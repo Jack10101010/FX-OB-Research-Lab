@@ -4,9 +4,10 @@ import { PageHeader } from "@/components/lab/AppShell";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
 import { Field, NeonSelect, Segment, NeonInput } from "@/components/lab/controls";
-import { RUNS } from "@/data/mock";
+import { useDataset } from "@/data/store";
 
 export default function Runs() {
+    const { RUNS } = useDataset();
     const [symbol, setSymbol] = useState("All");
     const [tf, setTf] = useState("All");
     const [mode, setMode] = useState("All");
@@ -23,7 +24,7 @@ export default function Runs() {
         });
         arr.sort((a, b) => (b[sort] ?? 0) - (a[sort] ?? 0));
         return arr;
-    }, [symbol, tf, mode, sort, q]);
+    }, [symbol, tf, mode, sort, q, RUNS]);
 
     return (
         <div className="pb-12">

@@ -10,17 +10,15 @@ import {
     Activity, Target, Hash, TrendingUp, AlertOctagon, ShieldCheck,
     Trophy, ChevronRight, BarChart3,
 } from "lucide-react";
-import {
-    ACTIVE_RUN, EQUITY_CURVE, RUNS, SWEEP_RR, MONTHLY, R_DIST,
-} from "@/data/mock";
+import { useDataset } from "@/data/store";
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
     PieChart, Pie, Legend,
 } from "recharts";
 
-const recent = RUNS.slice(0, 6);
-
 export default function Overview() {
+    const { ACTIVE_RUN, EQUITY_CURVE, RUNS, SWEEP_RR, MONTHLY, R_DIST } = useDataset();
+    const recent = RUNS.slice(0, 6);
     const spark = EQUITY_CURVE.filter((_, i) => i % 10 === 0).map((p) => p.netR);
 
     return (

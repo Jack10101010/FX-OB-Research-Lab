@@ -4,16 +4,17 @@ import { NeonPanel } from "@/components/lab/NeonPanel";
 import { Pill, ColoredR } from "@/components/lab/DataTable";
 import { Segment, NeonInput, NeonSelect, Field } from "@/components/lab/controls";
 import { CandleChart } from "@/components/lab/CandleChart";
-import { CANDLES, TRADES } from "@/data/mock";
+import { useDataset } from "@/data/store";
 import { Search } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 export default function TradeInspector() {
+    const { CANDLES, TRADES } = useDataset();
     const [q, setQ] = useState("");
     const [outcome, setOutcome] = useState("All");
     const [direction, setDirection] = useState("All");
     const [structure, setStructure] = useState("All");
-    const [selectedId, setSelectedId] = useState(TRADES[0].id);
+    const [selectedId, setSelectedId] = useState(TRADES[0]?.id);
 
     const filtered = useMemo(() => TRADES.filter((t) => {
         if (q && !t.id.toLowerCase().includes(q.toLowerCase())) return false;
@@ -21,7 +22,7 @@ export default function TradeInspector() {
         if (direction !== "All" && t.direction !== direction) return false;
         if (structure !== "All" && t.structure !== structure) return false;
         return true;
-    }), [q, outcome, direction, structure]);
+    }), [q, outcome, direction, structure, TRADES]);
 
     const trade = TRADES.find((t) => t.id === selectedId) || TRADES[0];
 

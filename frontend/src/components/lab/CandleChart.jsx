@@ -1,17 +1,49 @@
-import React from "react";
+import React, { useEffect, useRef, useLayoutEffect, useState } from "react";
+import { createChart, CrosshairMode, LineStyle } from "lightweight-charts";
 
-// Premium SVG-based mock candlestick chart, architected as a replaceable component.
-// Future: swap internals for lightweight-charts; keep props API stable.
+// CandleChart — backed by lightweight-charts v4.
+// Public prop API is intentionally identical to the prior SVG implementation:
 //
-// Props:
-//   candles: [{ i, t, o, h, l, c }]
-//   obBoxes: [{ i0, i1, top, bot, side, id }]
-//   trades:  [{ i, price, direction, win }]
-//   tpSlLines: [{ i, tp, sl }]
-//   height: pixels
-//   selectedTradeId, onTradeClick
+//   candles      [{ i, t, o, h, l, c }]            (t = "YYYY-MM-DD"; i is monotonic)
+//   obBoxes      [{ i0, i1, top, bot, side, id }]
+//   trades       [{ i, price, direction, win, id }]
+//   tpSlLines    [{ i, tp, sl }]
+//   showOB, showLongs, showShorts, showWins, showLosses, showBOSCHoCH (bool)
+//   height       number (px)
+//   onTradeClick (fn)
+//   selectedTradeId
 //
-// Visual: dark grid + neon OB rectangles + TP/SL dashed lines + entry/exit markers.
+// OB rectangles are rendered as DOM overlay layer positioned via the chart's
+// timeScale.timeToCoordinate() + series.priceToCoordinate() — LWC v4 has no
+// native rectangle primitive, so this is the cleanest approach.
+
+const BASE_TIME = Math.floor(new Date("2025-05-20T00:00:00Z").getTime() / 1000);
+const STEP_SEC = 4 * 3600;
+
+function hslToRgba(h, s, l, a = 1) {
+    s /= 100; l /= 100;
+    const k = (n) => (n + h / 30) % 12;
+    const f = (n) => l - s * Math.min(l, 1 - l) * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    const r = Math.round(255 * f(0));
+    const g = Math.round(255 * f(8));
+    const b = Math.round(255 * f(4));
+    return `rgba(${r}, ${g}, ${b}, ${a})`;
+}
+
+function readToken(name, fallback) {
+    if (typeof window === "undefined") return fallback;
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name);
+    if (!v) return fallback;
+    // CSS var format: "H S% L%"  →  rgba()  (lightweight-charts v4 only supports rgb/hex)
+    const parts = v.trim().split(/\s+/);
+    if (parts.length >= 3) {
+        const h = parseFloat(parts[0]);
+        const s = parseFloat(parts[1]);
+        const l = parseFloat(parts[2]);
+        if (!isNaN(h) && !isNaN(s) && !isNaN(l)) return hslToRgba(h, s, l, 1);
+    }
+    return fallback;
+}
 
 export function CandleChart({
     candles = [],
@@ -24,149 +56,166 @@ export function CandleChart({
     showShorts = true,
     showWins = true,
     showLosses = true,
-    showBOSCHoCH = true,
     onTradeClick,
     selectedTradeId,
 }) {
-    if (!candles.length) return null;
-    const padL = 24, padR = 64, padT = 18, padB = 32;
-    const W = 1200, H = height;
-    const innerW = W - padL - padR;
-    const innerH = H - padT - padB;
+    const containerRef = useRef(null);
+    const chartRef = useRef(null);
+    const seriesRef = useRef(null);
+    const priceLinesRef = useRef([]);
+    const [overlayKey, setOverlayKey] = useState(0); // triggers OB box reposition
 
-    const highs = candles.map((c) => c.h);
-    const lows = candles.map((c) => c.l);
-    const yMax = Math.max(...highs);
-    const yMin = Math.min(...lows);
-    const pad = (yMax - yMin) * 0.08;
-    const pMax = yMax + pad;
-    const pMin = yMin - pad;
-    const range = pMax - pMin;
+    // Compute token-derived colors once per mount (themes reapply on remount; ok).
+    const accentPrimary = readToken("--accent-primary", "rgba(217,70,239,1)");
+    const accentSecondary = readToken("--accent-secondary", "rgba(34,211,238,1)");
+    const bull = readToken("--bull", "rgba(16,185,129,1)");
+    const bear = readToken("--bear", "rgba(239,68,68,1)");
+    const success = readToken("--success", "rgba(16,185,129,1)");
+    const danger = readToken("--danger", "rgba(239,68,68,1)");
+    const muted = readToken("--muted", "rgba(120,120,140,1)");
+    const grid = readToken("--grid", "rgba(40,40,60,1)");
+    const panel = readToken("--panel", "rgba(20,20,30,1)");
 
-    const xFor = (i) => padL + (i / (candles.length - 1)) * innerW;
-    const yFor = (p) => padT + ((pMax - p) / range) * innerH;
-    const cWidth = Math.max(2, (innerW / candles.length) * 0.62);
+    // Create chart once
+    useLayoutEffect(() => {
+        if (!containerRef.current) return undefined;
+        const chart = createChart(containerRef.current, {
+            width: containerRef.current.clientWidth,
+            height,
+            layout: { background: { color: "transparent" }, textColor: muted, fontFamily: "JetBrains Mono" },
+            localization: { locale: "en-US" },
+            grid: { vertLines: { color: grid }, horzLines: { color: grid } },
+            rightPriceScale: { borderColor: grid },
+            timeScale: { borderColor: grid, timeVisible: true, secondsVisible: false },
+            crosshair: { mode: CrosshairMode.Normal, vertLine: { color: accentSecondary }, horzLine: { color: accentSecondary } },
+        });
+        chartRef.current = chart;
+        const series = chart.addCandlestickSeries({
+            upColor: bull, downColor: bear,
+            borderUpColor: bull, borderDownColor: bear,
+            wickUpColor: bull, wickDownColor: bear,
+        });
+        seriesRef.current = series;
 
-    // Grid lines
-    const yTicks = 6;
-    const gridY = Array.from({ length: yTicks }).map((_, i) => {
-        const v = pMax - (range * i) / (yTicks - 1);
-        return { v, y: yFor(v) };
-    });
+        // Reposition OB overlays on every time-scale change
+        const repaint = () => setOverlayKey((k) => k + 1);
+        chart.timeScale().subscribeVisibleTimeRangeChange(repaint);
+
+        const ro = new ResizeObserver(() => {
+            if (containerRef.current && chartRef.current) {
+                chartRef.current.applyOptions({ width: containerRef.current.clientWidth, height });
+                repaint();
+            }
+        });
+        ro.observe(containerRef.current);
+
+        return () => {
+            ro.disconnect();
+            chart.remove();
+            chartRef.current = null;
+            seriesRef.current = null;
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [height, accentSecondary, bull, bear, grid, muted]);
+
+    // Push candle data
+    useEffect(() => {
+        const series = seriesRef.current;
+        if (!series || !candles.length) return;
+        const data = candles.map((c) => ({
+            time: BASE_TIME + c.i * STEP_SEC,
+            open: c.o, high: c.h, low: c.l, close: c.c,
+        }));
+        series.setData(data);
+        chartRef.current?.timeScale().fitContent();
+        setOverlayKey((k) => k + 1);
+    }, [candles]);
+
+    // Push trade markers
+    useEffect(() => {
+        const series = seriesRef.current;
+        if (!series) return;
+        const visible = trades
+            .filter((t) => (t.direction === "Long" ? showLongs : showShorts))
+            .filter((t) => (t.win ? showWins : showLosses));
+        const markers = visible.map((t) => ({
+            time: BASE_TIME + t.i * STEP_SEC,
+            position: t.direction === "Long" ? "belowBar" : "aboveBar",
+            color: t.win ? success : danger,
+            shape: t.direction === "Long" ? "arrowUp" : "arrowDown",
+            text: `${t.win ? "W" : "L"}${selectedTradeId === t.id ? "★" : ""}`,
+            size: selectedTradeId === t.id ? 2 : 1,
+        }));
+        series.setMarkers(markers);
+    }, [trades, showLongs, showShorts, showWins, showLosses, selectedTradeId, success, danger]);
+
+    // Push TP/SL price lines
+    useEffect(() => {
+        const series = seriesRef.current;
+        if (!series) return;
+        priceLinesRef.current.forEach((pl) => series.removePriceLine(pl));
+        priceLinesRef.current = [];
+        tpSlLines.forEach((l) => {
+            const tp = series.createPriceLine({ price: l.tp, color: success, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "TP" });
+            const sl = series.createPriceLine({ price: l.sl, color: danger,  lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "SL" });
+            priceLinesRef.current.push(tp, sl);
+        });
+    }, [tpSlLines, success, danger]);
+
+    // OB box overlays — computed every render-trigger (overlayKey).
+    const overlays = (() => {
+        if (!showOB) return [];
+        const chart = chartRef.current;
+        const series = seriesRef.current;
+        if (!chart || !series) return [];
+        const out = [];
+        for (const b of obBoxes) {
+            const x0 = chart.timeScale().timeToCoordinate(BASE_TIME + b.i0 * STEP_SEC);
+            const x1 = chart.timeScale().timeToCoordinate(BASE_TIME + b.i1 * STEP_SEC);
+            const yTop = series.priceToCoordinate(b.top);
+            const yBot = series.priceToCoordinate(b.bot);
+            if (x0 == null || x1 == null || yTop == null || yBot == null) continue;
+            out.push({
+                id: b.id,
+                left: Math.min(x0, x1),
+                width: Math.abs(x1 - x0),
+                top: Math.min(yTop, yBot),
+                height: Math.abs(yBot - yTop),
+                side: b.side,
+            });
+        }
+        return out;
+        // overlayKey participates as a dependency for re-execution via state change
+    })();
 
     return (
         <div className="relative w-full" style={{ height }} data-testid="candle-chart">
-            <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full h-full">
-                {/* Background */}
-                <defs>
-                    <linearGradient id="cc-bg" x1="0" x2="0" y1="0" y2="1">
-                        <stop offset="0%"  stopColor="hsl(var(--panel-2))" />
-                        <stop offset="100%" stopColor="hsl(var(--panel))" />
-                    </linearGradient>
-                    <pattern id="cc-grid" x="0" y="0" width="60" height="40" patternUnits="userSpaceOnUse">
-                        <path d="M 60 0 L 0 0 0 40" fill="none" stroke="hsl(var(--grid))" strokeWidth="0.5" />
-                    </pattern>
-                </defs>
-                <rect x="0" y="0" width={W} height={H} fill="url(#cc-bg)" />
-                <rect x={padL} y={padT} width={innerW} height={innerH} fill="url(#cc-grid)" opacity="0.55" />
-
-                {/* Y-axis labels */}
-                {gridY.map((g, i) => (
-                    <g key={i}>
-                        <line x1={padL} x2={W - padR} y1={g.y} y2={g.y} stroke="hsl(var(--grid))" strokeWidth="0.5" />
-                        <text x={W - padR + 6} y={g.y + 3} fontSize="9" fill="hsl(var(--muted))" fontFamily="JetBrains Mono">
-                            {g.v.toFixed(5)}
-                        </text>
-                    </g>
+            <div ref={containerRef} className="w-full h-full" onClick={onTradeClick ? () => onTradeClick(null) : undefined} />
+            {/* Overlay layer for OB rectangles */}
+            <div className="pointer-events-none absolute inset-0" data-overlay-version={overlayKey}>
+                {overlays.map((o) => (
+                    <div
+                        key={o.id}
+                        data-testid={`ob-overlay-${o.id}`}
+                        className="absolute"
+                        style={{
+                            left: o.left, width: o.width, top: o.top, height: o.height,
+                            background: o.side === "bull"
+                                ? "hsl(var(--accent-primary) / 0.13)"
+                                : "hsl(var(--accent-secondary) / 0.13)",
+                            border: `1px dashed ${o.side === "bull" ? accentPrimary : accentSecondary}`,
+                            boxShadow: `0 0 12px -6px ${o.side === "bull" ? accentPrimary : accentSecondary}`,
+                        }}
+                    >
+                        <span
+                            className="absolute -top-0.5 left-1 text-[9px] font-mono px-1 leading-[12px] bg-[hsl(var(--panel))]"
+                            style={{ color: o.side === "bull" ? accentPrimary : accentSecondary }}
+                        >
+                            {o.id}
+                        </span>
+                    </div>
                 ))}
-                {/* X labels (every ~ 30 candles) */}
-                {candles.filter((_, i) => i % 30 === 0).map((c) => (
-                    <text key={c.i} x={xFor(c.i)} y={H - 10} fontSize="9" fill="hsl(var(--muted))" textAnchor="middle" fontFamily="JetBrains Mono">
-                        {c.t.slice(5)}
-                    </text>
-                ))}
-
-                {/* OB rectangles */}
-                {showOB && obBoxes.map((b) => {
-                    const x0 = xFor(b.i0);
-                    const x1 = xFor(b.i1);
-                    const y0 = yFor(b.top);
-                    const y1 = yFor(b.bot);
-                    const fill = b.side === "bull"
-                        ? "hsl(var(--accent-primary) / 0.13)"
-                        : "hsl(var(--accent-secondary) / 0.13)";
-                    const stroke = b.side === "bull"
-                        ? "hsl(var(--accent-primary))"
-                        : "hsl(var(--accent-secondary))";
-                    return (
-                        <g key={b.id}>
-                            <rect x={x0} y={y0} width={x1 - x0} height={y1 - y0} fill={fill} stroke={stroke} strokeWidth="1" strokeDasharray="2 2" />
-                            {/* extension line to the right */}
-                            <line x1={x1} x2={W - padR} y1={(y0 + y1) / 2} y2={(y0 + y1) / 2} stroke={stroke} strokeWidth="0.5" strokeDasharray="3 3" opacity="0.6" />
-                            <text x={x0 + 4} y={y0 + 11} fontSize="8.5" fill={stroke} fontFamily="JetBrains Mono" opacity="0.85">
-                                {b.id}
-                            </text>
-                        </g>
-                    );
-                })}
-
-                {/* Candles */}
-                {candles.map((c) => {
-                    const up = c.c >= c.o;
-                    const x = xFor(c.i);
-                    const color = up ? "hsl(var(--bull))" : "hsl(var(--bear))";
-                    const yH = yFor(c.h);
-                    const yL = yFor(c.l);
-                    const yO = yFor(c.o);
-                    const yC = yFor(c.c);
-                    const yT = Math.min(yO, yC);
-                    const bH = Math.max(1, Math.abs(yC - yO));
-                    return (
-                        <g key={c.i}>
-                            <line x1={x} x2={x} y1={yH} y2={yL} stroke={color} strokeWidth="1" />
-                            <rect x={x - cWidth / 2} y={yT} width={cWidth} height={bH} fill={color} opacity={up ? 0.9 : 0.85} />
-                        </g>
-                    );
-                })}
-
-                {/* TP/SL lines */}
-                {tpSlLines.map((l, idx) => (
-                    <g key={idx}>
-                        <line x1={xFor(l.i)} x2={W - padR} y1={yFor(l.tp)} y2={yFor(l.tp)} stroke="hsl(var(--success))" strokeDasharray="4 3" strokeWidth="1" />
-                        <text x={W - padR - 2} y={yFor(l.tp) - 3} textAnchor="end" fontSize="9" fontFamily="JetBrains Mono" fill="hsl(var(--success))">TP {l.tp.toFixed(5)}</text>
-                        <line x1={xFor(l.i)} x2={W - padR} y1={yFor(l.sl)} y2={yFor(l.sl)} stroke="hsl(var(--danger))" strokeDasharray="4 3" strokeWidth="1" />
-                        <text x={W - padR - 2} y={yFor(l.sl) - 3} textAnchor="end" fontSize="9" fontFamily="JetBrains Mono" fill="hsl(var(--danger))">SL {l.sl.toFixed(5)}</text>
-                    </g>
-                ))}
-
-                {/* Trade markers */}
-                {trades
-                    .filter((t) => (t.direction === "Long" ? showLongs : showShorts))
-                    .filter((t) => (t.win ? showWins : showLosses))
-                    .map((t, idx) => {
-                        const x = xFor(t.i);
-                        const y = yFor(t.price);
-                        const isSel = selectedTradeId && t.id === selectedTradeId;
-                        const color = t.win ? "hsl(var(--success))" : "hsl(var(--danger))";
-                        const up = t.direction === "Long";
-                        const points = up
-                            ? `${x},${y - 8} ${x - 5},${y + 1} ${x + 5},${y + 1}`
-                            : `${x},${y + 8} ${x - 5},${y - 1} ${x + 5},${y - 1}`;
-                        return (
-                            <g key={idx} onClick={() => onTradeClick && onTradeClick(t)} style={{ cursor: onTradeClick ? "pointer" : undefined }}>
-                                <polygon points={points} fill={color} opacity={isSel ? 1 : 0.95} style={{ filter: `drop-shadow(0 0 4px ${color})` }} />
-                                {isSel && <circle cx={x} cy={y} r="9" fill="none" stroke={color} strokeWidth="1" opacity="0.7" />}
-                            </g>
-                        );
-                    })}
-
-                {/* Header strip indicators */}
-                {showBOSCHoCH && (
-                    <text x={padL + 6} y={padT + 12} fontSize="9" fontFamily="JetBrains Mono" fill="hsl(var(--muted))">
-                        BOS · CHoCH overlay enabled
-                    </text>
-                )}
-            </svg>
+            </div>
         </div>
     );
 }

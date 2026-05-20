@@ -2,7 +2,9 @@ import React, { useState } from "react";
 import { PageHeader } from "@/components/lab/AppShell";
 import { NeonPanel, SectionTitle } from "@/components/lab/NeonPanel";
 import { Field, NeonInput, NeonSelect, Segment, NeonToggle, NeonButton } from "@/components/lab/controls";
-import { Play, Save, FileInput, Copy, ShieldAlert } from "lucide-react";
+import { Play, Save, FileInput, Copy, ShieldAlert, Trash2, Check } from "lucide-react";
+import { usePresets } from "@/data/presets";
+import { Pill } from "@/components/lab/DataTable";
 
 export default function StrategyBuilder() {
     const [cfg, setCfg] = useState({
@@ -35,6 +37,41 @@ export default function StrategyBuilder() {
     });
     const set = (k) => (v) => setCfg((c) => ({ ...c, [k]: v }));
 
+    // ── Preset manager (localStorage: fxob_configs) ─────────────────
+    const { presets, save, remove, duplicate, load, names } = usePresets();
+    const [selectedPreset, setSelectedPreset] = useState("");
+    const [presetName, setPresetName] = useState("");
+    const [flash, setFlash] = useState("");
+    const showFlash = (msg) => { setFlash(msg); setTimeout(() => setFlash(""), 1800); };
+
+    const onSave = () => {
+        const name = (presetName || selectedPreset || `${cfg.symbol}_${cfg.detectionTf}_RR${cfg.rr}`).trim();
+        if (!name) return;
+        save(name, cfg);
+        setSelectedPreset(name);
+        setPresetName("");
+        showFlash(`Saved · ${name}`);
+    };
+    const onLoad = () => {
+        if (!selectedPreset) return;
+        const p = load(selectedPreset);
+        if (!p) return;
+        const { _savedAt, ...rest } = p;
+        setCfg((c) => ({ ...c, ...rest }));
+        showFlash(`Loaded · ${selectedPreset}`);
+    };
+    const onDup = () => {
+        if (!selectedPreset) return;
+        const newName = duplicate(selectedPreset);
+        if (newName) { setSelectedPreset(newName); showFlash(`Duplicated → ${newName}`); }
+    };
+    const onDelete = () => {
+        if (!selectedPreset) return;
+        remove(selectedPreset);
+        showFlash(`Deleted · ${selectedPreset}`);
+        setSelectedPreset("");
+    };
+
     return (
         <div className="pb-12">
             <PageHeader
@@ -43,13 +80,43 @@ export default function StrategyBuilder() {
                 subtitle="Configure research parameters. This builder writes config only — execution happens against local Python engine."
                 actions={
                     <>
-                        <NeonButton icon={FileInput} tone="ghost">Load Config</NeonButton>
-                        <NeonButton icon={Save} tone="secondary">Save Config</NeonButton>
-                        <NeonButton icon={Copy} tone="ghost">Duplicate</NeonButton>
                         <NeonButton icon={Play} tone="primary" data-testid="builder-run-backtest">Run Backtest</NeonButton>
                     </>
                 }
             />
+
+            {/* Preset manager bar */}
+            <div className="px-6 mb-4">
+                <div className="clip-bevel p-[1px] bg-gradient-to-r from-[hsl(var(--accent-primary)/0.4)] via-[hsl(var(--border-mid))] to-[hsl(var(--accent-secondary)/0.4)]">
+                    <div className="clip-bevel bg-[hsl(var(--panel))] px-4 py-3 flex items-center gap-3 flex-wrap">
+                        <div className="text-[10px] font-mono uppercase tracking-[0.22em] text-muted-lab">Config Presets</div>
+                        <NeonSelect
+                            testId="preset-select"
+                            value={selectedPreset}
+                            onChange={setSelectedPreset}
+                            options={[{ value: "", label: names.length ? "— select preset —" : "— no presets saved —" }, ...names.map((n) => ({ value: n, label: n }))]}
+                            className="min-w-[220px]"
+                        />
+                        <NeonInput
+                            data-testid="preset-name"
+                            placeholder="New preset name…"
+                            value={presetName}
+                            onChange={(e) => setPresetName(e.target.value)}
+                            className="min-w-[200px]"
+                        />
+                        <NeonButton icon={Save}      tone="primary"   onClick={onSave}                                data-testid="preset-save">Save</NeonButton>
+                        <NeonButton icon={FileInput} tone="secondary" onClick={onLoad}   disabled={!selectedPreset}    data-testid="preset-load">Load</NeonButton>
+                        <NeonButton icon={Copy}      tone="ghost"     onClick={onDup}    disabled={!selectedPreset}    data-testid="preset-duplicate">Duplicate</NeonButton>
+                        <NeonButton icon={Trash2}    tone="danger"    onClick={onDelete} disabled={!selectedPreset}    data-testid="preset-delete">Delete</NeonButton>
+                        <Pill tone="muted">{names.length} saved</Pill>
+                        {flash && (
+                            <span className="inline-flex items-center gap-1.5 ml-auto px-2.5 py-1 text-[11px] font-mono uppercase tracking-wider clip-bevel-sm border border-[hsl(var(--success)/0.5)] bg-[hsl(var(--success)/0.08)] text-[hsl(var(--success))]" data-testid="preset-flash">
+                                <Check className="w-3.5 h-3.5" /> {flash}
+                            </span>
+                        )}
+                    </div>
+                </div>
+            </div>
 
             <div className="px-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
                 <NeonPanel title="Basic Settings">

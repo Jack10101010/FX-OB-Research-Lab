@@ -3,11 +3,12 @@ import { PageHeader } from "@/components/lab/AppShell";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { MetricChip } from "@/components/lab/MetricChip";
 import { Field, NeonInput, NeonToggle, NeonButton, Segment } from "@/components/lab/controls";
-import { MC_DRAWDOWN_DIST, MC_EQUITY_BANDS } from "@/data/mock";
+import { useDataset } from "@/data/store";
 import { Activity, TrendingDown, AlertTriangle, ShieldCheck, Dices, Play } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, AreaChart, Area, Line, LineChart, ComposedChart } from "recharts";
 
 export default function MonteCarlo() {
+    const { MC_DRAWDOWN_DIST, MC_EQUITY_BANDS } = useDataset();
     const [sims, setSims] = useState(1000);
     const [randTrade, setRandTrade] = useState(true);
     const [randSpread, setRandSpread] = useState(true);

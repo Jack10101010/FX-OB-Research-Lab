@@ -5,12 +5,13 @@ import { MetricChip } from "@/components/lab/MetricChip";
 import { DataTable, Pill } from "@/components/lab/DataTable";
 import { Segment } from "@/components/lab/controls";
 import { CandleChart } from "@/components/lab/CandleChart";
-import { PARITY, PARITY_MISMATCHES, CANDLES } from "@/data/mock";
+import { useDataset } from "@/data/store";
 import { Activity, Target, Hash, Check, X, ShieldCheck, Minus, Plus } from "lucide-react";
 
 export default function ParityDebugger() {
+    const { PARITY, PARITY_MISMATCHES, CANDLES } = useDataset();
     const [tab, setTab] = useState("mismatches");
-    const [sel, setSel] = useState(PARITY_MISMATCHES[0].id);
+    const [sel, setSel] = useState(PARITY_MISMATCHES[0]?.id);
 
     const tabs = {
         mismatches: PARITY_MISMATCHES.filter((m) => !["Unmatched TV", "Extra Python"].includes(m.type)),

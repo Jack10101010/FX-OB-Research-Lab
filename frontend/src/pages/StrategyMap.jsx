@@ -4,10 +4,11 @@ import { NeonPanel } from "@/components/lab/NeonPanel";
 import { Field, NeonSelect, Segment, NeonToggle, NeonButton } from "@/components/lab/controls";
 import { Pill } from "@/components/lab/DataTable";
 import { CandleChart } from "@/components/lab/CandleChart";
-import { CANDLES, OB_BOXES, TRADE_MARKERS, RUNS } from "@/data/mock";
+import { useDataset } from "@/data/store";
 import { Camera, Settings as SettingsIcon, BarChart3, Layers, ZoomIn, ZoomOut, Move, MousePointer2, Ruler, PenLine } from "lucide-react";
 
 export default function StrategyMap() {
+    const { CANDLES, OB_BOXES, TRADE_MARKERS, RUNS } = useDataset();
     const [tf, setTf] = useState("M15");
     const [zoom, setZoom] = useState("ALL");
     const [showOB, setShowOB] = useState(true);

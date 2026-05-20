@@ -3,6 +3,7 @@ import { PageHeader } from "@/components/lab/AppShell";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { Field, NeonInput, NeonToggle, NeonButton, Segment } from "@/components/lab/controls";
 import { useTheme, THEMES } from "@/context/ThemeContext";
+import { ImportZone } from "@/components/lab/ImportZone";
 import { Pill } from "@/components/lab/DataTable";
 import { Check, ShieldAlert, Sparkles } from "lucide-react";
 
@@ -72,6 +73,10 @@ export default function Settings() {
                             <Segment options={["Compact", "Comfortable", "Spacious"]} value={tableDensity} onChange={setTableDensity} />
                         </Field>
                     </div>
+                </NeonPanel>
+
+                <NeonPanel className="xl:col-span-2" title="Data Sources · Import" action={<Pill tone="primary">FILE API</Pill>}>
+                    <ImportZone />
                 </NeonPanel>
 
                 <NeonPanel className="xl:col-span-2" title="Data Paths">

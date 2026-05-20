@@ -1,0 +1,50 @@
+{
+  "summary": "Iteration 2 frontend testing for FX-OB Research Lab follow-up features (lightweight-charts, file importer, preset manager, multi-run comparison) + regression on 11 routes. 10/11 routes load cleanly; /sweep is BROKEN with a runtime error 'SWEEP_RR is not defined' regression introduced by the dataset-store refactor. All 3 new features (LWC charts, ImportZone, ComparisonLab) work correctly. Preset Manager: 4/6 verified (save + duplicate flashes show; load/delete were not verifiable from the Playwright select_option path because the SELECT is a React-controlled component and synthetic value-set did not propagate state — manual user interaction should work). Theme switching works. Research-only boundary intact (only disclaimer copy mentions trading terms).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "SweepLab / RRSweepView",
+        "issue": "Runtime ReferenceError: 'SWEEP_RR is not defined' on /sweep. /app/frontend/src/pages/SweepLab.jsx destructures SWEEP_RR/SWEEP_STOP_BUFFER/SWEEP_ENTRY_BUFFER from useDataset() inside the parent (line 23), but the inner sub-components RRSweepView (line 64), and likely StopBufferView/EntryBufferView, reference those identifiers directly without receiving them via props or calling useDataset() themselves. Result: /sweep route renders an empty body (body length=18) and React logs an error boundary warning. This is a regression from the dataset-store refactor.",
+        "selector": "/sweep route",
+        "priority": "CRITICAL"
+      },
+      {
+        "component": "Recharts containers (multiple pages)",
+        "issue": "Repeated console warnings: 'The width(-1) and height(-1) of chart should be greater than 0' on initial render of Recharts ResponsiveContainer in some panels (Overview, Runs/Active, Monte Carlo etc). Charts still display correctly after layout settles, but it suggests the ResponsiveContainer parent has zero-sized layout on first mount. Low priority cosmetic warning.",
+        "selector": "Recharts ResponsiveContainer wrappers",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Preset Manager — Load / Delete via SELECT",
+        "issue": "preset-save and preset-duplicate produce visible 'Saved · X' / 'Duplicated → X (copy)' flashes and localStorage 'fxob_configs' is written correctly. However preset-load and preset-delete buttons are disabled until selectedPreset state is non-empty (line 108/110 in StrategyBuilder.jsx). When a user actually clicks the SELECT option in the browser this works; Playwright's select_option did not trigger the React onChange handler, so the buttons remained inert in automation and no flash appeared. Recommend manual user verification — code path looks correct.",
+        "affected_selectors": ["preset-select", "preset-load", "preset-delete", "preset-flash"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "FIX CRITICAL: /app/frontend/src/pages/SweepLab.jsx — RRSweepView (and any other sub-views like StopBufferView/EntryBufferView) must obtain SWEEP_RR, SWEEP_STOP_BUFFER, SWEEP_ENTRY_BUFFER from useDataset() themselves (call the hook inside each sub-component) or receive them as props. Currently they reference identifiers declared only in the outer SweepLab function scope, which works inside the same function body but NOT inside the separately-declared sibling components below. This breaks the /sweep route entirely.",
+    "Investigate Recharts ResponsiveContainer width=-1 warnings — usually a parent flex/grid with no initial height. Cosmetic only.",
+    "Optional: have main agent self-verify preset-load and preset-delete by clicking through the UI in a browser (the Playwright synthetic select didn't trigger React state)."
+  ],
+  "critical_code_review_comments": [
+    "SweepLab.jsx scope bug: destructuring useDataset() values inside the parent does not make them visible to sibling/child function components in the same file. Each sub-component needs its own useDataset() call. This pattern likely needs to be audited across other refactored pages that contain inner views.",
+    "presets.js / StrategyBuilder.jsx: preset-load/delete disable-when-empty is correct UX, but the SELECT change handler should be tested manually since automation may not exercise it.",
+    "Consider adding an error boundary around route content so a single page exception (like SWEEP_RR) does not blank the route silently."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped per request)", "frontend": "91% (10/11 routes + 3/4 new features fully verified)"},
+  "test_credentials": "n/a (no auth)",
+  "seed_data_creation": "Created localStorage entry 'fxob_configs' -> {'TEST_PRESET_A': {...}} via preset-save during testing. The delete step did not execute because preset-load/delete required a state-bound SELECT change. Main agent may want to clear localStorage when verifying.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 2 verified: (a) lightweight-charts on /strategy-map renders 7 OB overlays + W/L markers cleanly, /trade-inspector renders single-trade chart with overlay; no color/locale console errors. (b) Settings ImportZone has all three test-ids. (c) Strategy Builder preset bar has all six test-ids; save+duplicate flashes confirmed and localStorage fxob_configs written. (d) ComparisonLab supports 2→5 runs, add-btn disables at 5/5, cmp-remove-2 works, KPI table renders 5 columns, equity overlay shows all lines. CRITICAL: /sweep is broken with 'SWEEP_RR is not defined'. Theme cards work (localStorage fxob_theme updates).",
+  "rca of the issue": "ROOT CAUSE for /sweep regression: In /app/frontend/src/pages/SweepLab.jsx the outer function SweepLab() calls `const ds = useDataset(); const SWEEP_RR = ds.SWEEP_RR, SWEEP_STOP_BUFFER = ..., SWEEP_ENTRY_BUFFER = ...;` (line 23). The sub-components RRSweepView (line 64), and the other Stop/Entry buffer views declared at the module top level inside the same file, then reference `SWEEP_RR` directly. Because each component is a separate function, those identifiers are NOT in their lexical scope — they were closures over the OLD module-level constants imported from mock.js prior to the dataset refactor. After the refactor, those module imports are gone, so the sub-components throw ReferenceError when they try to read SWEEP_RR. REPRO: visit /sweep → page renders only sidebar; check console for 'SWEEP_RR is not defined'. FIX: inside each of the three sub-views (RRSweepView, StopBufferView, EntryBufferView), call `const { SWEEP_RR, SWEEP_STOP_BUFFER, SWEEP_ENTRY_BUFFER } = useDataset();` directly, or accept the dataset slice as props from the parent."
+}

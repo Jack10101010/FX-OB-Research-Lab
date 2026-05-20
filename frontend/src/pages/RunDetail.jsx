@@ -6,11 +6,12 @@ import { MetricChip } from "@/components/lab/MetricChip";
 import { EquityCurve } from "@/components/lab/EquityCurve";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
 import { NeonButton } from "@/components/lab/controls";
-import { ACTIVE_RUN, EQUITY_CURVE, TRADES, MONTHLY, R_DIST, RUNS } from "@/data/mock";
+import { useDataset } from "@/data/store";
 import { Map as MapIcon, Crosshair, GitCompareArrows, TrendingUp, Hash, Activity, Target, AlertTriangle, ShieldCheck } from "lucide-react";
 import { BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie } from "recharts";
 
 export default function RunDetail() {
+    const { ACTIVE_RUN, EQUITY_CURVE, TRADES, MONTHLY, R_DIST, RUNS } = useDataset();
     const params = useParams();
     const runId = params.runId === "active" ? ACTIVE_RUN.id : decodeURIComponent(params.runId || ACTIVE_RUN.id);
     const run = RUNS.find((r) => r.id === runId) || ACTIVE_RUN;

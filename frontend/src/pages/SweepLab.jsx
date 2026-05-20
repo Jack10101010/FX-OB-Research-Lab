@@ -4,9 +4,7 @@ import { NeonPanel } from "@/components/lab/NeonPanel";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
 import { Segment, NeonSelect, Field } from "@/components/lab/controls";
 import { MetricChip } from "@/components/lab/MetricChip";
-import {
-    SWEEP_RR, SWEEP_STOP_BUFFER, SWEEP_ENTRY_BUFFER, SWEEP_VERIFY, SWEEP_TF, SWEEP_PAIR, SWEEP_SESSION, SWEEP_HEATMAP,
-} from "@/data/mock";
+import { useDataset } from "@/data/store";
 import { Trophy, AlertTriangle, Skull } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from "recharts";
 
@@ -21,6 +19,9 @@ const TABS = [
 ];
 
 export default function SweepLab() {
+    const ds = useDataset();
+    const SWEEP_RR = ds.SWEEP_RR, SWEEP_STOP_BUFFER = ds.SWEEP_STOP_BUFFER, SWEEP_ENTRY_BUFFER = ds.SWEEP_ENTRY_BUFFER,
+          SWEEP_VERIFY = ds.SWEEP_VERIFY, SWEEP_TF = ds.SWEEP_TF, SWEEP_PAIR = ds.SWEEP_PAIR, SWEEP_SESSION = ds.SWEEP_SESSION;
     const [tab, setTab] = useState("rr");
 
     return (
