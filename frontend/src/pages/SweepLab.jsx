@@ -62,6 +62,7 @@ export default function SweepLab() {
 }
 
 function RRSweepView() {
+    const { SWEEP_RR } = useDataset();
     return (
         <div className="space-y-4">
             <NeonPanel title="RR Sweep Leaderboard">
@@ -221,6 +222,7 @@ function Stat({ k, v, pos }) {
 }
 
 function Heatmap() {
+    const { SWEEP_HEATMAP } = useDataset();
     const { rrs, sbs, cells } = SWEEP_HEATMAP;
     const max = Math.max(...cells.map((c) => c.netR));
     const min = Math.min(...cells.map((c) => c.netR));

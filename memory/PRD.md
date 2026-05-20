@@ -1,75 +1,64 @@
 # FX-OB Research Lab — PRD
 
 ## Problem Statement
-Build a premium React + Tailwind cyberpunk/quant dashboard called **FX-OB Research Lab** — a local research dashboard for a Forex order-block backtesting engine. **Research only**: no broker controls, no live execution, no order placement, no kill switches. Pure frontend mock app architected to later be wired to Python CSV/JSON outputs.
+Premium React + Tailwind cyberpunk research dashboard for Forex order-block backtesting. **Research only**, no broker/live-trading controls. Pure frontend with mock data, architected to ingest local Python CSV/JSON outputs.
 
-## User Personas
-- **Quant Researcher / Operator** ("QuantOperator"): runs backtests, parameter sweeps, comparisons, and Pine↔Python parity validation locally. Needs dense, premium, sci-fi quant terminal aesthetics.
-
-## Core Requirements (Static)
-- React (CRA) + Tailwind + JS, shadcn/ui pre-installed
-- Recharts for standard charts; **custom SVG candlestick** for Strategy Map / Trade Inspector (replaceable abstraction)
-- 5 themes, live-switching: Cyberpunk Violet (default), Matrix Emerald, Tactical Amber, Ice Blue, Blood Red
-- Persistent theme via `localStorage.fxob_theme`
-- 11 pages with sidebar navigation
-- Beveled/octagonal KPI chips as core design primitive
-- Realistic mock data densities (24 runs, 137 trades, full sweep grids)
+## Tech Stack
+- React (CRA) + Tailwind + JS + shadcn/ui
+- Recharts (all standard charts)
+- **lightweight-charts v4.2.3** (Strategy Map / Trade Inspector candle chart)
+- react-router-dom v7, lucide-react, sonner
 
 ## Architecture
 ```
 /app/frontend/src/
-  index.css                     # 5-theme tokens + clip-path utilities
-  App.js                        # ThemeProvider + BrowserRouter + AppShell
-  context/ThemeContext.jsx
-  data/mock.js                  # All mock data (replaceable later)
+  index.css                    # 5-theme tokens + clip-path utilities
+  App.js                       # ThemeProvider + Router + AppShell
+  context/ThemeContext.jsx     # 5 themes, live data-theme on <html>
+  data/
+    mock.js                    # Default dataset
+    store.js                   # useDataset() hook + setDataset/resetDataset
+    importer.js                # CSV/JSON parsers (trades, OB, sweep, mismatches, summary)
+    presets.js                 # usePresets() — localStorage('fxob_configs')
   components/lab/
-    AppShell.jsx, Sidebar.jsx, TopBar.jsx
-    MetricChip.jsx              # beveled/octagonal KPI primitive
-    NeonPanel.jsx               # dark glass panel + corner accents
-    DataTable.jsx, EquityCurve.jsx, CandleChart.jsx, controls.jsx
-  pages/                        # 11 page components
-    Overview, StrategyBuilder, Runs, RunDetail, StrategyMap,
-    TradeInspector, SweepLab, ComparisonLab, ParityDebugger,
-    MonteCarlo, Settings
+    AppShell, Sidebar, TopBar, PageHeader
+    MetricChip                 # beveled/octagonal KPI primitive
+    NeonPanel, DataTable
+    CandleChart                # LWC v4 backed; props API unchanged
+    EquityCurve, ImportZone
+    controls (Segment, NeonInput, NeonSelect, NeonToggle, NeonButton, Field)
+  pages/                       # 11 page components (all consume useDataset)
 ```
 
-## What's Been Implemented (2026-02-20)
-- ✅ 5-theme system with live switching (CSS variables on `<html data-theme>`)
-- ✅ Custom typography: Space Grotesk + JetBrains Mono
-- ✅ Sidebar with active-route neon border, theme quick-picker, active config card, profile placeholder
-- ✅ TopBar: workspace name, Data Source · Local Data, timezone, Load Config, New Backtest
-- ✅ Beveled/octagonal MetricChip primitive used across all pages
-- ✅ Custom SVG CandleChart with OB rectangles, entry markers, TP/SL lines, win/loss markers
-- ✅ All 11 pages polished:
-  - Overview, StrategyBuilder, Runs, RunDetail, StrategyMap (core 7 fully polished)
-  - SweepLab (7 tabs, leaderboard, trophy/skull cards, heatmap)
-  - ParityDebugger (8 KPI chips, mismatch tab, preview chart, side-by-side diff)
-  - ComparisonLab, TradeInspector, MonteCarlo, Settings
-- ✅ Rich mock data: 24 runs, 137 trades, sweep grids (RR, SB, EB, VT, TF, Pair, Session), 31 parity mismatches, MC drawdown distribution + confidence bands
-- ✅ Research-only boundary: no live-trading UI anywhere; explicit disclaimer in Strategy Builder + Settings safety notes
-- ✅ Testing agent: 58/58 checks passed, 100% frontend pass rate
+## Implemented
+### Iteration 1 (2026-02-20) — MVP
+- All 11 pages polished: Overview, StrategyBuilder, Runs, RunDetail, StrategyMap, TradeInspector, SweepLab, ComparisonLab, ParityDebugger, MonteCarlo, Settings
+- 5 themes (Cyberpunk Violet default, Matrix Emerald, Tactical Amber, Ice Blue, Blood Red), live-switching, persisted to localStorage
+- Custom SVG candle chart for Strategy Map / Trade Inspector
+- Rich mock data (24 runs, 137 trades, full sweep grids, 31 parity mismatches)
+- 58/58 testing-agent checks passed
 
-## Prioritized Backlog
-### P1 (next iteration)
-- Wire `CandleChart` to lightweight-charts when Python engine outputs are available
-- File-system data adapter to read `outputs/runs/*.json` and `outputs/sweeps/*.csv` directly (Electron/Tauri or local bridge)
-- CSV/JSON import in Strategy Builder ("Load Config")
+### Iteration 2 (2026-02-20) — Engine upgrades
+- ✅ **Lightweight-charts v4 wiring** — CandleChart internals replaced; props API stable. Candles via candlestick series, trade markers via setMarkers, TP/SL via createPriceLine, OB rectangles via positioned overlay layer driven by `timeToCoordinate` + `priceToCoordinate`. HSL→RGB conversion + `localization.locale: 'en-US'` to avoid LWC color/locale issues.
+- ✅ **In-browser file importer** (`/settings → Data Sources · Import`) — drag-drop & file-picker, ingests `summary.json`, `config.json`, `trades.csv`, `order_blocks.csv`, `rr_sweep.csv`, `mismatches.csv`. Per-file detection + status display. Reset-to-mock button. Live updates via `useDataset()`.
+- ✅ **Save/Load Config presets** in Strategy Builder — Save/Load/Duplicate/Delete + preset picker. Persists to `localStorage('fxob_configs')` with success flashes.
+- ✅ **Multi-run Comparison Lab** — 2–5 runs, baseline crown, add/remove, KPI matrix with color-coded deltas, equity overlay (N lines), monthly bars per run, drawdown comparison placeholder, winner badge.
+- ✅ Fixed SweepLab sub-component scoping regression caught by testing agent.
 
+## Backlog
 ### P2
-- Persist Strategy Builder configs locally (named presets)
-- Multi-run Comparison (3+ runs)
-- Real Monte Carlo engine integration with percentile bands
-- Annotation/notes layer per trade (Trade Inspector "Notes" tab)
+- Replace remaining placeholders (Profit Factor, Max Drawdown) with real calculations once Python engine ships
+- Real Monte Carlo simulator (currently mock-only)
+- Annotations / notes layer per trade
 - Export Strategy Map screenshot
+- Optional sidecar (Electron/Tauri/Node) for folder watching & one-click Python re-run
 
-## Out of Scope (Hard Boundary)
+## Hard Boundary (Out of Scope)
 - Live broker connection
-- Order placement / cancellation
-- Kill switches / live trading controls
-- Account balance / equity from broker
+- Order placement / cancellation / kill switches
 - Real-time price feed
+- Account balance from broker
 
-## Next Tasks (for follow-up sessions)
-1. Hook real Python engine JSON output to `data/mock.js` adapter
-2. Replace SVG candle chart with lightweight-charts (preserve component API)
-3. Add config save/load via local file
+## localStorage Keys
+- `fxob_theme` — active theme id
+- `fxob_configs` — `{ [presetName]: configObject }`
