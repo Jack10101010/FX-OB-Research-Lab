@@ -89,6 +89,7 @@ export function MetricChip({
 }
 
 function MiniSpark({ data, tone = "primary" }) {
+    if (!data || data.length < 2) return null;
     const w = 64, h = 22;
     const min = Math.min(...data), max = Math.max(...data);
     const range = max - min || 1;
