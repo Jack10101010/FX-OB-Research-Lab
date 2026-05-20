@@ -135,6 +135,51 @@ export function parseTradesCSV(text) {
 
 // ─────────────────────── Helpers ───────────────────────
 
+function orderBlockLookupKey(value) {
+    if (value == null || value === "") return null;
+    const s = String(value).trim();
+    if (!s) return null;
+    const numeric = s.match(/\d+/);
+    return numeric ? String(Number(numeric[0])) : s.toLowerCase();
+}
+
+function buildOrderBlockLookup(orderBlocks) {
+    const map = new Map();
+    orderBlocks.forEach((ob) => {
+        const keys = new Set([String(ob.id || "").toLowerCase(), orderBlockLookupKey(ob.id)]);
+        keys.forEach((key) => {
+            if (key) map.set(key, ob);
+        });
+    });
+    return map;
+}
+
+function readPipSize(config, summary) {
+    const explicit = pickFrom(config, "pip_size", "pipSize", "pip", "pip_value", "pipValue")
+        ?? pickFrom(summary, "pip_size", "pipSize", "pip", "pip_value", "pipValue");
+    return isNum(explicit) && Number(explicit) > 0 ? Number(explicit) : null;
+}
+
+function enrichTradesWithOrderBlocks(trades, obLookup, pipSize) {
+    return trades.map((trade) => {
+        const ob = obLookup.get(String(trade.obId || "").toLowerCase()) || obLookup.get(orderBlockLookupKey(trade.obId));
+        const explicitWidth = isNum(trade.obWidth) && Number(trade.obWidth) > 0 ? Number(trade.obWidth) : null;
+        const computedWidth = ob && pipSize && isNum(ob.top) && isNum(ob.bot)
+            ? Number((Math.abs(Number(ob.top) - Number(ob.bot)) / pipSize).toFixed(1))
+            : null;
+        return {
+            ...trade,
+            obId: trade.obId ?? ob?.id ?? null,
+            obOriginTime: ob?.originTime ?? trade.obOrigin ?? null,
+            obDetectionTime: ob?.endTime ?? trade.detected ?? null,
+            obTop: ob && isNum(ob.top) ? Number(ob.top) : null,
+            obBottom: ob && isNum(ob.bot) ? Number(ob.bot) : null,
+            obWidthPips: explicitWidth ?? computedWidth,
+            obDirection: ob?.side === "bear" ? "Bearish" : ob?.side === "bull" ? "Bullish" : null,
+        };
+    });
+}
+
 function computeEquityCurve(trades) {
     let cum = 0;
     return trades.map((t, i) => {
@@ -348,19 +393,10 @@ export async function ingestRunBundle(fileList) {
     // Pick primary trades variant
     const variantPriority = ["single_position", "one_per_direction", "allow_multi_position", "unknown"];
     const primaryVariant = variantPriority.find((v) => collected.tradesByVariant[v]) || Object.keys(collected.tradesByVariant)[0];
-    const primaryTrades = collected.tradesByVariant[primaryVariant];
 
     // Map order blocks and trades onto candle indices when possible
     const hasCandles = !!collected.candles?.length;
     const candleIdx = hasCandles ? buildCandleIndex(collected.candles) : null;
-    const equityCurveByVariant = Object.fromEntries(
-        Object.entries(collected.tradesByVariant).map(([variant, trades]) => [variant, computeEquityCurve(trades)]),
-    );
-    const tradeMarkersByVariant = Object.fromEntries(
-        Object.entries(collected.tradesByVariant).map(([variant, trades]) => [variant, computeTradeMarkers(trades, candleIdx)]),
-    );
-    const equityCurve = equityCurveByVariant[primaryVariant] || [];
-
     const mappedOBs = collected.orderBlocks.map((b, idx) => {
         const explicitI0 = b.i0 != null ? Number(b.i0) : null;
         const explicitI1 = b.i1 != null ? Number(b.i1) : null;
@@ -378,6 +414,8 @@ export async function ingestRunBundle(fileList) {
             : (mapped0.quality === "nearest_prior" || mapped1.quality === "nearest_prior" ? "nearest_prior" : "exact");
         return {
             id: b.id,
+            originTime: b.originTime,
+            endTime: b.endTime,
             i0: mapped0.i >= 0 ? mapped0.i : fallbackI0,
             i1: mapped1.i >= 0 ? mapped1.i : fallbackI1,
             time0: mapped0.time,
@@ -389,6 +427,19 @@ export async function ingestRunBundle(fileList) {
         };
     });
 
+    const obLookup = buildOrderBlockLookup(mappedOBs);
+    const pipSize = readPipSize(collected.config, collected.summary);
+    const tradesByVariant = Object.fromEntries(
+        Object.entries(collected.tradesByVariant).map(([variant, trades]) => [variant, enrichTradesWithOrderBlocks(trades, obLookup, pipSize)]),
+    );
+    const primaryTrades = tradesByVariant[primaryVariant] || [];
+    const equityCurveByVariant = Object.fromEntries(
+        Object.entries(tradesByVariant).map(([variant, trades]) => [variant, computeEquityCurve(trades)]),
+    );
+    const tradeMarkersByVariant = Object.fromEntries(
+        Object.entries(tradesByVariant).map(([variant, trades]) => [variant, computeTradeMarkers(trades, candleIdx)]),
+    );
+    const equityCurve = equityCurveByVariant[primaryVariant] || [];
     const tradeMarkers = tradeMarkersByVariant[primaryVariant] || [];
 
     // Build run id and summary
@@ -406,7 +457,7 @@ export async function ingestRunBundle(fileList) {
         detectionTf:  sm.detection_tf || cfg.detection_tf,
         executionTf:  sm.execution_tf || cfg.execution_tf || "1m",
         dateRange:    `${sm.date_from || cfg.date_from || "?"} → ${sm.date_to || cfg.date_to || "?"}`,
-        rr:           Number(sm.rr ?? cfg.rr ?? 0),
+        rr:           Number(sm.rr_multiple ?? cfg.rr_multiple ?? sm.rr ?? cfg.rr ?? sm.risk_reward ?? cfg.risk_reward ?? 0),
         stopBuffer:   Number(sm.stop_buffer ?? cfg.stop_buffer ?? 0),
         verifyTicks:  Number(sm.verify_ticks ?? cfg.verify_ticks ?? 0),
         entryBuffer:  Number(sm.entry_buffer ?? cfg.entry_buffer ?? 0),
@@ -427,7 +478,7 @@ export async function ingestRunBundle(fileList) {
         config: cfg,
         summary: runSummary,
         trades: primaryTrades,
-        tradesByVariant: collected.tradesByVariant,
+        tradesByVariant,
         primaryVariant,
         tradeMarkers,
         tradeMarkersByVariant,

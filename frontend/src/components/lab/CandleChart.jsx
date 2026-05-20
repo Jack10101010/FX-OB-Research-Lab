@@ -26,6 +26,13 @@ function chartTime(point, indexKey = "i") {
     return BASE_TIME + i * STEP_SEC;
 }
 
+function formatOrderBlockLabel(id) {
+    if (id == null || id === "") return "OB";
+    const s = String(id).trim();
+    const match = s.match(/\d+/);
+    return match ? `OB-${String(Number(match[0])).padStart(3, "0")}` : s.slice(0, 12);
+}
+
 function hslToRgba(h, s, l, a = 1) {
     s /= 100; l /= 100;
     const k = (n) => (n + h / 30) % 12;
@@ -234,7 +241,7 @@ export function CandleChart({
                             className="absolute -top-0.5 left-1 text-[9px] font-mono px-1 leading-[12px] bg-[hsl(var(--panel))]"
                             style={{ color: o.side === "bull" ? accentPrimary : accentSecondary }}
                         >
-                            {o.id}
+                            {formatOrderBlockLabel(o.id)}
                         </span>
                     </div>
                 ))}

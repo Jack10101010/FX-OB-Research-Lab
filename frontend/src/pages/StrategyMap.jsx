@@ -22,6 +22,8 @@ export default function StrategyMap() {
     const runId = activeRunId || RUNS[0]?.id;
     const bundle = runId ? getRunData(runId) : null;
     const hasCandles = bundle ? (bundle.hasCandles !== false && !!bundle.candles?.length) : (CANDLES?.length > 0);
+    const summary = bundle?.summary || RUNS.find((r) => r.id === runId) || {};
+    const headerTitle = `${summary.symbol || "Symbol"} · ${summary.detectionTf || tf} · RR ${formatRR(summary.rr)}`;
 
     const tools = [MousePointer2, Move, ZoomIn, ZoomOut, Ruler, PenLine, Layers, Camera];
 
@@ -29,7 +31,7 @@ export default function StrategyMap() {
         <div className="pb-12">
             <PageHeader
                 eyebrow="STRATEGY MAP · FULL CHART"
-                title="EURUSD · M15 · RR 3.3"
+                title={headerTitle}
                 subtitle="Visual map of all detected order blocks, entries, exits, and trade outcomes for the selected run."
                 actions={<><NeonButton icon={Camera} tone="ghost">Export PNG</NeonButton><NeonButton icon={SettingsIcon} tone="ghost">Display</NeonButton></>}
             />
@@ -52,7 +54,7 @@ export default function StrategyMap() {
                             <NeonSelect value={tf} onChange={setTf} options={["M5", "M15", "M30", "H1"]} />
                             <NeonSelect value={runId} onChange={(v) => setActiveRunId(v)} options={RUNS.slice(0, 20).map((r) => r.id)} />
                             <VariantSelector variants={AVAILABLE_TRADE_VARIANTS} value={ACTIVE_TRADE_VARIANT} />
-                            <Pill tone="muted">2025-05-18 → 2026-05-18</Pill>
+                            <Pill tone="muted">{summary.dateRange || "Date range unavailable"}</Pill>
                         </div>
                     }
                 >
@@ -116,6 +118,11 @@ function variantLabel(v) {
         one_per_direction: "One per direction",
         unknown: "Trades",
     }[v] || v;
+}
+
+function formatRR(value) {
+    const n = Number(value);
+    return isFinite(n) && n > 0 ? n.toFixed(1) : "N/A";
 }
 
 function Toggle({ label, checked, onChange, dot }) {

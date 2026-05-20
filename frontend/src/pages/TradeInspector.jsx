@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { PageHeader } from "@/components/lab/AppShell";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { Pill, ColoredR } from "@/components/lab/DataTable";
-import { Segment, NeonInput, NeonSelect, Field } from "@/components/lab/controls";
+import { Segment, NeonInput, NeonSelect } from "@/components/lab/controls";
 import { CandleChart } from "@/components/lab/CandleChart";
 import { useDataset } from "@/data/store";
 import { setSelectedTradeVariant } from "@/data/store";
@@ -63,7 +63,7 @@ export default function TradeInspector() {
             <PageHeader
                 eyebrow="TRADE INSPECTOR"
                 title={trade ? `${trade.id} · ${trade.direction}` : "No trades"}
-                subtitle={trade ? `${trade.structure} · ${trade.session} · OB width ${trade.obWidth} pips` : "Selected variant has no imported trades."}
+                subtitle={trade ? `${trade.structure} · ${trade.session} · ${trade.obWidthPips != null ? `OB width ${trade.obWidthPips} pips` : "OB link unavailable"}` : "Selected variant has no imported trades."}
                 actions={<VariantSelector variants={AVAILABLE_TRADE_VARIANTS} value={ACTIVE_TRADE_VARIANT} />}
             />
 
@@ -153,16 +153,27 @@ export default function TradeInspector() {
                             <TabsTrigger value="notes">Notes</TabsTrigger>
                         </TabsList>
                         <TabsContent value="overview" className="text-[11.5px] font-mono text-muted-lab pt-3 leading-relaxed">
-                            {trade ? `Trade ${trade.id} captured a ${trade.direction.toLowerCase()} order block after a ${trade.structure} confirmation in the ${trade.session} session. Entry on retest; exit on TP/SL touch within 1m execution timeframe.` : "No trade selected for this variant."}
+                            {trade ? (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
+                                    <Row k="Trade ID" v={trade.id} />
+                                    <Row k="Direction" v={trade.direction} />
+                                    <Row k="Structure" v={trade.structure} />
+                                    <Row k="Session" v={trade.session} />
+                                </div>
+                            ) : "No trade selected for this variant."}
                         </TabsContent>
                         <TabsContent value="ob" className="text-[11.5px] font-mono pt-3">
-                            {trade ? <>
-                                <Row k="OB ID" v="OB-042" />
-                                <Row k="Origin" v={trade.obOrigin} />
-                                <Row k="Detected" v={trade.detected} />
-                                <Row k="OB Width" v={`${trade.obWidth} pips`} />
-                                <Row k="Side" v={trade.direction === "Long" ? "Bullish" : "Bearish"} />
-                            </> : <span className="text-muted-lab">No order block details.</span>}
+                            {trade ? (
+                                hasOrderBlockData(trade) ? <>
+                                    <Row k="OB ID" v={formatValue(trade.obId)} />
+                                    <Row k="Origin" v={formatValue(trade.obOriginTime)} />
+                                    <Row k="Detected" v={formatValue(trade.obDetectionTime)} />
+                                    <Row k="Top" v={formatNumber(trade.obTop)} />
+                                    <Row k="Bottom" v={formatNumber(trade.obBottom)} />
+                                    <Row k="OB Width" v={trade.obWidthPips != null ? `${trade.obWidthPips} pips` : "N/A"} />
+                                    <Row k="Side" v={formatValue(trade.obDirection)} />
+                                </> : <span className="text-muted-lab">No linked order block data.</span>
+                            ) : <span className="text-muted-lab">No order block details.</span>}
                         </TabsContent>
                         <TabsContent value="exec" className="text-[11.5px] font-mono pt-3">
                             {trade ? <>
@@ -185,15 +196,16 @@ export default function TradeInspector() {
                             <Row k="Direction" v={trade.direction} />
                             <Row k="Structure" v={trade.structure} />
                             <Row k="Session" v={trade.session} />
-                            <Row k="OB Origin" v={trade.obOrigin} />
-                            <Row k="Detected" v={trade.detected} />
+                            <Row k="OB ID" v={formatValue(trade.obId)} />
+                            <Row k="OB Origin" v={formatValue(trade.obOriginTime)} />
+                            <Row k="Detected" v={formatValue(trade.obDetectionTime)} />
                             <Row k="Entry Time" v={trade.entry} />
                             <Row k="Exit Time" v={trade.exit} />
                             <div className="divider-glow my-2" />
                             <Row k="Entry Price" v={trade.entryPrice} />
                             <Row k="Stop Loss" v={trade.stop} />
                             <Row k="Take Profit" v={trade.tp} />
-                            <Row k="OB Width" v={`${trade.obWidth} pips`} />
+                            <Row k="OB Width" v={trade.obWidthPips != null ? `${trade.obWidthPips} pips` : "N/A"} />
                             <div className="divider-glow my-2" />
                             <Row k="R Result" v={<ColoredR value={trade.r} />} />
                             <Row k="Outcome" v={<Pill tone={trade.outcome === "Win" ? "success" : "danger"}>{trade.outcome}</Pill>} />
@@ -226,6 +238,18 @@ function variantLabel(v) {
         one_per_direction: "One per direction",
         unknown: "Trades",
     }[v] || v;
+}
+
+function hasOrderBlockData(trade) {
+    return !!(trade?.obId || trade?.obOriginTime || trade?.obDetectionTime || trade?.obTop != null || trade?.obBottom != null || trade?.obWidthPips != null);
+}
+
+function formatValue(value) {
+    return value == null || value === "" ? "N/A" : String(value);
+}
+
+function formatNumber(value) {
+    return value == null || value === "" || !isFinite(Number(value)) ? "N/A" : String(value);
 }
 
 function Row({ k, v }) {

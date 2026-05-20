@@ -179,7 +179,7 @@ export function ImportZone() {
                                     <Layers className="w-3.5 h-3.5 text-[hsl(var(--accent-secondary))] shrink-0" />
                                     <span className="font-mono text-[11px] text-white truncate">{r.id}</span>
                                     <span className="font-mono text-[10px] text-muted-lab whitespace-nowrap">
-                                        · {r.summary.trades} trades · RR {r.summary.rr}
+                                        · {r.summary.trades} trades · RR {formatRR(r.summary.rr)}
                                     </span>
                                     {r.candlesDroppedForStorage && (
                                         <span className="font-mono text-[9.5px] text-[hsl(var(--warning))] uppercase tracking-wider">candles · session-only</span>
@@ -204,4 +204,9 @@ export function ImportZone() {
             </div>
         </div>
     );
+}
+
+function formatRR(value) {
+    const n = Number(value);
+    return isFinite(n) && n > 0 ? n.toFixed(1) : "N/A";
 }
