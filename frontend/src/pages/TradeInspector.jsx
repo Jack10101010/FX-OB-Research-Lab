@@ -10,7 +10,7 @@ import { Search, AlertTriangle } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 export default function TradeInspector() {
-    const { CANDLES, TRADES, activeRunId, getRunData, ACTIVE_TRADE_VARIANT, AVAILABLE_TRADE_VARIANTS } = useDataset();
+    const { CANDLES, TRADES, OB_BOXES, TRADE_MARKERS, activeRunId, getRunData, ACTIVE_TRADE_VARIANT, AVAILABLE_TRADE_VARIANTS } = useDataset();
     const bundle = activeRunId ? getRunData(activeRunId) : null;
     const hasCandles = bundle ? bundle.hasCandles !== false && !!bundle.candles?.length : true;
     const [q, setQ] = useState("");
@@ -34,11 +34,29 @@ export default function TradeInspector() {
     }), [q, outcome, direction, structure, TRADES]);
 
     const trade = TRADES.find((t) => t.id === selectedId) || TRADES[0] || null;
+    const selectedMarker = trade ? TRADE_MARKERS.find((m) => m.id === trade.id) : null;
+    const hasMappedMarker = hasCandles && selectedMarker?.i >= 0 && selectedMarker.mappingQuality !== "missing";
 
-    // Zoom candles around imagined trade index (mocked: center ±40)
+    // Prefer mapped imported trade location; fall back to legacy mock positioning.
     const candleWindow = Math.max(1, CANDLES.length - 80);
-    const center = trade ? ((trade.num * 2) % candleWindow) + Math.min(40, CANDLES.length) : 0;
-    const slice = CANDLES.slice(Math.max(0, center - 40), Math.min(CANDLES.length, center + 40)).map((c, i) => ({ ...c, i }));
+    const center = hasMappedMarker ? selectedMarker.i : (trade ? ((trade.num * 2) % candleWindow) + Math.min(40, CANDLES.length) : 0);
+    const sliceStart = Math.max(0, center - 40);
+    const sliceEnd = Math.min(CANDLES.length, center + 40);
+    const rawSlice = CANDLES.slice(sliceStart, sliceEnd);
+    const slice = hasMappedMarker ? rawSlice : rawSlice.map((c, i) => ({ ...c, i }));
+    const chartTrades = trade
+        ? (hasMappedMarker
+            ? [{ ...selectedMarker, price: selectedMarker.price || trade.entryPrice }]
+            : [{ i: 44, price: trade.entryPrice, direction: trade.direction, win: trade.outcome === "Win", id: trade.id }])
+        : [];
+    const chartOBs = hasMappedMarker
+        ? OB_BOXES.filter((b) => {
+            if (b.time0 != null && b.time1 != null && slice[0]?.time != null && slice[slice.length - 1]?.time != null) {
+                return b.time1 >= slice[0].time && b.time0 <= slice[slice.length - 1].time;
+            }
+            return b.i1 >= sliceStart && b.i0 <= sliceEnd;
+        })
+        : [];
 
     return (
         <div className="pb-12">
@@ -55,6 +73,16 @@ export default function TradeInspector() {
                         <AlertTriangle className="w-3.5 h-3.5 text-[hsl(var(--warning))]" />
                         <span className="text-[11px] font-mono uppercase tracking-wider text-[hsl(var(--warning))]">
                             Trade sequence view · no candle data imported
+                        </span>
+                    </div>
+                </div>
+            )}
+            {hasCandles && trade && !hasMappedMarker && (
+                <div className="px-6 mb-3">
+                    <div className="flex items-center gap-2 px-3 py-2 border border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.07)] clip-bevel-sm" data-testid="ti-mapping-warning">
+                        <AlertTriangle className="w-3.5 h-3.5 text-[hsl(var(--warning))]" />
+                        <span className="text-[11px] font-mono uppercase tracking-wider text-[hsl(var(--warning))]">
+                            Trade timestamp mapping degraded · using sequence fallback
                         </span>
                     </div>
                 </div>
@@ -111,8 +139,8 @@ export default function TradeInspector() {
                 >
                     <CandleChart
                         candles={slice}
-                        obBoxes={trade ? [{ i0: 20, i1: 42, top: trade.tp - 0.0014, bot: trade.stop + 0.0008, side: trade.direction === "Long" ? "bull" : "bear", id: "OB" }] : []}
-                        trades={trade ? [{ i: 44, price: trade.entryPrice, direction: trade.direction, win: trade.outcome === "Win", id: trade.id }] : []}
+                        obBoxes={chartOBs}
+                        trades={chartTrades}
                         tpSlLines={trade ? [{ i: 44, tp: trade.tp, sl: trade.stop }] : []}
                         selectedTradeId={trade?.id}
                         height={400}

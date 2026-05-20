@@ -51,18 +51,36 @@ function pickFrom(obj, ...names) {
     return null;
 }
 
+function normalizeTimestamp(value) {
+    if (value == null || value === "") return null;
+    if (typeof value === "number" && isFinite(value)) {
+        return value > 100000000000 ? Math.floor(value / 1000) : Math.floor(value);
+    }
+    let s = String(value).trim();
+    if (!s) return null;
+    s = s.replace(/^(\d{4}-\d{2}-\d{2})\s+/, "$1T");
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) s = `${s}T00:00:00Z`;
+    if (!/(Z|[+-]\d{2}:?\d{2})$/i.test(s)) s = `${s}Z`;
+    const ms = Date.parse(s);
+    return isFinite(ms) ? Math.floor(ms / 1000) : null;
+}
+
 // ─────────────────────── Parsers ───────────────────────
 
 export function parseCandlesCSV(text) {
     const { rows } = parseCSV(text);
-    return rows.map((r, i) => ({
-        i,
-        t: String(pick(r, "time", "timestamp", "datetime", "date") || ""),
-        o: Number(pick(r, "open", "o") ?? 0),
-        h: Number(pick(r, "high", "h") ?? 0),
-        l: Number(pick(r, "low", "l") ?? 0),
-        c: Number(pick(r, "close", "c") ?? 0),
-    }));
+    return rows.map((r, i) => {
+        const t = String(pick(r, "time", "timestamp", "datetime", "date") || "");
+        return {
+            i,
+            t,
+            time: normalizeTimestamp(t),
+            o: Number(pick(r, "open", "o") ?? 0),
+            h: Number(pick(r, "high", "h") ?? 0),
+            l: Number(pick(r, "low", "l") ?? 0),
+            c: Number(pick(r, "close", "c") ?? 0),
+        };
+    });
 }
 
 export function parseOrderBlocksCSV(text) {
@@ -85,22 +103,26 @@ export function parseTradesCSV(text) {
     const { rows } = parseCSV(text);
     return rows.map((r, i) => {
         const directionRaw = pick(r, "direction", "side", "dir") || "Long";
-        const direction = String(directionRaw).toLowerCase().startsWith("s") ? "Short" : "Long";
+        const directionText = String(directionRaw).toLowerCase();
+        const direction = directionText.startsWith("bear") || directionText.startsWith("s") || directionText === "sell"
+            ? "Short"
+            : "Long";
         const outcomeRaw = pick(r, "outcome", "result");
-        const rVal = Number(pick(r, "r", "r_result", "rresult") ?? 0);
+        const rVal = Number(pick(r, "pnl_r", "r", "r_result", "rresult") ?? 0);
         const outcome = outcomeRaw ? cap(outcomeRaw) : (rVal >= 0 ? "Win" : "Loss");
-        const structRaw = pick(r, "structure", "structure_type", "type") || "BOS";
+        const structRaw = pick(r, "structure_tag", "structure", "structure_type", "type") || "BOS";
         return {
             id: String(pick(r, "id", "trade_id") || `T-${String(i + 1).padStart(3, "0")}`),
+            obId: pick(r, "ob_id"),
             num: i + 1,
             direction,
             structure: String(structRaw).toUpperCase().includes("CHOCH") ? "CHoCH" : "BOS",
             session: String(pick(r, "session") || "—"),
             obOrigin:   String(pick(r, "ob_origin", "origin_time") || ""),
             detected:   String(pick(r, "detected", "detection_time") || ""),
-            entry:      String(pick(r, "entry", "entry_time") || ""),
-            exit:       String(pick(r, "exit", "exit_time") || ""),
-            entryPrice: Number(pick(r, "entry_price", "entryprice") ?? 0),
+            entry:      String(pick(r, "fill_time", "entry_time") || ""),
+            exit:       String(pick(r, "exit_time", "exit") || ""),
+            entryPrice: Number(pick(r, "entry", "entry_price", "entryprice") ?? 0),
             stop:       Number(pick(r, "stop", "stop_loss", "sl") ?? 0),
             tp:         Number(pick(r, "tp", "take_profit") ?? 0),
             r: rVal,
@@ -129,9 +151,11 @@ function computeEquityCurve(trades) {
 
 function computeTradeMarkers(trades, candleIdx) {
     return trades.map((t, idx) => {
-        const i = candleIdx ? timeToCandleIndex(t.entry, candleIdx) : -1;
+        const mapped = candleIdx ? timeToCandleIndex(t.entry, candleIdx) : { i: -1, quality: "missing", time: null };
         return {
-            i: i >= 0 ? i : idx * Math.max(1, Math.floor(220 / Math.max(1, trades.length))),
+            i: mapped.i >= 0 ? mapped.i : idx * Math.max(1, Math.floor(220 / Math.max(1, trades.length))),
+            time: mapped.time,
+            mappingQuality: mapped.quality,
             price: t.entryPrice,
             direction: t.direction,
             win: t.outcome === "Win",
@@ -141,25 +165,49 @@ function computeTradeMarkers(trades, candleIdx) {
 }
 
 // Build a fast index lookup from a candle array.
-// Returns ts→index map keyed by ISO YYYY-MM-DD or full timestamp.
 function buildCandleIndex(candles) {
-    const byExact = new Map();
-    const byDay = new Map();
+    const byTime = new Map();
+    const ordered = [];
     candles.forEach((c, i) => {
-        if (!c.t) return;
-        byExact.set(String(c.t), i);
-        byDay.set(String(c.t).slice(0, 10), i);
+        const time = c.time ?? normalizeTimestamp(c.t);
+        if (time == null) return;
+        byTime.set(time, i);
+        ordered.push({ time, i });
     });
-    return { byExact, byDay };
+    ordered.sort((a, b) => a.time - b.time);
+    const gaps = [];
+    for (let i = 1; i < ordered.length; i++) {
+        const gap = ordered[i].time - ordered[i - 1].time;
+        if (gap > 0) gaps.push(gap);
+    }
+    gaps.sort((a, b) => a - b);
+    const medianGap = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 3600;
+    return { byTime, ordered, toleranceSec: Math.max(60, Math.floor(medianGap * 1.5)) };
 }
 
 function timeToCandleIndex(time, idx) {
-    if (!time || !idx) return -1;
-    const s = String(time);
-    if (idx.byExact.has(s)) return idx.byExact.get(s);
-    const day = s.slice(0, 10);
-    if (idx.byDay.has(day)) return idx.byDay.get(day);
-    return -1;
+    const target = normalizeTimestamp(time);
+    if (target == null || !idx) return { i: -1, quality: "missing", time: null };
+    if (idx.byTime.has(target)) {
+        const i = idx.byTime.get(target);
+        return { i, quality: "exact", time: idx.ordered.find((c) => c.i === i)?.time ?? target };
+    }
+    let lo = 0;
+    let hi = idx.ordered.length - 1;
+    let best = null;
+    while (lo <= hi) {
+        const mid = Math.floor((lo + hi) / 2);
+        if (idx.ordered[mid].time <= target) {
+            best = idx.ordered[mid];
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    if (best && target - best.time <= idx.toleranceSec) {
+        return { i: best.i, quality: "nearest_prior", time: best.time };
+    }
+    return { i: -1, quality: "missing", time: null };
 }
 
 function detectFileKind(name) {
@@ -314,15 +362,27 @@ export async function ingestRunBundle(fileList) {
     const equityCurve = equityCurveByVariant[primaryVariant] || [];
 
     const mappedOBs = collected.orderBlocks.map((b, idx) => {
-        const i0 = b.i0 != null ? Number(b.i0) : timeToCandleIndex(b.originTime, candleIdx);
-        const i1 = b.i1 != null ? Number(b.i1) : timeToCandleIndex(b.endTime,    candleIdx);
+        const explicitI0 = b.i0 != null ? Number(b.i0) : null;
+        const explicitI1 = b.i1 != null ? Number(b.i1) : null;
+        const mapped0 = explicitI0 != null && explicitI0 >= 0
+            ? { i: explicitI0, quality: "exact", time: collected.candles?.[explicitI0]?.time ?? null }
+            : (candleIdx ? timeToCandleIndex(b.originTime, candleIdx) : { i: -1, quality: "missing", time: null });
+        const mapped1 = explicitI1 != null && explicitI1 >= 0
+            ? { i: explicitI1, quality: "exact", time: collected.candles?.[explicitI1]?.time ?? null }
+            : (candleIdx ? timeToCandleIndex(b.endTime, candleIdx) : { i: -1, quality: "missing", time: null });
         // Fallback synthetic spacing if neither indices nor candle mapping worked
         const fallbackI0 = idx * 24;
         const fallbackI1 = idx * 24 + 18;
+        const mappingQuality = mapped0.quality === "missing" || mapped1.quality === "missing"
+            ? "missing"
+            : (mapped0.quality === "nearest_prior" || mapped1.quality === "nearest_prior" ? "nearest_prior" : "exact");
         return {
             id: b.id,
-            i0: i0 != null && i0 >= 0 ? i0 : fallbackI0,
-            i1: i1 != null && i1 >= 0 ? i1 : fallbackI1,
+            i0: mapped0.i >= 0 ? mapped0.i : fallbackI0,
+            i1: mapped1.i >= 0 ? mapped1.i : fallbackI1,
+            time0: mapped0.time,
+            time1: mapped1.time,
+            mappingQuality,
             top: b.top,
             bot: b.bot,
             side: b.side,

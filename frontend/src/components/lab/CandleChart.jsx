@@ -20,6 +20,12 @@ import { createChart, CrosshairMode, LineStyle } from "lightweight-charts";
 const BASE_TIME = Math.floor(new Date("2025-05-20T00:00:00Z").getTime() / 1000);
 const STEP_SEC = 4 * 3600;
 
+function chartTime(point, indexKey = "i") {
+    if (point?.time != null && isFinite(Number(point.time))) return Number(point.time);
+    const i = Number(point?.[indexKey] ?? 0);
+    return BASE_TIME + i * STEP_SEC;
+}
+
 function hslToRgba(h, s, l, a = 1) {
     s /= 100; l /= 100;
     const k = (n) => (n + h / 30) % 12;
@@ -64,6 +70,7 @@ export function CandleChart({
     const seriesRef = useRef(null);
     const priceLinesRef = useRef([]);
     const [overlayKey, setOverlayKey] = useState(0); // triggers OB box reposition
+    const hasRealCandleTime = candles.some((c) => c.time != null && isFinite(Number(c.time)));
 
     // Compute token-derived colors once per mount (themes reapply on remount; ok).
     const accentPrimary = readToken("--accent-primary", "rgba(217,70,239,1)");
@@ -121,11 +128,23 @@ export function CandleChart({
     // Push candle data
     useEffect(() => {
         const series = seriesRef.current;
-        if (!series || !candles.length) return;
-        const data = candles.map((c) => ({
-            time: BASE_TIME + c.i * STEP_SEC,
-            open: c.o, high: c.h, low: c.l, close: c.c,
-        }));
+        if (!series) return;
+        if (!candles.length) {
+            series.setData([]);
+            return;
+        }
+        const seen = new Set();
+        const data = candles
+            .map((c) => ({
+                time: chartTime(c),
+                open: c.o, high: c.h, low: c.l, close: c.c,
+            }))
+            .sort((a, b) => a.time - b.time)
+            .filter((c) => {
+                if (seen.has(c.time)) return false;
+                seen.add(c.time);
+                return true;
+            });
         series.setData(data);
         chartRef.current?.timeScale().fitContent();
         setOverlayKey((k) => k + 1);
@@ -137,9 +156,10 @@ export function CandleChart({
         if (!series) return;
         const visible = trades
             .filter((t) => (t.direction === "Long" ? showLongs : showShorts))
-            .filter((t) => (t.win ? showWins : showLosses));
+            .filter((t) => (t.win ? showWins : showLosses))
+            .filter((t) => !hasRealCandleTime || (t.time != null && isFinite(Number(t.time))));
         const markers = visible.map((t) => ({
-            time: BASE_TIME + t.i * STEP_SEC,
+            time: chartTime(t),
             position: t.direction === "Long" ? "belowBar" : "aboveBar",
             color: t.win ? success : danger,
             shape: t.direction === "Long" ? "arrowUp" : "arrowDown",
@@ -147,7 +167,7 @@ export function CandleChart({
             size: selectedTradeId === t.id ? 2 : 1,
         }));
         series.setMarkers(markers);
-    }, [trades, showLongs, showShorts, showWins, showLosses, selectedTradeId, success, danger]);
+    }, [trades, showLongs, showShorts, showWins, showLosses, selectedTradeId, success, danger, hasRealCandleTime]);
 
     // Push TP/SL price lines
     useEffect(() => {
@@ -170,8 +190,11 @@ export function CandleChart({
         if (!chart || !series) return [];
         const out = [];
         for (const b of obBoxes) {
-            const x0 = chart.timeScale().timeToCoordinate(BASE_TIME + b.i0 * STEP_SEC);
-            const x1 = chart.timeScale().timeToCoordinate(BASE_TIME + b.i1 * STEP_SEC);
+            if (hasRealCandleTime && (b.time0 == null || b.time1 == null)) continue;
+            const time0 = b.time0 != null && isFinite(Number(b.time0)) ? Number(b.time0) : chartTime(b, "i0");
+            const time1 = b.time1 != null && isFinite(Number(b.time1)) ? Number(b.time1) : chartTime(b, "i1");
+            const x0 = chart.timeScale().timeToCoordinate(time0);
+            const x1 = chart.timeScale().timeToCoordinate(time1);
             const yTop = series.priceToCoordinate(b.top);
             const yBot = series.priceToCoordinate(b.bot);
             if (x0 == null || x1 == null || yTop == null || yBot == null) continue;
