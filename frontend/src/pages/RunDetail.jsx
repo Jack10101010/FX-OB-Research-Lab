@@ -12,15 +12,19 @@ import { Map as MapIcon, Crosshair, GitCompareArrows, TrendingUp, Hash, Activity
 import { BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie } from "recharts";
 
 export default function RunDetail() {
-    const { ACTIVE_RUN, EQUITY_CURVE, TRADES, MONTHLY, R_DIST, RUNS } = useDataset();
+    const { ACTIVE_RUN, EQUITY_CURVE, TRADES, MONTHLY, R_DIST, RUNS, getRunData } = useDataset();
     const params = useParams();
     const runId = params.runId === "active" ? ACTIVE_RUN.id : decodeURIComponent(params.runId || ACTIVE_RUN.id);
     const run = RUNS.find((r) => r.id === runId) || ACTIVE_RUN;
-    const isActive = run.id === ACTIVE_RUN.id;
-    const pf = isActive ? computeProfitFactor(TRADES) : null;
-    const maxDd = isActive ? computeMaxDrawdown(EQUITY_CURVE) : null;
-    const expectancy = isActive ? computeExpectancy(TRADES) : null;
-    const spark = EQUITY_CURVE.filter((_, i) => i % 12 === 0).map((p) => p.netR);
+    // Per-run lookup: imported bundles carry their own trades + equity curve.
+    const runData = getRunData(runId);
+    const tradesForRun  = runData?.trades        || (run.id === ACTIVE_RUN.id ? TRADES : null);
+    const equityForRun  = runData?.equityCurve   || (run.id === ACTIVE_RUN.id ? EQUITY_CURVE : null);
+    const hasFull = !!(tradesForRun?.length && equityForRun?.length);
+    const pf         = hasFull ? computeProfitFactor(tradesForRun) : null;
+    const maxDd      = hasFull ? computeMaxDrawdown(equityForRun)  : null;
+    const expectancy = hasFull ? computeExpectancy(tradesForRun)   : null;
+    const spark = (equityForRun || EQUITY_CURVE).filter((_, i) => i % 12 === 0).map((p) => p.netR);
 
     return (
         <div className="pb-12">
@@ -48,7 +52,7 @@ export default function RunDetail() {
 
             <div className="px-6 mt-5 grid grid-cols-1 xl:grid-cols-3 gap-4">
                 <NeonPanel className="xl:col-span-2" title="Equity Curve" action={<Pill tone="primary">NET R</Pill>}>
-                    <EquityCurve data={EQUITY_CURVE} height={300} />
+                    <EquityCurve data={equityForRun || EQUITY_CURVE} height={300} />
                 </NeonPanel>
 
                 <NeonPanel title="Configuration">
@@ -57,13 +61,13 @@ export default function RunDetail() {
                             ["Symbol",        run.symbol],
                             ["Detection TF",  run.detectionTf],
                             ["Execution TF",  run.executionTf || "1m"],
-                            ["Date Range",    "May '25 → May '26"],
-                            ["RR",            run.rr.toFixed(1)],
+                            ["Date Range",    run.dateRange || "May '25 → May '26"],
+                            ["RR",            (run.rr ?? 0).toFixed(1)],
                             ["Stop Buffer",   `${run.stopBuffer ?? 1.0} pip`],
-                            ["Entry Buffer",  "0.0 pip"],
+                            ["Entry Buffer",  `${run.entryBuffer ?? 0} pip`],
                             ["Verify Ticks",  String(run.verifyTicks ?? 0)],
                             ["Execution",     run.executionMode || "single_position"],
-                            ["OB Filter",     "ATR"],
+                            ["Source",        runData ? "Imported" : "Mock"],
                             ["Structure",     "Both"],
                             ["Direction",     "Both"],
                         ].map(([k, v]) => (
@@ -75,7 +79,7 @@ export default function RunDetail() {
                     </div>
                 </NeonPanel>
 
-                <NeonPanel className="xl:col-span-2" title="Trade Ledger" action={<Pill tone="secondary">{TRADES.length} TRADES</Pill>}>
+                <NeonPanel className="xl:col-span-2" title="Trade Ledger" action={<Pill tone="secondary">{(tradesForRun || []).length} TRADES</Pill>}>
                     <DataTable
                         testId="run-detail-trades"
                         maxHeight={360}
@@ -91,7 +95,7 @@ export default function RunDetail() {
                             { key: "r",         label: "R",       align: "right", render: (r) => <ColoredR value={r.r} /> },
                             { key: "outcome",   label: "Result",  render: (r) => <Pill tone={r.outcome === "Win" ? "success" : "danger"}>{r.outcome}</Pill> },
                         ]}
-                        rows={TRADES}
+                        rows={tradesForRun || []}
                     />
                 </NeonPanel>
 

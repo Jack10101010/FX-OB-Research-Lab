@@ -1,0 +1,13 @@
+{
+  "id": "EURUSD_M15_RR3.3_real",
+  "symbol": "EURUSD",
+  "detection_tf": "M15",
+  "execution_tf": "1m",
+  "date_from": "2025-05-18",
+  "date_to": "2026-05-18",
+  "rr": 3.3,
+  "stop_buffer": 1.0,
+  "entry_buffer": 0.0,
+  "verify_ticks": 0,
+  "execution_mode": "single_position"
+}

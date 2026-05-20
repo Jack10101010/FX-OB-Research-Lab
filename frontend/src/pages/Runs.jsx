@@ -4,10 +4,10 @@ import { PageHeader } from "@/components/lab/AppShell";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
 import { Field, NeonSelect, Segment, NeonInput } from "@/components/lab/controls";
-import { useDataset } from "@/data/store";
+import { useDataset, setHideMocks } from "@/data/store";
 
 export default function Runs() {
-    const { RUNS } = useDataset();
+    const { RUNS, hideMocks, hasImportedRuns, importedCount } = useDataset();
     const [symbol, setSymbol] = useState("All");
     const [tf, setTf] = useState("All");
     const [mode, setMode] = useState("All");
@@ -41,7 +41,7 @@ export default function Runs() {
                 <Field label="Search Run ID"><NeonInput data-testid="runs-search" placeholder="EURUSD_M15…" value={q} onChange={(e) => setQ(e.target.value)} /></Field>
             </div>
 
-            <div className="px-6 mb-3 flex items-center justify-between">
+            <div className="px-6 mb-3 flex items-center justify-between gap-3 flex-wrap">
                 <Segment
                     testId="runs-sort"
                     options={[
@@ -53,7 +53,23 @@ export default function Runs() {
                     value={sort}
                     onChange={setSort}
                 />
-                <Pill tone="muted">{filtered.length} rows</Pill>
+                <div className="flex items-center gap-2">
+                    {hasImportedRuns && (
+                        <button
+                            onClick={() => setHideMocks(!hideMocks)}
+                            data-testid="runs-toggle-mocks"
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-[10.5px] font-mono uppercase tracking-wider border clip-bevel-sm transition-colors ${
+                                hideMocks
+                                    ? "border-[hsl(var(--accent-primary))] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.06)]"
+                                    : "border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:border-[hsl(var(--accent-secondary))]"
+                            }`}
+                        >
+                            {hideMocks ? "Show Mock Runs" : "Hide Mock Runs"}
+                        </button>
+                    )}
+                    <Pill tone="muted">{filtered.length} rows</Pill>
+                    {importedCount > 0 && <Pill tone="primary">{importedCount} imported</Pill>}
+                </div>
             </div>
 
             <div className="px-6">
@@ -61,7 +77,13 @@ export default function Runs() {
                     <DataTable
                         testId="runs-table"
                         columns={[
-                            { key: "id",          label: "Run ID",     render: (r) => <Link to={`/runs/${encodeURIComponent(r.id)}`} className="text-[hsl(var(--accent-primary))] hover:text-white">{r.id}</Link> },
+                            { key: "id",          label: "Run ID",     render: (r) => (
+                                <span className="inline-flex items-center gap-1.5">
+                                    <Link to={`/runs/${encodeURIComponent(r.id)}`} className="text-[hsl(var(--accent-primary))] hover:text-white">{r.id}</Link>
+                                    {r._source === "mock" && <Pill tone="muted">MOCK</Pill>}
+                                    {r._source === "imported" && <Pill tone="primary">REAL</Pill>}
+                                </span>
+                            ) },
                             { key: "symbol",      label: "Symbol" },
                             { key: "detectionTf", label: "Det TF" },
                             { key: "executionTf", label: "Exec TF" },

@@ -9,7 +9,9 @@ import { Search } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 export default function TradeInspector() {
-    const { CANDLES, TRADES } = useDataset();
+    const { CANDLES, TRADES, ACTIVE_RUN, activeRunId, getRunData } = useDataset();
+    const bundle = activeRunId ? getRunData(activeRunId) : null;
+    const hasCandles = bundle ? bundle.hasCandles !== false && !!bundle.candles?.length : true;
     const [q, setQ] = useState("");
     const [outcome, setOutcome] = useState("All");
     const [direction, setDirection] = useState("All");
@@ -37,6 +39,17 @@ export default function TradeInspector() {
                 title={`${trade.id} · ${trade.direction}`}
                 subtitle={`${trade.structure} · ${trade.session} · OB width ${trade.obWidth} pips`}
             />
+
+            {!hasCandles && (
+                <div className="px-6 mb-3">
+                    <div className="flex items-center gap-2 px-3 py-2 border border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.07)] clip-bevel-sm" data-testid="ti-no-candles-banner">
+                        <AlertTriangle className="w-3.5 h-3.5 text-[hsl(var(--warning))]" />
+                        <span className="text-[11px] font-mono uppercase tracking-wider text-[hsl(var(--warning))]">
+                            Trade sequence view · no candle data imported
+                        </span>
+                    </div>
+                </div>
+            )}
 
             <div className="px-6 grid grid-cols-1 xl:grid-cols-[280px_1fr_280px] gap-3">
                 {/* LEFT: trade list */}

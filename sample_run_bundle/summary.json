@@ -1,0 +1,21 @@
+{
+  "id": "EURUSD_M15_RR3.3_real",
+  "symbol": "EURUSD",
+  "detection_tf": "M15",
+  "execution_tf": "1m",
+  "date_from": "2025-05-18",
+  "date_to": "2026-05-18",
+  "rr": 3.3,
+  "stop_buffer": 1.0,
+  "verify_ticks": 0,
+  "entry_buffer": 0.0,
+  "trades": 6,
+  "wins": 2,
+  "losses": 4,
+  "win_rate": 33.3,
+  "net_r": 2.6,
+  "validation": 98.7,
+  "reverse_cancels": 0,
+  "execution_mode": "single_position",
+  "completed_at": "2026-02-20T10:00:00Z"
+}

@@ -1,0 +1,55 @@
+{
+  "summary": "Iteration 4 (Phase 2 — real client-side run ingestion) frontend e2e testing complete. 8 of 11 acceptance items PASS end-to-end; 3 critical issues identified that block the corresponding pages or violate spec. Real-data flow is working for IMPORT, OVERVIEW, RUN DETAIL, COMPARISON LAB, RUNS toggle, PERSISTENCE, REMOVE, VALIDATION FAILURE. BLOCKERS: (1) Strategy Map crashes on render with 'hasCandles is not defined' ReferenceError → blank page (body_len=18). (2) Trade Inspector crashes with 'AlertTriangle is not defined' → no-candles banner never renders + trade list absent. (3) Runs page does NOT order imported runs first — default sort=netR overrides the imported-first list ordering, so EURUSD_M15_RR4 (+55R mock) appears first instead of the imported +2.6R run. Toggle hide-mocks itself works correctly. Computed real metrics match analytical truth: Profit Factor=(3+3)/(1+1+1+1)=1.50 ✓, Max Drawdown=-2.0R (cumulative path peak 4 → trough 2) ✓, Net R from summary=+2.6R ✓, Win Rate=33.3% ✓.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "StrategyMap (/strategy-map)",
+        "issue": "PAGEERROR: 'hasCandles is not defined'. Page renders blank (body_len=18). Same destructure-from-useDataset() bug pattern as iteration-2 SweepLab and iteration-3 ComparisonLab. The component references `hasCandles` but the identifier was never destructured from useDataset() or computed from active run candles. Acceptance check [data-testid=map-no-candles-banner] cannot be verified because the route throws on mount.",
+        "selector": "/strategy-map route — ReferenceError on render",
+        "priority": "CRITICAL"
+      },
+      {
+        "component": "TradeInspector (/trade-inspector)",
+        "issue": "PAGEERROR: 'AlertTriangle is not defined'. The no-candles banner JSX references the AlertTriangle lucide icon but it is NOT in the import line at the top of TradeInspector.jsx. Result: [data-testid=ti-no-candles-banner] is_visible() = false, and the 6 imported trades T-001..T-006 are absent from the left list because the component error-boundaries out. Add `AlertTriangle` to the existing `import { ... } from 'lucide-react'`.",
+        "selector": "/trade-inspector — ReferenceError + missing banner + empty trade list",
+        "priority": "CRITICAL"
+      },
+      {
+        "component": "Runs (/runs)",
+        "issue": "Imported run NOT first in table. Default sort is by netR descending, so EURUSD_M15_RR4 (+55R mock) sits at row 1 and the imported +2.6R run is buried. Spec requires imported runs first regardless of sort. Fix: in Runs.jsx filtered useMemo, partition by _source first (imported group, then mock group), then apply sort within each partition. Current sort logic does not honor the imported-first ordering produced by store.buildDerived. Toggle 'Hide Mock Runs' works correctly (only the 1 imported row remains).",
+        "selector": "[data-testid=runs-table] tbody tr — first row should have REAL pill",
+        "priority": "HIGH"
+      },
+      {
+        "component": "Recharts containers (carryover)",
+        "issue": "Persistent 'width(-1) and height(-1) of chart should be greater than 0' warnings on initial render. Cosmetic only.",
+        "selector": "Multiple Recharts ResponsiveContainer wrappers",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Fix /app/frontend/src/pages/StrategyMap.jsx: either destructure `hasCandles` from useDataset() (store exposes it via `active?.hasCandles` — add to buildDerived return) or derive locally e.g. `const hasCandles = (CANDLES?.length ?? 0) > 0`. Currently blanks the route.",
+    "Fix /app/frontend/src/pages/TradeInspector.jsx: add `AlertTriangle` to the lucide-react import line. The icon is referenced inside the no-candles banner JSX but not imported.",
+    "Fix /app/frontend/src/pages/Runs.jsx ordering: imported runs must appear before mock runs regardless of sort column. Suggested patch: split filtered into [imp = filtered.filter(r=>r._source==='imported'), mock = filtered.filter(r=>r._source!=='imported')], sort each independently, return [...imp, ...mock].",
+    "Audit other refactored pages (SweepLab, MonteCarlo, ParityDebugger) for the same scope-after-refactor pattern — three iterations in a row have surfaced ReferenceError bugs from undeclared identifiers used inside route components. An error boundary around <Outlet /> would have surfaced these earlier."
+  ],
+  "critical_code_review_comments": [
+    "Pattern: Three regressions in three iterations (SweepLab→ComparisonLab→StrategyMap+TradeInspector) all caused by missing imports or missing destructured store keys. This is a systemic issue — recommend adding ESLint no-undef rule (likely already on, but possibly suppressed) and an error boundary around each routed page so one broken page does not white-out the entire route. Add a CI smoke-test that visits every route and asserts body_len > 100 + no pageerrors.",
+    "importer.js correctly validates required artifacts and returns {ok:false, missing:[...]} when fields are absent; store.js correctly persists to localStorage and exposes hasImportedRuns flag — these flows are robust.",
+    "store.buildDerived returns RUNS as [...importedList, ...mockList] (imported first), but Runs.jsx loses this ordering by re-sorting on a single numeric key. Either preserve the partition in Runs.jsx or expose two separate arrays from the store.",
+    "ImportZone error title 'Bundle incomplete' is rendered uppercased via CSS (`uppercase tracking-wider`) — DOM text is 'BUNDLE INCOMPLETE'. Tests asserting on visible text should be case-insensitive."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped per request)", "frontend": "73% (8/11 acceptance items pass; 3 critical/high failures)"},
+  "test_credentials": "n/a (no auth)",
+  "seed_data_creation": "Used existing /app/sample_run_bundle/* fixtures (config.json + summary.json + order_blocks.csv + trades_single_position.csv).",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "VERIFIED PASS in iter 4: (1) IMPORT FLOW — [data-testid=import-history-item] = 'EURUSD_M15_RR3.3_real · 6 trades · 3 OBs · no candles · SINGLE_POSITION'; localStorage.fxob_runs has key 'EURUSD_M15_RR3.3_real'; localStorage.fxob_active_run_id='EURUSD_M15_RR3.3_real'. (2) VALIDATION — dropping only config.json shows [data-testid=import-error] with title 'Bundle incomplete' (rendered uppercase) and 'Missing required: summary.json, order_blocks.csv, trades_*.csv'; no run added. (3) REMOVE — [data-testid=import-remove-EURUSD_M15_RR3.3_real] click removes run from localStorage. (4) OVERVIEW — kpi-net-r='+2.6R', kpi-win-rate='33.3%', kpi-trades='6' EXACT match. (5) RUN DETAIL — all 6 T-001..T-006 rows present; 'Imported' source label present. (6) COMPARISON cmp-kpi-table — Run A (imported): PF=1.50, MaxDD=-2.0R, NetR=+2.6R, WR=33.3%; Run B (mock): PROFIT FACTOR & MAX DRAWDOWN show 'Limited Data'. (7) RUNS toggle [data-testid=runs-toggle-mocks] hides mocks correctly (24 → 1 row, REAL pill visible). (8) PERSISTENCE — reload preserves active run + runs map. FAIL: (a) /strategy-map blank — 'hasCandles is not defined' ReferenceError; banner unverifiable. (b) /trade-inspector banner missing — 'AlertTriangle is not defined' ReferenceError; trade list also empty. (c) /runs default ordering DOES NOT put imported first — sort=netR makes EURUSD_M15_RR4 (+55R mock) appear at row 1 instead of the imported +2.6R run.",
+  "rca of the issue": "(1) StrategyMap.jsx — ReferenceError 'hasCandles is not defined'. Same class of bug as iter-2 SweepLab and iter-3 ComparisonLab: page references an identifier that was never declared (neither imported nor destructured from useDataset()). MITIGATION: destructure `hasCandles` from store (need to expose it via buildDerived: `hasCandles: !!active?.hasCandles`) OR compute locally `const hasCandles = (CANDLES?.length ?? 0) > 0`. (2) TradeInspector.jsx — ReferenceError 'AlertTriangle is not defined'. The icon is referenced inside the no-candles banner JSX but not added to the existing `import { … } from 'lucide-react'` line. MITIGATION: add AlertTriangle to the lucide-react import. (3) Runs.jsx ordering — store.buildDerived returns RUNS pre-sorted with imported-first, but Runs.jsx filtered useMemo re-sorts the merged array by a single numeric key (default 'netR') which collapses the imported partition into the mock partition. MITIGATION: partition first by _source before sorting, e.g. `const imp = arr.filter(r=>r._source==='imported').sort(cmp); const mock = arr.filter(r=>r._source!=='imported').sort(cmp); return [...imp, ...mock];`."
+}

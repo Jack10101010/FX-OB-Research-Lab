@@ -41,12 +41,12 @@ export default function Overview() {
 
             {/* KPI ROW */}
             <div className="px-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-                <MetricChip testId="kpi-net-r"      label="Net R (Latest)"   value="+39.3R" sub="EURUSD M15 · RR 3.3" tone="primary"   icon={TrendingUp} sparkline={spark} />
-                <MetricChip testId="kpi-win-rate"   label="Win Rate"         value="29.9%"  sub="41 / 137 trades"     tone="secondary" icon={Target} sparkline={spark.map((v) => v * 0.4)} />
-                <MetricChip testId="kpi-trades"     label="Trades"           value="137"    sub="Validated set"        tone="muted"     icon={Hash} />
+                <MetricChip testId="kpi-net-r"      label="Net R (Latest)"   value={`${ACTIVE_RUN.netR >= 0 ? "+" : ""}${ACTIVE_RUN.netR}R`} sub={`${ACTIVE_RUN.symbol} ${ACTIVE_RUN.detectionTf} · RR ${Number(ACTIVE_RUN.rr).toFixed(1)}`} tone="primary"   icon={TrendingUp} sparkline={spark} />
+                <MetricChip testId="kpi-win-rate"   label="Win Rate"         value={`${Number(ACTIVE_RUN.winRate).toFixed(1)}%`}  sub={`${ACTIVE_RUN.wins} / ${ACTIVE_RUN.trades} trades`}     tone="secondary" icon={Target} sparkline={spark.map((v) => v * 0.4)} />
+                <MetricChip testId="kpi-trades"     label="Trades"           value={String(ACTIVE_RUN.trades)}    sub="Validated set"        tone="muted"     icon={Hash} />
                 <MetricChip testId="kpi-best-rr"    label="Best RR"          value="4.0"    sub="+55.0R · PF 1.62"     tone="primary"   icon={Trophy} />
-                <MetricChip testId="kpi-reverse"    label="Reverse Cancel"   value="2"      sub="1.5% of trades"       tone="warning"   icon={AlertOctagon} />
-                <MetricChip testId="kpi-validation" label="Validation"       value="98.2%"  sub="Pine ↔ Python parity" tone="success"   icon={ShieldCheck} />
+                <MetricChip testId="kpi-reverse"    label="Reverse Cancel"   value={String(ACTIVE_RUN.reverseCancels ?? 0)}      sub={`${Number(((ACTIVE_RUN.reverseCancels ?? 0) / Math.max(1, ACTIVE_RUN.trades) * 100)).toFixed(1)}% of trades`}       tone="warning"   icon={AlertOctagon} />
+                <MetricChip testId="kpi-validation" label="Validation"       value={`${Number(ACTIVE_RUN.validation).toFixed(1)}%`}  sub="Pine ↔ Python parity" tone="success"   icon={ShieldCheck} />
             </div>
 
             {/* MAIN GRID */}
@@ -94,12 +94,12 @@ export default function Overview() {
                             ["Symbol",        ACTIVE_RUN.symbol],
                             ["Detection TF",  ACTIVE_RUN.detectionTf],
                             ["Execution TF",  ACTIVE_RUN.executionTf],
-                            ["Date Range",    "May '25 → May '26"],
-                            ["RR",            ACTIVE_RUN.rr.toFixed(1)],
+                            ["Date Range",    ACTIVE_RUN.dateRange || "May '25 → May '26"],
+                            ["RR",            Number(ACTIVE_RUN.rr).toFixed(1)],
                             ["Stop Buffer",   `${ACTIVE_RUN.stopBuffer} pip`],
-                            ["Entry Buffer",  `${ACTIVE_RUN.entryBuffer} pip`],
+                            ["Entry Buffer",  `${ACTIVE_RUN.entryBuffer ?? 0} pip`],
                             ["Verify Ticks",  ACTIVE_RUN.verifyTicks],
-                            ["Execution",     "single_position"],
+                            ["Execution",     ACTIVE_RUN.executionMode || "single_position"],
                             ["Direction",     "Both"],
                             ["Profit Factor", pf != null ? pf.toFixed(2) : "N/A"],
                             ["Max Drawdown",  maxDd != null ? `${maxDd.toFixed(1)}R` : "N/A"],
@@ -121,7 +121,7 @@ export default function Overview() {
                         <div style={{ width: 132, height: 132 }}>
                             <ResponsiveContainer>
                                 <PieChart>
-                                    <Pie data={[{ name: "Wins", value: 41 }, { name: "Losses", value: 96 }]} dataKey="value" innerRadius={42} outerRadius={62} stroke="hsl(var(--panel))" strokeWidth={2} isAnimationActive={false}>
+                                    <Pie data={[{ name: "Wins", value: ACTIVE_RUN.wins }, { name: "Losses", value: ACTIVE_RUN.losses }]} dataKey="value" innerRadius={42} outerRadius={62} stroke="hsl(var(--panel))" strokeWidth={2} isAnimationActive={false}>
                                         <Cell fill="hsl(var(--accent-primary))" />
                                         <Cell fill="hsl(var(--bear) / 0.55)" />
                                     </Pie>
@@ -129,10 +129,10 @@ export default function Overview() {
                             </ResponsiveContainer>
                         </div>
                         <div className="text-[12px] font-mono">
-                            <div className="flex items-center gap-2"><span className="w-2 h-2 bg-[hsl(var(--accent-primary))]" /> Wins (29.9%)</div>
-                            <div className="flex items-center gap-2 mt-1.5"><span className="w-2 h-2 bg-[hsl(var(--bear)/0.65)]" /> Losses (70.1%)</div>
+                            <div className="flex items-center gap-2"><span className="w-2 h-2 bg-[hsl(var(--accent-primary))]" /> Wins ({Number(ACTIVE_RUN.winRate).toFixed(1)}%)</div>
+                            <div className="flex items-center gap-2 mt-1.5"><span className="w-2 h-2 bg-[hsl(var(--bear)/0.65)]" /> Losses ({(100 - Number(ACTIVE_RUN.winRate)).toFixed(1)}%)</div>
                             <div className="mt-3 text-muted-lab">Total Trades</div>
-                            <div className="text-white text-[20px] tabular-nums">137</div>
+                            <div className="text-white text-[20px] tabular-nums">{ACTIVE_RUN.trades}</div>
                         </div>
                     </div>
                 </NeonPanel>

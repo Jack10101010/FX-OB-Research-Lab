@@ -21,8 +21,8 @@ const PALETTE = [
 ];
 
 export default function ComparisonLab() {
-    const { RUNS, EQUITY_CURVE, MONTHLY, TRADES, ACTIVE_RUN } = useDataset();
-    const [ids, setIds] = useState([RUNS[0].id, RUNS[5].id]);
+    const { RUNS, EQUITY_CURVE, MONTHLY, TRADES, ACTIVE_RUN, getRunData } = useDataset();
+    const [ids, setIds] = useState(() => RUNS.slice(0, 2).map((r) => r.id));
 
     const setAt = (idx, v) => setIds((prev) => prev.map((x, i) => (i === idx ? v : x)));
     const addRun = () => {
@@ -39,23 +39,32 @@ export default function ComparisonLab() {
     const runs = ids.map((id) => RUNS.find((r) => r.id === id)).filter(Boolean);
     const baseline = runs[0];
 
-    // Real PF / Max DD are only available for the active run (full trade + equity data).
-    // For all other runs we honestly report "Limited Data" rather than fabricating.
-    const realPF = computeProfitFactor(TRADES);
-    const realDD = computeMaxDrawdown(EQUITY_CURVE);
+    // Per-run real metrics: prefer imported bundle data; fall back to active-run mock for the active id.
+    const realPF_active = computeProfitFactor(TRADES);
+    const realDD_active = computeMaxDrawdown(EQUITY_CURVE);
     const runMetrics = (r) => {
-        const hasFull = r.id === ACTIVE_RUN.id;
-        return {
-            pf:    hasFull ? realPF : null,
-            maxDd: hasFull ? realDD : null,
-            hasFull,
-        };
+        if (!r) return { pf: null, maxDd: null };
+        const bundle = getRunData(r.id);
+        if (bundle?.trades?.length && bundle?.equityCurve?.length) {
+            return { pf: computeProfitFactor(bundle.trades), maxDd: computeMaxDrawdown(bundle.equityCurve) };
+        }
+        // Fallback: only the active mock run has full data
+        if (r.id === ACTIVE_RUN.id) return { pf: realPF_active, maxDd: realDD_active };
+        return { pf: null, maxDd: null };
     };
 
-    // Synthesize per-run equity by scaling baseline curve to each run's netR
-    const equityMerged = EQUITY_CURVE.map((p) => {
+    // Synthesize per-run equity by using imported curve when available, else scaled baseline.
+    const equityMerged = EQUITY_CURVE.map((p, idx) => {
         const row = { label: p.label, i: p.i };
-        runs.forEach((r, idx) => { row[`r${idx}`] = Number((p.netR * (r.netR / (baseline?.netR || 1))).toFixed(2)); });
+        runs.forEach((r, i) => {
+            const bundle = getRunData(r.id);
+            if (bundle?.equityCurve?.length) {
+                const e = bundle.equityCurve[Math.min(idx, bundle.equityCurve.length - 1)];
+                row[`r${i}`] = e ? e.netR : null;
+            } else {
+                row[`r${i}`] = Number((p.netR * (r.netR / (baseline?.netR || 1))).toFixed(2));
+            }
+        });
         return row;
     });
 

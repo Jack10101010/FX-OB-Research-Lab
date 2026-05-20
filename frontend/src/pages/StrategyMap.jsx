@@ -5,7 +5,8 @@ import { Field, NeonSelect, Segment, NeonToggle, NeonButton } from "@/components
 import { Pill } from "@/components/lab/DataTable";
 import { CandleChart } from "@/components/lab/CandleChart";
 import { useDataset } from "@/data/store";
-import { Camera, Settings as SettingsIcon, BarChart3, Layers, ZoomIn, ZoomOut, Move, MousePointer2, Ruler, PenLine } from "lucide-react";
+import { setActiveRunId } from "@/data/store";
+import { Camera, Settings as SettingsIcon, Layers, ZoomIn, ZoomOut, Move, MousePointer2, Ruler, PenLine, AlertTriangle } from "lucide-react";
 
 export default function StrategyMap() {
     const { CANDLES, OB_BOXES, TRADE_MARKERS, RUNS } = useDataset();
@@ -46,11 +47,19 @@ export default function StrategyMap() {
                         <div className="flex items-center gap-2 flex-wrap">
                             <NeonSelect testId="map-symbol" value="EURUSD" onChange={() => {}} options={["EURUSD", "GBPUSD", "USDJPY", "XAUUSD"]} />
                             <NeonSelect value={tf} onChange={setTf} options={["M5", "M15", "M30", "H1"]} />
-                            <NeonSelect value={runId} onChange={setRunId} options={RUNS.slice(0, 10).map((r) => r.id)} />
+                            <NeonSelect value={runId} onChange={(v) => setActiveRunId(v)} options={RUNS.slice(0, 20).map((r) => r.id)} />
                             <Pill tone="muted">2025-05-18 → 2026-05-18</Pill>
                         </div>
                     }
                 >
+                    {!hasCandles && (
+                        <div className="mb-3 flex items-center gap-2 px-3 py-2 border border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.07)] clip-bevel-sm" data-testid="map-no-candles-banner">
+                            <AlertTriangle className="w-3.5 h-3.5 text-[hsl(var(--warning))]" />
+                            <span className="text-[11px] font-mono uppercase tracking-wider text-[hsl(var(--warning))]">
+                                Trade sequence view · no candle data imported
+                            </span>
+                        </div>
+                    )}
                     <div className="flex items-center gap-2 flex-wrap mb-3">
                         <Toggle label="Order Blocks" checked={showOB} onChange={setShowOB} dot="primary" />
                         <Toggle label="Long Entries" checked={showLongs} onChange={setShowLongs} dot="success" />
