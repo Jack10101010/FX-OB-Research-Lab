@@ -1,0 +1,73 @@
+{
+  "config": {
+    "symbol": "EURUSD",
+    "candle_file": "EURUSD_1m.csv",
+    "detection_timeframe": "15min",
+    "execution_timeframe": "1min",
+    "start_date": "2025-05-18",
+    "end_date": "2026-05-18",
+    "swing_length": 50,
+    "ob_filter": "Atr",
+    "rr_multiple": 3.3,
+    "entry_buffer_pips": 0.0,
+    "stop_buffer_pips": 1.0,
+    "pip_size": 0.0001,
+    "tick_size": 1e-05,
+    "verify_limit_ticks": 0,
+    "execution_modes": [
+      "single_position",
+      "allow_multi_position",
+      "one_per_direction"
+    ]
+  },
+  "ob_count": 151,
+  "bullish_count": 70,
+  "bearish_count": 81,
+  "bos_count": 72,
+  "choch_count": 79,
+  "execution_modes": {
+    "single_position": {
+      "total_obs": 151,
+      "filled_trades": 137,
+      "wins": 41,
+      "losses": 96,
+      "open": 0,
+      "invalidated": 0,
+      "reverse_touch_cancel": 2,
+      "unfilled": 11,
+      "win_rate": 0.29927007299270075,
+      "net_r": 39.29999999999999
+    },
+    "allow_multi_position": {
+      "total_obs": 151,
+      "filled_trades": 137,
+      "wins": 41,
+      "losses": 96,
+      "open": 0,
+      "invalidated": 0,
+      "reverse_touch_cancel": 2,
+      "unfilled": 11,
+      "win_rate": 0.29927007299270075,
+      "net_r": 39.29999999999999
+    },
+    "one_per_direction": {
+      "total_obs": 151,
+      "filled_trades": 137,
+      "wins": 41,
+      "losses": 96,
+      "open": 0,
+      "invalidated": 0,
+      "reverse_touch_cancel": 2,
+      "unfilled": 11,
+      "win_rate": 0.29927007299270075,
+      "net_r": 39.29999999999999
+    }
+  },
+  "symbol": "EURUSD",
+  "date_from": "2025-05-18",
+  "date_to": "2026-05-18",
+  "date_range": "2025-05-18 \u2192 2026-05-18",
+  "rr": 3.3,
+  "trade_count": 137,
+  "net_r": 39.29999999999999
+}

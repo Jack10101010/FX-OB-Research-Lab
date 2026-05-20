@@ -1,0 +1,26 @@
+{
+  "symbol": "EURUSD",
+  "candle_file": "EURUSD_1m.csv",
+  "detection_timeframe": "15min",
+  "execution_timeframe": "1min",
+  "start_date": "2025-05-18",
+  "end_date": "2026-05-18",
+  "swing_length": 50,
+  "ob_filter": "Atr",
+  "rr_multiple": 3.3,
+  "entry_buffer_pips": 0.0,
+  "stop_buffer_pips": 1.0,
+  "pip_size": 0.0001,
+  "tick_size": 1e-05,
+  "verify_limit_ticks": 0,
+  "execution_modes": [
+    "single_position",
+    "allow_multi_position",
+    "one_per_direction"
+  ],
+  "detection_tf": "15min",
+  "execution_tf": "1min",
+  "date_from": "2025-05-18",
+  "date_to": "2026-05-18",
+  "date_range": "2025-05-18 \u2192 2026-05-18"
+}

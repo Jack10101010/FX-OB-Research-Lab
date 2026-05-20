@@ -109,18 +109,20 @@ export function ImportZone() {
             >
                 <Upload className="w-6 h-6 mx-auto text-[hsl(var(--accent-primary))]" style={{ filter: "drop-shadow(0 0 8px hsl(var(--accent-primary)))" }} />
                 <div className="font-display text-[14px] mt-2 text-white">
-                    {busy ? "Importing…" : "Drop a full run bundle here or click to browse"}
+                    {busy ? "Importing…" : "Drop run files here or click to select a full run folder"}
                 </div>
                 <div className="text-[10.5px] font-mono uppercase tracking-wider text-muted-lab mt-1">
                     REQUIRED · config.json · summary.json · order_blocks.csv · trades_*.csv
                 </div>
                 <div className="text-[10px] font-mono uppercase tracking-wider text-muted-lab mt-0.5">
-                    OPTIONAL · candles.csv · alternative trades variants
+                    OPTIONAL · candles.csv · alternative trades variants · folder picker supported
                 </div>
                 <input
                     ref={inputRef}
                     type="file"
                     multiple
+                    webkitdirectory=""
+                    directory=""
                     accept=".json,.csv"
                     className="hidden"
                     data-testid="import-file-input"
