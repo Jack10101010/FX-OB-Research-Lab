@@ -7,6 +7,7 @@ import { EquityCurve } from "@/components/lab/EquityCurve";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
 import { NeonButton } from "@/components/lab/controls";
 import { useDataset } from "@/data/store";
+import { computeProfitFactor, computeMaxDrawdown, computeExpectancy } from "@/lib/metrics";
 import { Map as MapIcon, Crosshair, GitCompareArrows, TrendingUp, Hash, Activity, Target, AlertTriangle, ShieldCheck } from "lucide-react";
 import { BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie } from "recharts";
 
@@ -15,6 +16,10 @@ export default function RunDetail() {
     const params = useParams();
     const runId = params.runId === "active" ? ACTIVE_RUN.id : decodeURIComponent(params.runId || ACTIVE_RUN.id);
     const run = RUNS.find((r) => r.id === runId) || ACTIVE_RUN;
+    const isActive = run.id === ACTIVE_RUN.id;
+    const pf = isActive ? computeProfitFactor(TRADES) : null;
+    const maxDd = isActive ? computeMaxDrawdown(EQUITY_CURVE) : null;
+    const expectancy = isActive ? computeExpectancy(TRADES) : null;
     const spark = EQUITY_CURVE.filter((_, i) => i % 12 === 0).map((p) => p.netR);
 
     return (
@@ -36,9 +41,9 @@ export default function RunDetail() {
                 <MetricChip label="Net R"          value={`${run.netR >= 0 ? "+" : ""}${run.netR}R`} sub={`${run.trades} trades`}     tone="primary"   icon={TrendingUp} sparkline={spark} />
                 <MetricChip label="Win Rate"       value={`${run.winRate.toFixed(1)}%`}             sub={`${run.wins || ACTIVE_RUN.wins} / ${run.losses || ACTIVE_RUN.losses}`} tone="secondary" icon={Target} />
                 <MetricChip label="Trades"         value={String(run.trades)}                       sub="Validated"                      tone="muted"     icon={Hash} />
-                <MetricChip label="Expectancy"     value="0.287R"                                   sub="per trade"                      tone="primary"   icon={Activity} />
-                <MetricChip label="Profit Factor"  value="1.49"                                     sub="Placeholder"                    tone="secondary" icon={ShieldCheck} />
-                <MetricChip label="Max Drawdown"   value="-8.2R"                                    sub="Placeholder"                    tone="danger"    icon={AlertTriangle} />
+                <MetricChip label="Expectancy"     value={expectancy != null ? `${expectancy.toFixed(3)}R` : "N/A"}  sub={expectancy != null ? "per trade · computed" : "Limited Data"} tone="primary"   icon={Activity} />
+                <MetricChip label="Profit Factor"  value={pf != null ? pf.toFixed(2) : "N/A"}                       sub={pf != null ? "Σ wins / |Σ losses|" : "Limited Data"}        tone="secondary" icon={ShieldCheck} />
+                <MetricChip label="Max Drawdown"   value={maxDd != null ? `${maxDd.toFixed(1)}R` : "N/A"}            sub={maxDd != null ? "peak → trough" : "Limited Data"}            tone="danger"    icon={AlertTriangle} />
             </div>
 
             <div className="px-6 mt-5 grid grid-cols-1 xl:grid-cols-3 gap-4">

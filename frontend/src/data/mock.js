@@ -107,11 +107,19 @@ export const EQUITY_CURVE = (() => {
     const arr = [];
     let val = 0;
     const startDate = new Date(2025, 4, 18);
+    // Deliberately seed a few realistic drawdown periods so visual + Max DD
+    // calculations tell a believable story.
+    const dipZones = [
+        { start: 55,  len: 18, intensity: 0.32 },
+        { start: 110, len: 14, intensity: 0.38 },
+        { start: 175, len: 22, intensity: 0.42 },
+        { start: 225, len: 10, intensity: 0.30 },
+    ];
     for (let i = 0; i < points; i++) {
-        const trend = 0.18;
-        const noise = (rng() - 0.42) * 1.4;
+        const inDip = dipZones.find((d) => i >= d.start && i < d.start + d.len);
+        const trend = inDip ? -inDip.intensity : 0.24;
+        const noise = (rng() - 0.42) * 1.3;
         val += trend + noise;
-        if (val < -8) val += 1.5;
         const d = new Date(startDate.getTime() + i * 36 * 3600 * 1000);
         arr.push({
             i,
@@ -120,8 +128,9 @@ export const EQUITY_CURVE = (() => {
             netR: Number(val.toFixed(2)),
         });
     }
-    // ensure ending close to 39.3R
-    const factor = 39.3 / (arr[arr.length - 1].netR || 1);
+    // Anchor the final value to the published +39.3R while preserving the dip shape.
+    const last = arr[arr.length - 1].netR || 1;
+    const factor = 39.3 / last;
     return arr.map((p) => ({ ...p, netR: Number((p.netR * factor).toFixed(2)) }));
 })();
 

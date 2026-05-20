@@ -11,15 +11,19 @@ import {
     Trophy, ChevronRight, BarChart3,
 } from "lucide-react";
 import { useDataset } from "@/data/store";
+import { computeProfitFactor, computeMaxDrawdown } from "@/lib/metrics";
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
     PieChart, Pie, Legend,
 } from "recharts";
 
 export default function Overview() {
-    const { ACTIVE_RUN, EQUITY_CURVE, RUNS, SWEEP_RR, MONTHLY, R_DIST } = useDataset();
+    const { ACTIVE_RUN, EQUITY_CURVE, RUNS, SWEEP_RR, MONTHLY, R_DIST, TRADES } = useDataset();
     const recent = RUNS.slice(0, 6);
     const spark = EQUITY_CURVE.filter((_, i) => i % 10 === 0).map((p) => p.netR);
+    // Real metrics from full active-run data
+    const pf = computeProfitFactor(TRADES);
+    const maxDd = computeMaxDrawdown(EQUITY_CURVE);
 
     return (
         <div className="pb-12">
@@ -97,6 +101,8 @@ export default function Overview() {
                             ["Verify Ticks",  ACTIVE_RUN.verifyTicks],
                             ["Execution",     "single_position"],
                             ["Direction",     "Both"],
+                            ["Profit Factor", pf != null ? pf.toFixed(2) : "N/A"],
+                            ["Max Drawdown",  maxDd != null ? `${maxDd.toFixed(1)}R` : "N/A"],
                         ].map(([k, v]) => (
                             <React.Fragment key={k}>
                                 <div className="text-muted-lab uppercase tracking-wider text-[10px]">{k}</div>

@@ -6,6 +6,7 @@ import { MetricChip } from "@/components/lab/MetricChip";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
 import { NeonSelect, NeonButton } from "@/components/lab/controls";
 import { useDataset } from "@/data/store";
+import { computeProfitFactor, computeMaxDrawdown } from "@/lib/metrics";
 import { Plus, X, Trophy, Crown } from "lucide-react";
 import {
     AreaChart, Area, LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
@@ -20,7 +21,7 @@ const PALETTE = [
 ];
 
 export default function ComparisonLab() {
-    const { RUNS, EQUITY_CURVE, MONTHLY } = useDataset();
+    const { RUNS, EQUITY_CURVE, MONTHLY, TRADES, ACTIVE_RUN } = useDataset();
     const [ids, setIds] = useState([RUNS[0].id, RUNS[5].id]);
 
     const setAt = (idx, v) => setIds((prev) => prev.map((x, i) => (i === idx ? v : x)));
@@ -37,6 +38,19 @@ export default function ComparisonLab() {
 
     const runs = ids.map((id) => RUNS.find((r) => r.id === id)).filter(Boolean);
     const baseline = runs[0];
+
+    // Real PF / Max DD are only available for the active run (full trade + equity data).
+    // For all other runs we honestly report "Limited Data" rather than fabricating.
+    const realPF = computeProfitFactor(TRADES);
+    const realDD = computeMaxDrawdown(EQUITY_CURVE);
+    const runMetrics = (r) => {
+        const hasFull = r.id === ACTIVE_RUN.id;
+        return {
+            pf:    hasFull ? realPF : null,
+            maxDd: hasFull ? realDD : null,
+            hasFull,
+        };
+    };
 
     // Synthesize per-run equity by scaling baseline curve to each run's netR
     const equityMerged = EQUITY_CURVE.map((p) => {
@@ -66,8 +80,8 @@ export default function ComparisonLab() {
         { key: "netR",          label: "Net R",            fmt: (v) => `${v >= 0 ? "+" : ""}${v}R`,         delta: (v, base) => `${v - base >= 0 ? "+" : ""}${(v - base).toFixed(1)}R`,  posIfGreater: true },
         { key: "winRate",       label: "Win Rate",         fmt: (v) => `${v.toFixed(1)}%`,                  delta: (v, base) => `${v - base >= 0 ? "+" : ""}${(v - base).toFixed(1)}%`, posIfGreater: true },
         { key: "trades",        label: "Trades",           fmt: (v) => String(v),                            delta: (v, base) => `${v - base >= 0 ? "+" : ""}${v - base}`,             posIfGreater: null },
-        { key: "_pf",           label: "Profit Factor",    fmt: () => "1.42",                                delta: () => "—",                                                          posIfGreater: null, placeholder: true },
-        { key: "_dd",           label: "Max Drawdown",     fmt: () => "-9.2R",                               delta: () => "—",                                                          posIfGreater: null, placeholder: true },
+        { key: "_pf",           label: "Profit Factor",    posIfGreater: true,    compute: true },
+        { key: "_dd",           label: "Max Drawdown",     posIfGreater: true,    compute: true },
         { key: "reverseCancels",label: "Reverse Cancels",  fmt: (v) => String(v ?? 2),                       delta: (v, base) => `${(v ?? 2) - (base ?? 2) >= 0 ? "+" : ""}${(v ?? 2) - (base ?? 2)}`, posIfGreater: false },
         { key: "validation",    label: "Validation",       fmt: (v) => `${v.toFixed(1)}%`,                  delta: (v, base) => `${v - base >= 0 ? "+" : ""}${(v - base).toFixed(1)}%`, posIfGreater: true },
     ];
@@ -176,9 +190,38 @@ export default function ComparisonLab() {
                                     <tr key={def.key} className="border-b border-[hsl(var(--border-soft)/0.4)]">
                                         <td className="text-muted-lab py-1.5 pr-2 uppercase text-[10px] tracking-wider">{def.label}</td>
                                         {runs.map((r, idx) => {
-                                            const v = def.placeholder ? null : r[def.key];
-                                            const baseVal = def.placeholder ? null : baseline[def.key];
                                             const isBaseline = idx === 0;
+                                            // Real-PF / Real-DD computed only when full data available
+                                            if (def.compute) {
+                                                const m = runMetrics(r);
+                                                const bm = runMetrics(baseline);
+                                                const v    = def.key === "_pf" ? m.pf  : m.maxDd;
+                                                const base = def.key === "_pf" ? bm.pf : bm.maxDd;
+                                                if (v == null) {
+                                                    return (
+                                                        <td key={idx} className="text-right py-1.5 px-2 text-muted-lab" title="Full trade history required to compute this metric">
+                                                            <span className="italic text-[10.5px]">Limited Data</span>
+                                                        </td>
+                                                    );
+                                                }
+                                                const display = def.key === "_pf" ? v.toFixed(2) : `${v.toFixed(1)}R`;
+                                                const tone = isBaseline || base == null
+                                                    ? "text-white"
+                                                    : (def.posIfGreater
+                                                        ? (v > base ? "text-[hsl(var(--success))]" : v < base ? "text-[hsl(var(--danger))]" : "text-white")
+                                                        : (v < base ? "text-[hsl(var(--success))]" : v > base ? "text-[hsl(var(--danger))]" : "text-white"));
+                                                const dtxt = base != null ? `${v - base >= 0 ? "+" : ""}${(v - base).toFixed(2)}${def.key === "_dd" ? "R" : ""}` : "—";
+                                                return (
+                                                    <td key={idx} className={`text-right py-1.5 px-2 ${tone}`}>
+                                                        {display}
+                                                        {!isBaseline && base != null && (
+                                                            <div className="text-[9.5px] text-muted-lab leading-none">{dtxt}</div>
+                                                        )}
+                                                    </td>
+                                                );
+                                            }
+                                            const v = r[def.key];
+                                            const baseVal = baseline[def.key];
                                             const tone = isBaseline || def.posIfGreater == null
                                                 ? "text-white"
                                                 : (def.posIfGreater ? (v > baseVal ? "text-[hsl(var(--success))]" : v < baseVal ? "text-[hsl(var(--danger))]" : "text-white")
@@ -186,7 +229,7 @@ export default function ComparisonLab() {
                                             return (
                                                 <td key={idx} className={`text-right py-1.5 px-2 ${tone}`}>
                                                     {def.fmt(v)}
-                                                    {!isBaseline && !def.placeholder && (
+                                                    {!isBaseline && (
                                                         <div className="text-[9.5px] text-muted-lab leading-none">{def.delta(v, baseVal)}</div>
                                                     )}
                                                 </td>

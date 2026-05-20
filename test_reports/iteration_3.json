@@ -1,0 +1,42 @@
+{
+  "summary": "Iteration 3 frontend testing for FX-OB Research Lab — REAL Profit Factor / Max Drawdown / Expectancy metrics, Monte Carlo preview banner, and Sidebar 'Research Workstation' placeholder. All 12 requested checks PASS after a 1-line scope fix in ComparisonLab.jsx (similar pattern to iteration-2 SweepLab bug). Active run computed values match targets exactly: PF=1.22, MaxDD=-3.3R, Expectancy=0.161R. Non-active runs correctly show N/A · Limited Data. /comparison KPI matrix shows '1.22' and '-3.3R' for the active-id column and italicised 'Limited Data' for archived runs. Monte Carlo banner present. Sidebar 'Research Workstation' is disabled, displays Coming Soon badge + Desktop Mode subtitle + lock icon, hover reveals tooltip with all 5 future capabilities, click does not navigate. All 11 routes load. ROADMAP section heading present.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "ComparisonLab",
+        "issue": "Initial pageload of /comparison threw 'TRADES is not defined' then 'ACTIVE_RUN is not defined' — same pattern as iteration-2 SweepLab bug. /app/frontend/src/pages/ComparisonLab.jsx line 24 destructured `{ RUNS, EQUITY_CURVE, MONTHLY }` from useDataset() but later referenced `TRADES` (line 44) and `ACTIVE_RUN` (line 47) which were never imported from the dataset hook. Page rendered empty (body_len=18). FIXED by testing agent: destructure now `{ RUNS, EQUITY_CURVE, MONTHLY, TRADES, ACTIVE_RUN } = useDataset()`. Verified all KPI rows render correctly after fix.",
+        "selector": "/comparison route",
+        "priority": "FIXED"
+      },
+      {
+        "component": "Recharts containers (multiple pages)",
+        "issue": "Persistent 'width(-1) and height(-1) of chart should be greater than 0' console warnings on initial render. Cosmetic only — charts display correctly after layout settles. Carried over from iteration 2.",
+        "selector": "Recharts ResponsiveContainer wrappers",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Audit ALL pages that destructure values from useDataset() inside the parent component for any references to identifiers that were not destructured. This pattern caused both iteration-2 (/sweep) and iteration-3 (/comparison) regressions. Consider adding an error boundary around route content so single-page exceptions do not blank the route silently.",
+    "Recharts width(-1)/height(-1) warning floods the console — investigate by adding explicit minWidth/minHeight or initial dimensions to ResponsiveContainer parents."
+  ],
+  "critical_code_review_comments": [
+    "ComparisonLab.jsx had the same scope/refactor bug as iteration-2 SweepLab.jsx — useDataset() destructure was missing TRADES and ACTIVE_RUN. Fixed by testing agent in this iteration; main agent should audit other refactored pages for similar misses.",
+    "metrics.js implementation is clean: computeProfitFactor / computeMaxDrawdown / computeExpectancy all correctly return null when data is insufficient, preventing fabricated numbers for archived runs.",
+    "Sidebar WorkstationItem is well-implemented: aria-disabled='true', cursor-not-allowed, dashed border for visual disabled affordance, tooltip on hover with all 5 capability items, no NavLink so click is inert."
+  ],
+  "updated_files": [
+    "/app/frontend/src/pages/ComparisonLab.jsx (added TRADES + ACTIVE_RUN to useDataset() destructure on line 24)"
+  ],
+  "success_rate": {"backend": "n/a (skipped per request)", "frontend": "100% after fix (12/12 acceptance items pass)"},
+  "test_credentials": "n/a (no auth)",
+  "seed_data_creation": "none",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "VERIFIED in iter 3: (1) /runs/active KPI chips show Expectancy=0.161R 'PER TRADE · COMPUTED', PF=1.22 'Σ WINS / |Σ LOSSES|', MaxDD=-3.3R 'PEAK → TROUGH'. (2) /runs/EURUSD_M15_RR4 (non-active) KPI chips show 'N/A' with 'LIMITED DATA' sub for all three metrics — no fabrication. (3) Overview Active Config card shows 'Profit Factor 1.22' and 'Max Drawdown -3.3R' rows. (4) /comparison cmp-kpi-table contains rows 'PROFIT FACTOR' (1.22 | Limited Data) and 'MAX DRAWDOWN' (-3.3R | Limited Data). (5) /monte-carlo shows the 'Visualization preview · simulator not yet wired' banner under header. (6) Sidebar [data-testid=nav-research-workstation] is present with [data-testid=workstation-coming-soon-badge]='COMING SOON' and 'Desktop Mode' subtitle; hover reveals [data-testid=workstation-tooltip] containing all 5 capability bullets; click does NOT navigate (URL unchanged). (7) All 11 routes load. (8) /sweep no longer broken (iteration-2 regression resolved). FIX applied by testing agent: ComparisonLab.jsx line 24 useDataset destructure now includes TRADES and ACTIVE_RUN.",
+  "rca of the issue": "ROOT CAUSE: /app/frontend/src/pages/ComparisonLab.jsx line 24 destructured only `{ RUNS, EQUITY_CURVE, MONTHLY }` from useDataset() but the body of the component referenced `TRADES` (line 44 for computeProfitFactor) and `ACTIVE_RUN` (line 47 for `r.id === ACTIVE_RUN.id` comparison). These identifiers used to be module-level imports from the old mock.js but were not re-added to the destructure during the dataset-store refactor. Result: /comparison threw ReferenceError 'TRADES is not defined' then 'ACTIVE_RUN is not defined' and rendered empty (body_len=18). REPRO: visit /comparison → blank page, console pageerror. MITIGATION (applied): changed line 24 to `const { RUNS, EQUITY_CURVE, MONTHLY, TRADES, ACTIVE_RUN } = useDataset();`. Verified KPI table now renders all 7 metric rows including PROFIT FACTOR=1.22 and MAX DRAWDOWN=-3.3R for the active run, with 'Limited Data' for archived runs."
+}

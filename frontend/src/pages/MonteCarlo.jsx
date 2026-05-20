@@ -23,6 +23,18 @@ export default function MonteCarlo() {
                 actions={<NeonButton icon={Play} tone="primary">Run Simulation</NeonButton>}
             />
 
+            <div className="px-6 mb-4">
+                <div className="flex items-center gap-2 border border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.07)] clip-bevel-sm px-3 py-2">
+                    <AlertTriangle className="w-3.5 h-3.5 text-[hsl(var(--warning))]" />
+                    <span className="text-[11px] font-mono uppercase tracking-wider text-[hsl(var(--warning))]">
+                        Visualization preview · simulator not yet wired
+                    </span>
+                    <span className="text-[11px] font-mono text-[hsl(var(--text-2))] hidden md:inline">
+                        — controls render UI state only; values shown are mock outputs.
+                    </span>
+                </div>
+            </div>
+
             <div className="px-6 grid grid-cols-2 md:grid-cols-5 gap-3">
                 <MetricChip label="Median Net R"      value="+31.4R"  sub="50th percentile" tone="primary"   icon={Activity} />
                 <MetricChip label="5th Percentile"    value="+8.2R"   sub="Pessimistic"     tone="warning"   icon={TrendingDown} />
