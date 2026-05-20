@@ -40,6 +40,16 @@ function pick(row, ...names) {
 }
 
 const cap = (s) => (s == null ? "" : String(s).charAt(0).toUpperCase() + String(s).slice(1).toLowerCase());
+const isNum = (v) => v != null && isFinite(Number(v));
+const numOrNull = (v) => (isNum(v) ? Number(v) : null);
+
+function pickFrom(obj, ...names) {
+    if (!obj) return null;
+    for (const n of names) {
+        if (obj[n] != null) return obj[n];
+    }
+    return null;
+}
 
 // ─────────────────────── Parsers ───────────────────────
 
@@ -117,6 +127,19 @@ function computeEquityCurve(trades) {
     });
 }
 
+function computeTradeMarkers(trades, candleIdx) {
+    return trades.map((t, idx) => {
+        const i = candleIdx ? timeToCandleIndex(t.entry, candleIdx) : -1;
+        return {
+            i: i >= 0 ? i : idx * Math.max(1, Math.floor(220 / Math.max(1, trades.length))),
+            price: t.entryPrice,
+            direction: t.direction,
+            win: t.outcome === "Win",
+            id: t.id,
+        };
+    });
+}
+
 // Build a fast index lookup from a candle array.
 // Returns ts→index map keyed by ISO YYYY-MM-DD or full timestamp.
 function buildCandleIndex(candles) {
@@ -157,6 +180,67 @@ function detectFileKind(name) {
         if (n.includes("rr_sweep"))                          return "rr_sweep";
     }
     return "unknown";
+}
+
+function checkStatus(ok, missingValue = false) {
+    if (missingValue) return "WARNING";
+    return ok ? "PASS" : "FAIL";
+}
+
+function buildIntegrity({ collected, primaryTrades, netR, primaryVariant }) {
+    const sm = collected.summary || {};
+    const cfg = collected.config || {};
+    const summaryTradeCount = numOrNull(pickFrom(sm, "trades", "tradeCount", "trade_count", "total_trades", "n_trades"));
+    const summaryNetR = numOrNull(pickFrom(sm, "net_r", "netR"));
+    const summaryObCount = numOrNull(pickFrom(sm, "obCount", "ob_count", "orderBlockCount", "order_block_count", "order_blocks_count", "order_blocks", "obs", "total_obs"));
+    const parityValue = numOrNull(pickFrom(sm, "parity", "parity_score", "validation", "validation_score") ?? pickFrom(cfg, "parity", "parity_score", "validation", "validation_score"));
+    const missingRequired = [];
+    if (!collected.config) missingRequired.push("config.json");
+    if (!collected.summary) missingRequired.push("summary.json");
+    if (!collected.orderBlocks) missingRequired.push("order_blocks.csv");
+    if (!Object.keys(collected.tradesByVariant).length) missingRequired.push("trades_*.csv");
+
+    const netRTolerance = 0.01;
+    const checks = {
+        tradeCount: {
+            status: checkStatus(summaryTradeCount === primaryTrades.length, summaryTradeCount == null),
+            summary: summaryTradeCount,
+            parsed: primaryTrades.length,
+            variant: primaryVariant,
+        },
+        netR: {
+            status: checkStatus(summaryNetR != null && Math.abs(summaryNetR - netR) <= netRTolerance, summaryNetR == null),
+            summary: summaryNetR,
+            computed: Number(netR.toFixed(4)),
+            tolerance: netRTolerance,
+        },
+        obCount: {
+            status: checkStatus(summaryObCount === collected.orderBlocks.length, summaryObCount == null),
+            summary: summaryObCount,
+            parsed: collected.orderBlocks.length,
+        },
+        requiredFiles: {
+            status: missingRequired.length ? "FAIL" : "PASS",
+            missing: missingRequired,
+            present: collected.recognized.map((f) => f.name),
+        },
+        candles: {
+            status: collected.candles?.length ? "PASS" : "WARNING",
+            imported: !!collected.candles?.length,
+            count: collected.candles?.length || 0,
+            droppedForStorage: false,
+        },
+        parity: {
+            status: parityValue == null ? "WARNING" : "PASS",
+            available: parityValue != null,
+            value: parityValue,
+        },
+    };
+    const statuses = Object.values(checks).map((c) => c.status);
+    return {
+        status: statuses.includes("FAIL") ? "FAIL" : statuses.includes("WARNING") ? "WARNING" : "PASS",
+        checks,
+    };
 }
 
 // ─────────────────────── Bundle ingestion ───────────────────────
@@ -218,12 +302,16 @@ export async function ingestRunBundle(fileList) {
     const primaryVariant = variantPriority.find((v) => collected.tradesByVariant[v]) || Object.keys(collected.tradesByVariant)[0];
     const primaryTrades = collected.tradesByVariant[primaryVariant];
 
-    // Compute equity curve from primary trades
-    const equityCurve = computeEquityCurve(primaryTrades);
-
     // Map order blocks and trades onto candle indices when possible
     const hasCandles = !!collected.candles?.length;
     const candleIdx = hasCandles ? buildCandleIndex(collected.candles) : null;
+    const equityCurveByVariant = Object.fromEntries(
+        Object.entries(collected.tradesByVariant).map(([variant, trades]) => [variant, computeEquityCurve(trades)]),
+    );
+    const tradeMarkersByVariant = Object.fromEntries(
+        Object.entries(collected.tradesByVariant).map(([variant, trades]) => [variant, computeTradeMarkers(trades, candleIdx)]),
+    );
+    const equityCurve = equityCurveByVariant[primaryVariant] || [];
 
     const mappedOBs = collected.orderBlocks.map((b, idx) => {
         const i0 = b.i0 != null ? Number(b.i0) : timeToCandleIndex(b.originTime, candleIdx);
@@ -241,16 +329,7 @@ export async function ingestRunBundle(fileList) {
         };
     });
 
-    const tradeMarkers = primaryTrades.map((t, idx) => {
-        const i = candleIdx ? timeToCandleIndex(t.entry, candleIdx) : -1;
-        return {
-            i: i >= 0 ? i : idx * Math.max(1, Math.floor(220 / Math.max(1, primaryTrades.length))),
-            price: t.entryPrice,
-            direction: t.direction,
-            win: t.outcome === "Win",
-            id: t.id,
-        };
-    });
+    const tradeMarkers = tradeMarkersByVariant[primaryVariant] || [];
 
     // Build run id and summary
     const cfg = collected.config;
@@ -259,6 +338,7 @@ export async function ingestRunBundle(fileList) {
     const wins = primaryTrades.filter((t) => t.outcome === "Win").length;
     const losses = primaryTrades.length - wins;
     const netR = primaryTrades.reduce((s, t) => s + (Number(t.r) || 0), 0);
+    const integrity = buildIntegrity({ collected, primaryTrades, netR, primaryVariant });
 
     const runSummary = {
         id,
@@ -276,6 +356,7 @@ export async function ingestRunBundle(fileList) {
         winRate:      Number((sm.win_rate ?? sm.winRate ?? (primaryTrades.length ? (wins / primaryTrades.length) * 100 : 0)).toFixed(1)),
         netR:         Number((sm.net_r ?? sm.netR ?? netR).toFixed(1)),
         validation:   Number(sm.validation ?? 100),
+        integrity,
         executionMode:sm.execution_mode || cfg.execution_mode || primaryVariant,
         reverseCancels: Number(sm.reverse_cancels ?? sm.reverseCancels ?? 0),
         date:         (sm.completed_at || new Date().toISOString()).slice(0, 10),
@@ -289,10 +370,13 @@ export async function ingestRunBundle(fileList) {
         tradesByVariant: collected.tradesByVariant,
         primaryVariant,
         tradeMarkers,
+        tradeMarkersByVariant,
         equityCurve,
+        equityCurveByVariant,
         orderBlocks: mappedOBs,
         candles: hasCandles ? collected.candles : null,
         hasCandles,
+        integrity,
         importedAt: new Date().toISOString(),
     };
 

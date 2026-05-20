@@ -3,6 +3,7 @@ import "@/App.css";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { AppShell } from "@/components/lab/AppShell";
+import { RouteErrorBoundary } from "@/components/lab/RouteErrorBoundary";
 import Overview from "@/pages/Overview";
 import StrategyBuilder from "@/pages/StrategyBuilder";
 import Runs from "@/pages/Runs";
@@ -15,24 +16,30 @@ import ParityDebugger from "@/pages/ParityDebugger";
 import MonteCarlo from "@/pages/MonteCarlo";
 import Settings from "@/pages/Settings";
 
+const withRouteBoundary = (element) => (
+    <RouteErrorBoundary>
+        {element}
+    </RouteErrorBoundary>
+);
+
 function App() {
     return (
         <ThemeProvider>
             <BrowserRouter>
                 <AppShell>
                     <Routes>
-                        <Route path="/" element={<Overview />} />
-                        <Route path="/strategy" element={<StrategyBuilder />} />
-                        <Route path="/runs" element={<Runs />} />
-                        <Route path="/runs/:runId" element={<RunDetail />} />
-                        <Route path="/strategy-map" element={<StrategyMap />} />
-                        <Route path="/trade-inspector" element={<TradeInspector />} />
-                        <Route path="/sweep" element={<SweepLab />} />
-                        <Route path="/comparison" element={<ComparisonLab />} />
-                        <Route path="/parity" element={<ParityDebugger />} />
-                        <Route path="/monte-carlo" element={<MonteCarlo />} />
-                        <Route path="/settings" element={<Settings />} />
-                        <Route path="*" element={<Navigate to="/" replace />} />
+                        <Route path="/" element={withRouteBoundary(<Overview />)} />
+                        <Route path="/strategy" element={withRouteBoundary(<StrategyBuilder />)} />
+                        <Route path="/runs" element={withRouteBoundary(<Runs />)} />
+                        <Route path="/runs/:runId" element={withRouteBoundary(<RunDetail />)} />
+                        <Route path="/strategy-map" element={withRouteBoundary(<StrategyMap />)} />
+                        <Route path="/trade-inspector" element={withRouteBoundary(<TradeInspector />)} />
+                        <Route path="/sweep" element={withRouteBoundary(<SweepLab />)} />
+                        <Route path="/comparison" element={withRouteBoundary(<ComparisonLab />)} />
+                        <Route path="/parity" element={withRouteBoundary(<ParityDebugger />)} />
+                        <Route path="/monte-carlo" element={withRouteBoundary(<MonteCarlo />)} />
+                        <Route path="/settings" element={withRouteBoundary(<Settings />)} />
+                        <Route path="*" element={withRouteBoundary(<Navigate to="/" replace />)} />
                     </Routes>
                 </AppShell>
             </BrowserRouter>

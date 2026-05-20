@@ -1,15 +1,16 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { PageHeader } from "@/components/lab/AppShell";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { Pill, ColoredR } from "@/components/lab/DataTable";
 import { Segment, NeonInput, NeonSelect, Field } from "@/components/lab/controls";
 import { CandleChart } from "@/components/lab/CandleChart";
 import { useDataset } from "@/data/store";
+import { setSelectedTradeVariant } from "@/data/store";
 import { Search, AlertTriangle } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 export default function TradeInspector() {
-    const { CANDLES, TRADES, ACTIVE_RUN, activeRunId, getRunData } = useDataset();
+    const { CANDLES, TRADES, activeRunId, getRunData, ACTIVE_TRADE_VARIANT, AVAILABLE_TRADE_VARIANTS } = useDataset();
     const bundle = activeRunId ? getRunData(activeRunId) : null;
     const hasCandles = bundle ? bundle.hasCandles !== false && !!bundle.candles?.length : true;
     const [q, setQ] = useState("");
@@ -17,6 +18,12 @@ export default function TradeInspector() {
     const [direction, setDirection] = useState("All");
     const [structure, setStructure] = useState("All");
     const [selectedId, setSelectedId] = useState(TRADES[0]?.id);
+
+    useEffect(() => {
+        if (!TRADES.some((t) => t.id === selectedId)) {
+            setSelectedId(TRADES[0]?.id || null);
+        }
+    }, [TRADES, selectedId]);
 
     const filtered = useMemo(() => TRADES.filter((t) => {
         if (q && !t.id.toLowerCase().includes(q.toLowerCase())) return false;
@@ -26,18 +33,20 @@ export default function TradeInspector() {
         return true;
     }), [q, outcome, direction, structure, TRADES]);
 
-    const trade = TRADES.find((t) => t.id === selectedId) || TRADES[0];
+    const trade = TRADES.find((t) => t.id === selectedId) || TRADES[0] || null;
 
     // Zoom candles around imagined trade index (mocked: center ±40)
-    const center = (trade.num * 2) % (CANDLES.length - 80) + 40;
+    const candleWindow = Math.max(1, CANDLES.length - 80);
+    const center = trade ? ((trade.num * 2) % candleWindow) + Math.min(40, CANDLES.length) : 0;
     const slice = CANDLES.slice(Math.max(0, center - 40), Math.min(CANDLES.length, center + 40)).map((c, i) => ({ ...c, i }));
 
     return (
         <div className="pb-12">
             <PageHeader
                 eyebrow="TRADE INSPECTOR"
-                title={`${trade.id} · ${trade.direction}`}
-                subtitle={`${trade.structure} · ${trade.session} · OB width ${trade.obWidth} pips`}
+                title={trade ? `${trade.id} · ${trade.direction}` : "No trades"}
+                subtitle={trade ? `${trade.structure} · ${trade.session} · OB width ${trade.obWidth} pips` : "Selected variant has no imported trades."}
+                actions={<VariantSelector variants={AVAILABLE_TRADE_VARIANTS} value={ACTIVE_TRADE_VARIANT} />}
             />
 
             {!hasCandles && (
@@ -64,6 +73,11 @@ export default function TradeInspector() {
                         <Segment options={["All", "BOS", "CHoCH"]} value={structure} onChange={setStructure} />
                     </div>
                     <div className="max-h-[520px] overflow-y-auto scrollbar-thin pr-1 space-y-1">
+                        {!filtered.length && (
+                            <div className="px-2.5 py-2 text-[11px] font-mono text-muted-lab border border-dashed border-[hsl(var(--border-soft))] clip-bevel-sm">
+                                No trades in selected variant.
+                            </div>
+                        )}
                         {filtered.slice(0, 80).map((t) => {
                             const active = t.id === selectedId;
                             return (
@@ -91,13 +105,16 @@ export default function TradeInspector() {
                 </NeonPanel>
 
                 {/* MAIN CHART */}
-                <NeonPanel title={<>#{String(trade.num).padStart(3, "0")} <span className="text-[hsl(var(--accent-primary))] ml-1">{trade.direction}</span></>} action={<Pill tone={trade.outcome === "Win" ? "success" : "danger"}>{trade.outcome} · {trade.r >= 0 ? "+" : ""}{trade.r}R</Pill>}>
+                <NeonPanel
+                    title={trade ? <>#{String(trade.num).padStart(3, "0")} <span className="text-[hsl(var(--accent-primary))] ml-1">{trade.direction}</span></> : "No Trade Selected"}
+                    action={trade ? <Pill tone={trade.outcome === "Win" ? "success" : "danger"}>{trade.outcome} · {trade.r >= 0 ? "+" : ""}{trade.r}R</Pill> : null}
+                >
                     <CandleChart
                         candles={slice}
-                        obBoxes={[{ i0: 20, i1: 42, top: trade.tp - 0.0014, bot: trade.stop + 0.0008, side: trade.direction === "Long" ? "bull" : "bear", id: "OB" }]}
-                        trades={[{ i: 44, price: trade.entryPrice, direction: trade.direction, win: trade.outcome === "Win", id: trade.id }]}
-                        tpSlLines={[{ i: 44, tp: trade.tp, sl: trade.stop }]}
-                        selectedTradeId={trade.id}
+                        obBoxes={trade ? [{ i0: 20, i1: 42, top: trade.tp - 0.0014, bot: trade.stop + 0.0008, side: trade.direction === "Long" ? "bull" : "bear", id: "OB" }] : []}
+                        trades={trade ? [{ i: 44, price: trade.entryPrice, direction: trade.direction, win: trade.outcome === "Win", id: trade.id }] : []}
+                        tpSlLines={trade ? [{ i: 44, tp: trade.tp, sl: trade.stop }] : []}
+                        selectedTradeId={trade?.id}
                         height={400}
                     />
                     <Tabs defaultValue="overview" className="mt-3">
@@ -108,22 +125,26 @@ export default function TradeInspector() {
                             <TabsTrigger value="notes">Notes</TabsTrigger>
                         </TabsList>
                         <TabsContent value="overview" className="text-[11.5px] font-mono text-muted-lab pt-3 leading-relaxed">
-                            Trade {trade.id} captured a {trade.direction.toLowerCase()} order block after a {trade.structure} confirmation in the {trade.session} session. Entry on retest; exit on TP/SL touch within 1m execution timeframe.
+                            {trade ? `Trade ${trade.id} captured a ${trade.direction.toLowerCase()} order block after a ${trade.structure} confirmation in the ${trade.session} session. Entry on retest; exit on TP/SL touch within 1m execution timeframe.` : "No trade selected for this variant."}
                         </TabsContent>
                         <TabsContent value="ob" className="text-[11.5px] font-mono pt-3">
-                            <Row k="OB ID" v="OB-042" />
-                            <Row k="Origin" v={trade.obOrigin} />
-                            <Row k="Detected" v={trade.detected} />
-                            <Row k="OB Width" v={`${trade.obWidth} pips`} />
-                            <Row k="Side" v={trade.direction === "Long" ? "Bullish" : "Bearish"} />
+                            {trade ? <>
+                                <Row k="OB ID" v="OB-042" />
+                                <Row k="Origin" v={trade.obOrigin} />
+                                <Row k="Detected" v={trade.detected} />
+                                <Row k="OB Width" v={`${trade.obWidth} pips`} />
+                                <Row k="Side" v={trade.direction === "Long" ? "Bullish" : "Bearish"} />
+                            </> : <span className="text-muted-lab">No order block details.</span>}
                         </TabsContent>
                         <TabsContent value="exec" className="text-[11.5px] font-mono pt-3">
-                            <Row k="Entry" v={`${trade.entry} @ ${trade.entryPrice}`} />
-                            <Row k="Stop" v={String(trade.stop)} />
-                            <Row k="TP" v={String(trade.tp)} />
-                            <Row k="Exit" v={trade.exit} />
-                            <Row k="R Result" v={`${trade.r >= 0 ? "+" : ""}${trade.r}R`} />
-                            <Row k="Reverse Conflict" v={trade.reverseConflict ? "YES" : "NO"} />
+                            {trade ? <>
+                                <Row k="Entry" v={`${trade.entry} @ ${trade.entryPrice}`} />
+                                <Row k="Stop" v={String(trade.stop)} />
+                                <Row k="TP" v={String(trade.tp)} />
+                                <Row k="Exit" v={trade.exit} />
+                                <Row k="R Result" v={`${trade.r >= 0 ? "+" : ""}${trade.r}R`} />
+                                <Row k="Reverse Conflict" v={trade.reverseConflict ? "YES" : "NO"} />
+                            </> : <span className="text-muted-lab">No execution details.</span>}
                         </TabsContent>
                         <TabsContent value="notes" className="text-[11.5px] text-muted-lab pt-3">No notes recorded.</TabsContent>
                     </Tabs>
@@ -132,27 +153,51 @@ export default function TradeInspector() {
                 {/* RIGHT: details */}
                 <NeonPanel title="Trade Details" dense>
                     <div className="space-y-1 font-mono text-[11.5px]">
-                        <Row k="Direction" v={trade.direction} />
-                        <Row k="Structure" v={trade.structure} />
-                        <Row k="Session" v={trade.session} />
-                        <Row k="OB Origin" v={trade.obOrigin} />
-                        <Row k="Detected" v={trade.detected} />
-                        <Row k="Entry Time" v={trade.entry} />
-                        <Row k="Exit Time" v={trade.exit} />
-                        <div className="divider-glow my-2" />
-                        <Row k="Entry Price" v={trade.entryPrice} />
-                        <Row k="Stop Loss" v={trade.stop} />
-                        <Row k="Take Profit" v={trade.tp} />
-                        <Row k="OB Width" v={`${trade.obWidth} pips`} />
-                        <div className="divider-glow my-2" />
-                        <Row k="R Result" v={<ColoredR value={trade.r} />} />
-                        <Row k="Outcome" v={<Pill tone={trade.outcome === "Win" ? "success" : "danger"}>{trade.outcome}</Pill>} />
-                        <Row k="Reverse Conflict" v={trade.reverseConflict ? <Pill tone="warning">YES</Pill> : <span className="text-muted-lab">No</span>} />
+                        {trade ? <>
+                            <Row k="Direction" v={trade.direction} />
+                            <Row k="Structure" v={trade.structure} />
+                            <Row k="Session" v={trade.session} />
+                            <Row k="OB Origin" v={trade.obOrigin} />
+                            <Row k="Detected" v={trade.detected} />
+                            <Row k="Entry Time" v={trade.entry} />
+                            <Row k="Exit Time" v={trade.exit} />
+                            <div className="divider-glow my-2" />
+                            <Row k="Entry Price" v={trade.entryPrice} />
+                            <Row k="Stop Loss" v={trade.stop} />
+                            <Row k="Take Profit" v={trade.tp} />
+                            <Row k="OB Width" v={`${trade.obWidth} pips`} />
+                            <div className="divider-glow my-2" />
+                            <Row k="R Result" v={<ColoredR value={trade.r} />} />
+                            <Row k="Outcome" v={<Pill tone={trade.outcome === "Win" ? "success" : "danger"}>{trade.outcome}</Pill>} />
+                            <Row k="Reverse Conflict" v={trade.reverseConflict ? <Pill tone="warning">YES</Pill> : <span className="text-muted-lab">No</span>} />
+                        </> : <span className="text-muted-lab">No trade details available.</span>}
                     </div>
                 </NeonPanel>
             </div>
         </div>
     );
+}
+
+function VariantSelector({ variants, value }) {
+    if (!variants?.length) return null;
+    if (variants.length === 1) return <Pill tone="muted">{variantLabel(variants[0])}</Pill>;
+    return (
+        <NeonSelect
+            testId="ti-variant"
+            value={value || variants[0]}
+            onChange={setSelectedTradeVariant}
+            options={variants.map((v) => ({ value: v, label: variantLabel(v) }))}
+        />
+    );
+}
+
+function variantLabel(v) {
+    return {
+        single_position: "Single position",
+        allow_multi_position: "Allow multi",
+        one_per_direction: "One per direction",
+        unknown: "Trades",
+    }[v] || v;
 }
 
 function Row({ k, v }) {

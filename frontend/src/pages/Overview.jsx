@@ -110,6 +110,7 @@ export default function Overview() {
                             </React.Fragment>
                         ))}
                     </div>
+                    <IntegritySummary integrity={ACTIVE_RUN.integrity} />
                     <div className="divider-glow my-3" />
                     <Link to="/runs/active" className="inline-flex items-center gap-1 text-[11px] font-mono uppercase tracking-wider text-[hsl(var(--accent-primary))] hover:text-white">
                         Open run detail <ChevronRight className="w-3 h-3" />
@@ -175,4 +176,58 @@ export default function Overview() {
             </div>
         </div>
     );
+}
+
+function IntegritySummary({ integrity }) {
+    const status = integrity?.status || "UNAVAILABLE";
+    const flagged = integrity?.checks
+        ? Object.entries(integrity.checks).filter(([, check]) => check.status !== "PASS")
+        : [];
+    const tone = status === "PASS" ? "success" : status === "FAIL" ? "danger" : "warning";
+    const Icon = status === "PASS" ? ShieldCheck : AlertOctagon;
+
+    return (
+        <div className="mt-3 border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] clip-bevel-sm px-3 py-2" data-testid="run-integrity-summary">
+            <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                    <Icon className={`w-3.5 h-3.5 ${status === "PASS" ? "text-[hsl(var(--success))]" : status === "FAIL" ? "text-[hsl(var(--danger))]" : "text-[hsl(var(--warning))]"}`} />
+                    <span className="text-[10px] font-mono uppercase tracking-wider text-muted-lab">Run Integrity</span>
+                </div>
+                <Pill tone={tone}>{status}</Pill>
+            </div>
+            <div className="mt-1.5 text-[10.5px] font-mono text-muted-lab">
+                {flagged.length ? flagged.map(([key, check]) => (
+                    <div key={key} className="flex items-center justify-between gap-3">
+                        <span className="uppercase tracking-wider">{integrityLabel(key)}</span>
+                        <span className={check.status === "FAIL" ? "text-[hsl(var(--danger))]" : "text-[hsl(var(--warning))]"}>
+                            {integrityDetail(key, check)}
+                        </span>
+                    </div>
+                )) : (
+                    <span>{integrity ? "All imported-run checks passed" : "No imported-run integrity data"}</span>
+                )}
+            </div>
+        </div>
+    );
+}
+
+function integrityLabel(key) {
+    return {
+        tradeCount: "Trades",
+        netR: "Net R",
+        obCount: "OB Count",
+        requiredFiles: "Files",
+        candles: "Candles",
+        parity: "Parity",
+    }[key] || key;
+}
+
+function integrityDetail(key, check) {
+    if (key === "tradeCount") return `summary ${check.summary ?? "N/A"} · parsed ${check.parsed}`;
+    if (key === "netR") return `summary ${check.summary ?? "N/A"} · computed ${check.computed}`;
+    if (key === "obCount") return `summary ${check.summary ?? "N/A"} · parsed ${check.parsed}`;
+    if (key === "requiredFiles") return check.missing?.length ? `missing ${check.missing.join(", ")}` : check.status;
+    if (key === "candles") return check.droppedForStorage ? "dropped from storage" : "not imported";
+    if (key === "parity") return check.available ? String(check.value) : "unavailable";
+    return check.status;
 }

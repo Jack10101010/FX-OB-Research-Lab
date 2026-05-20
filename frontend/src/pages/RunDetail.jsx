@@ -5,21 +5,23 @@ import { NeonPanel } from "@/components/lab/NeonPanel";
 import { MetricChip } from "@/components/lab/MetricChip";
 import { EquityCurve } from "@/components/lab/EquityCurve";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
-import { NeonButton } from "@/components/lab/controls";
+import { NeonButton, NeonSelect } from "@/components/lab/controls";
 import { useDataset } from "@/data/store";
+import { setSelectedTradeVariant } from "@/data/store";
 import { computeProfitFactor, computeMaxDrawdown, computeExpectancy } from "@/lib/metrics";
 import { Map as MapIcon, Crosshair, GitCompareArrows, TrendingUp, Hash, Activity, Target, AlertTriangle, ShieldCheck } from "lucide-react";
 import { BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie } from "recharts";
 
 export default function RunDetail() {
-    const { ACTIVE_RUN, EQUITY_CURVE, TRADES, MONTHLY, R_DIST, RUNS, getRunData } = useDataset();
+    const { ACTIVE_RUN, EQUITY_CURVE, TRADES, MONTHLY, R_DIST, RUNS, getRunData, ACTIVE_TRADE_VARIANT, AVAILABLE_TRADE_VARIANTS } = useDataset();
     const params = useParams();
     const runId = params.runId === "active" ? ACTIVE_RUN.id : decodeURIComponent(params.runId || ACTIVE_RUN.id);
     const run = RUNS.find((r) => r.id === runId) || ACTIVE_RUN;
     // Per-run lookup: imported bundles carry their own trades + equity curve.
     const runData = getRunData(runId);
-    const tradesForRun  = runData?.trades        || (run.id === ACTIVE_RUN.id ? TRADES : null);
-    const equityForRun  = runData?.equityCurve   || (run.id === ACTIVE_RUN.id ? EQUITY_CURVE : null);
+    const isActiveRun = run.id === ACTIVE_RUN.id;
+    const tradesForRun  = isActiveRun ? TRADES : (runData?.trades || null);
+    const equityForRun  = isActiveRun ? EQUITY_CURVE : (runData?.equityCurve || null);
     const hasFull = !!(tradesForRun?.length && equityForRun?.length);
     const pf         = hasFull ? computeProfitFactor(tradesForRun) : null;
     const maxDd      = hasFull ? computeMaxDrawdown(equityForRun)  : null;
@@ -67,6 +69,7 @@ export default function RunDetail() {
                             ["Entry Buffer",  `${run.entryBuffer ?? 0} pip`],
                             ["Verify Ticks",  String(run.verifyTicks ?? 0)],
                             ["Execution",     run.executionMode || "single_position"],
+                            ["Trade Variant", isActiveRun ? variantLabel(ACTIVE_TRADE_VARIANT) : variantLabel(runData?.primaryVariant || run.executionMode)],
                             ["Source",        runData ? "Imported" : "Mock"],
                             ["Structure",     "Both"],
                             ["Direction",     "Both"],
@@ -79,7 +82,16 @@ export default function RunDetail() {
                     </div>
                 </NeonPanel>
 
-                <NeonPanel className="xl:col-span-2" title="Trade Ledger" action={<Pill tone="secondary">{(tradesForRun || []).length} TRADES</Pill>}>
+                <NeonPanel
+                    className="xl:col-span-2"
+                    title="Trade Ledger"
+                    action={
+                        <div className="flex items-center gap-2">
+                            {isActiveRun && <VariantSelector variants={AVAILABLE_TRADE_VARIANTS} value={ACTIVE_TRADE_VARIANT} />}
+                            <Pill tone="secondary">{(tradesForRun || []).length} TRADES</Pill>
+                        </div>
+                    }
+                >
                     <DataTable
                         testId="run-detail-trades"
                         maxHeight={360}
@@ -154,6 +166,28 @@ export default function RunDetail() {
             </div>
         </div>
     );
+}
+
+function VariantSelector({ variants, value }) {
+    if (!variants?.length) return null;
+    if (variants.length === 1) return <Pill tone="muted">{variantLabel(variants[0])}</Pill>;
+    return (
+        <NeonSelect
+            testId="run-detail-variant"
+            value={value || variants[0]}
+            onChange={setSelectedTradeVariant}
+            options={variants.map((v) => ({ value: v, label: variantLabel(v) }))}
+        />
+    );
+}
+
+function variantLabel(v) {
+    return {
+        single_position: "Single position",
+        allow_multi_position: "Allow multi",
+        one_per_direction: "One per direction",
+        unknown: "Trades",
+    }[v] || v || "N/A";
 }
 
 function Stat({ label, value, tone }) {

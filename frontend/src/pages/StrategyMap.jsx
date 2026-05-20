@@ -6,10 +6,11 @@ import { Pill } from "@/components/lab/DataTable";
 import { CandleChart } from "@/components/lab/CandleChart";
 import { useDataset } from "@/data/store";
 import { setActiveRunId } from "@/data/store";
+import { setSelectedTradeVariant } from "@/data/store";
 import { Camera, Settings as SettingsIcon, Layers, ZoomIn, ZoomOut, Move, MousePointer2, Ruler, PenLine, AlertTriangle } from "lucide-react";
 
 export default function StrategyMap() {
-    const { CANDLES, OB_BOXES, TRADE_MARKERS, RUNS, activeRunId, getRunData } = useDataset();
+    const { CANDLES, OB_BOXES, TRADE_MARKERS, RUNS, activeRunId, getRunData, ACTIVE_TRADE_VARIANT, AVAILABLE_TRADE_VARIANTS } = useDataset();
     const [tf, setTf] = useState("M15");
     const [zoom, setZoom] = useState("ALL");
     const [showOB, setShowOB] = useState(true);
@@ -50,6 +51,7 @@ export default function StrategyMap() {
                             <NeonSelect testId="map-symbol" value="EURUSD" onChange={() => {}} options={["EURUSD", "GBPUSD", "USDJPY", "XAUUSD"]} />
                             <NeonSelect value={tf} onChange={setTf} options={["M5", "M15", "M30", "H1"]} />
                             <NeonSelect value={runId} onChange={(v) => setActiveRunId(v)} options={RUNS.slice(0, 20).map((r) => r.id)} />
+                            <VariantSelector variants={AVAILABLE_TRADE_VARIANTS} value={ACTIVE_TRADE_VARIANT} />
                             <Pill tone="muted">2025-05-18 → 2026-05-18</Pill>
                         </div>
                     }
@@ -92,6 +94,28 @@ export default function StrategyMap() {
             </div>
         </div>
     );
+}
+
+function VariantSelector({ variants, value }) {
+    if (!variants?.length) return null;
+    if (variants.length === 1) return <Pill tone="muted">{variantLabel(variants[0])}</Pill>;
+    return (
+        <NeonSelect
+            testId="map-variant"
+            value={value || variants[0]}
+            onChange={setSelectedTradeVariant}
+            options={variants.map((v) => ({ value: v, label: variantLabel(v) }))}
+        />
+    );
+}
+
+function variantLabel(v) {
+    return {
+        single_position: "Single position",
+        allow_multi_position: "Allow multi",
+        one_per_direction: "One per direction",
+        unknown: "Trades",
+    }[v] || v;
 }
 
 function Toggle({ label, checked, onChange, dot }) {
