@@ -3,7 +3,7 @@ import { NavLink } from "react-router-dom";
 import {
     LayoutDashboard, Wrench, ListOrdered, Activity, Map, Crosshair,
     FlaskConical, GitCompareArrows, ShieldCheck, Dices, Settings as Cog,
-    Beaker, ChevronRight, MonitorCog, Lock,
+    Beaker, Boxes, ChevronRight, MonitorCog, Lock, CalendarRange,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme, THEMES } from "@/context/ThemeContext";
@@ -13,10 +13,12 @@ const NAV = [
     { to: "/strategy",        label: "Strategy Builder", icon: Wrench },
     { to: "/runs",            label: "Runs",             icon: ListOrdered },
     { to: "/runs/active",     label: "Run Detail",       icon: Activity },
+    { to: "/order-block-lab",  label: "Order Block Lab",  icon: Boxes },
     { to: "/strategy-map",    label: "Strategy Map",     icon: Map },
     { to: "/trade-inspector", label: "Trade Inspector",  icon: Crosshair },
     { to: "/sweep",           label: "Sweep Lab",        icon: FlaskConical },
     { to: "/comparison",      label: "Comparison Lab",   icon: GitCompareArrows },
+    { to: "/walk-forward",    label: "Walk-Forward Lab", icon: CalendarRange },
     { to: "/parity",          label: "Parity Debugger",  icon: ShieldCheck },
     { to: "/monte-carlo",     label: "Monte Carlo",      icon: Dices },
     { to: "/settings",        label: "Settings",         icon: Cog },

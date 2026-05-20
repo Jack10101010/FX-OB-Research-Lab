@@ -8,10 +8,12 @@ import Overview from "@/pages/Overview";
 import StrategyBuilder from "@/pages/StrategyBuilder";
 import Runs from "@/pages/Runs";
 import RunDetail from "@/pages/RunDetail";
+import OrderBlockLab from "@/pages/OrderBlockLab";
 import StrategyMap from "@/pages/StrategyMap";
 import TradeInspector from "@/pages/TradeInspector";
 import SweepLab from "@/pages/SweepLab";
 import ComparisonLab from "@/pages/ComparisonLab";
+import WalkForwardLab from "@/pages/WalkForwardLab";
 import ParityDebugger from "@/pages/ParityDebugger";
 import MonteCarlo from "@/pages/MonteCarlo";
 import Settings from "@/pages/Settings";
@@ -32,10 +34,12 @@ function App() {
                         <Route path="/strategy" element={withRouteBoundary(<StrategyBuilder />)} />
                         <Route path="/runs" element={withRouteBoundary(<Runs />)} />
                         <Route path="/runs/:runId" element={withRouteBoundary(<RunDetail />)} />
+                        <Route path="/order-block-lab" element={withRouteBoundary(<OrderBlockLab />)} />
                         <Route path="/strategy-map" element={withRouteBoundary(<StrategyMap />)} />
                         <Route path="/trade-inspector" element={withRouteBoundary(<TradeInspector />)} />
                         <Route path="/sweep" element={withRouteBoundary(<SweepLab />)} />
                         <Route path="/comparison" element={withRouteBoundary(<ComparisonLab />)} />
+                        <Route path="/walk-forward" element={withRouteBoundary(<WalkForwardLab />)} />
                         <Route path="/parity" element={withRouteBoundary(<ParityDebugger />)} />
                         <Route path="/monte-carlo" element={withRouteBoundary(<MonteCarlo />)} />
                         <Route path="/settings" element={withRouteBoundary(<Settings />)} />

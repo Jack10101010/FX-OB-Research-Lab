@@ -9,7 +9,7 @@ import { useDataset } from "@/data/store";
 import { computeProfitFactor, computeMaxDrawdown } from "@/lib/metrics";
 import { Plus, X, Trophy, Crown } from "lucide-react";
 import {
-    AreaChart, Area, LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
+    AreaChart, Area, BarChart, Bar, ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
 } from "recharts";
 
 const PALETTE = [
@@ -72,15 +72,6 @@ export default function ComparisonLab() {
     const monthlyMerged = MONTHLY.map((m) => {
         const row = { m: m.m };
         runs.forEach((r, idx) => { row[`r${idx}`] = Number((m.v * (r.netR / (baseline?.netR || 1))).toFixed(2)); });
-        return row;
-    });
-
-    // Drawdown placeholder per run (mock)
-    const ddMerged = Array.from({ length: 40 }).map((_, i) => {
-        const row = { i };
-        runs.forEach((r, idx) => {
-            row[`r${idx}`] = -1.5 - Math.abs(Math.sin(i / 5 + idx)) * (3 + Math.abs(r.netR) * 0.06);
-        });
         return row;
     });
 
@@ -273,21 +264,7 @@ export default function ComparisonLab() {
                     </div>
                 </NeonPanel>
 
-                <NeonPanel title="Drawdown Comparison (placeholder)">
-                    <div style={{ width: "100%", height: 220 }}>
-                        <ResponsiveContainer>
-                            <LineChart data={ddMerged} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
-                                <CartesianGrid stroke="hsl(var(--grid))" strokeDasharray="2 4" vertical={false} />
-                                <XAxis dataKey="i" tick={{ fill: "hsl(var(--muted))", fontFamily: "JetBrains Mono", fontSize: 10 }} />
-                                <YAxis tick={{ fill: "hsl(var(--muted))", fontFamily: "JetBrains Mono", fontSize: 10 }} />
-                                <Tooltip contentStyle={{ background: "hsl(var(--panel-2))", border: "1px solid hsl(var(--danger)/0.4)", fontFamily: "JetBrains Mono", fontSize: 11 }} />
-                                {runs.map((_, idx) => (
-                                    <Line key={idx} type="monotone" dataKey={`r${idx}`} stroke={PALETTE[idx % PALETTE.length].line} strokeWidth={1.4} dot={false} isAnimationActive={false} />
-                                ))}
-                            </LineChart>
-                        </ResponsiveContainer>
-                    </div>
-                </NeonPanel>
+                <ParetoFrontier runs={runs} runMetrics={runMetrics} />
             </div>
         </div>
     );
@@ -302,6 +279,148 @@ function Legend({ runs }) {
                     <span className="text-[hsl(var(--text-2))]">{PALETTE[idx % PALETTE.length].short}: {r.id}</span>
                 </span>
             ))}
+        </div>
+    );
+}
+
+// ── Pareto Frontier · Net R vs Drawdown ──────────────────────────────
+// Read-only robustness panel: best return-vs-drawdown tradeoff across the
+// runs already selected in Comparison Lab. A run is Pareto-efficient when no
+// other run has Net R >= and absolute Max Drawdown <=, while being strictly
+// better in at least one of the two. Uses runMetrics() for per-run drawdown.
+function ParetoFrontier({ runs, runMetrics }) {
+    const isNum = (v) => Number.isFinite(Number(v));
+    const r1 = (v) => Number(v).toFixed(1);
+
+    const points = (runs || []).map((r) => {
+        const m = (runMetrics ? runMetrics(r) : null) || {};
+        const netR = isNum(r?.netR) ? Number(r.netR) : null;
+        const ddRaw = isNum(m.maxDd) ? Number(m.maxDd) : null;
+        const ddAbs = ddRaw != null ? Math.abs(ddRaw) : null;
+        return {
+            id: r?.id,
+            symbol: r?.symbol || "—",
+            tf: r?.detectionTf || "—",
+            rr: isNum(r?.rr) ? Number(r.rr) : null,
+            netR,
+            ddAbs,
+            winRate: isNum(r?.winRate) ? Number(r.winRate) : null,
+            trades: isNum(r?.trades) ? Number(r.trades) : null,
+            // Pre-formatted, NaN-safe display strings
+            rrLabel: isNum(r?.rr) ? r1(r.rr) : "—",
+            netRLabel: netR != null ? `${netR >= 0 ? "+" : ""}${r1(netR)}R` : "Limited Data",
+            ddLabel: ddAbs != null ? `${r1(ddAbs)}R` : "Limited Data",
+            wrLabel: isNum(r?.winRate) ? `${r1(r.winRate)}%` : "—",
+            tradesLabel: isNum(r?.trades) ? String(Number(r.trades)) : "—",
+        };
+    });
+
+    const valid = points.filter((p) => p.netR != null && p.ddAbs != null);
+
+    valid.forEach((p) => {
+        p.pareto = !valid.some((o) =>
+            o !== p &&
+            o.netR >= p.netR && o.ddAbs <= p.ddAbs &&
+            (o.netR > p.netR || o.ddAbs < p.ddAbs)
+        );
+    });
+
+    const paretoCount = valid.filter((p) => p.pareto).length;
+    const board = [...valid].sort((a, b) => (b.netR - a.netR) || (a.ddAbs - b.ddAbs));
+
+    if (valid.length < 2) {
+        return (
+            <NeonPanel className="xl:col-span-3" title="Pareto Frontier · Net R vs Drawdown">
+                <div className="flex flex-col items-center text-center gap-2 py-10" data-testid="pareto-limited">
+                    <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-lab">Limited Data</span>
+                    <p className="text-[12.5px] text-muted-lab max-w-md">
+                        Import or select at least 2 runs with Net R and Max Drawdown to view the Pareto frontier.
+                    </p>
+                </div>
+            </NeonPanel>
+        );
+    }
+
+    return (
+        <NeonPanel className="xl:col-span-3" title="Pareto Frontier · Net R vs Drawdown" action={<Pill tone="primary">{paretoCount} EFFICIENT</Pill>}>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div className="lg:col-span-2" data-testid="pareto-chart" style={{ width: "100%", height: 300 }}>
+                    <ResponsiveContainer>
+                        <ScatterChart margin={{ top: 12, right: 16, left: -8, bottom: 12 }}>
+                            <CartesianGrid stroke="hsl(var(--grid))" strokeDasharray="2 4" />
+                            <XAxis
+                                type="number"
+                                dataKey="ddAbs"
+                                name="Max Drawdown"
+                                tick={{ fill: "hsl(var(--muted))", fontFamily: "JetBrains Mono", fontSize: 10 }}
+                                tickFormatter={(v) => `${v}R`}
+                                label={{ value: "Max Drawdown (R)", position: "insideBottom", offset: -4, fill: "hsl(var(--muted))", fontFamily: "JetBrains Mono", fontSize: 10 }}
+                            />
+                            <YAxis
+                                type="number"
+                                dataKey="netR"
+                                name="Net R"
+                                tick={{ fill: "hsl(var(--muted))", fontFamily: "JetBrains Mono", fontSize: 10 }}
+                                tickFormatter={(v) => `${v}R`}
+                            />
+                            <Tooltip cursor={{ strokeDasharray: "3 3", stroke: "hsl(var(--border-mid))" }} content={<ParetoTooltip />} />
+                            <Scatter data={valid} isAnimationActive={false}>
+                                {valid.map((p, i) => (
+                                    <Cell
+                                        key={i}
+                                        fill={p.pareto ? "hsl(var(--accent-primary))" : "hsl(var(--muted)/0.4)"}
+                                        stroke={p.pareto ? "hsl(var(--accent-primary))" : "hsl(var(--border-mid))"}
+                                        strokeWidth={p.pareto ? 1.5 : 1}
+                                    />
+                                ))}
+                            </Scatter>
+                        </ScatterChart>
+                    </ResponsiveContainer>
+                </div>
+
+                <div className="lg:col-span-1">
+                    <DataTable
+                        testId="pareto-leaderboard"
+                        columns={[
+                            { key: "id", label: "Run ID", render: (r) => (
+                                <Link to={`/runs/${encodeURIComponent(r.id)}`} className="text-[hsl(var(--accent-primary))] hover:text-white">{r.id}</Link>
+                            ) },
+                            { key: "netR",    label: "Net R",    align: "right", render: (r) => <ColoredR value={r.netR} /> },
+                            { key: "ddAbs",   label: "Max DD",   align: "right", render: (r) => r.ddLabel },
+                            { key: "rr",      label: "RR",       align: "right", render: (r) => r.rrLabel },
+                            { key: "winRate", label: "Win Rate", align: "right", render: (r) => r.wrLabel },
+                            { key: "pareto",  label: "Pareto",   align: "right", render: (r) => (
+                                r.pareto ? <Pill tone="primary">EFFICIENT</Pill> : <Pill tone="muted">—</Pill>
+                            ) },
+                        ]}
+                        rows={board}
+                        rowKey="id"
+                        selectedKey={board.find((p) => p.pareto)?.id}
+                    />
+                </div>
+            </div>
+        </NeonPanel>
+    );
+}
+
+function ParetoTooltip({ active, payload }) {
+    if (!active || !payload || !payload.length) return null;
+    const p = payload[0]?.payload;
+    if (!p) return null;
+    return (
+        <div className="clip-bevel-sm bg-[hsl(var(--panel-2))] border border-[hsl(var(--accent-primary)/0.4)] px-3 py-2 font-mono text-[11px]">
+            <div className="flex items-center gap-2">
+                <span className="w-2 h-2" style={{ background: p.pareto ? "hsl(var(--accent-primary))" : "hsl(var(--muted))" }} />
+                <span className="text-white">{p.id}</span>
+                {p.pareto && <span className="text-[9px] uppercase tracking-[0.18em] text-[hsl(var(--accent-primary))]">Efficient</span>}
+            </div>
+            <div className="text-muted-lab mt-1">{p.symbol} · {p.tf} · RR {p.rrLabel}</div>
+            <div className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-0.5">
+                <span className="text-muted-lab">Net R</span><span className="text-right text-white">{p.netRLabel}</span>
+                <span className="text-muted-lab">Max DD</span><span className="text-right text-white">{p.ddLabel}</span>
+                <span className="text-muted-lab">Win Rate</span><span className="text-right text-white">{p.wrLabel}</span>
+                <span className="text-muted-lab">Trades</span><span className="text-right text-white">{p.tradesLabel}</span>
+            </div>
         </div>
     );
 }
