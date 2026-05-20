@@ -22,8 +22,11 @@ export default function Runs() {
             if (q && !r.id.toLowerCase().includes(q.toLowerCase())) return false;
             return true;
         });
-        arr.sort((a, b) => (b[sort] ?? 0) - (a[sort] ?? 0));
-        return arr;
+        // Imported runs always appear before mock runs; sort within each partition.
+        const cmp = (a, b) => (b[sort] ?? 0) - (a[sort] ?? 0);
+        const imp  = arr.filter((r) => r._source === "imported").sort(cmp);
+        const mock = arr.filter((r) => r._source !== "imported").sort(cmp);
+        return [...imp, ...mock];
     }, [symbol, tf, mode, sort, q, RUNS]);
 
     return (

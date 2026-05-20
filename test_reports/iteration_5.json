@@ -1,0 +1,39 @@
+{
+  "summary": "Iteration 5 RETEST — all 3 previously-failing items from iter-4 are now PASS, plus the quick regression confirms KPIs and Comparison Lab still reflect the imported run. Strategy Map: route renders (body_len=1244, no pageerror), [data-testid=map-no-candles-banner] visible with text 'Trade sequence view · no candle data imported'. Trade Inspector: route renders (body_len=1284, no pageerror), [data-testid=ti-no-candles-banner] visible, left list shows exactly 6 trades #001..#006 (T-001..T-006); clicking #002 updates the main panel title to T-002 (verified). Runs page: default sort=netR, first row of [data-testid=runs-table] tbody is now 'EURUSD_M15_RR3.3_real' with REAL pill (+2.6R / 33.3% / 6 trades), NOT the +55R mock; toggle [data-testid=runs-toggle-mocks] reduces rows 25 → 1 and all remaining rows have the REAL pill. Quick regression — Overview KPIs: kpi-net-r='+2.6R', kpi-win-rate='33.3% · 2 / 6 trades', kpi-trades='6'; Comparison Lab cmp-kpi-table — Run A (imported) PF=1.50, MaxDD=-2.0R, NetR=+2.6R, WR=33.3%, Run B (mock) PF & MaxDD show 'Limited Data'. NOTE: ImportZone lives on /settings (not /import) — clarified during testing; functionally correct.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Overview equity-curve overlay",
+        "issue": "Console SVG error 'Error: <polyline> attribute points: Expected number, \"NaN,22\"' when imported run has only 6 trades — likely a divide-by-zero or empty-array scaling in the tooltip/marker polyline of the equity curve. Cosmetic only, page still renders correctly.",
+        "selector": "Overview equity curve chart",
+        "priority": "LOW"
+      },
+      {
+        "component": "Recharts containers (carryover)",
+        "issue": "Persistent 'width(-1) and height(-1) of chart should be greater than 0' warnings on initial render. Cosmetic only.",
+        "selector": "Multiple Recharts ResponsiveContainer wrappers",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/test_reports/iteration_5.json"],
+  "action_items": [
+    "OPTIONAL: investigate Overview equity-curve NaN polyline error when only 6 trades are imported (cosmetic).",
+    "OPTIONAL: suppress Recharts width(-1)/height(-1) warnings on initial render."
+  ],
+  "critical_code_review_comments": [
+    "All three iter-4 fixes correctly applied: StrategyMap.jsx now derives hasCandles from bundle.candles or CANDLES length and imports AlertTriangle from lucide-react; TradeInspector.jsx now imports AlertTriangle from lucide-react and computes hasCandles from active bundle; Runs.jsx now partitions filtered rows by _source ('imported' first, 'mock' second) and sorts within each partition — preserves imported-first ordering across all sort columns.",
+    "Recommend adding an error boundary around routed pages to surface future ReferenceError regressions earlier (raised in iter-4, still applies)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped per request)", "frontend": "100% (4/4 retest items pass; all iter-4 blockers resolved)"},
+  "test_credentials": "n/a (no auth)",
+  "seed_data_creation": "Re-used existing /app/sample_run_bundle/* fixtures via [data-testid=import-file-input] on /settings page.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "VERIFIED PASS in iter 5: (1) /strategy-map renders, banner visible. (2) /trade-inspector renders, banner visible, 6 trades present, click navigation works. (3) /runs first row is imported run with REAL pill under default sort=netR; toggle reduces 25 → 1 row. (4) Overview KPIs (+2.6R / 33.3% / 6) intact. (5) Comparison Lab (/comparison) shows PF=1.50, MaxDD=-2.0R for Run A and 'Limited Data' for Run B mock. NOTE: ImportZone is on /settings route, not /import; /import is not a defined route and redirects to /. App.js routes: /, /strategy, /runs, /runs/:runId, /strategy-map, /trade-inspector, /sweep, /comparison, /parity, /monte-carlo, /settings.",
+  "rca of the issue": "All three iter-4 root causes resolved at source: (a) StrategyMap.jsx — added AlertTriangle to lucide-react import and derived hasCandles = bundle ? (bundle.hasCandles !== false && !!bundle.candles?.length) : (CANDLES?.length > 0). (b) TradeInspector.jsx — added AlertTriangle to lucide-react import and derived hasCandles from active bundle. (c) Runs.jsx — useMemo now partitions filtered into imp (=_source==='imported') and mock, sorts each by selected key, and returns [...imp, ...mock]; imported runs always lead regardless of sort column."
+}

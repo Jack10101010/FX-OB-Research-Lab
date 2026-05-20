@@ -9,7 +9,7 @@ import { setActiveRunId } from "@/data/store";
 import { Camera, Settings as SettingsIcon, Layers, ZoomIn, ZoomOut, Move, MousePointer2, Ruler, PenLine, AlertTriangle } from "lucide-react";
 
 export default function StrategyMap() {
-    const { CANDLES, OB_BOXES, TRADE_MARKERS, RUNS } = useDataset();
+    const { CANDLES, OB_BOXES, TRADE_MARKERS, RUNS, activeRunId, getRunData } = useDataset();
     const [tf, setTf] = useState("M15");
     const [zoom, setZoom] = useState("ALL");
     const [showOB, setShowOB] = useState(true);
@@ -18,7 +18,9 @@ export default function StrategyMap() {
     const [showWins, setShowWins] = useState(true);
     const [showLosses, setShowLosses] = useState(true);
     const [showBC, setShowBC] = useState(true);
-    const [runId, setRunId] = useState(RUNS[0].id);
+    const runId = activeRunId || RUNS[0]?.id;
+    const bundle = runId ? getRunData(runId) : null;
+    const hasCandles = bundle ? (bundle.hasCandles !== false && !!bundle.candles?.length) : (CANDLES?.length > 0);
 
     const tools = [MousePointer2, Move, ZoomIn, ZoomOut, Ruler, PenLine, Layers, Camera];
 

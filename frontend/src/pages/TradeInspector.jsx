@@ -5,7 +5,7 @@ import { Pill, ColoredR } from "@/components/lab/DataTable";
 import { Segment, NeonInput, NeonSelect, Field } from "@/components/lab/controls";
 import { CandleChart } from "@/components/lab/CandleChart";
 import { useDataset } from "@/data/store";
-import { Search } from "lucide-react";
+import { Search, AlertTriangle } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 export default function TradeInspector() {
