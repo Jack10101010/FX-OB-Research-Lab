@@ -1,5 +1,5 @@
 import React, { useCallback, useRef, useState } from "react";
-import { Upload, FileText, CheckCircle2, AlertCircle, Trash2, Layers, X, ImageOff } from "lucide-react";
+import { Upload, CheckCircle2, AlertCircle, Trash2, Layers, X, ImageOff } from "lucide-react";
 import { ingestRunBundle } from "@/data/importer";
 import { addRunBundle, removeRunBundle, clearAllRuns, useDataset } from "@/data/store";
 import { cn } from "@/lib/utils";
@@ -24,41 +24,71 @@ export function ImportZone() {
     const [busy, setBusy] = useState(false);
     const [history, setHistory] = useState([]); // recent ingest results
     const [error, setError] = useState(null);
+    const [importWarnings, setImportWarnings] = useState([]);
+    const [pendingDuplicate, setPendingDuplicate] = useState(null);
 
     const importedRuns = Object.values(ds.runs)
         .sort((a, b) => (b.importedAt || "").localeCompare(a.importedAt || ""));
 
+    const completeImport = useCallback((bundle, result) => {
+        addRunBundle(bundle);
+        setImportWarnings(result.validationWarnings || []);
+        setPendingDuplicate(null);
+        setHistory((h) => [{
+            ok: true,
+            runId: bundle.id,
+            trades: bundle.trades.length,
+            obs: bundle.orderBlocks.length,
+            candles: bundle.hasCandles ? bundle.candles.length : 0,
+            variant: bundle.primaryVariant,
+            hasCandles: bundle.hasCandles,
+            warnings: result.validationWarnings?.length || 0,
+            recognized: result.recognized,
+        }, ...h].slice(0, 12));
+    }, []);
+
     const handleFiles = useCallback(async (list) => {
         if (!list?.length) return;
-        setBusy(true); setError(null);
+        setBusy(true); setError(null); setImportWarnings([]); setPendingDuplicate(null);
         try {
             const result = await ingestRunBundle(list);
             if (!result.ok) {
                 setError({
-                    title: "Bundle incomplete",
+                    title: result.validationErrors?.length ? "Schema validation failed" : "Bundle incomplete",
                     missing: result.missing,
+                    validationErrors: result.validationErrors,
+                    validationWarnings: result.validationWarnings,
                     recognized: result.recognized,
                     unrecognized: result.unrecognized,
                 });
                 setBusy(false);
                 return;
             }
-            addRunBundle(result.bundle);
-            setHistory((h) => [{
-                ok: true,
-                runId: result.bundle.id,
-                trades: result.bundle.trades.length,
-                obs: result.bundle.orderBlocks.length,
-                candles: result.bundle.hasCandles ? result.bundle.candles.length : 0,
-                variant: result.bundle.primaryVariant,
-                hasCandles: result.bundle.hasCandles,
-                recognized: result.recognized,
-            }, ...h].slice(0, 12));
+            if (ds.runs?.[result.bundle.id]) {
+                setPendingDuplicate({ bundle: result.bundle, result });
+                return;
+            }
+            completeImport(result.bundle, result);
         } catch (e) {
             setError({ title: "Ingest failed", message: String(e.message || e) });
         } finally {
             setBusy(false);
         }
+    }, [completeImport, ds.runs]);
+
+    const replaceDuplicate = useCallback(() => {
+        if (!pendingDuplicate) return;
+        completeImport(pendingDuplicate.bundle, pendingDuplicate.result);
+    }, [completeImport, pendingDuplicate]);
+
+    const renameDuplicate = useCallback(() => {
+        if (!pendingDuplicate) return;
+        const renamed = cloneBundleWithId(pendingDuplicate.bundle, nextCopyId(pendingDuplicate.bundle.id, ds.runs));
+        completeImport(renamed, pendingDuplicate.result);
+    }, [completeImport, ds.runs, pendingDuplicate]);
+
+    const cancelDuplicate = useCallback(() => {
+        setPendingDuplicate(null);
     }, []);
 
     return (
@@ -106,6 +136,29 @@ export function ImportZone() {
                 </div>
             )}
 
+            {pendingDuplicate && (
+                <div className="px-3 py-2 border border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.07)] clip-bevel-sm" data-testid="import-duplicate">
+                    <div className="flex items-center gap-2">
+                        <AlertCircle className="w-3.5 h-3.5 text-[hsl(var(--warning))]" />
+                        <span className="text-[11px] font-mono uppercase tracking-wider text-[hsl(var(--warning))]">Duplicate run ID</span>
+                    </div>
+                    <div className="mt-1.5 text-[11px] font-mono text-[hsl(var(--text-2))]">
+                        Run <span className="text-white">{pendingDuplicate.bundle.id}</span> already exists.
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                        <button onClick={replaceDuplicate} className="px-2.5 py-1 text-[10.5px] font-mono uppercase tracking-wider border border-[hsl(var(--warning)/0.55)] text-[hsl(var(--warning))] hover:text-white clip-bevel-sm">
+                            Replace
+                        </button>
+                        <button onClick={renameDuplicate} className="px-2.5 py-1 text-[10.5px] font-mono uppercase tracking-wider border border-[hsl(var(--accent-primary)/0.55)] text-[hsl(var(--accent-primary))] hover:text-white clip-bevel-sm">
+                            Rename
+                        </button>
+                        <button onClick={cancelDuplicate} className="px-2.5 py-1 text-[10.5px] font-mono uppercase tracking-wider border border-[hsl(var(--border-mid))] text-muted-lab hover:text-white clip-bevel-sm">
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            )}
+
             {/* Validation failure card */}
             {error && (
                 <div className="px-3 py-2 border border-[hsl(var(--danger)/0.5)] bg-[hsl(var(--danger)/0.08)] clip-bevel-sm" data-testid="import-error">
@@ -119,12 +172,25 @@ export function ImportZone() {
                             Missing required: <span className="text-[hsl(var(--danger))]">{error.missing.join(", ")}</span>
                         </div>
                     )}
+                    {error.validationErrors?.length > 0 && (
+                        <IssueList issues={error.validationErrors} tone="danger" />
+                    )}
                     {error.message && <div className="mt-1.5 text-[11px] font-mono text-[hsl(var(--text-2))]">{error.message}</div>}
                     {error.recognized?.length > 0 && (
                         <div className="mt-1 text-[10.5px] font-mono text-muted-lab">
                             Recognized: {error.recognized.map((r) => KIND_LABEL[r.kind] || r.kind).join(" · ")}
                         </div>
                     )}
+                </div>
+            )}
+
+            {importWarnings.length > 0 && (
+                <div className="px-3 py-2 border border-[hsl(var(--warning)/0.4)] bg-[hsl(var(--warning)/0.07)] clip-bevel-sm" data-testid="import-warnings">
+                    <div className="flex items-center gap-2">
+                        <AlertCircle className="w-3.5 h-3.5 text-[hsl(var(--warning))]" />
+                        <span className="text-[11px] font-mono uppercase tracking-wider text-[hsl(var(--warning))]">Import warnings</span>
+                    </div>
+                    <IssueList issues={importWarnings} tone="warning" />
                 </div>
             )}
 
@@ -137,7 +203,7 @@ export function ImportZone() {
                             <CheckCircle2 className="w-3.5 h-3.5 text-[hsl(var(--success))]" />
                             <span className="font-mono text-[11px] text-white">{h.runId}</span>
                             <span className="font-mono text-[10px] text-muted-lab">
-                                · {h.trades} trades · {h.obs} OBs {h.hasCandles ? `· ${h.candles} candles` : "· no candles"}
+                                · {h.trades} trades · {h.obs} OBs {h.hasCandles ? `· ${h.candles} candles` : "· no candles"} {h.warnings ? `· ${h.warnings} warnings` : ""}
                             </span>
                             <span className="ml-auto inline-flex items-center text-[9.5px] font-mono uppercase tracking-wider px-1.5 py-[1px] border border-[hsl(var(--accent-primary)/0.5)] text-[hsl(var(--accent-primary))] clip-bevel-sm">
                                 {h.variant}
@@ -209,4 +275,38 @@ export function ImportZone() {
 function formatRR(value) {
     const n = Number(value);
     return isFinite(n) && n > 0 ? n.toFixed(1) : "N/A";
+}
+
+function IssueList({ issues, tone }) {
+    const color = tone === "danger" ? "text-[hsl(var(--danger))]" : "text-[hsl(var(--warning))]";
+    return (
+        <div className="mt-1.5 space-y-0.5">
+            {issues.slice(0, 8).map((issue, i) => (
+                <div key={`${issue.file}-${issue.field}-${i}`} className="text-[10.5px] font-mono text-[hsl(var(--text-2))]">
+                    <span className={color}>{issue.file}</span> · {issue.field}: {issue.message}
+                </div>
+            ))}
+            {issues.length > 8 && (
+                <div className="text-[10.5px] font-mono text-muted-lab">+{issues.length - 8} more</div>
+            )}
+        </div>
+    );
+}
+
+function nextCopyId(id, runs) {
+    let n = 1;
+    let candidate = `${id}_copy_${n}`;
+    while (runs?.[candidate]) {
+        n += 1;
+        candidate = `${id}_copy_${n}`;
+    }
+    return candidate;
+}
+
+function cloneBundleWithId(bundle, id) {
+    return {
+        ...bundle,
+        id,
+        summary: bundle.summary ? { ...bundle.summary, id } : bundle.summary,
+    };
 }

@@ -51,6 +51,97 @@ function pickFrom(obj, ...names) {
     return null;
 }
 
+function hasAny(headers, ...names) {
+    return names.some((name) => headers.includes(name.toLowerCase()));
+}
+
+function hasAnyKey(obj, ...names) {
+    return names.some((name) => obj?.[name] != null);
+}
+
+function pushHeaderIssues(target, severity, file, kind, headers, groups) {
+    groups.forEach(({ label, aliases }) => {
+        if (!hasAny(headers, ...aliases)) {
+            target.push({ severity, file, kind, field: label, message: `${file} missing ${label}` });
+        }
+    });
+}
+
+function validateJsonObject(value, file, kind, errors) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        errors.push({ severity: "error", file, kind, field: kind, message: `${file} must contain a JSON object` });
+    }
+}
+
+function validateJsonWarnings(value, file, kind, warnings) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return;
+    if (kind === "config") {
+        [
+            { label: "symbol", aliases: ["symbol"] },
+            { label: "detection timeframe", aliases: ["detection_tf", "detectionTf"] },
+            { label: "execution timeframe", aliases: ["execution_tf", "executionTf"] },
+            { label: "date range", aliases: ["date_from", "dateFrom", "date_to", "dateTo"] },
+            { label: "RR", aliases: ["rr_multiple", "rr", "risk_reward"] },
+        ].forEach(({ label, aliases }) => {
+            if (!hasAnyKey(value, ...aliases)) warnings.push({ severity: "warning", file, kind, field: label, message: `${file} missing ${label}` });
+        });
+    }
+    if (kind === "summary") {
+        [
+            { label: "trade count", aliases: ["trades", "tradeCount", "trade_count", "total_trades", "n_trades"] },
+            { label: "net R", aliases: ["net_r", "netR"] },
+            { label: "OB count", aliases: ["obCount", "ob_count", "orderBlockCount", "order_block_count", "order_blocks_count", "order_blocks", "obs", "total_obs"] },
+            { label: "symbol", aliases: ["symbol"] },
+            { label: "date range", aliases: ["date_from", "dateFrom", "date_to", "dateTo"] },
+            { label: "RR", aliases: ["rr_multiple", "rr", "risk_reward"] },
+        ].forEach(({ label, aliases }) => {
+            if (!hasAnyKey(value, ...aliases)) warnings.push({ severity: "warning", file, kind, field: label, message: `${file} missing ${label}` });
+        });
+    }
+}
+
+function validateCsvHeaders(kind, file, headers, errors, warnings) {
+    if (kind === "order_blocks") {
+        pushHeaderIssues(errors, "error", file, kind, headers, [
+            { label: "id/ob_id", aliases: ["id", "ob_id"] },
+            { label: "top/high", aliases: ["top", "high"] },
+            { label: "bottom/bot/low", aliases: ["bottom", "bot", "low"] },
+        ]);
+        pushHeaderIssues(warnings, "warning", file, kind, headers, [
+            { label: "origin_time", aliases: ["origin_time"] },
+            { label: "detection_time/end_time", aliases: ["detection_time", "end_time"] },
+            { label: "direction/side/type", aliases: ["direction", "side", "type"] },
+        ]);
+    }
+    if (kind.startsWith("trades_")) {
+        pushHeaderIssues(errors, "error", file, kind, headers, [
+            { label: "trade_id/id", aliases: ["trade_id", "id"] },
+            { label: "direction", aliases: ["direction"] },
+            { label: "fill_time/entry_time", aliases: ["fill_time", "entry_time"] },
+            { label: "entry", aliases: ["entry"] },
+            { label: "pnl_r/r/r_result", aliases: ["pnl_r", "r", "r_result"] },
+        ]);
+        pushHeaderIssues(warnings, "warning", file, kind, headers, [
+            { label: "ob_id", aliases: ["ob_id"] },
+            { label: "exit_time", aliases: ["exit_time"] },
+            { label: "stop", aliases: ["stop"] },
+            { label: "tp", aliases: ["tp"] },
+            { label: "rr_multiple", aliases: ["rr_multiple"] },
+            { label: "structure_tag", aliases: ["structure_tag"] },
+            { label: "outcome", aliases: ["outcome"] },
+        ]);
+    }
+    if (kind === "candles") {
+        pushHeaderIssues(errors, "error", file, kind, headers, [
+            { label: "time/timestamp/datetime/date", aliases: ["time", "timestamp", "datetime", "date"] },
+            { label: "open/o", aliases: ["open", "o"] },
+            { label: "high/h", aliases: ["high", "h"] },
+            { label: "low/l", aliases: ["low", "l"] },
+            { label: "close/c", aliases: ["close", "c"] },
+        ]);
+    }
+}
+
 function normalizeTimestamp(value) {
     if (value == null || value === "") return null;
     if (typeof value === "number" && isFinite(value)) {
@@ -344,6 +435,8 @@ export async function ingestRunBundle(fileList) {
         config: null, summary: null, orderBlocks: null, candles: null,
         tradesByVariant: {},
         readErrors: [],
+        validationErrors: [],
+        validationWarnings: [],
         recognized: [],
         unrecognized: [],
     };
@@ -357,14 +450,38 @@ export async function ingestRunBundle(fileList) {
         }
         try {
             switch (kind) {
-                case "config":  collected.config  = JSON.parse(text); collected.recognized.push({ name: f.name, kind }); break;
-                case "summary": collected.summary = JSON.parse(text); collected.recognized.push({ name: f.name, kind }); break;
-                case "candles": collected.candles = parseCandlesCSV(text); collected.recognized.push({ name: f.name, kind, rows: collected.candles.length }); break;
-                case "order_blocks": collected.orderBlocks = parseOrderBlocksCSV(text); collected.recognized.push({ name: f.name, kind, rows: collected.orderBlocks.length }); break;
+                case "config":
+                    collected.config = JSON.parse(text);
+                    validateJsonObject(collected.config, f.name, kind, collected.validationErrors);
+                    validateJsonWarnings(collected.config, f.name, kind, collected.validationWarnings);
+                    collected.recognized.push({ name: f.name, kind });
+                    break;
+                case "summary":
+                    collected.summary = JSON.parse(text);
+                    validateJsonObject(collected.summary, f.name, kind, collected.validationErrors);
+                    validateJsonWarnings(collected.summary, f.name, kind, collected.validationWarnings);
+                    collected.recognized.push({ name: f.name, kind });
+                    break;
+                case "candles": {
+                    const parsed = parseCSV(text);
+                    validateCsvHeaders(kind, f.name, parsed.headers, collected.validationErrors, collected.validationWarnings);
+                    collected.candles = parseCandlesCSV(text);
+                    collected.recognized.push({ name: f.name, kind, rows: collected.candles.length });
+                    break;
+                }
+                case "order_blocks": {
+                    const parsed = parseCSV(text);
+                    validateCsvHeaders(kind, f.name, parsed.headers, collected.validationErrors, collected.validationWarnings);
+                    collected.orderBlocks = parseOrderBlocksCSV(text);
+                    collected.recognized.push({ name: f.name, kind, rows: collected.orderBlocks.length });
+                    break;
+                }
                 case "trades_single_position":
                 case "trades_allow_multi_position":
                 case "trades_one_per_direction":
                 case "trades_unknown": {
+                    const parsed = parseCSV(text);
+                    validateCsvHeaders(kind, f.name, parsed.headers, collected.validationErrors, collected.validationWarnings);
                     const t = parseTradesCSV(text);
                     const variantKey = kind.replace(/^trades_/, "");
                     collected.tradesByVariant[variantKey] = t;
@@ -376,6 +493,7 @@ export async function ingestRunBundle(fileList) {
             }
         } catch (e) {
             collected.readErrors.push({ name: f.name, error: String(e.message || e) });
+            collected.validationErrors.push({ severity: "error", file: f.name, kind, field: "parse", message: `${f.name} could not be parsed: ${e.message || e}` });
         }
     }
 
@@ -385,9 +503,20 @@ export async function ingestRunBundle(fileList) {
     if (!collected.summary)                           missing.push("summary.json");
     if (!collected.orderBlocks)                       missing.push("order_blocks.csv");
     if (!Object.keys(collected.tradesByVariant).length) missing.push("trades_*.csv");
+    missing.forEach((artifact) => {
+        collected.validationErrors.push({ severity: "error", file: artifact, kind: "required", field: artifact, message: `Missing required artifact: ${artifact}` });
+    });
 
-    if (missing.length) {
-        return { ok: false, missing, errors: collected.readErrors, recognized: collected.recognized, unrecognized: collected.unrecognized };
+    if (missing.length || collected.validationErrors.length) {
+        return {
+            ok: false,
+            missing,
+            errors: collected.readErrors,
+            validationErrors: collected.validationErrors,
+            validationWarnings: collected.validationWarnings,
+            recognized: collected.recognized,
+            unrecognized: collected.unrecognized,
+        };
     }
 
     // Pick primary trades variant
@@ -488,6 +617,8 @@ export async function ingestRunBundle(fileList) {
         candles: hasCandles ? collected.candles : null,
         hasCandles,
         integrity,
+        validationErrors: collected.validationErrors,
+        validationWarnings: collected.validationWarnings,
         importedAt: new Date().toISOString(),
     };
 
@@ -496,6 +627,8 @@ export async function ingestRunBundle(fileList) {
         bundle,
         recognized: collected.recognized,
         unrecognized: collected.unrecognized,
+        validationErrors: collected.validationErrors,
+        validationWarnings: collected.validationWarnings,
         readErrors: collected.readErrors,
     };
 }
