@@ -117,6 +117,7 @@ export default function ProtectionLab() {
                             ]}
                             rows={exactProtectionRows}
                             rowKey="mode"
+                            selectedKey="baseline"
                         />
                         <Note>Baseline trade variants remain unchanged; protected trade CSVs are imported separately from normal variant switching.</Note>
                     </NeonPanel>
@@ -225,66 +226,45 @@ export default function ProtectionLab() {
                 <NeonPanel className="xl:col-span-3" title="Fully Breached · Weekday × Hour (UTC)"
                     action={<Pill tone={bt.fullGrid.total ? "danger" : "muted"}>{bt.fullGrid.total} BREACHES</Pill>}>
                     <Desc icon={AlertTriangle}>Trades where the OB fully breached (or penetration ≥ 100%). Bucketed by entry / fill time (UTC).</Desc>
-                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5" data-testid="protlab-fullbreach-mini-chips">
-                        <MiniStatChip
-                            label="Most Breached Hour"
-                            value={bt.mostHour ? `${padH(bt.mostHour.hour)}:00` : "—"}
-                            sub={bt.mostHour ? `${bt.mostHour.count} breaches` : "no breaches"}
-                            icon={Clock}
-                        />
-                        <MiniStatChip
-                            label="Worst Breach Hour"
-                            value={bt.worstHour ? `${padH(bt.worstHour.hour)}:00` : "—"}
-                            sub={bt.worstHour ? `${fmtR(bt.worstHour.netR)} net` : "by net R"}
-                            tone="danger"
-                            icon={AlertTriangle}
-                        />
-                        <MiniStatChip
-                            label="Most Breached Day"
+                    <div className="mt-3 grid grid-cols-2 md:grid-cols-4 2xl:grid-cols-8 gap-2.5" data-testid="protlab-fullbreach-mini-chips">
+                        <MetricChip label="Most Breached Hour"
+                            value={bt.mostHour ? `${padH(bt.mostHour.hour)}:00 UTC` : "—"}
+                            sub={bt.mostHour ? `${bt.mostHour.count} breach${bt.mostHour.count === 1 ? "" : "es"}` : "no breaches"}
+                            tone={bt.mostHour ? "primary" : "muted"} icon={Clock} />
+                        <MetricChip label="Worst Breach Hour"
+                            value={bt.worstHour ? `${padH(bt.worstHour.hour)}:00 UTC` : "—"}
+                            sub={bt.worstHour ? `${fmtR(bt.worstHour.netR)} net` : "by Net R"}
+                            tone={bt.worstHour && bt.worstHour.netR < 0 ? "danger" : "muted"} icon={AlertTriangle} />
+                        <MetricChip label="Most Breached Day"
                             value={bt.mostDay ? WEEKDAYS[bt.mostDay.day] : "—"}
-                            sub={bt.mostDay ? `${bt.mostDay.count} breaches` : "no breaches"}
-                            icon={Activity}
-                        />
-                        <MiniStatChip
-                            label="Worst Breach Day"
+                            sub={bt.mostDay ? `${bt.mostDay.count} breach${bt.mostDay.count === 1 ? "" : "es"}` : "no breaches"}
+                            tone={bt.mostDay ? "primary" : "muted"} icon={Activity} />
+                        <MetricChip label="Worst Breach Day"
                             value={bt.worstDay ? WEEKDAYS[bt.worstDay.day] : "—"}
-                            sub={bt.worstDay ? `${fmtR(bt.worstDay.netR)} net` : "by net R"}
-                            tone="danger"
-                            icon={AlertTriangle}
-                        />
-                        <MiniStatChip
-                            label="Most Breached Session"
+                            sub={bt.worstDay ? `${fmtR(bt.worstDay.netR)} net` : "by Net R"}
+                            tone={bt.worstDay && bt.worstDay.netR < 0 ? "danger" : "muted"} icon={AlertTriangle} />
+                        <MetricChip label="Most Breached Session"
                             value={bt.mostSession && bt.mostSession.fullCount ? bt.mostSession.session : "—"}
                             sub={bt.mostSession && bt.mostSession.fullCount ? `${bt.mostSession.fullCount} breaches` : "no breaches"}
-                            icon={Target}
-                        />
-                        <MiniStatChip
-                            label="Worst Breach Session"
+                            tone={bt.mostSession && bt.mostSession.fullCount ? "secondary" : "muted"} icon={Target} />
+                        <MetricChip label="Worst Breach Session"
                             value={bt.worstSession ? bt.worstSession.session : "—"}
-                            sub={bt.worstSession ? `${fmtR(bt.worstSession.netR)} net` : "by net R"}
-                            tone="danger"
-                            icon={ShieldAlert}
-                        />
-                        <MiniStatChip
-                            label="Breached Winners %"
-                            value={fmtPct(bt.breachedWinnersPct)}
-                            sub={`${bt.breachedWinners} / ${bt.fullBreachCount}`}
-                            tone="success"
-                            icon={ShieldCheck}
-                        />
-                        <MiniStatChip
-                            label="Wick vs Close"
-                            value={bt.hasCloseFields ? `${bt.fullBreachCount} / ${bt.closeConfirmed}` : "Limited"}
-                            sub={bt.hasCloseFields ? `${fmtPct(bt.closeVsFullPct)} confirmed` : "missing close"}
-                            tone={bt.hasCloseFields ? "primary" : "muted"}
-                            icon={TrendingUp}
-                        />
+                            sub={bt.worstSession ? `${fmtR(bt.worstSession.netR)} net` : "by Net R"}
+                            tone={bt.worstSession && bt.worstSession.netR < 0 ? "danger" : "muted"} icon={ShieldAlert} />
+                        <MetricChip label="Breached Winners %"
+                            value={bt.fullBreachCount ? fmtPct(bt.breachedWinnersPct) : "—"}
+                            sub={bt.fullBreachCount ? `${bt.breachedWinners} / ${bt.fullBreachCount} breached` : "no breaches"}
+                            tone={bt.fullBreachCount && bt.breachedWinnersPct > 0 ? "success" : "muted"} icon={ShieldCheck} />
+                        <MetricChip label="Wick vs Close"
+                            value={bt.hasBaselineCloseFields ? `${bt.fullBreachCount} / ${bt.closeConfirmed}` : "Limited Data"}
+                            sub={bt.hasBaselineCloseFields ? `${fmtPct(bt.closeVsFullPct)} confirmed` : "baseline close fields missing"}
+                            tone={bt.hasBaselineCloseFields ? "primary" : "muted"} icon={TrendingUp} />
                     </div>
-                    <div className="mt-3 grid grid-cols-1 2xl:grid-cols-[minmax(0,1fr)_640px] gap-4 items-start">
-                        <div className="min-w-0 flex-1">
+                    <div className="mt-3 grid grid-cols-1 2xl:grid-cols-[minmax(0,960px)_minmax(0,1fr)] gap-5 items-start">
+                        <div className="min-w-0">
                             <WeekHourHeatmap grid={bt.fullGrid} testId="protlab-fullbreach-heatmap" />
                         </div>
-                        <div className="min-w-0 space-y-2 self-start" data-testid="protlab-fullbreach-insights">
+                        <div className="min-w-0 space-y-3 self-start" data-testid="protlab-fullbreach-insights">
                             <InsightCluster>
                                 <MiniInsightTable title="Session Distribution" rows={bt.sessionDistributionRows} columns={["session", "share"]} />
                                 <MiniInsightTable title="Breach Rate by Session" rows={bt.sessionRateRows} columns={["session", "rate"]} />
@@ -331,13 +311,13 @@ export default function ProtectionLab() {
                     )}
                 </NeonPanel>
 
-                <NeonPanel className="xl:col-span-3" title="Breach Session Breakdown (UTC)" action={<ConfidenceTag level={bt.hasCloseFields ? "exact" : "estimated"} />}>
+                <NeonPanel className="xl:col-span-3" title="Breach Session Breakdown (UTC)" action={<ConfidenceTag level={bt.hasBaselineCloseFields ? "exact" : "estimated"} />}>
                     <DataTable
                         testId="protlab-breach-session"
                         columns={[
                             { key: "session", label: "Session" },
                             { key: "fullCount", label: "Full Breach", align: "right" },
-                            { key: "closeCount", label: "Close-Confirmed", align: "right", render: (r) => (bt.hasCloseFields ? String(r.closeCount) : "—") },
+                            { key: "closeCount", label: "Close-Confirmed", align: "right", render: (r) => (bt.hasBaselineCloseFields ? String(r.closeCount) : "—") },
                             { key: "netR", label: "Net R", align: "right", render: (r) => <ColoredR value={r.netR} /> },
                             { key: "avgR", label: "Avg R", align: "right", render: (r) => fmtExp(r.avgR) },
                             { key: "breachRate", label: "Breach Rate", align: "right", render: (r) => (r.breachRate == null ? "—" : fmtPct(r.breachRate)) },
@@ -441,31 +421,18 @@ function InsightChip({ label, value, sub, tone = "primary" }) {
 function InsightGroup({ title, children, icon: Icon = Activity, tone = "primary" }) {
     const style = metricCardStyle(tone);
     return (
-        <div className={`relative min-w-0 overflow-hidden border ${style.border} bg-[hsl(var(--panel-2)/0.52)] clip-bevel-sm px-3 py-2.5 ${style.glow}`}>
-            <div className={`absolute left-3 top-3 h-1.5 w-1.5 rounded-full ${style.accent} shadow-[0_0_10px_currentColor]`} />
-            {Icon && <Icon className="absolute right-3 top-3 w-3.5 h-3.5 text-muted-lab" />}
-            <div className="text-[8.5px] font-mono uppercase tracking-[0.2em] text-muted-lab leading-tight truncate pl-4 pr-5">{title}</div>
-            <div className="space-y-1.5">{children}</div>
-        </div>
-    );
-}
-
-function MiniStatChip({ label, value, sub, tone = "primary", icon: Icon = Activity }) {
-    const style = metricCardStyle(tone);
-    return (
-        <div className={`relative min-w-0 overflow-hidden border ${style.border} bg-[hsl(var(--panel-2)/0.52)] clip-bevel-sm px-4 py-3 ${style.glow}`}>
-            <div className={`absolute left-3 top-3 h-1.5 w-1.5 rounded-full ${style.accent} shadow-[0_0_10px_currentColor]`} />
-            {Icon && <Icon className="absolute right-3 top-3 w-3.5 h-3.5 text-muted-lab" />}
-            <div className="text-[9px] font-mono uppercase tracking-[0.22em] text-muted-lab leading-tight truncate pl-4 pr-5">{label}</div>
-            <div className={`font-display font-semibold tabular-nums text-[19px] leading-tight mt-2 truncate ${style.value}`}>{value}</div>
-            {sub && <div className="text-[9.5px] font-mono uppercase tracking-[0.12em] text-muted-lab mt-2 truncate">{sub}</div>}
+        <div className={`relative min-w-0 overflow-hidden border ${style.border} bg-[hsl(var(--panel-2)/0.52)] clip-bevel-sm px-4 py-3.5 ${style.glow}`}>
+            <div className={`absolute left-3.5 top-3.5 h-1.5 w-1.5 rounded-full ${style.accent} shadow-[0_0_10px_currentColor]`} />
+            {Icon && <Icon className="absolute right-3.5 top-3.5 w-4 h-4 text-muted-lab" />}
+            <div className="text-[10px] font-mono uppercase tracking-[0.2em] text-muted-lab leading-tight truncate pl-4 pr-6 mb-3">{title}</div>
+            <div className="space-y-2">{children}</div>
         </div>
     );
 }
 
 function InsightCluster({ children }) {
     return (
-        <div className="grid grid-cols-1 md:grid-cols-3 2xl:grid-cols-3 gap-2.5">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             {children}
         </div>
     );
@@ -480,11 +447,11 @@ function InsightRow({ label, value, sub, tone = "primary" }) {
         muted: "text-muted-lab",
     }[tone] || "text-white";
     return (
-        <div className="flex items-start justify-between gap-3 font-mono text-[10.5px]">
-            <span className="text-[hsl(var(--text-2))] leading-tight">{label}</span>
-            <span className="text-right leading-tight">
-                <span className={`block font-semibold tabular-nums ${color}`}>{value}</span>
-                {sub && <span className="block text-[9.5px] text-muted-lab mt-0.5">{sub}</span>}
+        <div className="flex items-start justify-between gap-3 font-mono text-[11.5px]">
+            <span className="text-[hsl(var(--text-2))] leading-snug">{label}</span>
+            <span className="text-right leading-tight shrink-0">
+                <span className={`block text-[15px] font-semibold tabular-nums ${color}`}>{value}</span>
+                {sub && <span className="block text-[10px] text-muted-lab mt-0.5">{sub}</span>}
             </span>
         </div>
     );
@@ -493,18 +460,18 @@ function InsightRow({ label, value, sub, tone = "primary" }) {
 function MiniInsightTable({ title, rows, columns, danger = false, icon: Icon = Activity }) {
     const style = metricCardStyle(danger ? "danger" : "primary");
     return (
-        <div className={`relative min-w-0 overflow-hidden border ${style.border} bg-[hsl(var(--panel-2)/0.52)] clip-bevel-sm px-3 py-2.5 ${style.glow}`}>
-            <div className={`absolute left-3 top-3 h-1.5 w-1.5 rounded-full ${style.accent} shadow-[0_0_10px_currentColor]`} />
-            {Icon && <Icon className="absolute right-3 top-3 w-3.5 h-3.5 text-muted-lab" />}
-            <div className="text-[8.5px] font-mono uppercase tracking-[0.2em] text-muted-lab leading-tight mb-2.5 truncate pl-4 pr-5">{title}</div>
-            <div className="space-y-1.5">
+        <div className={`relative min-w-0 overflow-hidden border ${style.border} bg-[hsl(var(--panel-2)/0.52)] clip-bevel-sm px-4 py-3.5 ${style.glow}`}>
+            <div className={`absolute left-3.5 top-3.5 h-1.5 w-1.5 rounded-full ${style.accent} shadow-[0_0_10px_currentColor]`} />
+            {Icon && <Icon className="absolute right-3.5 top-3.5 w-4 h-4 text-muted-lab" />}
+            <div className="text-[10px] font-mono uppercase tracking-[0.2em] text-muted-lab leading-tight mb-3 truncate pl-4 pr-6">{title}</div>
+            <div className="space-y-2">
                 {rows.length ? rows.map((row) => (
-                    <div key={`${title}-${row[columns[0]]}`} className="flex items-center justify-between gap-2 font-mono text-[10px]">
-                        <span className="text-[hsl(var(--text-2))] truncate leading-tight">{row[columns[0]]}</span>
-                        <span className={`tabular-nums leading-tight ${danger ? "text-[hsl(var(--danger))]" : "text-white"}`}>{row[columns[1]]}</span>
+                    <div key={`${title}-${row[columns[0]]}`} className="flex items-center justify-between gap-3 font-mono text-[12px]">
+                        <span className="text-[hsl(var(--text-2))] truncate leading-snug">{row[columns[0]]}</span>
+                        <span className={`tabular-nums leading-snug shrink-0 ${danger ? "text-[hsl(var(--danger))]" : "text-white"}`}>{row[columns[1]]}</span>
                     </div>
                 )) : (
-                    <div className="text-[10px] font-mono text-muted-lab">Limited Data</div>
+                    <div className="text-[12px] font-mono text-muted-lab">Limited Data</div>
                 )}
             </div>
         </div>
@@ -551,6 +518,8 @@ function ModeLabel({ row }) {
         ? "text-[hsl(var(--accent-secondary))]"
         : row.isBest
             ? "text-[hsl(var(--success))]"
+            : row.underperforms
+                ? "text-[hsl(var(--danger))]"
             : "text-white";
     return (
         <div className="flex flex-wrap items-center gap-1.5">
@@ -871,8 +840,10 @@ function buildBreachTiming(trades, closeSourceTrades = trades) {
 
     const fullBreach = list.filter(isFullBreachTrade);
 
-    const closeKnown = closeList.filter((t) => t?.close_confirmed_ob_breach === true || t?.close_confirmed_ob_breach === false || !!t?.close_breach_time).length;
-    const closeConfirmedTrades = closeList.filter((t) => t?.close_confirmed_ob_breach === true || !!t?.close_breach_time);
+    const baselineCloseKnown = list.filter((t) => t?.close_confirmed_ob_breach === true || t?.close_confirmed_ob_breach === false || !!t?.close_breach_time).length;
+    const baselineCloseConfirmedTrades = list.filter((t) => t?.close_confirmed_ob_breach === true || !!t?.close_breach_time);
+    const closeHeatmapKnown = closeList.filter((t) => t?.close_confirmed_ob_breach === true || t?.close_confirmed_ob_breach === false || !!t?.close_breach_time).length;
+    const closeHeatmapTrades = closeList.filter((t) => t?.close_confirmed_ob_breach === true || !!t?.close_breach_time);
 
     const tradeTime = (t) => parseDate(t?.fill_time || t?.entry);
     const tradeSession = (t) => deriveSessionFromTimestamp(tradeTime(t)) || "Unknown";
@@ -892,16 +863,16 @@ function buildBreachTiming(trades, closeSourceTrades = trades) {
     const fullUndated = fullBreach.length - fullEvents.length;
 
     // Close-confirmed grid — by close_breach_time (UTC)
-    const closeEvents = closeConfirmedTrades
+    const closeEvents = closeHeatmapTrades
         .map((t) => { const d = parseDate(t?.close_breach_time); return d ? { day: dayIndex(d.getUTCDay()), hour: d.getUTCHours(), r: rMulti(t) } : null; })
         .filter(Boolean);
     const closeGrid = buildGrid(closeEvents);
-    const closeUndated = closeConfirmedTrades.length - closeEvents.length;
+    const closeUndated = closeHeatmapTrades.length - closeEvents.length;
     const hasCloseFields = closeEvents.length > 0;
 
     // Session breakdown
-    const sessionRows = BREACH_SESSIONS.map((s) => breachSessionRow(s, list, fullBreach, closeConfirmedTrades, tradeSession, breachSession));
-    const unknownRow = breachSessionRow("Unknown", list, fullBreach, closeConfirmedTrades, tradeSession, breachSession);
+    const sessionRows = BREACH_SESSIONS.map((s) => breachSessionRow(s, list, fullBreach, baselineCloseConfirmedTrades, tradeSession, breachSession));
+    const unknownRow = breachSessionRow("Unknown", list, fullBreach, baselineCloseConfirmedTrades, tradeSession, breachSession);
     if (unknownRow.fullCount || unknownRow.closeCount) sessionRows.push(unknownRow);
 
     // Summary chips
@@ -927,10 +898,11 @@ function buildBreachTiming(trades, closeSourceTrades = trades) {
     const newYork = sessionByName("New York");
     const london = sessionByName("London");
 
-    const closeRate = closeKnown ? (closeConfirmedTrades.length / closeKnown) * 100 : null;
+    const closeRate = baselineCloseKnown ? (baselineCloseConfirmedTrades.length / baselineCloseKnown) * 100 : null;
     const fullBreachCount = fullBreach.length;
     const breachedWinners = fullBreach.filter((t) => rMulti(t) > 0).length;
     const breachedLosers = fullBreach.filter((t) => rMulti(t) < 0).length;
+    const hasBaselineCloseFields = baselineCloseKnown > 0;
     const sessionDistributionRows = sessionRows
         .filter((row) => BREACH_SESSIONS.includes(row.session))
         .map((row) => ({
@@ -962,13 +934,17 @@ function buildBreachTiming(trades, closeSourceTrades = trades) {
     return {
         fullGrid, fullUndated,
         closeGrid, closeUndated, hasCloseFields,
-        closeConfirmed: closeConfirmedTrades.length, closeKnown,
+        closeConfirmed: baselineCloseConfirmedTrades.length,
+        closeHeatmapConfirmed: closeHeatmapTrades.length,
+        closeKnown: baselineCloseKnown,
+        closeHeatmapKnown,
+        hasBaselineCloseFields,
         fullBreachCount,
         breachedWinners,
         breachedLosers,
         breachedWinnersPct: fullBreachCount ? (breachedWinners / fullBreachCount) * 100 : 0,
         breachedLosersPct: fullBreachCount ? (breachedLosers / fullBreachCount) * 100 : 0,
-        closeVsFullPct: fullBreachCount ? (closeConfirmedTrades.length / fullBreachCount) * 100 : 0,
+        closeVsFullPct: fullBreachCount ? (baselineCloseConfirmedTrades.length / fullBreachCount) * 100 : 0,
         sessionDistributionRows,
         sessionRateRows,
         sessionExpectancyRows,
