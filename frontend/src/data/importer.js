@@ -42,6 +42,14 @@ function pick(row, ...names) {
 const cap = (s) => (s == null ? "" : String(s).charAt(0).toUpperCase() + String(s).slice(1).toLowerCase());
 const isNum = (v) => v != null && isFinite(Number(v));
 const numOrNull = (v) => (isNum(v) ? Number(v) : null);
+const boolOrNull = (v) => {
+    if (v == null || v === "") return null;
+    if (typeof v === "boolean") return v;
+    const text = String(v).trim().toLowerCase();
+    if (["true", "1", "yes", "y"].includes(text)) return true;
+    if (["false", "0", "no", "n"].includes(text)) return false;
+    return null;
+};
 
 function pickFrom(obj, ...names) {
     if (!obj) return null;
@@ -220,6 +228,28 @@ export function parseTradesCSV(text) {
             outcome,
             obWidth:        Number(pick(r, "ob_width", "obwidth") ?? 0),
             reverseConflict: Boolean(pick(r, "reverse_conflict", "reverse_cancel")),
+            fill_candle_open: numOrNull(pick(r, "fill_candle_open")),
+            fill_candle_high: numOrNull(pick(r, "fill_candle_high")),
+            fill_candle_low: numOrNull(pick(r, "fill_candle_low")),
+            fill_candle_close: numOrNull(pick(r, "fill_candle_close")),
+            fill_candle_index: numOrNull(pick(r, "fill_candle_index")),
+            exit_candle_index: numOrNull(pick(r, "exit_candle_index")),
+            bars_to_exit: numOrNull(pick(r, "bars_to_exit")),
+            minutes_to_exit: numOrNull(pick(r, "minutes_to_exit")),
+            same_candle_exit: boolOrNull(pick(r, "same_candle_exit")),
+            max_ob_penetration_price: numOrNull(pick(r, "max_ob_penetration_price")),
+            max_ob_penetration_pct: numOrNull(pick(r, "max_ob_penetration_pct")),
+            max_ob_penetration_pips: numOrNull(pick(r, "max_ob_penetration_pips")),
+            ob_fully_breached: boolOrNull(pick(r, "ob_fully_breached")),
+            fill_penetration_pct: numOrNull(pick(r, "fill_penetration_pct")),
+            fill_penetration_pips: numOrNull(pick(r, "fill_penetration_pips")),
+            entry_depth_pct: numOrNull(pick(r, "entry_depth_pct")),
+            max_distance_away_before_fill_price: numOrNull(pick(r, "max_distance_away_before_fill_price")),
+            max_distance_away_before_fill_pips: numOrNull(pick(r, "max_distance_away_before_fill_pips")),
+            max_distance_away_before_fill_r: numOrNull(pick(r, "max_distance_away_before_fill_r")),
+            stop_buffer: numOrNull(pick(r, "stop_buffer")),
+            stop_buffer_pips: numOrNull(pick(r, "stop_buffer_pips")),
+            rr_config: numOrNull(pick(r, "rr_config")),
         };
     });
 }

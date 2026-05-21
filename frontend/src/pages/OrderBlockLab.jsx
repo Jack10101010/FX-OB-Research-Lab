@@ -6,15 +6,37 @@ import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
 import { NeonSelect } from "@/components/lab/controls";
 import { useDataset } from "@/data/store";
 import { setSelectedTradeVariant } from "@/data/store";
-import { Activity, AlertTriangle, Boxes, GitBranch, ShieldCheck, TrendingUp } from "lucide-react";
+import { Activity, AlertTriangle, Boxes, Clipboard, FileText, GitBranch, ShieldCheck, TrendingUp, X } from "lucide-react";
 
 const LOW_SAMPLE_N = 10;
 const SESSION_COLUMNS = ["Asia", "London", "London Lull", "New York", "Outside", "Unknown"];
+const RESEARCH_BACKLOG_ITEMS = [
+    {
+        title: "High-Quality Setup Clustering",
+        status: "Requires derived feature set",
+        body: "Cluster winners/losers by OB width, age, displacement away before fill, structure type, session origin, penetration depth, fill session, and future trend/regime tags.",
+    },
+    {
+        title: "Dynamic Stop Logic Attribution",
+        status: "Future execution model",
+        body: "Compare per-trade stop behavior once stops become dynamic instead of run-level config attribution.",
+    },
+    {
+        title: "Trend / Regime Analysis",
+        status: "Future regime tagging",
+        body: "Split OB performance by trending/ranging and volatility regimes.",
+    },
+];
 
 export default function OrderBlockLab() {
     const { ACTIVE_RUN, TRADES, ACTIVE_TRADE_VARIANT, AVAILABLE_TRADE_VARIANTS, activeRunId } = useDataset();
+    const [reportOpen, setReportOpen] = React.useState(false);
     const trades = Array.isArray(TRADES) ? TRADES : [];
     const analytics = React.useMemo(() => buildOrderBlockAnalytics(trades), [trades]);
+    const reportText = React.useMemo(
+        () => buildResearchReport({ run: ACTIVE_RUN, variant: ACTIVE_TRADE_VARIANT, analytics }),
+        [ACTIVE_RUN, ACTIVE_TRADE_VARIANT, analytics],
+    );
 
     return (
         <div className="pb-12">
@@ -22,7 +44,19 @@ export default function OrderBlockLab() {
                 eyebrow="ORDER BLOCK LAB"
                 title={ACTIVE_RUN?.id || "No active run"}
                 subtitle={`${ACTIVE_RUN?.symbol || "Symbol"} · ${ACTIVE_RUN?.detectionTf || "TF"} · ${variantLabel(ACTIVE_TRADE_VARIANT)}`}
-                actions={<VariantSelector variants={AVAILABLE_TRADE_VARIANTS} value={ACTIVE_TRADE_VARIANT} />}
+                actions={(
+                    <div className="flex items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={() => setReportOpen(true)}
+                            className="clip-bevel-sm border border-[hsl(var(--accent-primary)/0.45)] bg-[hsl(var(--accent-primary)/0.12)] px-3 py-2 text-[11px] font-display uppercase tracking-wider text-[hsl(var(--accent-primary))] hover:bg-[hsl(var(--accent-primary)/0.2)] transition-colors inline-flex items-center gap-2"
+                        >
+                            <FileText className="w-3.5 h-3.5" />
+                            Generate Report
+                        </button>
+                        <VariantSelector variants={AVAILABLE_TRADE_VARIANTS} value={ACTIVE_TRADE_VARIANT} />
+                    </div>
+                )}
             />
 
             <div className="px-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -50,9 +84,20 @@ export default function OrderBlockLab() {
                 <BucketPanel className="xl:col-span-3" title="OB Creation Hour Performance" rows={analytics.creationHourRows} />
                 <BucketPanel className="xl:col-span-3" title="OB Width Analysis" rows={analytics.widthRows} />
                 <BucketPanel className="xl:col-span-3" title="OB Age / Time-to-Fill" rows={analytics.ageRows} compact />
+                <BucketPanel className="xl:col-span-3" title="Penetration Depth Analysis" rows={analytics.penetrationRows} compact />
+                <CatastrophicBreachPanel analysis={analytics.catastrophicBreach} />
+                <BucketPanel title="Fast Stopout Analysis" rows={analytics.fastStopoutRows} compact />
+                <BucketPanel title="Distance Before Fill" rows={analytics.distanceBeforeFillRows} compact />
                 <SessionMatrix matrix={analytics.sessionMatrix} />
                 <FailureLab trades={analytics.worstLosses} />
+                <ResearchBacklog />
             </div>
+            {reportOpen && (
+                <ReportModal
+                    reportText={reportText}
+                    onClose={() => setReportOpen(false)}
+                />
+            )}
         </div>
     );
 }
@@ -152,11 +197,186 @@ function FailureLab({ trades }) {
                 ]}
                 rows={trades}
             />
-            <div className="mt-3 text-[11px] font-mono text-muted-lab border border-dashed border-[hsl(var(--border-soft))] clip-bevel-sm px-3 py-2">
-                Penetration depth and 100% breach analysis require exporter penetration fields.
+        </NeonPanel>
+    );
+}
+
+function CatastrophicBreachPanel({ analysis }) {
+    return (
+        <NeonPanel
+            title="Catastrophic Breach Analysis"
+            action={<Pill tone={analysis.breachCount ? "danger" : "muted"}>{formatPct(analysis.breachPct)} BREACH</Pill>}
+        >
+            <div className="grid grid-cols-2 gap-2 mb-3">
+                <MetricChip label="Breached" value={String(analysis.breachCount)} sub={`${formatPct(analysis.breachPct)} of known`} tone={analysis.breachCount ? "danger" : "muted"} icon={AlertTriangle} />
+                <MetricChip label="Avg Loss" value={analysis.avgLoss == null ? "—" : formatR(analysis.avgLoss)} sub="breached losses" tone="secondary" icon={TrendingUp} />
+            </div>
+            <DataTable
+                testId="oblab-catastrophic-breach"
+                maxHeight={220}
+                columns={[
+                    { key: "label", label: "Bucket", render: (r) => <BucketLabel row={r} /> },
+                    { key: "count", label: "N", align: "right" },
+                    { key: "winRate", label: "WR", align: "right", render: (r) => formatPct(r.winRate) },
+                    { key: "netR", label: "Net R", align: "right", render: (r) => <ColoredR value={round1(r.netR)} /> },
+                    { key: "expectancy", label: "Exp", align: "right", render: (r) => `${formatSigned(round3(r.expectancy))}R` },
+                ]}
+                rows={analysis.rows}
+            />
+        </NeonPanel>
+    );
+}
+
+function ResearchBacklog() {
+    return (
+        <NeonPanel className="xl:col-span-3" title="Research Backlog · Requires Exporter Fields" action={<Pill tone="muted">{RESEARCH_BACKLOG_ITEMS.length} IDEAS</Pill>}>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5" data-testid="oblab-research-backlog">
+                {RESEARCH_BACKLOG_ITEMS.map((item) => (
+                    <div key={item.title} className="border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] clip-bevel-sm px-3 py-2.5">
+                        <div className="flex items-start gap-2 justify-between">
+                            <div className="text-[11.5px] font-display text-white leading-tight">{item.title}</div>
+                            <Pill tone="warning">{item.status}</Pill>
+                        </div>
+                        <p className="mt-2 text-[11px] text-[hsl(var(--text-2))] leading-relaxed">{item.body}</p>
+                        {item.future && <div className="mt-1.5 text-[10.5px] font-mono text-muted-lab">{item.future}</div>}
+                    </div>
+                ))}
             </div>
         </NeonPanel>
     );
+}
+
+function ReportModal({ reportText, onClose }) {
+    const [copied, setCopied] = React.useState(false);
+    const copyReport = async () => {
+        try {
+            await navigator.clipboard.writeText(reportText);
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1400);
+        } catch {
+            setCopied(false);
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center px-4 py-6" role="dialog" aria-modal="true">
+            <div className="w-full max-w-4xl max-h-[86vh] border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel)/0.98)] clip-bevel overflow-hidden shadow-2xl shadow-black/40">
+                <div className="flex items-center justify-between border-b border-[hsl(var(--border-soft))] px-4 py-3">
+                    <div>
+                        <div className="font-display text-sm text-white uppercase tracking-wider">Order Block Lab Report</div>
+                        <div className="text-[11px] font-mono text-muted-lab">Deterministic summary from current analytics</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={copyReport}
+                            className="clip-bevel-sm border border-[hsl(var(--accent-primary)/0.45)] bg-[hsl(var(--accent-primary)/0.12)] px-3 py-2 text-[11px] font-display uppercase tracking-wider text-[hsl(var(--accent-primary))] hover:bg-[hsl(var(--accent-primary)/0.2)] transition-colors inline-flex items-center gap-2"
+                        >
+                            <Clipboard className="w-3.5 h-3.5" />
+                            {copied ? "Copied" : "Copy Report"}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.7)] px-3 py-2 text-[11px] font-display uppercase tracking-wider text-muted-lab hover:text-white transition-colors inline-flex items-center gap-2"
+                            aria-label="Close report"
+                        >
+                            <X className="w-4 h-4" />
+                            Close
+                        </button>
+                    </div>
+                </div>
+                <div className="p-4 overflow-auto max-h-[calc(86vh-72px)] scrollbar-thin">
+                    <pre className="whitespace-pre-wrap text-[11.5px] leading-relaxed font-mono text-[hsl(var(--text-2))]">{reportText}</pre>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function buildResearchReport({ run, variant, analytics }) {
+    const structuralGroups = [
+        ["Structure Type", analytics.structureRows],
+        ["Direction", analytics.directionRows],
+        ["Origin Session", analytics.originSessionRows],
+        ["Creation Hour", analytics.creationHourRows],
+        ["Width Bucket", analytics.widthRows],
+        ["Age Bucket", analytics.ageRows],
+    ];
+    const executionGroups = [
+        ["Penetration Bucket", analytics.penetrationRows],
+        ["Fast Stopout Bucket", analytics.fastStopoutRows],
+        ["Distance Before Fill Bucket", analytics.distanceBeforeFillRows],
+    ];
+    const limitedSections = [
+        ...structuralGroups,
+        ...executionGroups,
+    ].filter(([, rows]) => hasLimitedData(rows)).map(([label]) => label);
+    const nonZeroBucketCount = [
+        ...structuralGroups.flatMap(([, rows]) => rows),
+        ...executionGroups.flatMap(([, rows]) => rows),
+        ...(analytics.catastrophicBreach?.rows || []),
+    ].filter((row) => row.count > 0).length;
+    const weakConfidence = nonZeroBucketCount > 0 && analytics.lowSampleBuckets / nonZeroBucketCount >= 0.5;
+
+    const lines = [
+        "ORDER BLOCK LAB REPORT",
+        "",
+        "OVERVIEW",
+        `Run: ${run?.id || "No active run"}`,
+        `Selected variant: ${variantLabel(variant)}`,
+        `Linked trades: ${analytics.linkedCount}`,
+        `Unlinked trades: ${analytics.unlinkedCount}`,
+        "",
+        "STRUCTURAL QUALITY HIGHLIGHTS",
+        "Best-performing:",
+        ...structuralGroups.map(([label, rows]) => `- ${label}: ${formatBucketSummary(bestRow(rows))}`),
+        "",
+        "Worst-performing:",
+        ...structuralGroups.map(([label, rows]) => `- ${label}: ${formatBucketSummary(worstRow(rows))}`),
+        "",
+        "EXECUTION FINDINGS",
+        `Best penetration bucket: ${formatBucketSummary(bestRow(analytics.penetrationRows))}`,
+        `Worst penetration bucket: ${formatBucketSummary(worstRow(analytics.penetrationRows))}`,
+        `Catastrophic breach rate: ${formatPct(analytics.catastrophicBreach?.breachPct || 0)} (${analytics.catastrophicBreach?.breachCount || 0} breached)`,
+        `Fastest losing bucket: ${formatBucketSummary(fastestLosingRow(analytics.fastStopoutRows))}`,
+        `Best distance-before-fill bucket: ${formatBucketSummary(bestRow(analytics.distanceBeforeFillRows))}`,
+        "",
+        "WARNING FLAGS",
+        `Low sample buckets: ${analytics.lowSampleBuckets}`,
+        `Limited data sections: ${limitedSections.length ? limitedSections.join(", ") : "None"}`,
+        `Weak confidence: ${weakConfidence ? "Yes - many populated buckets are below n < 10" : "No"}`,
+        "",
+        "RESEARCH BACKLOG",
+        ...RESEARCH_BACKLOG_ITEMS.map((item) => `- ${item.title} (${item.status}): ${item.body}`),
+    ];
+
+    return lines.join("\n");
+}
+
+function bestRow(rows) {
+    return rows.filter(isUsableBucket).reduce((acc, row) => (!acc || row.netR > acc.netR ? row : acc), null);
+}
+
+function worstRow(rows) {
+    return rows.filter(isUsableBucket).reduce((acc, row) => (!acc || row.netR < acc.netR ? row : acc), null);
+}
+
+function fastestLosingRow(rows) {
+    return rows.find((row) => isUsableBucket(row) && row.netR < 0) || worstRow(rows);
+}
+
+function isUsableBucket(row) {
+    return row && row.count > 0 && row.label !== "Limited Data";
+}
+
+function hasLimitedData(rows) {
+    return rows.some((row) => row.label === "Limited Data" && row.count > 0);
+}
+
+function formatBucketSummary(row) {
+    if (!row) return "Limited Data";
+    return `${row.label} · n=${row.count} · WR ${formatPct(row.winRate)} · Net ${formatR(row.netR)} · Exp ${formatSigned(round3(row.expectancy))}R`;
 }
 
 function buildOrderBlockAnalytics(trades) {
@@ -168,7 +388,20 @@ function buildOrderBlockAnalytics(trades) {
     const creationHourRows = bucketRows(trades, creationHourLabel);
     const widthRows = bucketRows(trades, widthBucket, ["0-2 pips", "2-5 pips", "5-10 pips", "10+ pips", "Limited Data"]);
     const ageRows = bucketRows(trades, ageBucket, ["same session / <4h", "4-12h", "12-24h", "1-3d", "3-7d", "7-14d", "14d+", "Limited Data"]);
-    const allRows = [...structureRows, ...directionRows, ...originSessionRows, ...creationHourRows, ...widthRows, ...ageRows];
+    const penetrationRows = bucketRows(trades, penetrationBucket, ["0–10%", "10–25%", "25–50%", "50–75%", "75–100%", "100%+", "Limited Data"]);
+    const fastStopoutRows = bucketRows(trades, fastStopoutBucket, ["same candle", "<15m", "15–60m", "1–4h", "4h+", "Limited Data"]);
+    const distanceBeforeFillRows = bucketRows(trades, distanceBeforeFillBucket, ["0–0.5R", "0.5–1R", "1–2R", "2R+", "Limited Data"]);
+    const allRows = [
+        ...structureRows,
+        ...directionRows,
+        ...originSessionRows,
+        ...creationHourRows,
+        ...widthRows,
+        ...ageRows,
+        ...penetrationRows,
+        ...fastStopoutRows,
+        ...distanceBeforeFillRows,
+    ];
     const lowSampleBuckets = allRows.filter((r) => r.count > 0 && r.count < LOW_SAMPLE_N).length;
     const bestBucket = allRows.filter((r) => r.count > 0).reduce((acc, cur) => (!acc || cur.netR > acc.netR ? cur : acc), null);
     return {
@@ -182,12 +415,45 @@ function buildOrderBlockAnalytics(trades) {
         creationHourRows,
         widthRows,
         ageRows,
+        penetrationRows,
+        catastrophicBreach: buildCatastrophicBreach(trades),
+        fastStopoutRows,
+        distanceBeforeFillRows,
         sessionMatrix: buildSessionMatrix(trades),
         worstLosses: trades
             .filter((t) => Number(t.r) < 0)
             .map((t) => ({ ...t, ageLabel: ageBucket(t), originSession: originSessionForTrade(t), fillSession: fillSessionForTrade(t) }))
             .sort((a, b) => Number(a.r) - Number(b.r))
             .slice(0, 12),
+    };
+}
+
+function buildCatastrophicBreach(trades) {
+    const known = trades.filter((trade) => trade?.ob_fully_breached === true || trade?.ob_fully_breached === false);
+    const breached = known.filter((trade) => trade.ob_fully_breached === true);
+    const rows = [
+        finalizeBucket(breached.reduce((bucket, trade) => {
+            addTradeToBucket(bucket, trade);
+            return bucket;
+        }, emptyBucket("Breached"))),
+        finalizeBucket(known.filter((trade) => trade.ob_fully_breached === false).reduce((bucket, trade) => {
+            addTradeToBucket(bucket, trade);
+            return bucket;
+        }, emptyBucket("Not Breached"))),
+    ];
+    if (known.length !== trades.length) {
+        rows.push(finalizeBucket(trades.filter((trade) => trade?.ob_fully_breached !== true && trade?.ob_fully_breached !== false).reduce((bucket, trade) => {
+            addTradeToBucket(bucket, trade);
+            return bucket;
+        }, emptyBucket("Limited Data"))));
+    }
+    const breachedLosses = breached.map((trade) => Number(trade.r)).filter((r) => Number.isFinite(r) && r < 0);
+    const avgLoss = breachedLosses.length ? breachedLosses.reduce((sum, r) => sum + r, 0) / breachedLosses.length : null;
+    return {
+        rows,
+        breachCount: breached.length,
+        breachPct: known.length ? (breached.length / known.length) * 100 : 0,
+        avgLoss,
     };
 }
 
@@ -274,6 +540,36 @@ function ageBucket(trade) {
     if (hours < 168) return "3-7d";
     if (hours < 336) return "7-14d";
     return "14d+";
+}
+
+function penetrationBucket(trade) {
+    const v = Number(trade?.max_ob_penetration_pct);
+    if (!Number.isFinite(v)) return "Limited Data";
+    if (v < 10) return "0–10%";
+    if (v < 25) return "10–25%";
+    if (v < 50) return "25–50%";
+    if (v < 75) return "50–75%";
+    if (v < 100) return "75–100%";
+    return "100%+";
+}
+
+function fastStopoutBucket(trade) {
+    if (trade?.same_candle_exit === true) return "same candle";
+    const minutes = Number(trade?.minutes_to_exit);
+    if (!Number.isFinite(minutes)) return "Limited Data";
+    if (minutes < 15) return "<15m";
+    if (minutes < 60) return "15–60m";
+    if (minutes < 240) return "1–4h";
+    return "4h+";
+}
+
+function distanceBeforeFillBucket(trade) {
+    const v = Number(trade?.max_distance_away_before_fill_r);
+    if (!Number.isFinite(v)) return "Limited Data";
+    if (v < 0.5) return "0–0.5R";
+    if (v < 1) return "0.5–1R";
+    if (v < 2) return "1–2R";
+    return "2R+";
 }
 
 function ageHours(trade) {
