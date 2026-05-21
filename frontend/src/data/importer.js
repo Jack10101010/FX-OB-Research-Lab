@@ -46,8 +46,9 @@ const boolOrNull = (v) => {
     if (v == null || v === "") return null;
     if (typeof v === "boolean") return v;
     const text = String(v).trim().toLowerCase();
-    if (["true", "1", "yes", "y"].includes(text)) return true;
-    if (["false", "0", "no", "n"].includes(text)) return false;
+    if (["true", "1", "yes", "y", "t"].includes(text)) return true;
+    if (["false", "0", "no", "n", "f"].includes(text)) return false;
+    if (["none", "null", "nan"].includes(text)) return null;
     return null;
 };
 
@@ -250,6 +251,20 @@ export function parseTradesCSV(text) {
             stop_buffer: numOrNull(pick(r, "stop_buffer")),
             stop_buffer_pips: numOrNull(pick(r, "stop_buffer_pips")),
             rr_config: numOrNull(pick(r, "rr_config")),
+            close_confirmed_ob_breach: boolOrNull(pick(r, "close_confirmed_ob_breach")),
+            close_breach_time: String(pick(r, "close_breach_time") || ""),
+            close_breach_price: numOrNull(pick(r, "close_breach_price")),
+            close_breach_distance_pips: numOrNull(pick(r, "close_breach_distance_pips")),
+            close_breach_distance_pct: numOrNull(pick(r, "close_breach_distance_pct")),
+            close_breach_session: String(pick(r, "close_breach_session") || ""),
+            close_breach_hour: numOrNull(pick(r, "close_breach_hour")),
+            protection_mode: String(pick(r, "protection_mode") || ""),
+            protection_threshold: numOrNull(pick(r, "protection_threshold")),
+            protection_threshold_pct: numOrNull(pick(r, "protection_threshold_pct")),
+            protection_exit_reason: String(pick(r, "protection_exit_reason") || ""),
+            protection_exit_price: numOrNull(pick(r, "protection_exit_price")),
+            protection_trigger_time: String(pick(r, "protection_trigger_time") || ""),
+            protection_trigger_penetration_pct: numOrNull(pick(r, "protection_trigger_penetration_pct")),
         };
     });
 }
@@ -376,6 +391,27 @@ function timeToCandleIndex(time, idx) {
     return { i: -1, quality: "missing", time: null };
 }
 
+function protectedTradeFileInfo(name) {
+    const file = String(name || "").split(/[\\/]/).pop().toLowerCase();
+    const m = file.match(/^trades_(single_position|allow_multi_position|one_per_direction)__(.+)\.csv$/);
+    if (!m) return null;
+    return {
+        baseVariant: m[1],
+        mode: normalizeProtectionModeKey(m[2]),
+    };
+}
+
+function normalizeProtectionModeKey(value) {
+    return String(value || "")
+        .trim()
+        .toLowerCase()
+        .replace(/^trades_(single_position|allow_multi_position|one_per_direction)__/, "")
+        .replace(/\.csv$/, "")
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/_+/g, "_")
+        .replace(/^_+|_+$/g, "");
+}
+
 function detectFileKind(name) {
     const n = name.toLowerCase();
     if (n.endsWith(".json")) {
@@ -385,6 +421,7 @@ function detectFileKind(name) {
     }
     if (n.endsWith(".csv")) {
         if (n.includes("candle"))                            return "candles";
+        if (protectedTradeFileInfo(name))                     return "trades_protected";
         if (n.includes("order_block") || n.includes("ob_"))  return "order_blocks";
         if (n.includes("trades_single_position"))            return "trades_single_position";
         if (n.includes("trades_allow_multi_position"))       return "trades_allow_multi_position";
@@ -464,6 +501,8 @@ export async function ingestRunBundle(fileList) {
     const collected = {
         config: null, summary: null, orderBlocks: null, candles: null,
         tradesByVariant: {},
+        protectionTradesByMode: {},
+        protectionSourceFiles: [],
         readErrors: [],
         validationErrors: [],
         validationWarnings: [],
@@ -516,6 +555,17 @@ export async function ingestRunBundle(fileList) {
                     const variantKey = kind.replace(/^trades_/, "");
                     collected.tradesByVariant[variantKey] = t;
                     collected.recognized.push({ name: f.name, kind, rows: t.length });
+                    break;
+                }
+                case "trades_protected": {
+                    const info = protectedTradeFileInfo(f.name);
+                    const parsed = parseCSV(text);
+                    validateCsvHeaders(kind, f.name, parsed.headers, collected.validationErrors, collected.validationWarnings);
+                    const t = parseTradesCSV(text);
+                    const mode = normalizeProtectionModeKey(info.mode || t[0]?.protection_mode);
+                    collected.protectionTradesByMode[mode] = t;
+                    collected.protectionSourceFiles.push({ name: f.name, kind, mode, baseVariant: info.baseVariant, rows: t.length });
+                    collected.recognized.push({ name: f.name, kind, mode, baseVariant: info.baseVariant, rows: t.length });
                     break;
                 }
                 default:
@@ -591,9 +641,15 @@ export async function ingestRunBundle(fileList) {
     const tradesByVariant = Object.fromEntries(
         Object.entries(collected.tradesByVariant).map(([variant, trades]) => [variant, enrichTradesWithOrderBlocks(trades, obLookup, pipSize)]),
     );
+    const protectionTradesByMode = Object.fromEntries(
+        Object.entries(collected.protectionTradesByMode).map(([mode, trades]) => [mode, enrichTradesWithOrderBlocks(trades, obLookup, pipSize)]),
+    );
     const primaryTrades = tradesByVariant[primaryVariant] || [];
     const equityCurveByVariant = Object.fromEntries(
         Object.entries(tradesByVariant).map(([variant, trades]) => [variant, computeEquityCurve(trades)]),
+    );
+    const protectionEquityCurveByMode = Object.fromEntries(
+        Object.entries(protectionTradesByMode).map(([mode, trades]) => [mode, computeEquityCurve(trades)]),
     );
     const tradeMarkersByVariant = Object.fromEntries(
         Object.entries(tradesByVariant).map(([variant, trades]) => [variant, computeTradeMarkers(trades, candleIdx)]),
@@ -627,6 +683,7 @@ export async function ingestRunBundle(fileList) {
         netR:         Number((sm.net_r ?? sm.netR ?? netR).toFixed(1)),
         validation:   Number(sm.validation ?? 100),
         integrity,
+        protection_results: sm.protection_results || {},
         executionMode:sm.execution_mode || cfg.execution_mode || primaryVariant,
         reverseCancels: Number(sm.reverse_cancels ?? sm.reverseCancels ?? 0),
         date:         (sm.completed_at || new Date().toISOString()).slice(0, 10),
@@ -643,6 +700,13 @@ export async function ingestRunBundle(fileList) {
         tradeMarkersByVariant,
         equityCurve,
         equityCurveByVariant,
+        protectionResults: {
+            summary: sm.protection_results || {},
+            tradesByMode: protectionTradesByMode,
+            equityCurveByMode: protectionEquityCurveByMode,
+            sourceFiles: collected.protectionSourceFiles,
+            tradesOmittedForStorage: false,
+        },
         orderBlocks: mappedOBs,
         candles: hasCandles ? collected.candles : null,
         hasCandles,

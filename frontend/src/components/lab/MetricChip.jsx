@@ -65,7 +65,7 @@ export function MetricChip({
                     />
                     <div className="relative px-4 pt-3 pb-3.5 min-h-[96px] flex flex-col justify-between">
                         <div className="flex items-center justify-between">
-                            <span className="pl-4 text-[10px] font-mono tracking-[0.18em] uppercase text-muted-lab">
+                            <span className="pl-4 text-[10px] font-mono tracking-[0.18em] uppercase text-title-lab">
                                 {label}
                             </span>
                             {Icon && <Icon className="w-3.5 h-3.5 text-muted-lab" />}

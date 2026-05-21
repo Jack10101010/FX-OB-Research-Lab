@@ -9,6 +9,7 @@ import { setSelectedTradeVariant } from "@/data/store";
 import { Activity, AlertTriangle, Boxes, Clipboard, FileText, GitBranch, ShieldCheck, TrendingUp, X } from "lucide-react";
 
 const LOW_SAMPLE_N = 10;
+const EMPTY_TRADES = [];
 const SESSION_COLUMNS = ["Asia", "London", "London Lull", "New York", "Outside", "Unknown"];
 const RESEARCH_BACKLOG_ITEMS = [
     {
@@ -31,7 +32,7 @@ const RESEARCH_BACKLOG_ITEMS = [
 export default function OrderBlockLab() {
     const { ACTIVE_RUN, TRADES, ACTIVE_TRADE_VARIANT, AVAILABLE_TRADE_VARIANTS, activeRunId } = useDataset();
     const [reportOpen, setReportOpen] = React.useState(false);
-    const trades = Array.isArray(TRADES) ? TRADES : [];
+    const trades = React.useMemo(() => (Array.isArray(TRADES) ? TRADES : EMPTY_TRADES), [TRADES]);
     const analytics = React.useMemo(() => buildOrderBlockAnalytics(trades), [trades]);
     const reportText = React.useMemo(
         () => buildResearchReport({ run: ACTIVE_RUN, variant: ACTIVE_TRADE_VARIANT, analytics }),

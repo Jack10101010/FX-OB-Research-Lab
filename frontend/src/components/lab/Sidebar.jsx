@@ -4,6 +4,7 @@ import {
     LayoutDashboard, Wrench, ListOrdered, Activity, Map, Crosshair,
     FlaskConical, GitCompareArrows, ShieldCheck, Dices, Settings as Cog,
     Beaker, Boxes, ChevronRight, MonitorCog, Lock, CalendarRange, ShieldAlert,
+    MousePointerClick,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme, THEMES } from "@/context/ThemeContext";
@@ -15,6 +16,7 @@ const NAV = [
     { to: "/runs/active",     label: "Run Detail",       icon: Activity },
     { to: "/order-block-lab",  label: "Order Block Lab",  icon: Boxes },
     { to: "/protection-lab",  label: "Protection Lab",   icon: ShieldAlert },
+    { to: "/entries-lab",     label: "Entries Lab",      icon: MousePointerClick },
     { to: "/strategy-map",    label: "Strategy Map",     icon: Map },
     { to: "/trade-inspector", label: "Trade Inspector",  icon: Crosshair },
     { to: "/sweep",           label: "Sweep Lab",        icon: FlaskConical },

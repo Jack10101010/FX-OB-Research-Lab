@@ -10,6 +10,7 @@ import Runs from "@/pages/Runs";
 import RunDetail from "@/pages/RunDetail";
 import OrderBlockLab from "@/pages/OrderBlockLab";
 import ProtectionLab from "@/pages/ProtectionLab";
+import EntriesLab from "@/pages/EntriesLab";
 import StrategyMap from "@/pages/StrategyMap";
 import TradeInspector from "@/pages/TradeInspector";
 import SweepLab from "@/pages/SweepLab";
@@ -37,6 +38,7 @@ function App() {
                         <Route path="/runs/:runId" element={withRouteBoundary(<RunDetail />)} />
                         <Route path="/order-block-lab" element={withRouteBoundary(<OrderBlockLab />)} />
                         <Route path="/protection-lab" element={withRouteBoundary(<ProtectionLab />)} />
+                        <Route path="/entries-lab" element={withRouteBoundary(<EntriesLab />)} />
                         <Route path="/strategy-map" element={withRouteBoundary(<StrategyMap />)} />
                         <Route path="/trade-inspector" element={withRouteBoundary(<TradeInspector />)} />
                         <Route path="/sweep" element={withRouteBoundary(<SweepLab />)} />

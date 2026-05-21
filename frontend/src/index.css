@@ -23,6 +23,7 @@
         --accent-secondary: 190 100% 55%;
         --accent-glow: 280 95% 65%;
         --accent-border: 295 70% 45%;
+        --title-highlight: var(--accent-secondary);
 
         --success: 145 80% 52%;
         --danger: 0 85% 62%;
@@ -147,6 +148,7 @@
 
     .text-accent { color: hsl(var(--accent-primary)); }
     .text-accent-2 { color: hsl(var(--accent-secondary)); }
+    .text-title-lab { color: hsl(var(--title-highlight)); }
     .text-muted-lab { color: hsl(var(--muted)); }
     .text-success { color: hsl(var(--success)); }
     .text-danger { color: hsl(var(--danger)); }
