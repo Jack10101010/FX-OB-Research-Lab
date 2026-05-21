@@ -5,7 +5,10 @@ import { Field, NeonInput, NeonToggle, NeonButton, Segment } from "@/components/
 import { useTheme, THEMES } from "@/context/ThemeContext";
 import { ImportZone } from "@/components/lab/ImportZone";
 import { Pill } from "@/components/lab/DataTable";
-import { Check, ShieldAlert, Sparkles } from "lucide-react";
+import { Check, Lock, PlugZap, ShieldAlert, Sparkles } from "lucide-react";
+
+const RUNNER_PRESETS = ["baseline", "protection sweep", "entry penetration sweep", "session filter sweep", "custom config"];
+const REIMPORT_REMINDER = "After running, import the latest outputs/runs folder back into Research Lab.";
 
 export default function Settings() {
     const { theme, setTheme } = useTheme();
@@ -13,6 +16,9 @@ export default function Settings() {
     const [glow, setGlow] = useState(70);
     const [markerSize, setMarkerSize] = useState(6);
     const [tableDensity, setTableDensity] = useState("Compact");
+    const [runnerPath, setRunnerPath] = useState("~/Documents/Dev Projects/Lux-OB-Backtester");
+    const [runnerPreset, setRunnerPreset] = useState("baseline");
+    const [copiedRunner, setCopiedRunner] = useState("");
     const [paths, setPaths] = useState({
         runs: "outputs/runs",
         sweeps: "outputs/sweeps",
@@ -89,6 +95,77 @@ export default function Settings() {
                     </div>
                 </NeonPanel>
 
+                <NeonPanel className="xl:col-span-2" title="Local Test Runner · Command Builder" action={<Pill tone="secondary">COPY ONLY</Pill>}>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <Field label="Backtester path">
+                            <NeonInput value={runnerPath} onChange={(e) => setRunnerPath(e.target.value)} />
+                        </Field>
+                        <Field label="Preset">
+                            <Segment options={RUNNER_PRESETS} value={runnerPreset} onChange={setRunnerPreset} />
+                        </Field>
+                    </div>
+                    <div className="mt-3 border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm p-3">
+                        <div className="flex items-center justify-between gap-3 mb-2">
+                            <span className="text-[10px] font-mono uppercase tracking-wider text-muted-lab">Generated command</span>
+                            <Pill tone={runnerPreset === "baseline" ? "success" : "warning"}>{runnerPreset === "baseline" ? "REAL" : "FUTURE PRESET"}</Pill>
+                        </div>
+                        <pre className="overflow-x-auto scrollbar-thin text-[11px] font-mono text-[hsl(var(--accent-secondary))] leading-relaxed whitespace-pre-wrap">
+                            {runnerCommand(runnerPath, runnerPreset)}
+                        </pre>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                        <button type="button" onClick={() => copyText(runnerCommand(runnerPath, runnerPreset), setCopiedRunner, "command")} className="px-3 py-2 text-[10.5px] font-mono uppercase tracking-wider border border-[hsl(var(--accent-secondary)/0.5)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.06)] hover:bg-[hsl(var(--accent-secondary)/0.12)] clip-bevel-sm">
+                            {copiedRunner === "command" ? "Copied command" : "Copy command"}
+                        </button>
+                        <button type="button" onClick={() => copyText(REIMPORT_REMINDER, setCopiedRunner, "reminder")} className="px-3 py-2 text-[10.5px] font-mono uppercase tracking-wider border border-[hsl(var(--accent-primary)/0.5)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.06)] hover:bg-[hsl(var(--accent-primary)/0.12)] clip-bevel-sm">
+                            {copiedRunner === "reminder" ? "Copied reminder" : "Copy re-import reminder"}
+                        </button>
+                        <button type="button" disabled className="px-3 py-2 text-[10.5px] font-mono uppercase tracking-wider border border-dashed border-[hsl(var(--border-mid))] text-muted-lab bg-[hsl(var(--panel-2)/0.25)] opacity-70 cursor-not-allowed clip-bevel-sm">
+                            Future: Generate config JSON
+                        </button>
+                    </div>
+                    <div className="mt-3 text-[11px] text-[hsl(var(--text-2))] font-mono">
+                        {REIMPORT_REMINDER}
+                    </div>
+                </NeonPanel>
+
+                <NeonPanel title="Research Workstation · Sidecar Integration" action={<Pill tone="muted">COMING SOON</Pill>}>
+                    <div className="space-y-3">
+                        <div className="flex items-center justify-between border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm px-3 py-2">
+                            <span className="text-[10px] font-mono uppercase tracking-wider text-muted-lab">Status</span>
+                            <span className="inline-flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider text-[hsl(var(--warning))]">
+                                <Lock className="w-3 h-3" />
+                                Not connected
+                            </span>
+                        </div>
+                        <Field label="Sidecar URL">
+                            <NeonInput value="http://localhost:8787" disabled readOnly />
+                        </Field>
+                        <div className="grid grid-cols-1 gap-2">
+                            <SidecarButton label="Test Connection" />
+                            <SidecarButton label="Pull Latest Run" />
+                            <SidecarButton label="Trigger Python Backtest" />
+                        </div>
+                        <p className="text-[11.5px] text-[hsl(var(--text-2))] leading-relaxed">
+                            The sidecar will eventually watch local backtest folders, trigger Python runs, and stream/import new results into the dashboard.
+                        </p>
+                        <div className="grid grid-cols-1 gap-1.5">
+                            {[
+                                "folder watching",
+                                "one-click Python rerun",
+                                "auto-import latest run",
+                                "protection/entry sweep launcher",
+                                "AI Review handoff",
+                            ].map((item) => (
+                                <div key={item} className="flex items-center gap-2 text-[10.5px] font-mono uppercase tracking-wider text-muted-lab">
+                                    <PlugZap className="w-3 h-3 text-[hsl(var(--accent-secondary))]" />
+                                    {item}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </NeonPanel>
+
                 <NeonPanel title="Symbol Metadata">
                     <div className="space-y-2 font-mono text-[11.5px]">
                         <Meta k="EURUSD · pip size" v="0.00010" />
@@ -117,6 +194,36 @@ function Row({ label, checked, onChange }) {
             <span className="text-[11.5px] font-mono uppercase tracking-wider text-[hsl(var(--text-2))]">{label}</span>
             <NeonToggle checked={checked} onChange={onChange} />
         </div>
+    );
+}
+function runnerCommand(path, preset) {
+    const cdPath = shellEscapePath(path || "~/Documents/Dev Projects/Lux-OB-Backtester");
+    const base = `cd ${cdPath}\npython3 scripts/run_backtest.py`;
+    if (preset === "baseline") return base;
+    return `${base}\n# FUTURE: ${preset} preset will require config selection before execution.`;
+}
+function shellEscapePath(path) {
+    return String(path).replace(/ /g, "\\ ");
+}
+async function copyText(text, setCopied, key) {
+    try {
+        await navigator?.clipboard?.writeText(text);
+        setCopied(key);
+        window.setTimeout(() => setCopied(""), 1600);
+    } catch (_) {
+        setCopied("");
+    }
+}
+function SidecarButton({ label }) {
+    return (
+        <button
+            type="button"
+            disabled
+            className="inline-flex items-center justify-center gap-2 px-3 py-2 text-[10.5px] font-mono uppercase tracking-wider border border-dashed border-[hsl(var(--border-mid))] text-muted-lab bg-[hsl(var(--panel-2)/0.25)] opacity-70 cursor-not-allowed clip-bevel-sm"
+        >
+            <Lock className="w-3 h-3" />
+            {label}
+        </button>
     );
 }
 function Meta({ k, v }) {

@@ -4,7 +4,7 @@ import {
     LayoutDashboard, Wrench, ListOrdered, Activity, Map, Crosshair,
     FlaskConical, GitCompareArrows, ShieldCheck, Dices, Settings as Cog,
     Beaker, Boxes, ChevronRight, MonitorCog, Lock, CalendarRange, ShieldAlert,
-    MousePointerClick,
+    MousePointerClick, TestTubeDiagonal, Newspaper,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme, THEMES } from "@/context/ThemeContext";
@@ -17,11 +17,13 @@ const NAV = [
     { to: "/order-block-lab",  label: "Order Block Lab",  icon: Boxes },
     { to: "/protection-lab",  label: "Protection Lab",   icon: ShieldAlert },
     { to: "/entries-lab",     label: "Entries Lab",      icon: MousePointerClick },
+    { to: "/news-lab",        label: "News Lab",         icon: Newspaper },
     { to: "/strategy-map",    label: "Strategy Map",     icon: Map },
     { to: "/trade-inspector", label: "Trade Inspector",  icon: Crosshair },
     { to: "/sweep",           label: "Sweep Lab",        icon: FlaskConical },
     { to: "/comparison",      label: "Comparison Lab",   icon: GitCompareArrows },
-    { to: "/walk-forward",    label: "Walk-Forward Lab", icon: CalendarRange },
+    { to: "/walk-forward",     label: "Walk-Forward Lab",  icon: CalendarRange },
+    { to: "/hypothesis-lab",  label: "Hypothesis Lab",   icon: TestTubeDiagonal },
     { to: "/parity",          label: "Parity Debugger",  icon: ShieldCheck },
     { to: "/monte-carlo",     label: "Monte Carlo",      icon: Dices },
     { to: "/settings",        label: "Settings",         icon: Cog },
@@ -92,6 +94,16 @@ export function Sidebar() {
                 <div className="pt-3 mt-2 border-t border-[hsl(var(--border-soft))]">
                     <div className="px-2.5 mb-1 text-[9.5px] font-mono uppercase tracking-[0.22em] text-muted-lab">Roadmap</div>
                     <WorkstationItem />
+                    <RoadmapItem
+                        testId="nav-ai-review"
+                        label="AI Review"
+                        sublabel="Future"
+                    />
+                    <RoadmapItem
+                        testId="nav-local-runner"
+                        label="Local Runner"
+                        sublabel="Experimental"
+                    />
                 </div>
             </nav>
 
@@ -145,6 +157,28 @@ export function Sidebar() {
                 </div>
             </div>
         </aside>
+    );
+}
+
+function RoadmapItem({ testId, label, sublabel }) {
+    return (
+        <div className="relative mt-2" data-testid={testId}>
+            <div
+                aria-disabled="true"
+                role="button"
+                className="group relative flex items-center gap-2.5 px-2.5 py-2 text-[12.5px] font-medium tracking-tight cursor-not-allowed select-none border border-dashed border-[hsl(var(--border-mid))] clip-bevel-sm opacity-80 hover:opacity-100 transition-opacity"
+            >
+                <MonitorCog className="w-4 h-4 text-[hsl(var(--accent-secondary))]" />
+                <span className="text-[hsl(var(--text-2))]">{label}</span>
+                <Lock className="w-3 h-3 ml-auto text-muted-lab" />
+            </div>
+            <div className="mt-1 flex items-center gap-1.5 px-2.5">
+                <span className="inline-flex items-center text-[8.5px] font-mono uppercase tracking-[0.22em] px-1.5 py-[1px] border border-[hsl(var(--accent-secondary)/0.5)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.06)] clip-bevel-sm">
+                    Coming Soon
+                </span>
+                <span className="text-[9.5px] font-mono text-muted-lab">{sublabel}</span>
+            </div>
+        </div>
     );
 }
 

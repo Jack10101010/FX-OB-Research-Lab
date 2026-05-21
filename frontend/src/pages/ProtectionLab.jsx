@@ -6,7 +6,7 @@ import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
 import { useDataset } from "@/data/store";
 import {
     ShieldAlert, ShieldCheck, AlertTriangle, TrendingUp, Activity,
-    Hash, Target, Clock, Newspaper, Ban, ListChecks,
+    Hash, Target, Clock, Newspaper, Ban, ListChecks, Check, ChevronDown, ChevronUp,
 } from "lucide-react";
 
 // ── Protection Lab V1 ────────────────────────────────────────────────
@@ -19,6 +19,34 @@ import {
 const PENETRATION_THRESHOLDS = [75, 90, 100];
 
 const EMPTY_TRADES = [];
+
+const WHAT_IF_FILTERS = [
+    { key: "noNyFill", group: "Session", label: "Exclude NY fills", summary: "NY fills", matches: (t) => fillSessionOf(t) === "New York" },
+    { key: "noLondonFill", group: "Session", label: "Exclude London fills", summary: "London fills", matches: (t) => fillSessionOf(t) === "London" },
+    { key: "noAsiaFill", group: "Session", label: "Exclude Asia fills", summary: "Asia fills", matches: (t) => fillSessionOf(t) === "Asia" },
+    { key: "noOutsideFill", group: "Session", label: "Exclude Outside fills", summary: "Outside fills", matches: (t) => fillSessionOf(t) === "Outside" },
+    { key: "noWednesday", group: "Time", label: "Exclude Wednesday", summary: "Wednesday", matches: (t) => fillDayOf(t) === 2 },
+    { key: "no1500", group: "Time", label: "Exclude 15:00 UTC", summary: "15:00 UTC", matches: (t) => fillHourOf(t) === 15 },
+    { key: "noFullBreach", group: "Structure", label: "Exclude fully breached", summary: "Fully breached", matches: isFullBreachTrade },
+    { key: "noCloseBreach", group: "Structure", label: "Exclude close-confirmed breached", summary: "Close-confirmed breached", matches: isCloseConfirmedBreachTrade },
+    { key: "noBos", group: "Structure", label: "Exclude BOS", summary: "BOS", matches: (t) => structureOf(t) === "bos" },
+    { key: "noChoch", group: "Structure", label: "Exclude CHoCH", summary: "CHoCH", matches: (t) => structureOf(t) === "choch" },
+    { key: "noLongs", group: "Direction", label: "Exclude longs", summary: "Longs", matches: (t) => directionOf(t) === "long" },
+    { key: "noShorts", group: "Direction", label: "Exclude shorts", summary: "Shorts", matches: (t) => directionOf(t) === "short" },
+    { key: "noOriginNy", group: "Advanced", label: "Exclude OB origin NY", summary: "OB origin NY", matches: (t) => originSessionOf(t) === "New York" },
+    { key: "noOriginOutside", group: "Advanced", label: "Exclude OB origin Outside", summary: "OB origin Outside", matches: (t) => originSessionOf(t) === "Outside" },
+    { key: "noWideOb", group: "Advanced", label: "Exclude width > 10 pips", summary: "Width > 10 pips", matches: (t) => Number(t?.obWidthPips) > 10 },
+    { key: "noAge7to14d", group: "Advanced", label: "Exclude age bucket 7–14d", summary: "Age 7–14d", matches: (t) => ageBucketOf(t) === "7–14d" },
+];
+
+const WHAT_IF_GROUPS = ["Session", "Time", "Structure", "Direction", "Advanced"];
+
+const WHAT_IF_PRESETS = [
+    { label: "Avoid New York", keys: ["noNyFill"] },
+    { label: "Avoid toxic hour", keys: ["no1500"] },
+    { label: "Avoid fully breached", keys: ["noFullBreach"] },
+    { label: "Conservative filter", keys: ["noNyFill", "no1500", "noFullBreach"] },
+];
 
 const FAST_STOPOUT_ORDER = ["same candle", "<15m", "15–60m", "1–4h", "4h+", "Limited Data"];
 
@@ -41,12 +69,32 @@ const PROTECTION_BACKLOG = [
 export default function ProtectionLab() {
     const { ACTIVE_RUN, TRADES, ACTIVE_TRADE_VARIANT, activeRunId, runs } = useDataset();
     const trades = React.useMemo(() => (Array.isArray(TRADES) ? TRADES : EMPTY_TRADES), [TRADES]);
+    const [whatIfFilters, setWhatIfFilters] = React.useState({});
     const activeRun = activeRunId ? runs?.[activeRunId] : null;
     const closeTimingTrades = React.useMemo(() => tradesForCloseBreachTiming(trades, activeRun), [trades, activeRun]);
     const p = React.useMemo(() => buildProtection(trades), [trades]);
     const bt = React.useMemo(() => buildBreachTiming(trades, closeTimingTrades), [trades, closeTimingTrades]);
     const exactProtectionRows = React.useMemo(() => buildExactProtectionRows(activeRun, p.netR), [activeRun, p.netR]);
+    const whatIf = React.useMemo(() => buildWhatIfSimulation(trades, whatIfFilters), [trades, whatIfFilters]);
     const hasExactProtection = exactProtectionRows.length > 0;
+    const exportProtectionResults = () => {
+        const rows = exactProtectionRows.map((row) => ({
+            mode: row.mode,
+            threshold_or_buffer: row.thresholdLabel,
+            trades: row.trades,
+            win_rate: row.winRate,
+            net_r: row.netR,
+            max_dd: row.maxDD,
+            expectancy: row.expectancy,
+            protection_exits: row.protectionExits,
+            avg_exit_r: row.avgProtectionExitR,
+            total_exit_r: row.totalProtectionExitR,
+            winners_cut: row.winnersCut,
+            loser_r_saved: row.loserRSaved,
+            net_vs_baseline: row.netVsBaseline,
+        }));
+        downloadCsv(`protection_lab_${fileSafe(ACTIVE_RUN?.id || activeRunId || "run")}_${csvTimestamp()}.csv`, rows);
+    };
 
     return (
         <div className="pb-12">
@@ -95,7 +143,19 @@ export default function ProtectionLab() {
                     <NeonPanel
                         className="xl:col-span-3"
                         title="Exact Protection Simulation Results"
-                        action={<Pill tone="success">{exactProtectionRows.length} MODES</Pill>}
+                        action={(
+                            <div className="flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={exportProtectionResults}
+                                    disabled={!hasExactProtection}
+                                    className="px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider border border-[hsl(var(--accent-secondary)/0.55)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.06)] hover:bg-[hsl(var(--accent-secondary)/0.12)] disabled:opacity-40 clip-bevel-sm"
+                                >
+                                    Export Protection Results CSV
+                                </button>
+                                <Pill tone="success">{exactProtectionRows.length} MODES</Pill>
+                            </div>
+                        )}
                     >
                         <Note>Higher Net R and lower drawdown are better. Most protection modes currently underperform baseline.</Note>
                         <DataTable
@@ -122,6 +182,16 @@ export default function ProtectionLab() {
                         <Note>Baseline trade variants remain unchanged; protected trade CSVs are imported separately from normal variant switching.</Note>
                     </NeonPanel>
                 )}
+
+                <WhatIfFilterSimulator
+                    filters={WHAT_IF_FILTERS}
+                    activeFilters={whatIfFilters}
+                    onToggle={(key) => setWhatIfFilters((prev) => ({ ...prev, [key]: !prev[key] }))}
+                    onClear={() => setWhatIfFilters({})}
+                    onPreset={(keys) => setWhatIfFilters(Object.fromEntries(keys.map((key) => [key, true])))}
+                    onRestoreFilters={(keys) => setWhatIfFilters(Object.fromEntries((keys || []).map((key) => [key, true])))}
+                    result={whatIf}
+                />
 
                 {/* A) Baseline */}
                 <NeonPanel title={hasExactProtection ? "A · Baseline · Exploratory Fallback" : "A · Baseline"} action={<ConfidenceTag level="exact" />}>
@@ -541,6 +611,375 @@ function DeltaVsBaseline({ row }) {
     return <span className={`font-mono font-semibold tabular-nums ${color}`}>{fmtR(value)}</span>;
 }
 
+function WhatIfFilterSimulator({ filters, activeFilters, onToggle, onClear, onPreset, onRestoreFilters, result }) {
+    const [copied, setCopied] = React.useState(false);
+    const [collapsed, setCollapsed] = React.useState(false);
+    const [savedSimulations, setSavedSimulations] = React.useState([]);
+    const [draftName, setDraftName] = React.useState("Simulation 1");
+    const activeItems = filters.filter((f) => activeFilters[f.key]);
+    const activeCount = activeItems.length;
+    const activeSummary = activeItems.map((filter) => `${filter.summary} (${result.filterCounts[filter.key] || 0} trades)`).join(", ");
+    const activeKeys = activeItems.map((filter) => filter.key).sort();
+    const activeSignature = activeKeys.join("|");
+    const baselineSignature = `${result.original.n}|${result.original.netR}|${result.original.maxDD}`;
+    React.useEffect(() => {
+        setSavedSimulations([]);
+        setDraftName("Simulation 1");
+    }, [baselineSignature]);
+    const nextSimulationName = (items = savedSimulations) => {
+        const nextNumber = items.reduce((max, simulation) => {
+            const match = String(simulation.label || "").match(/Simulation\s+(\d+)/i);
+            return match ? Math.max(max, Number(match[1])) : max;
+        }, 0) + 1;
+        return `Simulation ${nextNumber}`;
+    };
+    const activeSaved = activeSignature ? savedSimulations.find((simulation) => simulation.signature === activeSignature) : null;
+    const isDuplicateSimulation = !!activeSaved;
+    const canSaveSimulation = activeCount > 0 && !isDuplicateSimulation;
+    const saveSimulation = () => {
+        if (!canSaveSimulation) return;
+        const newSimulation = {
+            id: `simulation-${Date.now()}-${activeSignature}`,
+            label: draftName.trim() || nextSimulationName(),
+            signature: activeSignature,
+            filterKeys: activeKeys,
+            filters: activeSummary,
+            remaining: { ...result.filtered },
+            removed: { ...result.removed },
+            delta: result.deltaNetR,
+        };
+        setSavedSimulations((current) => [...current, newSimulation]);
+        setDraftName(nextSimulationName([...savedSimulations, newSimulation]));
+        onClear();
+    };
+    const savedRows = savedSimulations.map((simulation) => ({
+        ...(activeSaved?.id === simulation.id ? result.filtered : simulation.remaining),
+        kind: "saved",
+        id: simulation.id,
+        label: simulation.label,
+        signature: simulation.signature,
+        filterKeys: simulation.filterKeys,
+        filters: simulation.filters,
+        removedCount: activeSaved?.id === simulation.id ? result.removed.n : simulation.removed.n,
+        delta: activeSaved?.id === simulation.id ? result.deltaNetR : simulation.delta,
+        isActive: activeSaved?.id === simulation.id,
+    }));
+    const tableRows = [
+        { ...result.original, kind: "baseline", id: "baseline", label: "Baseline", removedCount: 0, delta: null },
+        ...(activeCount && !activeSaved ? [{ ...result.filtered, kind: "current", id: "current", label: draftName, filters: activeSummary, removedCount: result.removed.n, delta: result.deltaNetR }] : []),
+        ...savedRows,
+    ];
+    const removeSimulation = (id) => setSavedSimulations((current) => current.filter((simulation) => simulation.id !== id));
+    const renameSimulation = (id, label) => setSavedSimulations((current) => current.map((simulation) => (
+        simulation.id === id ? { ...simulation, label } : simulation
+    )));
+    const resetToBaseline = () => {
+        onClear();
+        setDraftName(nextSimulationName());
+    };
+    const hypothesisPayload = {
+        type: "protection_lab_what_if_filter_hypothesis",
+        activeFilters: activeItems.map((filter) => ({
+            key: filter.key,
+            label: filter.label,
+            matchingTrades: result.filterCounts[filter.key] || 0,
+        })),
+        baselineTrades: result.original.n,
+        remainingTrades: result.filtered.n,
+        removedTrades: result.removed.n,
+        netRDelta: result.deltaNetR,
+    };
+    const promoteHypothesis = async () => {
+        try {
+            await navigator?.clipboard?.writeText(JSON.stringify(hypothesisPayload, null, 2));
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1800);
+        } catch (_) {
+            setCopied(false);
+        }
+    };
+
+    return (
+        <NeonPanel
+            className="xl:col-span-3"
+            title="What-If Filter Simulator"
+            action={(
+                <div className="flex items-center gap-2">
+                    <Pill tone={activeCount ? "warning" : "muted"}>{activeCount ? `${activeCount} FILTERS ACTIVE` : "BASELINE MODE"}</Pill>
+                    {activeCount ? <Pill tone={result.deltaNetR >= 0 ? "success" : "danger"}>{fmtR(result.deltaNetR)}</Pill> : null}
+                    <button
+                        type="button"
+                        onClick={() => setCollapsed((value) => !value)}
+                        className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-mono uppercase tracking-wider border border-[hsl(var(--border-mid))] text-muted-lab hover:text-white clip-bevel-sm"
+                    >
+                        {collapsed ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
+                        {collapsed ? "Expand" : "Collapse"}
+                    </button>
+                </div>
+            )}
+        >
+            <div
+                onClick={(event) => {
+                    if (!activeCount) return;
+                    if (event.target.closest("[data-whatif-keep-active='true']")) return;
+                    resetToBaseline();
+                }}
+            >
+                <div className="mt-3 border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.38)] clip-bevel-sm px-3 py-2 text-[11px] font-mono text-[hsl(var(--text-2))]">
+                    {activeCount ? <>Active filters: <span className="text-white">{activeSummary}</span></> : "No active filters"}
+                </div>
+                {collapsed ? null : (
+                    <>
+                    <div className="mt-3 flex flex-wrap items-stretch gap-2" data-whatif-keep-active="true">
+                        {WHAT_IF_PRESETS.map((preset) => (
+                            <button
+                                key={preset.label}
+                                type="button"
+                                onClick={() => onPreset(preset.keys)}
+                                className="px-2.5 py-1.5 text-[10px] font-mono uppercase tracking-wider border border-[hsl(var(--accent-secondary)/0.45)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.06)] hover:bg-[hsl(var(--accent-secondary)/0.12)] clip-bevel-sm"
+                            >
+                                {preset.label}
+                            </button>
+                        ))}
+                        <button
+                            type="button"
+                            onClick={() => setSavedSimulations([])}
+                            disabled={!savedSimulations.length}
+                            className="px-2.5 py-1.5 text-[10px] font-mono uppercase tracking-wider border border-[hsl(var(--border-mid))] text-muted-lab hover:text-white disabled:opacity-40 disabled:hover:text-muted-lab clip-bevel-sm"
+                        >
+                            Clear Saved Simulations
+                        </button>
+                        <button
+                            type="button"
+                            onClick={promoteHypothesis}
+                            disabled={!activeCount}
+                            title="Creates a clean hypothesis/config idea from the selected filters so it can later be tested by the Python backtester. This frontend simulation is exploratory only."
+                            className="px-2.5 py-1.5 text-[10px] font-mono uppercase tracking-wider border border-[hsl(var(--warning)/0.55)] text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.08)] hover:bg-[hsl(var(--warning)/0.14)] disabled:opacity-40 clip-bevel-sm"
+                        >
+                            {copied ? "Hypothesis copied" : "Promote to Exact Backtest"}
+                        </button>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 grow basis-full 2xl:basis-auto 2xl:min-w-[680px]">
+                            <MetricChip label="Remaining" value={String(result.filtered.n)} sub={`${result.removed.n} removed`} tone="primary" icon={ShieldCheck} />
+                            <MetricChip label="Filtered Net R" value={fmtR(result.filtered.netR)} sub={`${fmtR(result.deltaNetR)} vs base`} tone={result.deltaNetR >= 0 ? "success" : "danger"} icon={TrendingUp} />
+                            <MetricChip label="Filtered WR" value={fmtPct(result.filtered.winRate)} sub={`${result.filtered.wins}W / ${result.filtered.losses}L`} tone="secondary" icon={Target} />
+                            <MetricChip label="Removed Subset" value={fmtR(result.removed.netR)} sub={`${result.removed.n} trades · ${fmtExp(result.removed.expectancy)}`} tone={result.removed.netR >= 0 ? "success" : "danger"} icon={AlertTriangle} />
+                        </div>
+                    </div>
+
+                    <div className="mt-3 space-y-2" data-testid="protlab-whatif-filters" data-whatif-keep-active="true">
+                        <div className="text-[10.5px] font-mono uppercase tracking-wider text-muted-lab">
+                            Matching trades are removed from baseline. Remaining trades are recalculated as if those setups were never taken.
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-2">
+                            {WHAT_IF_GROUPS.map((group) => (
+                                <div key={group} className="border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.26)] clip-bevel-sm p-2">
+                                    <div className="text-[9.5px] font-mono uppercase tracking-[0.2em] text-title-lab mb-1.5">{group}</div>
+                                    <div className="grid grid-cols-1 gap-1.5">
+                                        {filters.filter((filter) => filter.group === group).map((filter) => (
+                                            <WhatIfFilterButton
+                                                key={filter.key}
+                                                filter={filter}
+                                                active={!!activeFilters[filter.key]}
+                                                count={result.filterCounts[filter.key] || 0}
+                                                onToggle={onToggle}
+                                            />
+                                        ))}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="mt-3" data-whatif-keep-active="true">
+                        <WhatIfResultsTable
+                            rows={tableRows}
+                            canSaveSimulation={canSaveSimulation}
+                            isDuplicateSimulation={isDuplicateSimulation}
+                            draftName={draftName}
+                            onDraftNameChange={setDraftName}
+                            onSave={saveSimulation}
+                            onSelectSaved={(row) => onRestoreFilters(row.filterKeys)}
+                            onReset={resetToBaseline}
+                            onRemove={removeSimulation}
+                            onRename={renameSimulation}
+                        />
+                    </div>
+                    <div className="mt-2 text-[10.5px] font-mono uppercase tracking-wider text-muted-lab">
+                        Promote creates a copyable hypothesis/config idea only; it does not run Python.
+                    </div>
+                    </>
+                )}
+            </div>
+        </NeonPanel>
+    );
+}
+
+function WhatIfResultsTable({
+    rows,
+    canSaveSimulation,
+    isDuplicateSimulation,
+    draftName,
+    onDraftNameChange,
+    onSave,
+    onSelectSaved,
+    onReset,
+    onRemove,
+    onRename,
+}) {
+    const metric = (row, key, render) => {
+        return render ? render(row[key], row) : row[key];
+    };
+    return (
+        <div className="overflow-x-auto border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.28)] clip-bevel-sm" data-testid="protlab-whatif-results">
+            <table className="w-full min-w-[980px] text-[11px] font-mono">
+                <thead className="text-[9.5px] uppercase tracking-[0.18em] text-title-lab">
+                    <tr className="border-b border-[hsl(var(--border-soft))]">
+                        <th className="px-3 py-2 text-left font-medium">Set</th>
+                        <th className="px-3 py-2 text-right font-medium">Trades</th>
+                        <th className="px-3 py-2 text-right font-medium">Removed</th>
+                        <th className="px-3 py-2 text-right font-medium">WR</th>
+                        <th className="px-3 py-2 text-right font-medium">Net R</th>
+                        <th className="px-3 py-2 text-right font-medium">Expectancy</th>
+                        <th className="px-3 py-2 text-right font-medium">Max DD</th>
+                        <th className="px-3 py-2 text-right font-medium">Delta vs Base</th>
+                        <th className="px-3 py-2 text-right font-medium">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {rows.map((row) => (
+                        <tr
+                            key={row.id}
+                            onClick={() => {
+                                if (row.kind === "saved") onSelectSaved(row);
+                                if (row.kind === "baseline") onReset();
+                            }}
+                            className={[
+                                "border-b border-[hsl(var(--border-soft))] last:border-b-0",
+                                row.kind === "current" ? "bg-[hsl(var(--warning)/0.08)] shadow-[inset_3px_0_0_hsl(var(--warning)/0.78)]" : "",
+                                row.kind === "saved" && row.isActive ? "bg-[hsl(var(--warning)/0.08)] shadow-[inset_3px_0_0_hsl(var(--warning)/0.78)] cursor-pointer" : "",
+                                row.kind === "saved" && !row.isActive ? "bg-[hsl(var(--accent-secondary)/0.035)] hover:bg-[hsl(var(--accent-secondary)/0.07)] cursor-pointer" : "",
+                                row.kind === "baseline" ? "cursor-pointer hover:bg-[hsl(var(--panel-2)/0.42)]" : "",
+                            ].join(" ")}
+                        >
+                            <td className="px-3 py-2.5 text-left">
+                                <div className="flex items-center gap-2">
+                                    {row.kind === "current" ? (
+                                        <>
+                                            <span className="text-[hsl(var(--warning))] font-semibold">Current simulation</span>
+                                            <input
+                                                value={draftName}
+                                                onChange={(event) => onDraftNameChange(event.target.value)}
+                                                onClick={(event) => event.stopPropagation()}
+                                                className="w-36 bg-[hsl(var(--panel-2)/0.7)] border border-[hsl(var(--warning)/0.38)] text-white px-2 py-1 text-[10px] uppercase tracking-wider clip-bevel-sm outline-none focus:border-[hsl(var(--warning))]"
+                                                aria-label="Current simulation name"
+                                            />
+                                            <Pill tone="warning">WORKING DRAFT</Pill>
+                                        </>
+                                    ) : (
+                                        <>
+                                            {row.kind === "saved" ? (
+                                                <input
+                                                    value={row.label}
+                                                    onChange={(event) => onRename(row.id, event.target.value)}
+                                                    onClick={(event) => event.stopPropagation()}
+                                                    className="w-36 bg-transparent border border-transparent text-white px-1 py-0.5 text-[11px] uppercase tracking-wider outline-none hover:border-[hsl(var(--border-soft))] focus:border-[hsl(var(--accent-secondary)/0.65)] clip-bevel-sm"
+                                                    aria-label={`${row.label} name`}
+                                                />
+                                            ) : (
+                                                <span className="text-white">{row.label}</span>
+                                            )}
+                                            {row.kind === "baseline" ? <Pill tone="secondary">BASELINE</Pill> : null}
+                                            {row.kind === "saved" && row.isActive ? <Pill tone="warning">ACTIVE</Pill> : null}
+                                            {row.kind === "saved" && row.filters ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={(event) => {
+                                                        event.stopPropagation();
+                                                        onSelectSaved(row);
+                                                    }}
+                                                    title={row.filters}
+                                                    className="text-[9px] uppercase tracking-wider text-muted-lab hover:text-white border border-[hsl(var(--border-soft))] px-1.5 py-0.5 clip-bevel-sm"
+                                                >
+                                                    Details
+                                                </button>
+                                            ) : null}
+                                        </>
+                                    )}
+                                </div>
+                            </td>
+                            <td className="px-3 py-2.5 text-right tabular-nums">{metric(row, "n")}</td>
+                            <td className="px-3 py-2.5 text-right tabular-nums">{metric(row, "removedCount")}</td>
+                            <td className="px-3 py-2.5 text-right tabular-nums">{metric(row, "winRate", fmtPct)}</td>
+                            <td className="px-3 py-2.5 text-right tabular-nums"><ColoredR value={row.netR} /></td>
+                            <td className="px-3 py-2.5 text-right tabular-nums">{metric(row, "expectancy", fmtExp)}</td>
+                            <td className="px-3 py-2.5 text-right tabular-nums">{metric(row, "maxDD", fmtR)}</td>
+                            <td className="px-3 py-2.5 text-right tabular-nums">
+                                {row.delta == null ? (
+                                    <span className="text-muted-lab">—</span>
+                                ) : (
+                                    <span className={row.delta >= 0 ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]"}>
+                                        {fmtR(row.delta)}
+                                    </span>
+                                )}
+                            </td>
+                            <td className="px-3 py-2.5 text-right">
+                                {row.kind === "current" ? (
+                                    <button
+                                        type="button"
+                                        onClick={onSave}
+                                        disabled={!canSaveSimulation}
+                                        title={isDuplicateSimulation ? "This exact filter set is already saved." : "Save this current simulation."}
+                                        className="px-2 py-1 text-[9.5px] uppercase tracking-wider border border-[hsl(var(--success)/0.55)] text-[hsl(var(--success))] bg-[hsl(var(--success)/0.07)] hover:bg-[hsl(var(--success)/0.13)] disabled:opacity-40 clip-bevel-sm"
+                                    >
+                                        Save
+                                    </button>
+                                ) : row.kind === "saved" ? (
+                                    <button
+                                        type="button"
+                                        onClick={(event) => {
+                                            event.stopPropagation();
+                                            onRemove(row.id);
+                                        }}
+                                        className="px-2 py-1 text-[9.5px] uppercase tracking-wider border border-[hsl(var(--danger)/0.45)] text-[hsl(var(--danger))] bg-[hsl(var(--danger)/0.06)] hover:bg-[hsl(var(--danger)/0.12)] clip-bevel-sm"
+                                    >
+                                        Remove
+                                    </button>
+                                ) : (
+                                    <span className="text-muted-lab">—</span>
+                                )}
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+    );
+}
+
+function WhatIfFilterButton({ filter, active, count, onToggle }) {
+    return (
+        <button
+            type="button"
+            onClick={() => onToggle(filter.key)}
+            className={[
+                "text-left px-2 py-1.5 clip-bevel-sm border text-[10px] font-mono uppercase tracking-wider transition-colors",
+                active
+                    ? "border-[hsl(var(--warning)/0.75)] bg-[hsl(var(--warning)/0.13)] text-[hsl(var(--warning))] shadow-[0_0_18px_hsl(var(--warning)/0.12)]"
+                    : "border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.38)] text-[hsl(var(--text-2))] hover:border-[hsl(var(--accent-secondary)/0.55)] hover:text-white",
+            ].join(" ")}
+        >
+            <span className="flex items-center justify-between gap-2">
+                <span>{filter.label} ({count})</span>
+                {active ? (
+                    <span className="inline-flex items-center gap-1 text-[9px] text-[hsl(var(--warning))]">
+                        <Check className="w-3 h-3" /> Active
+                    </span>
+                ) : null}
+            </span>
+        </button>
+    );
+}
+
 // ── Analytics (pure, NaN-safe) ───────────────────────────────────────
 function tradesForCloseBreachTiming(trades, run) {
     const base = Array.isArray(trades) ? trades : [];
@@ -796,6 +1235,72 @@ function buildProtection(trades) {
     };
 }
 
+function buildWhatIfSimulation(trades, activeFilters) {
+    const list = Array.isArray(trades) ? trades : [];
+    const filterCounts = WHAT_IF_FILTERS.reduce((acc, filter) => {
+        acc[filter.key] = list.filter((trade) => {
+            try {
+                return filter.matches(trade);
+            } catch (_) {
+                return false;
+            }
+        }).length;
+        return acc;
+    }, {});
+    const enabled = WHAT_IF_FILTERS.filter((filter) => activeFilters?.[filter.key]);
+    const removed = [];
+    const filtered = [];
+    list.forEach((trade) => {
+        const shouldRemove = enabled.some((filter) => {
+            try {
+                return filter.matches(trade);
+            } catch (_) {
+                return false;
+            }
+        });
+        if (shouldRemove) removed.push(trade);
+        else filtered.push(trade);
+    });
+    const originalStats = summarizeTradeSet(list);
+    const filteredStats = summarizeTradeSet(filtered);
+    return {
+        original: originalStats,
+        filtered: filteredStats,
+        removed: summarizeTradeSet(removed),
+        filterCounts,
+        deltaNetR: round1(filteredStats.netR - originalStats.netR),
+    };
+}
+
+function summarizeTradeSet(trades) {
+    const list = Array.isArray(trades) ? trades : [];
+    const n = list.length;
+    const wins = list.filter((trade) => rMulti(trade) > 0).length;
+    const losses = list.filter((trade) => rMulti(trade) < 0).length;
+    const netR = list.reduce((sum, trade) => sum + rMulti(trade), 0);
+    return {
+        n,
+        wins,
+        losses,
+        winRate: n ? (wins / n) * 100 : 0,
+        netR: round1(netR),
+        expectancy: n ? netR / n : 0,
+        maxDD: maxDrawdownR(list),
+    };
+}
+
+function maxDrawdownR(trades) {
+    let equity = 0;
+    let peak = 0;
+    let maxDD = 0;
+    (Array.isArray(trades) ? trades : []).forEach((trade) => {
+        equity += rMulti(trade);
+        peak = Math.max(peak, equity);
+        maxDD = Math.min(maxDD, equity - peak);
+    });
+    return round1(maxDD);
+}
+
 function variantLabel(v) {
     return {
         single_position: "Single position",
@@ -832,6 +1337,69 @@ function rMulti(t) {
 function isFullBreachTrade(t) {
     return t?.ob_fully_breached === true ||
         (Number.isFinite(Number(t?.max_ob_penetration_pct)) && Number(t.max_ob_penetration_pct) >= 100);
+}
+
+function isCloseConfirmedBreachTrade(t) {
+    return t?.close_confirmed_ob_breach === true || !!t?.close_breach_time;
+}
+
+function fillDateOf(trade) {
+    return parseLikelyDate(
+        trade?.fill_time ??
+        trade?.entry_time ??
+        trade?.entryTimestamp ??
+        trade?.entryTime ??
+        trade?.time
+    );
+}
+
+function fillSessionOf(trade) {
+    return deriveSessionFromTimestamp(fillDateOf(trade)) || "Unknown";
+}
+
+function fillDayOf(trade) {
+    const d = fillDateOf(trade);
+    return d ? dayIndex(d.getUTCDay()) : null;
+}
+
+function fillHourOf(trade) {
+    const d = fillDateOf(trade);
+    return d ? d.getUTCHours() : null;
+}
+
+function originSessionOf(trade) {
+    return normalizeSession(trade?.obOriginSession) ||
+        deriveSessionFromTimestamp(parseLikelyDate(trade?.obOriginTime ?? trade?.obDetectionTime)) ||
+        "Unknown";
+}
+
+function directionOf(trade) {
+    const value = String(trade?.direction || trade?.side || "").toLowerCase();
+    if (value.includes("short") || value.includes("sell") || value.includes("bear")) return "short";
+    if (value.includes("long") || value.includes("buy") || value.includes("bull")) return "long";
+    return "unknown";
+}
+
+function structureOf(trade) {
+    const value = String(trade?.structureTag || trade?.structure_tag || trade?.structure || "").toLowerCase();
+    if (value.includes("choch") || value.includes("change")) return "choch";
+    if (value.includes("bos") || value.includes("break")) return "bos";
+    return "unknown";
+}
+
+function ageBucketOf(trade) {
+    const fill = fillDateOf(trade);
+    const origin = parseLikelyDate(trade?.obDetectionTime ?? trade?.obOriginTime);
+    if (!fill || !origin) return "Limited Data";
+    const hours = (fill.getTime() - origin.getTime()) / 36e5;
+    if (!Number.isFinite(hours) || hours < 0) return "Limited Data";
+    if (hours < 4) return "<4h";
+    if (hours < 12) return "4–12h";
+    if (hours < 24) return "12–24h";
+    if (hours < 72) return "1–3d";
+    if (hours < 168) return "3–7d";
+    if (hours < 336) return "7–14d";
+    return "14d+";
 }
 
 function buildBreachTiming(trades, closeSourceTrades = trades) {
@@ -1032,6 +1600,15 @@ function parseDate(value) {
     return Number.isFinite(d.getTime()) ? d : null;
 }
 
+function parseLikelyDate(value) {
+    if (value == null || value === "") return null;
+    if (value instanceof Date) return Number.isFinite(value.getTime()) ? value : null;
+    if (typeof value === "number") return null;
+    const text = String(value).trim();
+    if (!/[T:\-\/]/.test(text)) return null;
+    return parseDate(text);
+}
+
 function normalizeSession(value) {
     if (value == null || value === "") return null;
     const text = String(value).trim();
@@ -1159,4 +1736,44 @@ function BreachSessionMatrix({ matrix }) {
             </div>
         </NeonPanel>
     );
+}
+
+function downloadCsv(filename, rows) {
+    const csv = rowsToCsv(rows);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+}
+
+function rowsToCsv(rows) {
+    if (!rows?.length) return "";
+    const headers = Object.keys(rows[0]);
+    const lines = [
+        headers.map(csvCell).join(","),
+        ...rows.map((row) => headers.map((key) => csvCell(row[key])).join(",")),
+    ];
+    return `${lines.join("\n")}\n`;
+}
+
+function csvCell(value) {
+    if (value == null) return "";
+    const text = String(value);
+    if (/[",\n\r]/.test(text)) {
+        return `"${text.replace(/"/g, '""')}"`;
+    }
+    return text;
+}
+
+function csvTimestamp() {
+    return new Date().toISOString().replace(/[:.]/g, "-");
+}
+
+function fileSafe(value) {
+    return String(value || "run").replace(/[^a-z0-9_-]+/gi, "_");
 }

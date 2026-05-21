@@ -11,11 +11,13 @@ import RunDetail from "@/pages/RunDetail";
 import OrderBlockLab from "@/pages/OrderBlockLab";
 import ProtectionLab from "@/pages/ProtectionLab";
 import EntriesLab from "@/pages/EntriesLab";
+import NewsLab from "@/pages/NewsLab";
 import StrategyMap from "@/pages/StrategyMap";
 import TradeInspector from "@/pages/TradeInspector";
 import SweepLab from "@/pages/SweepLab";
 import ComparisonLab from "@/pages/ComparisonLab";
 import WalkForwardLab from "@/pages/WalkForwardLab";
+import HypothesisLab from "@/pages/HypothesisLab";
 import ParityDebugger from "@/pages/ParityDebugger";
 import MonteCarlo from "@/pages/MonteCarlo";
 import Settings from "@/pages/Settings";
@@ -39,11 +41,13 @@ function App() {
                         <Route path="/order-block-lab" element={withRouteBoundary(<OrderBlockLab />)} />
                         <Route path="/protection-lab" element={withRouteBoundary(<ProtectionLab />)} />
                         <Route path="/entries-lab" element={withRouteBoundary(<EntriesLab />)} />
+                        <Route path="/news-lab" element={withRouteBoundary(<NewsLab />)} />
                         <Route path="/strategy-map" element={withRouteBoundary(<StrategyMap />)} />
                         <Route path="/trade-inspector" element={withRouteBoundary(<TradeInspector />)} />
                         <Route path="/sweep" element={withRouteBoundary(<SweepLab />)} />
                         <Route path="/comparison" element={withRouteBoundary(<ComparisonLab />)} />
                         <Route path="/walk-forward" element={withRouteBoundary(<WalkForwardLab />)} />
+                        <Route path="/hypothesis-lab" element={withRouteBoundary(<HypothesisLab />)} />
                         <Route path="/parity" element={withRouteBoundary(<ParityDebugger />)} />
                         <Route path="/monte-carlo" element={withRouteBoundary(<MonteCarlo />)} />
                         <Route path="/settings" element={withRouteBoundary(<Settings />)} />
