@@ -27,8 +27,8 @@ const WHAT_IF_FILTERS = [
     { key: "noOutsideFill", group: "Session", label: "Exclude Outside fills", summary: "Outside fills", matches: (t) => fillSessionOf(t) === "Outside" },
     { key: "noWednesday", group: "Time", label: "Exclude Wednesday", summary: "Wednesday", matches: (t) => fillDayOf(t) === 2 },
     { key: "no1500", group: "Time", label: "Exclude 15:00 UTC", summary: "15:00 UTC", matches: (t) => fillHourOf(t) === 15 },
-    { key: "noFullBreach", group: "Structure", label: "Exclude fully breached", summary: "Fully breached", matches: isFullBreachTrade },
-    { key: "noCloseBreach", group: "Structure", label: "Exclude close-confirmed breached", summary: "Close-confirmed breached", matches: isCloseConfirmedBreachTrade },
+    { key: "noFullBreach", group: "Structure", label: "Exclude hard invalidation losses", summary: "Hard invalidation losses", matches: isFullBreachTrade },
+    { key: "noCloseBreach", group: "Structure", label: "Exclude close-confirmed invalidations", summary: "Close-confirmed invalidations", matches: isCloseConfirmedBreachTrade },
     { key: "noBos", group: "Structure", label: "Exclude BOS", summary: "BOS", matches: (t) => structureOf(t) === "bos" },
     { key: "noChoch", group: "Structure", label: "Exclude CHoCH", summary: "CHoCH", matches: (t) => structureOf(t) === "choch" },
     { key: "noLongs", group: "Direction", label: "Exclude longs", summary: "Longs", matches: (t) => directionOf(t) === "long" },
@@ -44,18 +44,18 @@ const WHAT_IF_GROUPS = ["Session", "Time", "Structure", "Direction", "Advanced"]
 const WHAT_IF_PRESETS = [
     { label: "Avoid New York", keys: ["noNyFill"] },
     { label: "Avoid toxic hour", keys: ["no1500"] },
-    { label: "Avoid fully breached", keys: ["noFullBreach"] },
+    { label: "Avoid hard invalidation losses", keys: ["noFullBreach"] },
     { label: "Conservative filter", keys: ["noNyFill", "no1500", "noFullBreach"] },
 ];
 
 const FAST_STOPOUT_ORDER = ["same candle", "<15m", "15–60m", "1–4h", "4h+", "Limited Data"];
 
 const PROTECTION_BACKLOG = [
-    { title: "BE escape exact simulation", status: "Requires exporter data", body: "Intratrade return-to-entry timestamps needed to confirm a break-even exit actually triggered after breach." },
-    { title: "Immediate breach exit exact simulation", status: "Requires exporter data", body: "Candle-level exit prices at the moment the far side of the OB is fully breached." },
+    { title: "BE escape exact simulation", status: "Requires exporter data", body: "Intratrade return-to-entry timestamps needed to confirm a break-even exit actually triggered after hard invalidation." },
+    { title: "Immediate hard invalidation exit exact simulation", status: "Requires exporter data", body: "Candle-level exit prices at the moment the far side of the OB is hard invalidated." },
     { title: "Penetration threshold sweep", status: "Requires exporter data", body: "Sweep exit thresholds with candle-level fills instead of capping flagged trades at 0R." },
-    { title: "News blackout overlay", status: "Future data required", body: "High-impact news calendar to compare breach / fast-stopout rates inside news windows." },
-    { title: "Pre-fill breach cancel", status: "Requires exporter data", body: "Pre-fill breach flags and pending-order lifecycle to model cancelling orders before entry." },
+    { title: "News blackout overlay", status: "Future data required", body: "High-impact news calendar to compare hard invalidation / fast-stopout rates inside news windows." },
+    { title: "Pre-fill invalidation cancel", status: "Requires exporter data", body: "Pre-fill invalidation flags and pending-order lifecycle to model cancelling orders before entry." },
     { title: "Dynamic stop logic", status: "Future execution model", body: "Per-trade trailing / structure-based stops rather than a single run-level stop config." },
     { title: "Compare protection variants vs baseline", status: "Future simulation", body: "Run simulated protection variants side-by-side against the unprotected baseline." },
     { title: "Export protection configs to Python engine", status: "Requires exporter integration", body: "Serialize chosen protection rules back to the FX-OB backtester for exact re-simulation." },
@@ -116,8 +116,8 @@ export default function ProtectionLab() {
                 <MetricChip label="Win Rate"     value={fmtPct(p.winRate)}        sub={`${p.wins}W / ${p.losses}L`}  tone="secondary" icon={Target} />
                 <MetricChip label="Net R"        value={fmtR(p.netR)}             sub="cumulative"                   tone={p.netR >= 0 ? "primary" : "danger"} icon={TrendingUp} />
                 <MetricChip label="Expectancy"   value={fmtExp(p.expectancy)}     sub="per trade"                    tone="primary"   icon={Activity} />
-                <MetricChip label="Breached"     value={String(p.breached)}       sub={p.breachKnown ? `${p.breachKnown} flagged` : "no flags"} tone={p.breached ? "danger" : "muted"} icon={AlertTriangle} />
-                <MetricChip label="Non-Breached" value={String(p.nonBreached)}    sub={`${p.breachUnknown} unknown`} tone={p.nonBreached ? "success" : "muted"} icon={ShieldCheck} />
+                <MetricChip label="Hard Invalidations" value={String(p.breached)}       sub={p.breachKnown ? `${p.breachKnown} flagged` : "no flags"} tone={p.breached ? "danger" : "muted"} icon={AlertTriangle} />
+                <MetricChip label="No Hard Invalidation" value={String(p.nonBreached)}    sub={`${p.breachUnknown} unknown`} tone={p.nonBreached ? "success" : "muted"} icon={ShieldCheck} />
             </div>
 
             <div className="px-6 mt-5 grid grid-cols-1 xl:grid-cols-3 gap-4">
@@ -130,8 +130,8 @@ export default function ProtectionLab() {
                     <div className="flex items-start gap-2 text-[11.5px] font-mono text-[hsl(var(--warning))]" data-testid="protlab-research-safety">
                         <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
                         <span>
-                            Estimated protections are optimistic upper bounds derived from breach / penetration flags only — not candle-level simulations, and not proven results.
-                            Exact figures require exporter data: intratrade return-to-entry, candle-level exit prices, high-impact news windows, and pre-fill breach / pending lifecycle.
+                            Estimated protections are optimistic upper bounds derived from hard invalidation / penetration flags only — not candle-level simulations, and not proven results.
+                            Exact figures require exporter data: intratrade return-to-entry, candle-level exit prices, high-impact news windows, and pre-fill invalidation / pending lifecycle.
                         </span>
                     </div>
                     {hasExactProtection && (
@@ -204,9 +204,9 @@ export default function ProtectionLab() {
                             ["Win Rate", fmtPct(p.winRate)],
                             ["Net R", fmtR(p.netR)],
                             ["Expectancy", fmtExp(p.expectancy)],
-                            ["Breached", String(p.breached)],
-                            ["Non-Breached", String(p.nonBreached)],
-                            ["Breach Unknown", String(p.breachUnknown)],
+                            ["Hard Invalidations", String(p.breached)],
+                            ["No Hard Invalidation", String(p.nonBreached)],
+                            ["Invalidation Unknown", String(p.breachUnknown)],
                         ].map(([k, v]) => (
                             <React.Fragment key={k}>
                                 <div className="text-muted-lab uppercase tracking-wider text-[10px]">{k}</div>
@@ -216,34 +216,34 @@ export default function ProtectionLab() {
                     </div>
                 </NeonPanel>
 
-                {/* B) Break-even Escape After Breach */}
+                {/* B) Break-even Escape After Hard Invalidation */}
                 <NeonPanel
-                    title={hasExactProtection ? "B · Break-even Escape After Breach · Exploratory" : "B · Break-even Escape After Breach"}
+                    title={hasExactProtection ? "B · Break-even Escape After Hard Invalidation · Exploratory" : "B · Break-even Escape After Hard Invalidation"}
                     action={<div className="flex items-center gap-1.5"><ConfidenceTag level="estimated" /><ConfidenceTag level="requires" /></div>}
                 >
                     <Desc icon={AlertTriangle}>
-                        If the OB fully breaches while the trade is active, arm a break-even escape. If price returns to entry, assume exit at 0R.
+                        If the OB is hard invalidated while the trade is active, arm a break-even escape. If price returns to entry, assume exit at 0R.
                     </Desc>
                     <div className="grid grid-cols-2 gap-2 mt-3">
-                        <MetricChip label="Breached Losses" value={String(p.breachedLossCount)} sub="flagged & losing" tone={p.breachedLossCount ? "danger" : "muted"} icon={AlertTriangle} />
+                        <MetricChip label="Hard Invalidation Losses" value={String(p.breachedLossCount)} sub="flagged & losing" tone={p.breachedLossCount ? "danger" : "muted"} icon={AlertTriangle} />
                         <MetricChip label="Max R Saved" value={fmtR(p.maxSavedBreached)} sub="if all → BE (optimistic)" tone={p.maxSavedBreached > 0 ? "success" : "muted"} icon={ShieldCheck} />
                     </div>
-                    <Note>Optimistic / not exact — assumes every breached loss returns to entry. Requires intratrade return-to-entry export for exact simulation.</Note>
+                    <Note>Optimistic / not exact — assumes every hard invalidation loss returns to entry. Requires intratrade return-to-entry export for exact simulation.</Note>
                     <Note tone={p.breachKnown ? "muted" : "warning"}>
-                        Breach flags present on {p.breachKnown} / {p.n} trades{p.breachKnown ? "" : " — requires exporter field ob_fully_breached"}.
+                        Hard invalidation flags present on {p.breachKnown} / {p.n} trades{p.breachKnown ? "" : " — requires exporter field ob_fully_breached"}.
                     </Note>
                 </NeonPanel>
 
-                {/* C) Immediate Exit After Full Breach */}
-                <NeonPanel title={hasExactProtection ? "C · Immediate Exit After Full Breach · Exploratory" : "C · Immediate Exit After Full Breach"} action={<ConfidenceTag level="estimated" />}>
-                    <Desc icon={ShieldAlert}>Exit immediately when the far side of the OB is fully breached.</Desc>
+                {/* C) Immediate Exit After Hard Invalidation */}
+                <NeonPanel title={hasExactProtection ? "C · Immediate Exit After Hard Invalidation · Exploratory" : "C · Immediate Exit After Hard Invalidation"} action={<ConfidenceTag level="estimated" />}>
+                    <Desc icon={ShieldAlert}>Exit immediately when price fully consumes the OB beyond its far-side invalidation threshold.</Desc>
                     <div className="grid grid-cols-2 gap-2 mt-3">
-                        <MetricChip label="Affected" value={String(p.breached)} sub="breached trades" tone={p.breached ? "danger" : "muted"} icon={AlertTriangle} />
-                        <MetricChip label="Current Net R" value={fmtR(p.breachedNetR)} sub="breached, as-is" tone={p.breachedNetR >= 0 ? "primary" : "danger"} icon={TrendingUp} />
+                        <MetricChip label="Affected" value={String(p.breached)} sub="hard invalidations" tone={p.breached ? "danger" : "muted"} icon={AlertTriangle} />
+                        <MetricChip label="Current Net R" value={fmtR(p.breachedNetR)} sub="invalidated, as-is" tone={p.breachedNetR >= 0 ? "primary" : "danger"} icon={TrendingUp} />
                         <MetricChip label="If Capped 0R" value={fmtR(p.cappedBreachedNetR)} sub="losses → 0R" tone="secondary" icon={ShieldCheck} />
                         <MetricChip label="Improvement" value={fmtR(p.maxSavedBreached)} sub="theoretical" tone={p.maxSavedBreached > 0 ? "success" : "muted"} icon={TrendingUp} />
                     </div>
-                    <Note>Rough estimate — caps breached losing trades at 0R; real exits may be better or worse. Needs candle-level exit price for exact figures.</Note>
+                    <Note>Rough estimate — caps hard invalidation losing trades at 0R; real exits may be better or worse. Needs candle-level exit price for exact figures.</Note>
                 </NeonPanel>
 
                 {/* D) Max Penetration Threshold */}
@@ -293,37 +293,37 @@ export default function ProtectionLab() {
                     {!p.hasFastData && <Note tone="warning">No time-to-exit data in current dataset — requires exporter fields same_candle_exit / minutes_to_exit.</Note>}
                 </NeonPanel>
 
-                <NeonPanel className="xl:col-span-3" title="Fully Breached · Weekday × Hour (UTC)"
-                    action={<Pill tone={bt.fullGrid.total ? "danger" : "muted"}>{bt.fullGrid.total} BREACHES</Pill>}>
-                    <Desc icon={AlertTriangle}>Trades where the OB fully breached (or penetration ≥ 100%). Bucketed by entry / fill time (UTC).</Desc>
+                <NeonPanel className="xl:col-span-3" title="Loss Analytics · Hard Invalidations by Weekday × Hour"
+                    action={<Pill tone={bt.fullGrid.total ? "danger" : "muted"}>{bt.fullGrid.total} INVALIDATIONS</Pill>}>
+                    <Desc icon={AlertTriangle}>Hard invalidation = price fully consumed the order block beyond its far-side invalidation threshold. Bucketed by entry / fill time (UTC).</Desc>
                     <div className="mt-3 grid grid-cols-2 md:grid-cols-4 2xl:grid-cols-8 gap-2.5" data-testid="protlab-fullbreach-mini-chips">
-                        <MetricChip label="Most Breached Hour"
+                        <MetricChip label="Worst Loss Hour"
                             value={bt.mostHour ? `${padH(bt.mostHour.hour)}:00 UTC` : "—"}
-                            sub={bt.mostHour ? `${bt.mostHour.count} breach${bt.mostHour.count === 1 ? "" : "es"}` : "no breaches"}
+                            sub={bt.mostHour ? `${bt.mostHour.count} invalidation${bt.mostHour.count === 1 ? "" : "s"}` : "no invalidations"}
                             tone={bt.mostHour ? "primary" : "muted"} icon={Clock} />
-                        <MetricChip label="Worst Breach Hour"
+                        <MetricChip label="Worst Net Loss Hour"
                             value={bt.worstHour ? `${padH(bt.worstHour.hour)}:00 UTC` : "—"}
                             sub={bt.worstHour ? `${fmtR(bt.worstHour.netR)} net` : "by Net R"}
                             tone={bt.worstHour && bt.worstHour.netR < 0 ? "danger" : "muted"} icon={AlertTriangle} />
-                        <MetricChip label="Most Breached Day"
+                        <MetricChip label="Most Invalidated Day"
                             value={bt.mostDay ? WEEKDAYS[bt.mostDay.day] : "—"}
-                            sub={bt.mostDay ? `${bt.mostDay.count} breach${bt.mostDay.count === 1 ? "" : "es"}` : "no breaches"}
+                            sub={bt.mostDay ? `${bt.mostDay.count} invalidation${bt.mostDay.count === 1 ? "" : "s"}` : "no invalidations"}
                             tone={bt.mostDay ? "primary" : "muted"} icon={Activity} />
-                        <MetricChip label="Worst Breach Day"
+                        <MetricChip label="Worst Loss Day"
                             value={bt.worstDay ? WEEKDAYS[bt.worstDay.day] : "—"}
                             sub={bt.worstDay ? `${fmtR(bt.worstDay.netR)} net` : "by Net R"}
                             tone={bt.worstDay && bt.worstDay.netR < 0 ? "danger" : "muted"} icon={AlertTriangle} />
-                        <MetricChip label="Most Breached Session"
+                        <MetricChip label="Most Invalidated Session"
                             value={bt.mostSession && bt.mostSession.fullCount ? bt.mostSession.session : "—"}
-                            sub={bt.mostSession && bt.mostSession.fullCount ? `${bt.mostSession.fullCount} breaches` : "no breaches"}
+                            sub={bt.mostSession && bt.mostSession.fullCount ? `${bt.mostSession.fullCount} invalidations` : "no invalidations"}
                             tone={bt.mostSession && bt.mostSession.fullCount ? "secondary" : "muted"} icon={Target} />
-                        <MetricChip label="Worst Breach Session"
+                        <MetricChip label="Worst Loss Session"
                             value={bt.worstSession ? bt.worstSession.session : "—"}
                             sub={bt.worstSession ? `${fmtR(bt.worstSession.netR)} net` : "by Net R"}
                             tone={bt.worstSession && bt.worstSession.netR < 0 ? "danger" : "muted"} icon={ShieldAlert} />
-                        <MetricChip label="Breached Winners %"
+                        <MetricChip label="Invalidated Winners %"
                             value={bt.fullBreachCount ? fmtPct(bt.breachedWinnersPct) : "—"}
-                            sub={bt.fullBreachCount ? `${bt.breachedWinners} / ${bt.fullBreachCount} breached` : "no breaches"}
+                            sub={bt.fullBreachCount ? `${bt.breachedWinners} / ${bt.fullBreachCount} invalidated` : "no invalidations"}
                             tone={bt.fullBreachCount && bt.breachedWinnersPct > 0 ? "success" : "muted"} icon={ShieldCheck} />
                         <MetricChip label="Wick vs Close"
                             value={bt.hasBaselineCloseFields ? `${bt.fullBreachCount} / ${bt.closeConfirmed}` : "Limited Data"}
@@ -337,8 +337,8 @@ export default function ProtectionLab() {
                         <div className="min-w-0 space-y-3 self-start" data-testid="protlab-fullbreach-insights">
                             <InsightCluster>
                                 <MiniInsightTable title="Session Distribution" rows={bt.sessionDistributionRows} columns={["session", "share"]} />
-                                <MiniInsightTable title="Breach Rate by Session" rows={bt.sessionRateRows} columns={["session", "rate"]} />
-                                <MiniInsightTable title="Breached Expectancy by Session" rows={bt.sessionExpectancyRows} columns={["session", "expectancy"]} />
+                                <MiniInsightTable title="Failure Rate by Session" rows={bt.sessionRateRows} columns={["session", "rate"]} />
+                                <MiniInsightTable title="Invalidated Expectancy by Session" rows={bt.sessionExpectancyRows} columns={["session", "expectancy"]} />
                             </InsightCluster>
                             <InsightCluster>
                                 <MiniInsightTable title="Top Toxic Hours" rows={bt.topToxicHours} columns={["hour", "netR"]} danger />
@@ -346,11 +346,11 @@ export default function ProtectionLab() {
                                     <InsightRow
                                         label={bt.worstDaySession ? bt.worstDaySession.label : "Limited Data"}
                                         value={bt.worstDaySession ? fmtR(bt.worstDaySession.netR) : "—"}
-                                        sub={bt.worstDaySession ? `${bt.worstDaySession.count} breaches` : "no combo data"}
+                                        sub={bt.worstDaySession ? `${bt.worstDaySession.count} invalidations` : "no combo data"}
                                         tone="danger"
                                     />
                                 </InsightGroup>
-                                <InsightGroup title="Breached Losers">
+                                <InsightGroup title="Hard Invalidation Losses">
                                     <InsightRow
                                         label="Loss Share"
                                         value={fmtPct(bt.breachedLosersPct)}
@@ -361,18 +361,18 @@ export default function ProtectionLab() {
                             </InsightCluster>
                         </div>
                     </div>
-                    {bt.fullUndated > 0 && <Note tone="warning">{bt.fullUndated} fully-breached trade{bt.fullUndated === 1 ? "" : "s"} lack a parseable entry/fill time and are omitted from the grid.</Note>}
+                    {bt.fullUndated > 0 && <Note tone="warning">{bt.fullUndated} hard invalidation trade{bt.fullUndated === 1 ? "" : "s"} lack a parseable entry/fill time and are omitted from the grid.</Note>}
                 </NeonPanel>
 
-                <NeonPanel className="xl:col-span-3" title="Close-Confirmed Breach · Weekday × Hour (UTC)"
+                <NeonPanel className="xl:col-span-3" title="Loss Analytics · Close-Confirmed Invalidations"
                     action={<Pill tone={bt.hasCloseFields ? (bt.closeGrid.total ? "danger" : "muted") : "muted"}>{bt.hasCloseFields ? `${bt.closeGrid.total} CONFIRMED` : "LIMITED DATA"}</Pill>}>
                     {bt.hasCloseFields ? (
                         <>
-                            <Desc icon={ShieldAlert}>Trades with a close-confirmed OB breach. Bucketed by close_breach_time (UTC).</Desc>
+                            <Desc icon={ShieldAlert}>Trades with a close-confirmed OB invalidation. Bucketed by close_breach_time (UTC).</Desc>
                             <div className="mt-3">
                                 <WeekHourHeatmap grid={bt.closeGrid} testId="protlab-closebreach-heatmap" />
                             </div>
-                            {bt.closeUndated > 0 && <Note tone="warning">{bt.closeUndated} close-confirmed breach{bt.closeUndated === 1 ? "" : "es"} lack a parseable close_breach_time and are omitted from the grid.</Note>}
+                            {bt.closeUndated > 0 && <Note tone="warning">{bt.closeUndated} close-confirmed invalidation{bt.closeUndated === 1 ? "" : "s"} lack a parseable close_breach_time and are omitted from the grid.</Note>}
                         </>
                     ) : (
                         <div data-testid="protlab-closebreach-heatmap">
@@ -381,21 +381,21 @@ export default function ProtectionLab() {
                     )}
                 </NeonPanel>
 
-                <NeonPanel className="xl:col-span-3" title="Breach Session Breakdown (UTC)" action={<ConfidenceTag level={bt.hasBaselineCloseFields ? "exact" : "estimated"} />}>
+                <NeonPanel className="xl:col-span-3" title="Loss Analytics · Failure Session Breakdown" action={<ConfidenceTag level={bt.hasBaselineCloseFields ? "exact" : "estimated"} />}>
                     <DataTable
                         testId="protlab-breach-session"
                         columns={[
                             { key: "session", label: "Session" },
-                            { key: "fullCount", label: "Full Breach", align: "right" },
+                            { key: "fullCount", label: "Hard Invalidation", align: "right" },
                             { key: "closeCount", label: "Close-Confirmed", align: "right", render: (r) => (bt.hasBaselineCloseFields ? String(r.closeCount) : "—") },
                             { key: "netR", label: "Net R", align: "right", render: (r) => <ColoredR value={r.netR} /> },
                             { key: "avgR", label: "Avg R", align: "right", render: (r) => fmtExp(r.avgR) },
-                            { key: "breachRate", label: "Breach Rate", align: "right", render: (r) => (r.breachRate == null ? "—" : fmtPct(r.breachRate)) },
+                            { key: "breachRate", label: "Failure Rate", align: "right", render: (r) => (r.breachRate == null ? "—" : fmtPct(r.breachRate)) },
                         ]}
                         rows={bt.sessionRows}
                         rowKey="session"
                     />
-                    <Note>Net R / Avg R are over fully-breached trades per session (entry/fill session). Breach rate = full breaches ÷ trades in that session.</Note>
+                    <Note>Net R / Avg R are over hard invalidation trades per session (entry/fill session). Failure rate = hard invalidations ÷ trades in that session.</Note>
                 </NeonPanel>
 
                 <BreachSessionMatrix matrix={bt.matrix} />
@@ -404,11 +404,11 @@ export default function ProtectionLab() {
                 <NeonPanel className="xl:col-span-3" title="Future Protections · Requires Exporter Data" action={<ConfidenceTag level="requires" />}>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3" data-testid="protlab-future">
                         <FutureCard icon={Newspaper} title="F · News Blackout"
-                            body="Future filter to compare breach / fast-stopout rates around high-impact news windows."
+                            body="Future filter to compare hard invalidation / fast-stopout rates around high-impact news windows."
                             status="Future data required" />
-                        <FutureCard icon={Ban} title="G · Cancel Pending If Pre-Fill Breach"
-                            body="Future rule: cancel a pending order if the OB is fully breached before entry."
-                            status="Requires pre-fill breach export / pending lifecycle analytics" />
+                        <FutureCard icon={Ban} title="G · Cancel Pending If Pre-Fill Invalidation"
+                            body="Future rule: cancel a pending order if the OB is hard invalidated before entry."
+                            status="Requires pre-fill invalidation export / pending lifecycle analytics" />
                     </div>
                 </NeonPanel>
 
@@ -1636,7 +1636,7 @@ function deriveSessionFromTimestamp(value) {
 
 function WeekHourHeatmap({ grid, testId }) {
     if (!grid.total) {
-        return <div data-testid={testId} className="py-6 text-center text-muted-lab font-mono text-[12px]">No breaches recorded for this view.</div>;
+        return <div data-testid={testId} className="py-6 text-center text-muted-lab font-mono text-[12px]">No invalidations recorded for this view.</div>;
     }
     return (
         <div className="overflow-x-auto scrollbar-thin" data-testid={testId}>
@@ -1668,7 +1668,7 @@ function WeekHourHeatmap({ grid, testId }) {
                                     <td key={h}>
                                         <div className="clip-bevel-sm px-1 py-1 text-center text-white tabular-nums leading-tight"
                                             style={{ background: bg }}
-                                            title={`${wd} ${padH(h)}:00 UTC · ${c.count} breach${c.count === 1 ? "" : "es"} · ${fmtR(c.netR)}`}>
+                                            title={`${wd} ${padH(h)}:00 UTC · ${c.count} invalidation${c.count === 1 ? "" : "s"} · ${fmtR(c.netR)}`}>
                                             <div>{c.count}</div>
                                             <div className="text-[8px] text-white/70">{cellR(c.netR)}</div>
                                         </div>
@@ -1686,20 +1686,20 @@ function WeekHourHeatmap({ grid, testId }) {
 function BreachSessionMatrix({ matrix }) {
     if (!matrix) {
         return (
-            <NeonPanel className="xl:col-span-3" title="Origin Session × Breach Session (UTC)" action={<Pill tone="muted">LIMITED DATA</Pill>}>
+            <NeonPanel className="xl:col-span-3" title="Origin Session × Failure Session" action={<Pill tone="muted">LIMITED DATA</Pill>}>
                 <div data-testid="protlab-breach-matrix">
-                    <Note tone="warning">Limited Data — origin session unavailable (requires obOriginSession / obOriginTime). Cannot build the origin × breach matrix.</Note>
+                    <Note tone="warning">Limited Data — origin session unavailable (requires obOriginSession / obOriginTime). Cannot build the origin × failure matrix.</Note>
                 </div>
             </NeonPanel>
         );
     }
     return (
-        <NeonPanel className="xl:col-span-3" title="Origin Session × Breach Session (UTC)" action={<Pill tone="muted">{matrix.total} BREACHES</Pill>}>
+        <NeonPanel className="xl:col-span-3" title="Origin Session × Failure Session" action={<Pill tone="muted">{matrix.total} INVALIDATIONS</Pill>}>
             <div className="overflow-x-auto scrollbar-thin" data-testid="protlab-breach-matrix">
                 <table className="w-full min-w-[640px] font-mono text-[11px] border-separate border-spacing-1">
                     <thead>
                         <tr>
-                            <th className="text-muted-lab text-left px-2 py-1 text-[10px] uppercase tracking-wider whitespace-nowrap">Origin / Breach</th>
+                            <th className="text-muted-lab text-left px-2 py-1 text-[10px] uppercase tracking-wider whitespace-nowrap">Origin / Failure</th>
                             {matrix.cols.map((c) => (
                                 <th key={c} className="text-muted-lab px-2 py-1 text-[10px] uppercase tracking-wider">{c}</th>
                             ))}

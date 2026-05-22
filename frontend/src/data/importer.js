@@ -265,8 +265,41 @@ export function parseTradesCSV(text) {
             protection_exit_price: numOrNull(pick(r, "protection_exit_price")),
             protection_trigger_time: String(pick(r, "protection_trigger_time") || ""),
             protection_trigger_penetration_pct: numOrNull(pick(r, "protection_trigger_penetration_pct")),
+            entry_model: String(pick(r, "entry_model") || ""),
+            entry_threshold_pct: numOrNull(pick(r, "entry_threshold_pct")),
+            planned_entry_price: numOrNull(pick(r, "planned_entry_price")),
+            actual_entry_price: numOrNull(pick(r, "actual_entry_price")),
+            entry_model_filled: boolOrNull(pick(r, "entry_model_filled")),
+            missed_trade: boolOrNull(pick(r, "missed_trade")),
+            missed_reason: String(pick(r, "missed_reason") || ""),
+            bars_to_fill: numOrNull(pick(r, "bars_to_fill")),
+            minutes_to_fill: numOrNull(pick(r, "minutes_to_fill")),
+            news_blackout: boolOrNull(pick(r, "news_blackout")),
+            news_blackout_trigger_time: String(pick(r, "news_blackout_trigger_time") || ""),
+            news_blackout_event_time: String(pick(r, "news_blackout_event_time") || ""),
+            news_blackout_currency: String(pick(r, "news_blackout_currency") || ""),
+            news_blackout_impact: String(pick(r, "news_blackout_impact") || ""),
+            news_blackout_event: String(pick(r, "news_blackout_event") || ""),
+            news_blackout_window_start: String(pick(r, "news_blackout_window_start") || ""),
+            news_blackout_window_end: String(pick(r, "news_blackout_window_end") || ""),
+            news_blackout_minutes_from_event: numOrNull(pick(r, "news_blackout_minutes_from_event")),
         };
     });
+}
+
+export function parseNewsEventsCSV(text) {
+    const { rows } = parseCSV(text);
+    return rows
+        .map((r, i) => ({
+            id: `NEWS-${String(i + 1).padStart(5, "0")}`,
+            time: String(pick(r, "time", "timestamp", "datetime", "date") || ""),
+            currency: String(pick(r, "currency", "ccy") || "").toUpperCase(),
+            impact: String(pick(r, "impact", "importance") || "").toLowerCase(),
+            event: String(pick(r, "event", "name", "title") || ""),
+            source: String(pick(r, "source") || ""),
+            country: String(pick(r, "country") || ""),
+        }))
+        .filter((event) => event.time && event.currency && event.event);
 }
 
 // ─────────────────────── Helpers ───────────────────────
@@ -401,6 +434,16 @@ function protectedTradeFileInfo(name) {
     };
 }
 
+function entryTradeFileInfo(name) {
+    const file = String(name || "").split(/[\\/]/).pop().toLowerCase();
+    const m = file.match(/^trades_(single_position|allow_multi_position|one_per_direction)__(entry_.+)\.csv$/);
+    if (!m) return null;
+    return {
+        baseVariant: m[1],
+        mode: normalizeEntryModeKey(m[2]),
+    };
+}
+
 function normalizeProtectionModeKey(value) {
     return String(value || "")
         .trim()
@@ -412,6 +455,26 @@ function normalizeProtectionModeKey(value) {
         .replace(/^_+|_+$/g, "");
 }
 
+function normalizeEntryModeKey(value) {
+    return String(value || "")
+        .trim()
+        .toLowerCase()
+        .replace(/^trades_(single_position|allow_multi_position|one_per_direction)__/, "")
+        .replace(/\.csv$/, "")
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/_+/g, "_")
+        .replace(/^_+|_+$/g, "");
+}
+
+function newsDateRange(events) {
+    const sorted = (events || [])
+        .map((event) => normalizeTimestamp(event.time))
+        .filter((time) => time != null)
+        .sort((a, b) => a - b);
+    if (!sorted.length) return "News calendar";
+    return `${new Date(sorted[0] * 1000).toISOString().slice(0, 10)} → ${new Date(sorted[sorted.length - 1] * 1000).toISOString().slice(0, 10)}`;
+}
+
 function detectFileKind(name) {
     const n = name.toLowerCase();
     if (n.endsWith(".json")) {
@@ -421,16 +484,27 @@ function detectFileKind(name) {
     }
     if (n.endsWith(".csv")) {
         if (n.includes("candle"))                            return "candles";
+        if (entryTradeFileInfo(name))                         return "trades_entry";
         if (protectedTradeFileInfo(name))                     return "trades_protected";
         if (n.includes("order_block") || n.includes("ob_"))  return "order_blocks";
         if (n.includes("trades_single_position"))            return "trades_single_position";
         if (n.includes("trades_allow_multi_position"))       return "trades_allow_multi_position";
         if (n.includes("trades_one_per_direction"))          return "trades_one_per_direction";
         if (n.includes("trade"))                             return "trades_unknown";
+        if (isNewsCalendarFile(n))                           return "news_events";
         if (n.includes("mismatch") || n.includes("parity"))  return "mismatches";
         if (n.includes("rr_sweep"))                          return "rr_sweep";
     }
     return "unknown";
+}
+
+function isNewsCalendarFile(name) {
+    const file = String(name || "").split(/[\\/]/).pop().toLowerCase();
+    return file === "master_economic_calendar_2020_present.csv"
+        || file === "economic_calendar.csv"
+        || file === "news.csv"
+        || (file.includes("calendar") && file.endsWith(".csv"))
+        || (file.includes("news") && file.endsWith(".csv"));
 }
 
 function checkStatus(ok, missingValue = false) {
@@ -501,8 +575,12 @@ export async function ingestRunBundle(fileList) {
     const collected = {
         config: null, summary: null, orderBlocks: null, candles: null,
         tradesByVariant: {},
+        entryTradesByMode: {},
+        entrySourceFiles: [],
         protectionTradesByMode: {},
         protectionSourceFiles: [],
+        newsEvents: [],
+        newsSourceFiles: [],
         readErrors: [],
         validationErrors: [],
         validationWarnings: [],
@@ -545,6 +623,13 @@ export async function ingestRunBundle(fileList) {
                     collected.recognized.push({ name: f.name, kind, rows: collected.orderBlocks.length });
                     break;
                 }
+                case "news_events": {
+                    const events = parseNewsEventsCSV(text);
+                    collected.newsEvents = [...collected.newsEvents, ...events];
+                    collected.newsSourceFiles.push({ name: f.name, kind, rows: events.length });
+                    collected.recognized.push({ name: f.name, kind, rows: events.length });
+                    break;
+                }
                 case "trades_single_position":
                 case "trades_allow_multi_position":
                 case "trades_one_per_direction":
@@ -568,6 +653,20 @@ export async function ingestRunBundle(fileList) {
                     collected.recognized.push({ name: f.name, kind, mode, baseVariant: info.baseVariant, rows: t.length });
                     break;
                 }
+                case "trades_entry": {
+                    const info = entryTradeFileInfo(f.name);
+                    const parsed = parseCSV(text);
+                    validateCsvHeaders(kind, f.name, parsed.headers, collected.validationErrors, collected.validationWarnings);
+                    const t = parseTradesCSV(text);
+                    const mode = normalizeEntryModeKey(info.mode || t[0]?.entry_model);
+                    collected.entryTradesByMode[`${info.baseVariant}__${mode}`] = t;
+                    if (!collected.entryTradesByMode[mode] || info.baseVariant === "single_position") {
+                        collected.entryTradesByMode[mode] = t;
+                    }
+                    collected.entrySourceFiles.push({ name: f.name, kind, mode, baseVariant: info.baseVariant, rows: t.length });
+                    collected.recognized.push({ name: f.name, kind, mode, baseVariant: info.baseVariant, rows: t.length });
+                    break;
+                }
                 default:
                     collected.unrecognized.push({ name: f.name, kind });
             }
@@ -583,9 +682,69 @@ export async function ingestRunBundle(fileList) {
     if (!collected.summary)                           missing.push("summary.json");
     if (!collected.orderBlocks)                       missing.push("order_blocks.csv");
     if (!Object.keys(collected.tradesByVariant).length) missing.push("trades_*.csv");
-    missing.forEach((artifact) => {
-        collected.validationErrors.push({ severity: "error", file: artifact, kind: "required", field: artifact, message: `Missing required artifact: ${artifact}` });
-    });
+    const newsOnlyImport = collected.newsEvents.length
+        && !collected.config
+        && !collected.summary
+        && !collected.orderBlocks
+        && !Object.keys(collected.tradesByVariant).length;
+    if (!newsOnlyImport) {
+        missing.forEach((artifact) => {
+            collected.validationErrors.push({ severity: "error", file: artifact, kind: "required", field: artifact, message: `Missing required artifact: ${artifact}` });
+        });
+    }
+
+    if (newsOnlyImport) {
+        const id = `news_calendar_${Date.now()}`;
+        const bundle = {
+            id,
+            config: {},
+            summary: {
+                id,
+                symbol: "Economic Calendar",
+                detectionTf: "News",
+                executionTf: "UTC",
+                dateRange: newsDateRange(collected.newsEvents),
+                rr: 0,
+                stopBuffer: 0,
+                verifyTicks: 0,
+                entryBuffer: 0,
+                trades: 0,
+                wins: 0,
+                losses: 0,
+                winRate: 0,
+                netR: 0,
+                validation: 100,
+                executionMode: "news_calendar",
+                date: new Date().toISOString().slice(0, 10),
+            },
+            trades: [],
+            tradesByVariant: {},
+            primaryVariant: null,
+            tradeMarkers: [],
+            tradeMarkersByVariant: {},
+            equityCurve: [],
+            equityCurveByVariant: {},
+            protectionResults: { summary: {}, tradesByMode: {}, equityCurveByMode: {}, sourceFiles: [], tradesOmittedForStorage: false },
+            entryResults: { summary: {}, tradesByMode: {}, equityCurveByMode: {}, sourceFiles: [], tradesOmittedForStorage: false },
+            newsEvents: collected.newsEvents,
+            newsSourceFiles: collected.newsSourceFiles,
+            orderBlocks: [],
+            candles: null,
+            hasCandles: false,
+            validationErrors: collected.validationErrors,
+            validationWarnings: collected.validationWarnings,
+            importedAt: new Date().toISOString(),
+        };
+        return {
+            ok: true,
+            bundle,
+            recognized: collected.recognized,
+            unrecognized: collected.unrecognized,
+            validationErrors: collected.validationErrors,
+            validationWarnings: collected.validationWarnings,
+            readErrors: collected.readErrors,
+        };
+    }
 
     if (missing.length || collected.validationErrors.length) {
         return {
@@ -644,12 +803,18 @@ export async function ingestRunBundle(fileList) {
     const protectionTradesByMode = Object.fromEntries(
         Object.entries(collected.protectionTradesByMode).map(([mode, trades]) => [mode, enrichTradesWithOrderBlocks(trades, obLookup, pipSize)]),
     );
+    const entryTradesByMode = Object.fromEntries(
+        Object.entries(collected.entryTradesByMode).map(([mode, trades]) => [mode, enrichTradesWithOrderBlocks(trades, obLookup, pipSize)]),
+    );
     const primaryTrades = tradesByVariant[primaryVariant] || [];
     const equityCurveByVariant = Object.fromEntries(
         Object.entries(tradesByVariant).map(([variant, trades]) => [variant, computeEquityCurve(trades)]),
     );
     const protectionEquityCurveByMode = Object.fromEntries(
         Object.entries(protectionTradesByMode).map(([mode, trades]) => [mode, computeEquityCurve(trades)]),
+    );
+    const entryEquityCurveByMode = Object.fromEntries(
+        Object.entries(entryTradesByMode).map(([mode, trades]) => [mode, computeEquityCurve(trades)]),
     );
     const tradeMarkersByVariant = Object.fromEntries(
         Object.entries(tradesByVariant).map(([variant, trades]) => [variant, computeTradeMarkers(trades, candleIdx)]),
@@ -684,6 +849,7 @@ export async function ingestRunBundle(fileList) {
         validation:   Number(sm.validation ?? 100),
         integrity,
         protection_results: sm.protection_results || {},
+        entry_results: sm.entry_results || {},
         executionMode:sm.execution_mode || cfg.execution_mode || primaryVariant,
         reverseCancels: Number(sm.reverse_cancels ?? sm.reverseCancels ?? 0),
         date:         (sm.completed_at || new Date().toISOString()).slice(0, 10),
@@ -707,6 +873,15 @@ export async function ingestRunBundle(fileList) {
             sourceFiles: collected.protectionSourceFiles,
             tradesOmittedForStorage: false,
         },
+        entryResults: {
+            summary: sm.entry_results || {},
+            tradesByMode: entryTradesByMode,
+            equityCurveByMode: entryEquityCurveByMode,
+            sourceFiles: collected.entrySourceFiles,
+            tradesOmittedForStorage: false,
+        },
+        newsEvents: collected.newsEvents,
+        newsSourceFiles: collected.newsSourceFiles,
         orderBlocks: mappedOBs,
         candles: hasCandles ? collected.candles : null,
         hasCandles,

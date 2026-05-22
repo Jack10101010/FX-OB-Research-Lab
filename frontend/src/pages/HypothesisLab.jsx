@@ -49,8 +49,8 @@ const SIM_FILTERS = [
     { key: "excl_age_14p",     group: "Order Block", label: "Exclude OB age: 14d+",       matches: (t) => ageBucketOf(t) === "14d+" },
     { key: "excl_width_nar",   group: "Order Block", label: "Exclude width: 0–5 pips",    matches: (t) => widthBucketOf(t) === "0–5p" },
     { key: "excl_width_wid",   group: "Order Block", label: "Exclude width: >10 pips",    matches: (t) => Number(t?.obWidthPips ?? t?.ob_width_pips) > 10 },
-    { key: "excl_full_br",     group: "Order Block", label: "Exclude fully breached",     matches: isFullBreach },
-    { key: "excl_close_br",    group: "Order Block", label: "Exclude close-conf. breach", matches: isCloseBreach },
+    { key: "excl_full_br",     group: "Order Block", label: "Exclude hard invalidation losses", matches: isFullBreach },
+    { key: "excl_close_br",    group: "Order Block", label: "Exclude close-conf. invalidation", matches: isCloseBreach },
     { key: "excl_pen_high",    group: "Order Block", label: "Exclude pen. > 75%",         matches: (t) => penBucketOf(t) === ">75%" },
     { key: "excl_dist_far",    group: "Order Block", label: "Exclude distance > 20 pips", matches: (t) => Number(t?.distanceBeforeFill ?? t?.distance_before_fill_pips) > 20 },
 ];
@@ -67,7 +67,7 @@ const ENTRY_MODES = [
 
 const PROTECTION_MODES = [
     { mode: "baseline",          label: "Baseline (no protection)" },
-    { mode: "full_breach_exit",  label: "Full Breach Exit" },
+    { mode: "full_breach_exit",  label: "Hard Invalidation Exit" },
     { mode: "penetration_exits", label: "Penetration Exits" },
     { mode: "close_confirmed",   label: "Close-Confirmed Exits" },
 ];
@@ -75,7 +75,7 @@ const PROTECTION_MODES = [
 const PRESETS = [
     { label: "Avoid New York",       filters: ["excl_ny"],                                   entry: null,                    protection: null },
     { label: "Avoid toxic hour",     filters: ["excl_hr_15"],                                entry: null,                    protection: null },
-    { label: "Avoid fully breached", filters: ["excl_full_br"],                              entry: null,                    protection: null },
+    { label: "Avoid hard invalidation losses", filters: ["excl_full_br"],                              entry: null,                    protection: null },
     { label: "Use best entry model", filters: [],                                            entry: "BEST",                  protection: null },
     { label: "Entry 25% only",       filters: [],                                            entry: "entry_penetration_25p0",protection: null },
     { label: "Conservative filter",  filters: ["excl_ny", "excl_hr_15", "excl_full_br"],    entry: null,                    protection: null },
@@ -253,7 +253,7 @@ export default function HypothesisLab() {
                         <InsightGroup title="Protection"  items={insights.protection} />
                         <InsightGroup title="Timing"      items={insights.timing} />
                         <InsightGroup title="Order Block" items={insights.ob} />
-                        <InsightGroup title="Breach"      items={insights.breach} />
+                        <InsightGroup title="Loss Behavior" items={insights.breach} />
                     </div>
                 </Section>
 
@@ -888,10 +888,10 @@ function buildInsights(trades, entryRows, protRows) {
             ins("Worst Width",     worstWid  ? `${worstWid.label} (${fmtR(worstWid.netR)})`  : null, hasData),
         ],
         breach: [
-            ins("Most Breached Sess.", mostBrSess  ? `${mostBrSess.label}  (n=${mostBrSess.count})`       : null, hasBreach),
-            ins("Worst Breached Sess.",worstBrSess ? `${worstBrSess.label} (${fmtR(worstBrSess.netR)})`   : null, hasBreach),
-            ins("Worst Breach Hour",   worstBrHr   ? `${worstBrHr.label}   (${fmtR(worstBrHr.netR)})`    : null, hasBreach),
-            ins("Breached Winners %",  brWinPct != null ? `${brWinPct}%`                                  : null, hasBreach),
+            ins("Most Invalidated Sess.", mostBrSess  ? `${mostBrSess.label}  (n=${mostBrSess.count})`       : null, hasBreach),
+            ins("Worst Loss Sess.",worstBrSess ? `${worstBrSess.label} (${fmtR(worstBrSess.netR)})`   : null, hasBreach),
+            ins("Worst Loss Hour",   worstBrHr   ? `${worstBrHr.label}   (${fmtR(worstBrHr.netR)})`    : null, hasBreach),
+            ins("Invalidated Winners %",  brWinPct != null ? `${brWinPct}%`                                  : null, hasBreach),
         ],
     };
 }

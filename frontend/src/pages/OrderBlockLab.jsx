@@ -205,12 +205,12 @@ function FailureLab({ trades }) {
 function CatastrophicBreachPanel({ analysis }) {
     return (
         <NeonPanel
-            title="Catastrophic Breach Analysis"
-            action={<Pill tone={analysis.breachCount ? "danger" : "muted"}>{formatPct(analysis.breachPct)} BREACH</Pill>}
+            title="Loss Analytics · Catastrophic Failures"
+            action={<Pill tone={analysis.breachCount ? "danger" : "muted"}>{formatPct(analysis.breachPct)} FAILURE</Pill>}
         >
             <div className="grid grid-cols-2 gap-2 mb-3">
-                <MetricChip label="Breached" value={String(analysis.breachCount)} sub={`${formatPct(analysis.breachPct)} of known`} tone={analysis.breachCount ? "danger" : "muted"} icon={AlertTriangle} />
-                <MetricChip label="Avg Loss" value={analysis.avgLoss == null ? "—" : formatR(analysis.avgLoss)} sub="breached losses" tone="secondary" icon={TrendingUp} />
+                <MetricChip label="Hard Invalidated" value={String(analysis.breachCount)} sub={`${formatPct(analysis.breachPct)} of known`} tone={analysis.breachCount ? "danger" : "muted"} icon={AlertTriangle} />
+                <MetricChip label="Avg Loss" value={analysis.avgLoss == null ? "—" : formatR(analysis.avgLoss)} sub="hard invalidation losses" tone="secondary" icon={TrendingUp} />
             </div>
             <DataTable
                 testId="oblab-catastrophic-breach"
@@ -339,7 +339,7 @@ function buildResearchReport({ run, variant, analytics }) {
         "EXECUTION FINDINGS",
         `Best penetration bucket: ${formatBucketSummary(bestRow(analytics.penetrationRows))}`,
         `Worst penetration bucket: ${formatBucketSummary(worstRow(analytics.penetrationRows))}`,
-        `Catastrophic breach rate: ${formatPct(analytics.catastrophicBreach?.breachPct || 0)} (${analytics.catastrophicBreach?.breachCount || 0} breached)`,
+        `Catastrophic failure rate: ${formatPct(analytics.catastrophicBreach?.breachPct || 0)} (${analytics.catastrophicBreach?.breachCount || 0} hard invalidated)`,
         `Fastest losing bucket: ${formatBucketSummary(fastestLosingRow(analytics.fastStopoutRows))}`,
         `Best distance-before-fill bucket: ${formatBucketSummary(bestRow(analytics.distanceBeforeFillRows))}`,
         "",
@@ -436,11 +436,11 @@ function buildCatastrophicBreach(trades) {
         finalizeBucket(breached.reduce((bucket, trade) => {
             addTradeToBucket(bucket, trade);
             return bucket;
-        }, emptyBucket("Breached"))),
+        }, emptyBucket("Hard Invalidated"))),
         finalizeBucket(known.filter((trade) => trade.ob_fully_breached === false).reduce((bucket, trade) => {
             addTradeToBucket(bucket, trade);
             return bucket;
-        }, emptyBucket("Not Breached"))),
+        }, emptyBucket("Not Hard Invalidated"))),
     ];
     if (known.length !== trades.length) {
         rows.push(finalizeBucket(trades.filter((trade) => trade?.ob_fully_breached !== true && trade?.ob_fully_breached !== false).reduce((bucket, trade) => {
