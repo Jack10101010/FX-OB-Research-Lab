@@ -16,14 +16,6 @@ export function MetricChip({
     valueClassName,
     testId,
 }) {
-    const toneMap = {
-        primary:   "before:bg-[hsl(var(--accent-primary))]",
-        secondary: "before:bg-[hsl(var(--accent-secondary))]",
-        success:   "before:bg-[hsl(var(--success))]",
-        danger:    "before:bg-[hsl(var(--danger))]",
-        warning:   "before:bg-[hsl(var(--warning))]",
-        muted:     "before:bg-[hsl(var(--border-mid))]",
-    };
     const valueColor = {
         primary:   "text-[hsl(var(--accent-primary))] text-glow-primary",
         secondary: "text-[hsl(var(--accent-secondary))] text-glow-secondary",
@@ -55,20 +47,12 @@ export function MetricChip({
                 {/* Inner panel */}
                 <div className="clip-bevel relative overflow-hidden bg-[hsl(var(--panel))]">
                     <div className="absolute inset-0 bg-gradient-to-br from-[hsl(var(--accent-primary)/0.06)] via-transparent to-[hsl(var(--accent-secondary)/0.04)] pointer-events-none" />
-                    {/* tone accent strip top-left */}
-                    <span
-                        className={cn(
-                            "absolute top-3 left-3 w-1.5 h-1.5 rounded-full before:absolute before:inset-0 before:rounded-full",
-                            toneMap[tone],
-                        )}
-                        style={{ boxShadow: `0 0 10px hsl(var(--accent-${tone === "secondary" ? "secondary" : "primary"}))` }}
-                    />
                     <div className="relative px-4 pt-3 pb-3.5 min-h-[96px] flex flex-col justify-between">
-                        <div className="flex items-center justify-between">
-                            <span className="pl-4 text-[10px] font-mono tracking-[0.18em] uppercase text-title-lab">
+                        <div className="flex items-center gap-2">
+                            {Icon && <Icon className="w-3.5 h-3.5 text-[hsl(var(--accent-primary))]" />}
+                            <span className="text-[10px] font-mono tracking-[0.18em] uppercase text-[hsl(var(--accent-primary))]">
                                 {label}
                             </span>
-                            {Icon && <Icon className="w-3.5 h-3.5 text-muted-lab" />}
                         </div>
                         <div className="flex items-end justify-between gap-2 mt-1">
                             <div className={cn("font-display font-semibold leading-none text-[28px] tabular-nums", valueColor, valueClassName)}>

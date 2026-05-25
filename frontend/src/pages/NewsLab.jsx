@@ -1,27 +1,33 @@
 import React from "react";
-import { PageHeader } from "@/components/lab/AppShell";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { MetricChip } from "@/components/lab/MetricChip";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
 import { useDataset } from "@/data/store";
+import { ActiveRunContext } from "@/components/lab/ActiveRunContext";
 import {
     AlertTriangle, CalendarClock, Clipboard, Download, FileText,
     Globe2, ListChecks, Newspaper, ShieldAlert,
 } from "lucide-react";
 
 const EMPTY_TRADES = [];
+const EMPTY_EVENTS = [];
+const TABLE_ROW_LIMIT = 500;
+const OVERLAP_PREVIEW_LIMIT = 250;
+const OVERLAP_IMPACT_OPTIONS = {
+    high: { label: "High Impact", impacts: ["high"] },
+    medium_high: { label: "Medium + High", impacts: ["medium", "high"] },
+    all: { label: "All Impacts", impacts: null },
+};
 const CSV_TEMPLATE = "time,currency,impact,event\n2025-06-12 12:30:00,USD,high,CPI\n";
-
-const PLACEHOLDER_WINDOWS = [
-    { window: "15m before / 15m after" },
-    { window: "30m before / 30m after" },
-    { window: "60m before / 60m after" },
-    { window: "120m before / 60m after" },
-];
 
 const EVENT_TYPES = ["CPI", "NFP", "FOMC", "Rate Decision", "PMI", "Other"];
 const CURRENCIES = ["USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD"];
 const SESSIONS = ["Asia", "London", "London Lull", "New York", "Outside"];
+const DEFAULT_COMPARISON_SCENARIOS = [
+    { id: "scenario-15-15-high", beforeMinutes: 15, afterMinutes: 15, impactMode: "high" },
+    { id: "scenario-30-30-high", beforeMinutes: 30, afterMinutes: 30, impactMode: "high" },
+    { id: "scenario-60-60-high", beforeMinutes: 60, afterMinutes: 60, impactMode: "high" },
+];
 
 const BACKLOG = [
     "ForexFactory / Investing.com calendar import",
@@ -42,30 +48,66 @@ export default function NewsLab() {
     const [currencyFilter, setCurrencyFilter] = React.useState("ALL");
     const [impactFilter, setImpactFilter] = React.useState("ALL");
     const [searchFilter, setSearchFilter] = React.useState("");
+    const [overlapEnabled, setOverlapEnabled] = React.useState(false);
+    const [overlapBeforeMinutes, setOverlapBeforeMinutes] = React.useState(30);
+    const [overlapAfterMinutes, setOverlapAfterMinutes] = React.useState(30);
+    const [overlapImpactMode, setOverlapImpactMode] = React.useState("high");
+    const [newsDateStart, setNewsDateStart] = React.useState("");
+    const [newsDateEnd, setNewsDateEnd] = React.useState("");
+    const [savedOverlapScenarios, setSavedOverlapScenarios] = React.useState([]);
+    const [scenarioNameDraft, setScenarioNameDraft] = React.useState("Scenario 1");
+    const [comparisonScenarios, setComparisonScenarios] = React.useState(DEFAULT_COMPARISON_SCENARIOS);
+    const [comparisonRows, setComparisonRows] = React.useState([]);
+    const [copiedConfigId, setCopiedConfigId] = React.useState("");
+    const deferredSearchFilter = React.useDeferredValue(searchFilter);
     const activeRun = activeRunId ? runs?.[activeRunId] : null;
     const newsResults = getNewsResults(activeRun, ACTIVE_RUN);
-    const newsEvents = React.useMemo(() => normalizeNewsEvents(activeRun?.newsEvents || ACTIVE_RUN?.newsEvents || []), [activeRun, ACTIVE_RUN]);
+    const rawNewsEvents = activeRun?.newsEvents || ACTIVE_RUN?.newsEvents || EMPTY_EVENTS;
+    const newsEvents = React.useMemo(() => normalizeNewsEvents(rawNewsEvents), [rawNewsEvents]);
     const hasNewsEvents = newsEvents.length > 0;
     const hasNewsResults = Boolean(newsResults);
     const hasNewsData = hasNewsResults || hasNewsEvents;
-    const eventSummary = React.useMemo(() => buildNewsEventSummary(newsEvents), [newsEvents]);
-    const relevantCurrencies = React.useMemo(() => deriveSymbolCurrencies(ACTIVE_RUN?.symbol || activeRun?.summary?.symbol || activeRun?.config?.symbol), [ACTIVE_RUN, activeRun]);
+    const dateFilteredNewsEvents = React.useMemo(
+        () => applyDateRange(newsEvents, newsDateStart, newsDateEnd),
+        [newsEvents, newsDateStart, newsDateEnd],
+    );
+    const dateRangeActive = Boolean(newsDateStart || newsDateEnd);
+    const eventSummary = React.useMemo(() => buildNewsEventSummary(dateFilteredNewsEvents), [dateFilteredNewsEvents]);
+    const relevantCurrencies = React.useMemo(
+        () => deriveSymbolCurrencies(ACTIVE_RUN?.symbol || activeRun?.summary?.symbol || activeRun?.config?.symbol),
+        [ACTIVE_RUN, activeRun],
+    );
     const filteredEvents = React.useMemo(
-        () => filterNewsEvents(newsEvents, { currencyFilter, impactFilter, searchFilter }),
-        [newsEvents, currencyFilter, impactFilter, searchFilter],
+        () => filterNewsEvents(dateFilteredNewsEvents, { currencyFilter, impactFilter, searchFilter: deferredSearchFilter }),
+        [dateFilteredNewsEvents, currencyFilter, impactFilter, deferredSearchFilter],
     );
+    const visibleFilteredEvents = React.useMemo(() => filteredEvents.slice(0, TABLE_ROW_LIMIT), [filteredEvents]);
     const relevantEvents = React.useMemo(
-        () => relevantCurrencies.length ? newsEvents.filter((event) => relevantCurrencies.includes(event.currency)) : [],
-        [newsEvents, relevantCurrencies],
+        () => relevantCurrencies.length ? dateFilteredNewsEvents.filter((e) => relevantCurrencies.includes(e.currency)) : [],
+        [dateFilteredNewsEvents, relevantCurrencies],
     );
+    const visibleRelevantEvents = React.useMemo(() => relevantEvents.slice(0, TABLE_ROW_LIMIT), [relevantEvents]);
+    const overlapSettings = React.useMemo(() => ({
+        beforeMinutes: overlapBeforeMinutes,
+        afterMinutes: overlapAfterMinutes,
+        impactMode: overlapImpactMode,
+    }), [overlapBeforeMinutes, overlapAfterMinutes, overlapImpactMode]);
+    const dateRangeLabel = React.useMemo(
+        () => formatDateRangeLabel(newsDateStart, newsDateEnd),
+        [newsDateStart, newsDateEnd],
+    );
+    const overlapButtonLabel = React.useMemo(() => (
+        `Calculate ${OVERLAP_IMPACT_OPTIONS[overlapImpactMode]?.label || "High Impact"} ${overlapBeforeMinutes}m / ${overlapAfterMinutes}m Preview`
+    ), [overlapAfterMinutes, overlapBeforeMinutes, overlapImpactMode]);
     const overlapRows = React.useMemo(
-        () => buildTradeNewsOverlaps(trades, newsEvents, relevantCurrencies),
-        [trades, newsEvents, relevantCurrencies],
+        () => overlapEnabled ? buildTradeNewsOverlaps(trades, dateFilteredNewsEvents, relevantCurrencies, overlapSettings) : [],
+        [overlapEnabled, trades, dateFilteredNewsEvents, relevantCurrencies, overlapSettings],
     );
-    const overlapSummary = React.useMemo(() => buildOverlapSummary(overlapRows), [overlapRows]);
+    const visibleOverlapRows = React.useMemo(() => overlapRows.slice(0, OVERLAP_PREVIEW_LIMIT), [overlapRows]);
+    const overlapAnalytics = React.useMemo(() => buildOverlapAnalytics(overlapRows), [overlapRows]);
+    const overlapBreakdowns = React.useMemo(() => buildOverlapBreakdowns(overlapRows), [overlapRows]);
     const exactBlockedRows = React.useMemo(() => buildExactBlockedRows(trades), [trades]);
     const exactSummary = React.useMemo(() => buildExactNewsSummary(exactBlockedRows), [exactBlockedRows]);
-    const sweepRows = React.useMemo(() => buildSweepRows(newsResults), [newsResults]);
     const blockedRows = React.useMemo(
         () => (exactBlockedRows.length ? exactBlockedRows : buildBlockedRows(newsResults)),
         [exactBlockedRows, newsResults],
@@ -79,13 +121,117 @@ export default function NewsLab() {
             // Clipboard is optional in this frontend-only placeholder.
         }
     };
+    const updateOverlapBefore = (value) => {
+        setOverlapBeforeMinutes(clampMinutes(value));
+        setOverlapEnabled(false);
+    };
+    const updateOverlapAfter = (value) => {
+        setOverlapAfterMinutes(clampMinutes(value));
+        setOverlapEnabled(false);
+    };
+    const updateOverlapImpact = (value) => {
+        setOverlapImpactMode(value);
+        setOverlapEnabled(false);
+    };
+    const updateNewsDateStart = (v) => { setNewsDateStart(v); setOverlapEnabled(false); setComparisonRows([]); };
+    const updateNewsDateEnd = (v) => { setNewsDateEnd(v); setOverlapEnabled(false); setComparisonRows([]); };
+    const updateComparisonScenario = (id, patch) => {
+        setComparisonScenarios((rows) => rows.map((row) => (
+            row.id === id ? { ...row, ...patch } : row
+        )));
+        setComparisonRows([]);
+    };
+    const applyFullCalendarRange = () => {
+        const dated = newsEvents.filter((e) => e.ts != null);
+        if (!dated.length) return;
+        setNewsDateStart(tsToDateStr(dated[0].ts));
+        setNewsDateEnd(tsToDateStr(dated[dated.length - 1].ts));
+        setOverlapEnabled(false);
+        setComparisonRows([]);
+    };
+    const applyActiveRunRange = () => {
+        const range = deriveTradeRange(trades);
+        if (range.start) setNewsDateStart(range.start);
+        if (range.end) setNewsDateEnd(range.end);
+        setOverlapEnabled(false);
+        setComparisonRows([]);
+    };
+    const clearDateRange = () => { setNewsDateStart(""); setNewsDateEnd(""); setOverlapEnabled(false); setComparisonRows([]); };
+    const saveOverlapScenario = () => {
+        if (!overlapEnabled) return;
+        const name = scenarioNameDraft.trim() || `Scenario ${savedOverlapScenarios.length + 1}`;
+        const scenario = {
+            id: `saved-${Date.now()}`,
+            name,
+            beforeMinutes: overlapBeforeMinutes,
+            afterMinutes: overlapAfterMinutes,
+            impactMode: overlapImpactMode,
+            dateStart: newsDateStart,
+            dateEnd: newsDateEnd,
+            dateRange: dateRangeLabel,
+            createdAt: new Date().toISOString(),
+            metrics: overlapAnalytics,
+        };
+        setSavedOverlapScenarios((rows) => [...rows, scenario]);
+        setScenarioNameDraft(`Scenario ${savedOverlapScenarios.length + 2}`);
+    };
+    const renameSavedScenario = (id, name) => {
+        setSavedOverlapScenarios((rows) => rows.map((row) => (
+            row.id === id ? { ...row, name } : row
+        )));
+    };
+    const deleteSavedScenario = (id) => {
+        setSavedOverlapScenarios((rows) => rows.filter((row) => row.id !== id));
+    };
+    const restoreSavedScenario = (scenario) => {
+        setOverlapBeforeMinutes(scenario.beforeMinutes);
+        setOverlapAfterMinutes(scenario.afterMinutes);
+        setOverlapImpactMode(scenario.impactMode);
+        setNewsDateStart(scenario.dateStart || "");
+        setNewsDateEnd(scenario.dateEnd || "");
+        setOverlapEnabled(true);
+        setComparisonRows([]);
+    };
+    const addComparisonScenario = () => {
+        setComparisonScenarios((rows) => [
+            ...rows,
+            { id: `scenario-${Date.now()}`, beforeMinutes: 30, afterMinutes: 30, impactMode: "high" },
+        ]);
+        setComparisonRows([]);
+    };
+    const removeComparisonScenario = (id) => {
+        setComparisonScenarios((rows) => rows.filter((row) => row.id !== id));
+        setComparisonRows([]);
+    };
+    const calculateScenarioComparison = () => {
+        const rows = comparisonScenarios.map((scenario, index) => (
+            buildScenarioComparisonRow(
+                scenario,
+                index,
+                trades,
+                dateFilteredNewsEvents,
+                relevantCurrencies,
+                { dateStart: newsDateStart, dateEnd: newsDateEnd, dateRange: dateRangeLabel },
+            )
+        ));
+        setComparisonRows(rows);
+    };
+    const copyScenarioConfig = async (scenario) => {
+        const payload = buildPythonConfigPayload(scenario, newsDateStart, newsDateEnd);
+        try {
+            await navigator.clipboard?.writeText(JSON.stringify(payload, null, 2));
+            setCopiedConfigId(scenario.id);
+            window.setTimeout(() => setCopiedConfigId(""), 1600);
+        } catch {
+            setCopiedConfigId("");
+        }
+    };
 
     return (
         <div className="pb-12">
-            <PageHeader
-                eyebrow="NEWS LAB"
-                title="News Lab"
-                subtitle="Research high-impact economic event filters, blackout windows, and blocked trade quality."
+            <ActiveRunContext
+                pageLabel="News Lab"
+                description="Research high-impact economic event filters, blackout windows, and blocked trade quality."
                 actions={(
                     <div className="flex items-center gap-2">
                         <Pill tone="secondary">FRONTEND V1</Pill>
@@ -98,19 +244,61 @@ export default function NewsLab() {
             />
 
             <div className="px-6 grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
-                <MetricChip label="Events Loaded" value={fmtMaybeCount(eventSummary.eventsLoaded ?? newsResults?.eventsLoaded)} sub="calendar CSV" tone={hasNewsEvents ? "primary" : "muted"} icon={Newspaper} />
+                <MetricChip label="Events Loaded" value={fmtMaybeCount(eventSummary.eventsLoaded ?? newsResults?.eventsLoaded)} sub={dateRangeActive ? "filtered range" : "calendar CSV"} tone={hasNewsEvents ? "primary" : "muted"} icon={Newspaper} />
                 <MetricChip label="High Impact" value={fmtMaybeCount(eventSummary.highImpactEvents ?? newsResults?.highImpactEvents)} sub="filtered events" tone={hasNewsEvents ? "secondary" : "muted"} icon={ShieldAlert} />
-                <MetricChip label="Medium Impact" value={fmtMaybeCount(eventSummary.mediumImpactEvents)} sub="calendar CSV" tone={hasNewsEvents ? "primary" : "muted"} icon={AlertTriangle} />
+                <MetricChip label="Medium Impact" value={fmtMaybeCount(eventSummary.mediumImpactEvents)} sub={dateRangeActive ? "filtered range" : "calendar CSV"} tone={hasNewsEvents ? "primary" : "muted"} icon={AlertTriangle} />
                 <MetricChip label="Currencies" value={eventSummary.currenciesCovered || "—"} sub="covered" tone={hasNewsEvents ? "secondary" : "muted"} icon={Globe2} />
-                <MetricChip label="Date Range" value={eventSummary.dateRange || "—"} sub="UTC" tone={hasNewsEvents ? "primary" : "muted"} icon={CalendarClock} />
+                <MetricChip label="Date Range" value={eventSummary.dateRange || "—"} sub={dateRangeActive ? "UTC filtered" : "UTC"} tone={hasNewsEvents ? "primary" : "muted"} icon={CalendarClock} />
                 <MetricChip label="Source" value={eventSummary.source || "—"} sub="calendar" tone={hasNewsEvents ? "success" : "muted"} icon={FileText} />
             </div>
 
+            {hasNewsEvents && (
+                <div className="px-6 mt-3">
+                    <NeonPanel
+                        title="News Date Range"
+                        action={<Pill tone={dateRangeActive ? "warning" : "muted"}>{dateRangeActive ? "RANGE ACTIVE" : "FRONTEND ANALYSIS ONLY"}</Pill>}
+                    >
+                        <div className="mb-2 text-[11px] font-mono text-muted-lab">
+                            Filters all tables and overlap preview to a date window. Does not affect Python backtest or exact blackout results.
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto_auto_auto] gap-2 items-end">
+                            <label className="grid gap-1 text-[10px] font-mono uppercase tracking-[0.18em] text-muted-lab">
+                                Start date (UTC)
+                                <input
+                                    type="date"
+                                    value={newsDateStart}
+                                    onChange={(e) => updateNewsDateStart(e.target.value)}
+                                    className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-mono text-[hsl(var(--text-2))]"
+                                />
+                            </label>
+                            <label className="grid gap-1 text-[10px] font-mono uppercase tracking-[0.18em] text-muted-lab">
+                                End date (UTC)
+                                <input
+                                    type="date"
+                                    value={newsDateEnd}
+                                    onChange={(e) => updateNewsDateEnd(e.target.value)}
+                                    className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-mono text-[hsl(var(--text-2))]"
+                                />
+                            </label>
+                            <ActionButton onClick={applyActiveRunRange} icon={CalendarClock} disabled={!trades.length}>Match Active Run</ActionButton>
+                            <ActionButton onClick={applyFullCalendarRange} icon={Globe2}>Full Calendar</ActionButton>
+                            <ActionButton onClick={clearDateRange} icon={FileText} disabled={!dateRangeActive}>Clear</ActionButton>
+                        </div>
+                        {dateRangeActive && (
+                            <div className="mt-2 text-[11px] font-mono text-muted-lab">
+                                {dateFilteredNewsEvents.length} of {newsEvents.length} events in selected range.
+                            </div>
+                        )}
+                    </NeonPanel>
+                </div>
+            )}
+
             <div className="px-6 mt-5 grid grid-cols-1 xl:grid-cols-3 gap-4">
-                <NeonPanel
+                <CollapsiblePanel
                     className="xl:col-span-3"
                     title="News Source · CSV Format"
                     action={<Pill tone="muted">NO LIVE API</Pill>}
+                    defaultCollapsed
                 >
                     <div className="grid grid-cols-1 lg:grid-cols-[1.15fr_0.85fr] gap-4">
                         <div>
@@ -138,13 +326,14 @@ export default function NewsLab() {
                             </div>
                         </div>
                     </div>
-                </NeonPanel>
+                </CollapsiblePanel>
 
                 {hasNewsEvents && (
-                    <NeonPanel
+                    <CollapsiblePanel
                         className="xl:col-span-3"
                         title="Event Explorer"
                         action={<Pill tone="success">{filteredEvents.length} EVENTS</Pill>}
+                        defaultCollapsed
                     >
                         <div className="grid grid-cols-1 md:grid-cols-[0.7fr_0.7fr_1.6fr] gap-2 mb-3">
                             <select value={currencyFilter} onChange={(e) => setCurrencyFilter(e.target.value)} className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-mono text-[hsl(var(--text-2))]">
@@ -164,74 +353,206 @@ export default function NewsLab() {
                                 className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-mono text-[hsl(var(--text-2))] placeholder:text-muted-lab"
                             />
                         </div>
+                        <div className="mb-3 text-[11px] font-mono text-muted-lab">
+                            Showing first {Math.min(TABLE_ROW_LIMIT, filteredEvents.length)} of {filteredEvents.length} filtered events.
+                        </div>
                         <DataTable
                             testId="newslab-event-explorer"
                             maxHeight={380}
                             columns={[
-                                { key: "time", label: "Time" },
+                                { key: "time", label: "Time (UTC)" },
                                 { key: "currency", label: "Currency" },
                                 { key: "impact", label: "Impact", render: (r) => <Pill tone={impactTone(r.impact)}>{r.impact || "—"}</Pill> },
                                 { key: "event", label: "Event" },
                                 { key: "country", label: "Country" },
                                 { key: "source", label: "Source" },
                             ]}
-                            rows={filteredEvents}
+                            rows={visibleFilteredEvents}
                         />
-                    </NeonPanel>
+                    </CollapsiblePanel>
                 )}
 
                 {hasNewsEvents && (
-                    <NeonPanel
+                    <CollapsiblePanel
                         className="xl:col-span-3"
                         title="Relevant Events for Active Symbol"
                         action={<Pill tone={relevantCurrencies.length ? "primary" : "muted"}>{relevantCurrencies.length ? relevantCurrencies.join(" / ") : "NO SYMBOL"}</Pill>}
+                        defaultCollapsed
                     >
                         {!relevantCurrencies.length && <LimitedData>Active run symbol is unavailable, so currency relevance cannot be derived.</LimitedData>}
+                        <div className="mb-3 text-[11px] font-mono text-muted-lab">
+                            Showing first {Math.min(TABLE_ROW_LIMIT, relevantEvents.length)} of {relevantEvents.length} relevant events.
+                        </div>
                         <DataTable
                             testId="newslab-relevant-events"
                             maxHeight={260}
                             columns={[
-                                { key: "time", label: "Time" },
+                                { key: "time", label: "Time (UTC)" },
                                 { key: "currency", label: "Currency" },
                                 { key: "impact", label: "Impact", render: (r) => <Pill tone={impactTone(r.impact)}>{r.impact || "—"}</Pill> },
                                 { key: "event", label: "Event" },
                                 { key: "source", label: "Source" },
                             ]}
-                            rows={relevantEvents}
+                            rows={visibleRelevantEvents}
                         />
-                    </NeonPanel>
+                    </CollapsiblePanel>
                 )}
 
                 {hasNewsEvents && (
                     <NeonPanel
                         className="xl:col-span-3"
-                        title="Trade Overlap Preview · 30m Before / 30m After"
+                        title={`Trade Overlap Preview · ${overlapBeforeMinutes}m Before / ${overlapAfterMinutes}m After`}
                         action={<Pill tone={overlapRows.length ? "warning" : "muted"}>{overlapRows.length} OVERLAPS</Pill>}
                     >
                         <LimitedData>Frontend overlap preview only — exact blackout results require Python rerun.</LimitedData>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
-                            <MiniStat label="Critical overlaps" value={overlapSummary.critical} tone="danger" />
-                            <MiniStat label="High overlaps" value={overlapSummary.high} tone="warning" />
-                            <MiniStat label="Medium overlaps" value={overlapSummary.medium} tone="secondary" />
-                            <MiniStat label="Total overlaps" value={overlapSummary.total} tone="primary" />
+                        {!relevantCurrencies.length && (
+                            <LimitedData>No active symbol — currency relevance unavailable; overlap preview disabled.</LimitedData>
+                        )}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-3">
+                            <label className="grid gap-1 text-[10px] font-mono uppercase tracking-[0.18em] text-muted-lab">
+                                Minutes before event
+                                <input
+                                    type="number"
+                                    min="0"
+                                    max="1440"
+                                    value={overlapBeforeMinutes}
+                                    onChange={(e) => updateOverlapBefore(e.target.value)}
+                                    className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-mono text-[hsl(var(--text-2))]"
+                                />
+                            </label>
+                            <label className="grid gap-1 text-[10px] font-mono uppercase tracking-[0.18em] text-muted-lab">
+                                Minutes after event
+                                <input
+                                    type="number"
+                                    min="0"
+                                    max="1440"
+                                    value={overlapAfterMinutes}
+                                    onChange={(e) => updateOverlapAfter(e.target.value)}
+                                    className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-mono text-[hsl(var(--text-2))]"
+                                />
+                            </label>
+                            <label className="grid gap-1 text-[10px] font-mono uppercase tracking-[0.18em] text-muted-lab">
+                                Impact filter
+                                <select
+                                    value={overlapImpactMode}
+                                    onChange={(e) => updateOverlapImpact(e.target.value)}
+                                    className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-mono text-[hsl(var(--text-2))]"
+                                >
+                                    <option value="high">High only</option>
+                                    <option value="medium_high">Medium + High</option>
+                                    <option value="all">All impacts</option>
+                                </select>
+                            </label>
                         </div>
-                        <DataTable
-                            testId="newslab-overlap-preview"
-                            maxHeight={360}
-                            columns={[
-                                { key: "severity", label: "Severity", render: (r) => <Pill tone={severityTone(r.severity)}>{r.severity}</Pill> },
-                                { key: "tradeId", label: "Trade ID" },
-                                { key: "fillTime", label: "Fill Time" },
-                                { key: "eventTime", label: "Event Time" },
-                                { key: "event", label: "Event" },
-                                { key: "currency", label: "Currency" },
-                                { key: "impact", label: "Impact", render: (r) => <Pill tone={impactTone(r.impact)}>{r.impact || "—"}</Pill> },
-                                { key: "minutesFromEvent", label: "Min From Event", align: "right", render: (r) => fmtSignedMinutes(r.minutesFromEvent) },
-                                { key: "originalOutcome", label: "Outcome" },
-                                { key: "originalR", label: "Original R", align: "right", render: (r) => fmtMaybeR(r.originalR) },
-                            ]}
-                            rows={overlapRows}
-                        />
+                        {!overlapEnabled ? (
+                            <div className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.35)] p-3">
+                                <div className="text-[11.5px] font-mono text-[hsl(var(--text-2))]">Overlap preview is disabled until calculated to keep the page fast.</div>
+                                <button
+                                    type="button"
+                                    onClick={() => setOverlapEnabled(true)}
+                                    disabled={!relevantCurrencies.length}
+                                    className="mt-3 inline-flex items-center justify-center px-3 py-2 text-[10px] font-mono uppercase tracking-wider border border-[hsl(var(--accent-secondary)/0.55)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.06)] hover:bg-[hsl(var(--accent-secondary)/0.12)] disabled:opacity-45 disabled:cursor-not-allowed clip-bevel-sm"
+                                >
+                                    {overlapButtonLabel}
+                                </button>
+                            </div>
+                        ) : (
+                            <>
+                                <div className="mb-3 clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.32)] px-3 py-2 text-[11.5px] font-mono text-[hsl(var(--text-2))] leading-relaxed">
+                                    Wins and losses shown here are the <strong>original outcomes</strong> of trades whose fill time fell inside the selected news window. This is a frontend overlap preview — not a simulated blackout result.
+                                </div>
+                                <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-2 mb-3">
+                                    <MiniStat label="Overlapped" value={overlapAnalytics.total} tone="primary" />
+                                    <MiniStat label="Wins" value={overlapAnalytics.wins} tone="primary" />
+                                    <MiniStat label="Losses" value={overlapAnalytics.losses} tone="danger" />
+                                    <MiniStat label="Win Rate" value={fmtMaybePct(overlapAnalytics.winRate)} tone="secondary" />
+                                    <MiniStat label="Net R" value={fmtMaybeR(overlapAnalytics.netR)} tone={isFiniteNum(overlapAnalytics.netR) ? (Number(overlapAnalytics.netR) >= 0 ? "primary" : "danger") : "muted"} />
+                                    <MiniStat label="Avg R" value={fmtMaybeExp(overlapAnalytics.avgR)} tone="secondary" />
+                                    <MiniStatSmall label="Best Event" value={overlapAnalytics.bestEvent} tone="primary" />
+                                    <MiniStatSmall label="Worst Event" value={overlapAnalytics.worstEvent} tone="warning" />
+                                </div>
+                                <div className="mb-3 clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.32)] p-3">
+                                    <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto] gap-2 items-end">
+                                        <label className="grid gap-1 text-[10px] font-mono uppercase tracking-[0.18em] text-muted-lab">
+                                            Scenario name
+                                            <input
+                                                value={scenarioNameDraft}
+                                                onChange={(e) => setScenarioNameDraft(e.target.value)}
+                                                className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-mono text-[hsl(var(--text-2))]"
+                                            />
+                                        </label>
+                                        <ActionButton onClick={saveOverlapScenario} icon={FileText}>Save Scenario</ActionButton>
+                                        <ActionButton onClick={() => copyScenarioConfig({ id: "current-overlap", ...overlapSettings })} icon={Clipboard}>
+                                            {copiedConfigId === "current-overlap" ? "Copied Config" : "Copy Python Config"}
+                                        </ActionButton>
+                                    </div>
+                                </div>
+                                <DataTable
+                                    testId="newslab-overlap-preview"
+                                    maxHeight={360}
+                                    columns={[
+                                        { key: "severity", label: "Severity", render: (r) => <Pill tone={severityTone(r.severity)}>{r.severity}</Pill> },
+                                        { key: "tradeId", label: "Trade ID" },
+                                        { key: "relation", label: "Relation", render: (r) => {
+                                            const m = Number(r.minutesFromEvent);
+                                            const label = m < -0.5 ? "Before" : m > 0.5 ? "After" : "Same min";
+                                            const tone = m < -0.5 ? "warning" : m > 0.5 ? "secondary" : "danger";
+                                            return <Pill tone={tone}>{label}</Pill>;
+                                        }},
+                                        { key: "minutesFromEvent", label: "Minutes", align: "right", render: (r) => fmtSignedMinutes(r.minutesFromEvent) },
+                                        { key: "fillTime", label: "Fill Time (UTC)" },
+                                        { key: "eventTime", label: "Event Time (UTC)" },
+                                        { key: "event", label: "Event" },
+                                        { key: "currency", label: "Currency" },
+                                        { key: "impact", label: "Impact", render: (r) => <Pill tone={impactTone(r.impact)}>{r.impact || "—"}</Pill> },
+                                        { key: "originalOutcome", label: "Outcome" },
+                                        { key: "originalR", label: "R", align: "right", render: (r) => fmtMaybeR(r.originalR) },
+                                    ]}
+                                    rows={visibleOverlapRows}
+                                />
+                                <div className="mt-4 grid grid-cols-1 xl:grid-cols-3 gap-3">
+                                    <OverlapBreakdownTable title="By Impact" rows={overlapBreakdowns.byImpact} />
+                                    <OverlapBreakdownTable title="By Event Name" rows={overlapBreakdowns.byEvent} />
+                                    <OverlapBreakdownTable title="By Proximity" rows={overlapBreakdowns.byProximity} />
+                                </div>
+                            </>
+                        )}
+                        {savedOverlapScenarios.length > 0 && (
+                            <div className="mt-4">
+                                <div className="mb-2 text-[10px] font-mono uppercase tracking-[0.2em] text-title-lab">Saved Overlap Scenarios</div>
+                                <DataTable
+                                    testId="newslab-saved-overlap-scenarios"
+                                    maxHeight={280}
+                                    columns={[
+                                        { key: "name", label: "Name", render: (r) => (
+                                            <input
+                                                value={r.name}
+                                                onChange={(e) => renameSavedScenario(r.id, e.target.value)}
+                                                className="w-44 clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-2 py-1 text-[11px] font-mono text-[hsl(var(--text-2))]"
+                                            />
+                                        ) },
+                                        { key: "window", label: "Window", render: (r) => formatScenarioWindow(r) },
+                                        { key: "impactMode", label: "Impact", render: (r) => OVERLAP_IMPACT_OPTIONS[r.impactMode]?.label || "High Impact" },
+                                        { key: "dateRange", label: "Date Range" },
+                                        { key: "total", label: "Overlaps", align: "right", render: (r) => fmtMaybeCount(r.metrics?.total) },
+                                        { key: "wins", label: "Wins", align: "right", render: (r) => fmtMaybeCount(r.metrics?.wins) },
+                                        { key: "losses", label: "Losses", align: "right", render: (r) => fmtMaybeCount(r.metrics?.losses) },
+                                        { key: "winRate", label: "WR", align: "right", render: (r) => fmtMaybePct(r.metrics?.winRate) },
+                                        { key: "netR", label: "Net R", align: "right", render: (r) => r.metrics?.netR == null ? "—" : <ColoredR value={num(r.metrics.netR)} /> },
+                                        { key: "avgR", label: "Avg R", align: "right", render: (r) => fmtMaybeExp(r.metrics?.avgR) },
+                                        { key: "createdAt", label: "Created", render: (r) => shortDateTime(r.createdAt) },
+                                        { key: "actions", label: "Actions", render: (r) => (
+                                            <div className="flex flex-wrap gap-1.5">
+                                                <TinyButton onClick={() => restoreSavedScenario(r)}>Restore</TinyButton>
+                                                <TinyButton onClick={() => copyScenarioConfig(r)}>{copiedConfigId === r.id ? "Copied" : "Config"}</TinyButton>
+                                                <TinyButton onClick={() => deleteSavedScenario(r.id)} tone="danger">Delete</TinyButton>
+                                            </div>
+                                        ) },
+                                    ]}
+                                    rows={savedOverlapScenarios}
+                                />
+                            </div>
+                        )}
                     </NeonPanel>
                 )}
 
@@ -253,26 +574,81 @@ export default function NewsLab() {
 
                 <NeonPanel
                     className="xl:col-span-3"
-                    title="Blackout Sweep Results"
-                    action={<Pill tone={hasNewsResults ? "success" : "muted"}>{hasNewsResults ? "HYDRATED" : "LIMITED DATA"}</Pill>}
+                    title="News Blackout Scenario Comparison"
+                    action={<Pill tone={comparisonRows.length ? "warning" : "muted"}>{comparisonRows.length ? `${comparisonRows.length} CALCULATED` : "FRONTEND ONLY"}</Pill>}
                 >
-                    {!hasNewsResults && <LimitedData>Run a news blackout backtest and import the output to compare blackout windows.</LimitedData>}
+                    <LimitedData>Frontend overlap scenario comparison only — exact blackout results require Python rerun.</LimitedData>
+                    {!relevantCurrencies.length && <LimitedData>No active symbol — currency relevance unavailable; scenario comparison disabled.</LimitedData>}
+                    <div className="space-y-2 mb-3">
+                        {comparisonScenarios.map((scenario) => (
+                            <div key={scenario.id} className="grid grid-cols-1 md:grid-cols-[1fr_1fr_1.2fr_auto] gap-2 items-end clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.28)] p-2">
+                                <label className="grid gap-1 text-[10px] font-mono uppercase tracking-[0.18em] text-muted-lab">
+                                    Before
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        max="1440"
+                                        value={scenario.beforeMinutes}
+                                        onChange={(e) => updateComparisonScenario(scenario.id, { beforeMinutes: clampMinutes(e.target.value) })}
+                                        className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-mono text-[hsl(var(--text-2))]"
+                                    />
+                                </label>
+                                <label className="grid gap-1 text-[10px] font-mono uppercase tracking-[0.18em] text-muted-lab">
+                                    After
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        max="1440"
+                                        value={scenario.afterMinutes}
+                                        onChange={(e) => updateComparisonScenario(scenario.id, { afterMinutes: clampMinutes(e.target.value) })}
+                                        className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-mono text-[hsl(var(--text-2))]"
+                                    />
+                                </label>
+                                <label className="grid gap-1 text-[10px] font-mono uppercase tracking-[0.18em] text-muted-lab">
+                                    Impact
+                                    <select
+                                        value={scenario.impactMode}
+                                        onChange={(e) => updateComparisonScenario(scenario.id, { impactMode: e.target.value })}
+                                        className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-mono text-[hsl(var(--text-2))]"
+                                    >
+                                        <option value="high">High only</option>
+                                        <option value="medium_high">Medium + High</option>
+                                        <option value="all">All impacts</option>
+                                    </select>
+                                </label>
+                                <TinyButton onClick={() => removeComparisonScenario(scenario.id)} tone="danger" disabled={comparisonScenarios.length <= 1}>Remove</TinyButton>
+                            </div>
+                        ))}
+                    </div>
+                    <div className="mb-3 flex flex-wrap gap-2">
+                        <ActionButton onClick={addComparisonScenario} icon={FileText}>Add Scenario Row</ActionButton>
+                        <ActionButton onClick={calculateScenarioComparison} icon={ShieldAlert} disabled={!relevantCurrencies.length || !comparisonScenarios.length}>Calculate Scenario Comparison</ActionButton>
+                    </div>
                     <DataTable
-                        testId="newslab-blackout-sweep"
+                        testId="newslab-blackout-scenario-comparison"
+                        maxHeight={320}
                         columns={[
                             { key: "window", label: "Window" },
                             { key: "eventsUsed", label: "Events Used", align: "right", render: (r) => fmtMaybeCount(r.eventsUsed) },
-                            { key: "tradesBlocked", label: "Blocked", align: "right", render: (r) => fmtMaybeCount(r.tradesBlocked) },
+                            { key: "impactMode", label: "Impact", render: (r) => OVERLAP_IMPACT_OPTIONS[r.impactMode]?.label || "High Impact" },
+                            { key: "overlappedTrades", label: "Overlaps", align: "right", render: (r) => fmtMaybeCount(r.overlappedTrades) },
+                            { key: "wins", label: "Wins", align: "right", render: (r) => fmtMaybeCount(r.wins) },
+                            { key: "losses", label: "Losses", align: "right", render: (r) => fmtMaybeCount(r.losses) },
                             { key: "winRate", label: "WR", align: "right", render: (r) => fmtMaybePct(r.winRate) },
                             { key: "netR", label: "Net R", align: "right", render: (r) => r.netR == null ? "—" : <ColoredR value={num(r.netR)} /> },
-                            { key: "maxDD", label: "Max DD", align: "right", render: (r) => fmtMaybeR(r.maxDD) },
-                            { key: "expectancy", label: "Expectancy", align: "right", render: (r) => fmtMaybeExp(r.expectancy) },
-                            { key: "deltaVsBaseline", label: "Δ Baseline", align: "right", render: (r) => fmtMaybeR(r.deltaVsBaseline) },
-                            { key: "blockedWinners", label: "Blocked Winners", align: "right", render: (r) => fmtMaybeCount(r.blockedWinners) },
-                            { key: "blockedLosers", label: "Blocked Losers", align: "right", render: (r) => fmtMaybeCount(r.blockedLosers) },
+                            { key: "avgR", label: "Avg R", align: "right", render: (r) => fmtMaybeExp(r.avgR) },
+                            { key: "dateRange", label: "Date Range" },
+                            { key: "actions", label: "Config", render: (r) => (
+                                <TinyButton onClick={() => copyScenarioConfig(r)}>{copiedConfigId === r.id ? "Copied" : "Copy Config"}</TinyButton>
+                            ) },
                         ]}
-                        rows={sweepRows}
+                        rows={comparisonRows}
                     />
+                    {!comparisonRows.length && (
+                        <div className="mt-3 text-[11px] font-mono text-muted-lab">
+                            Add or edit scenario rows, then calculate to compare frontend overlap metrics.
+                        </div>
+                    )}
                 </NeonPanel>
 
                 <NeonPanel
@@ -307,11 +683,60 @@ export default function NewsLab() {
                 <BreakdownPanel title="Event Type Breakdown" rows={eventBreakdowns.eventTypes} />
                 <BreakdownPanel title="Currency Breakdown" rows={eventBreakdowns.currencies} />
                 <BreakdownPanel title="Session Breakdown" rows={eventBreakdowns.sessions} />
+                <NewsDebugPanel activeRun={activeRun} />
                 <ResearchBacklog />
             </div>
         </div>
     );
 }
+
+// ── Collapsible wrapper ──────────────────────────────────────────────────────
+
+function CollapsiblePanel({ title, action, className, defaultCollapsed = false, children }) {
+    const [collapsed, setCollapsed] = React.useState(defaultCollapsed);
+    const toggleAction = (
+        <div className="flex items-center gap-2">
+            {action}
+            <button
+                type="button"
+                onClick={() => setCollapsed((c) => !c)}
+                className="text-[9px] font-mono uppercase tracking-[0.2em] text-muted-lab border border-[hsl(var(--border-soft))] px-2 py-1 clip-bevel-sm hover:text-[hsl(var(--text-2))]"
+            >
+                {collapsed ? "Show ▾" : "Hide ▴"}
+            </button>
+        </div>
+    );
+    return (
+        <NeonPanel className={className} title={title} action={toggleAction}>
+            {!collapsed && children}
+        </NeonPanel>
+    );
+}
+
+// ── Overlap breakdown table ──────────────────────────────────────────────────
+
+function OverlapBreakdownTable({ title, rows }) {
+    return (
+        <div>
+            <div className="text-[10px] font-mono uppercase tracking-[0.2em] text-title-lab mb-2">{title}</div>
+            <DataTable
+                testId={`newslab-overlap-breakdown-${slug(title)}`}
+                maxHeight={200}
+                columns={[
+                    { key: "label", label: "Bucket" },
+                    { key: "count", label: "Trades", align: "right", render: (r) => fmtMaybeCount(r.count) },
+                    { key: "wins", label: "W", align: "right", render: (r) => fmtMaybeCount(r.wins) },
+                    { key: "losses", label: "L", align: "right", render: (r) => fmtMaybeCount(r.losses) },
+                    { key: "winRate", label: "WR", align: "right", render: (r) => fmtMaybePct(r.winRate) },
+                    { key: "netR", label: "Net R", align: "right", render: (r) => r.netR == null ? "—" : <ColoredR value={num(r.netR)} /> },
+                ]}
+                rows={rows}
+            />
+        </div>
+    );
+}
+
+// ── Sub-components ───────────────────────────────────────────────────────────
 
 function EventTimeline({ newsResults }) {
     const rows = Array.isArray(newsResults?.timeline) ? newsResults.timeline : [];
@@ -355,6 +780,76 @@ function BreakdownPanel({ title, rows }) {
     );
 }
 
+// ── Per-OB news debug trace panel ───────────────────────────────────────────
+// Surfaces `news_debug` from summary.json when the Python backtester was run
+// with `news_debug_ob_ids` — e.g. ["32"] to trace OB-032.
+
+function NewsDebugPanel({ activeRun }) {
+    const debugRows = React.useMemo(() => {
+        const raw = activeRun?.summary?.news_debug ?? activeRun?.news_debug;
+        return Array.isArray(raw) ? raw : [];
+    }, [activeRun]);
+
+    if (!debugRows.length) return null;
+
+    return (
+        <NeonPanel
+            className="xl:col-span-3"
+            title="News Debug Trace"
+            action={<Pill tone="warning">{debugRows.length} OB{debugRows.length !== 1 ? "s" : ""} TRACED</Pill>}
+        >
+            <div className="mb-2 text-[10.5px] font-mono text-muted-lab">
+                Per-OB flatten trace — exported when <code>news_debug_ob_ids</code> is set in config. Use to verify why a specific OB did or did not flatten.
+            </div>
+            <div className="space-y-3">
+                {debugRows.map((row, idx) => {
+                    const flattenFired = row.flatten_fired ?? row.flattened ?? false;
+                    const activeAtTarget = row.active_at_flatten_target ?? row.was_active ?? null;
+                    return (
+                        <div key={idx} className={`clip-bevel-sm border p-3 font-mono text-[11px] ${flattenFired ? "border-[hsl(var(--success)/0.5)] bg-[hsl(var(--success)/0.06)]" : "border-[hsl(var(--danger)/0.5)] bg-[hsl(var(--danger)/0.06)]"}`}>
+                            <div className="flex items-center gap-3 mb-2">
+                                <span className="text-[12px] font-bold text-white">{row.ob_id ?? `OB-${idx + 1}`}</span>
+                                <Pill tone={flattenFired ? "success" : "warning"}>{flattenFired ? "FLATTENED" : "NOT FLATTENED"}</Pill>
+                                {activeAtTarget === true && <Pill tone="secondary">ACTIVE AT FLATTEN TARGET</Pill>}
+                                {activeAtTarget === false && <Pill tone="muted">NOT ACTIVE AT TARGET</Pill>}
+                            </div>
+                            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-x-6 gap-y-1 text-[10.5px]">
+                                <DebugField label="Fill Time" value={row.fill_time} />
+                                <DebugField label="Entry" value={row.entry} />
+                                <DebugField label="Stop" value={row.stop} />
+                                <DebugField label="Loss Time" value={row.loss_time} />
+                                <DebugField label="News Event" value={row.news_event} />
+                                <DebugField label="News Event Time" value={row.news_event_time} />
+                                <DebugField label="Blackout Start" value={row.blackout_start} />
+                                <DebugField label="Blackout End" value={row.blackout_end} />
+                                <DebugField label="Flatten Target" value={row.flatten_target} />
+                                <DebugField label="Flatten Candle Open" value={row.flatten_candle_open} />
+                                <DebugField label="Flatten R" value={row.flatten_r} />
+                                <DebugField label="Late Flatten" value={row.late_flatten != null ? String(row.late_flatten) : null} />
+                                {row.flatten_reason && (
+                                    <div className="col-span-2 xl:col-span-4 text-[hsl(var(--warning))]">
+                                        <span className="text-muted-lab">Reason: </span>{row.flatten_reason}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+        </NeonPanel>
+    );
+}
+
+function DebugField({ label, value }) {
+    if (value == null || value === "") return null;
+    return (
+        <div>
+            <span className="text-muted-lab">{label}: </span>
+            <span className="text-[hsl(var(--text-2))]">{String(value)}</span>
+        </div>
+    );
+}
+
 function ResearchBacklog() {
     return (
         <NeonPanel className="xl:col-span-3" title="Research Notes · Backlog" action={<Pill tone="secondary">{BACKLOG.length} ITEMS</Pill>}>
@@ -386,6 +881,22 @@ function ActionButton({ children, icon: Icon, disabled = false, onClick }) {
     );
 }
 
+function TinyButton({ children, disabled = false, onClick, tone = "secondary" }) {
+    const toneClass = tone === "danger"
+        ? "border-[hsl(var(--danger)/0.45)] text-[hsl(var(--danger))] bg-[hsl(var(--danger)/0.06)] hover:bg-[hsl(var(--danger)/0.12)]"
+        : "border-[hsl(var(--accent-secondary)/0.45)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.06)] hover:bg-[hsl(var(--accent-secondary)/0.12)]";
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            disabled={disabled}
+            className={`px-2 py-1 text-[9.5px] font-mono uppercase tracking-wider disabled:opacity-45 disabled:cursor-not-allowed clip-bevel-sm border ${toneClass}`}
+        >
+            {children}
+        </button>
+    );
+}
+
 function LimitedData({ children }) {
     return (
         <div className="mb-3 flex items-start gap-2 text-[11.5px] font-mono text-[hsl(var(--warning))]">
@@ -404,6 +915,17 @@ function MiniStat({ label, value, tone = "primary" }) {
     );
 }
 
+function MiniStatSmall({ label, value, tone = "primary" }) {
+    return (
+        <div className={`clip-bevel-sm border px-3 py-2 bg-[hsl(var(--panel-2)/0.38)] ${toneBorderClass(tone)}`}>
+            <div className="text-[9.5px] font-mono uppercase tracking-[0.2em] text-muted-lab">{label}</div>
+            <div className={`mt-1 font-mono text-[11px] leading-snug ${toneTextClass(tone)}`}>{value || "—"}</div>
+        </div>
+    );
+}
+
+// ── Data normalisation ───────────────────────────────────────────────────────
+
 function normalizeNewsEvents(events) {
     return (Array.isArray(events) ? events : [])
         .map((event, index) => ({
@@ -414,6 +936,7 @@ function normalizeNewsEvents(events) {
             event: String(event.event || ""),
             source: String(event.source || ""),
             country: String(event.country || ""),
+            searchText: `${event.event || ""} ${event.country || ""} ${event.source || ""}`.toLowerCase(),
             ts: parseTime(event.time),
         }))
         .filter((event) => event.time && event.currency && event.event)
@@ -437,7 +960,7 @@ function buildNewsEventSummary(events) {
         mediumImpactEvents: events.filter((event) => event.impact === "medium").length,
         currenciesCovered: currencies.length ? String(currencies.length) : null,
         currencyOptions: currencies,
-        dateRange: first && last ? `${shortDate(first.time)} → ${shortDate(last.time)}` : null,
+        dateRange: first && last ? `${shortDateCompact(first.time)} → ${shortDateCompact(last.time)}` : null,
         source: sources.length === 1 ? sources[0] : sources.length ? `${sources.length} sources` : null,
     };
 }
@@ -447,7 +970,19 @@ function filterNewsEvents(events, { currencyFilter, impactFilter, searchFilter }
     return events.filter((event) => {
         if (currencyFilter !== "ALL" && event.currency !== currencyFilter) return false;
         if (impactFilter !== "ALL" && event.impact !== impactFilter) return false;
-        if (search && !`${event.event} ${event.country} ${event.source}`.toLowerCase().includes(search)) return false;
+        if (search && !event.searchText.includes(search)) return false;
+        return true;
+    });
+}
+
+function applyDateRange(events, startStr, endStr) {
+    if (!startStr && !endStr) return events;
+    const startTs = startStr ? parseTime(startStr + "T00:00:00Z") : null;
+    const endTs = endStr ? parseTime(endStr + "T23:59:59Z") : null;
+    return events.filter((e) => {
+        if (e.ts == null) return false;
+        if (startTs != null && e.ts < startTs) return false;
+        if (endTs != null && e.ts > endTs) return false;
         return true;
     });
 }
@@ -459,18 +994,42 @@ function deriveSymbolCurrencies(symbol) {
     return pair.every((currency) => CURRENCIES.includes(currency)) ? pair : [];
 }
 
-function buildTradeNewsOverlaps(trades, events, relevantCurrencies) {
+function deriveTradeRange(trades) {
+    const tss = trades
+        .map((t) => parseTime(t.entry || t.fillTime || t.fill_time || t.detectionTime || t.detection_time))
+        .filter(Boolean);
+    if (!tss.length) return { start: "", end: "" };
+    return { start: tsToDateStr(Math.min(...tss)), end: tsToDateStr(Math.max(...tss)) };
+}
+
+function clampMinutes(value) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return 0;
+    return Math.max(0, Math.min(1440, Math.round(parsed)));
+}
+
+// ── Overlap calculation ──────────────────────────────────────────────────────
+
+function buildTradeNewsOverlaps(trades, events, relevantCurrencies, settings = {}, limit = null) {
+    if (!relevantCurrencies.length) return [];
     if (!trades.length || !events.length) return [];
-    const currencies = relevantCurrencies.length ? new Set(relevantCurrencies) : null;
-    const windowSec = 30 * 60;
-    const relevantEvents = events.filter((event) => event.ts != null && (!currencies || currencies.has(event.currency)));
+    const currencies = new Set(relevantCurrencies);
+    const beforeSec = clampMinutes(settings.beforeMinutes ?? 30) * 60;
+    const afterSec = clampMinutes(settings.afterMinutes ?? 30) * 60;
+    const impactOption = OVERLAP_IMPACT_OPTIONS[settings.impactMode] || OVERLAP_IMPACT_OPTIONS.high;
+    const impacts = impactOption.impacts ? new Set(impactOption.impacts) : null;
+    const relevantEvents = events.filter((event) => (
+        event.ts != null
+        && (!impacts || impacts.has(event.impact))
+        && currencies.has(event.currency)
+    ));
     const rows = [];
     trades.forEach((trade) => {
         const fillTs = parseTime(trade.entry || trade.fillTime || trade.fill_time);
         if (fillTs == null) return;
         relevantEvents.forEach((event) => {
             const deltaSec = fillTs - event.ts;
-            if (Math.abs(deltaSec) > windowSec) return;
+            if (deltaSec < -beforeSec || deltaSec > afterSec) return;
             rows.push({
                 id: `${trade.id}-${event.id}`,
                 tradeId: trade.id,
@@ -486,37 +1045,143 @@ function buildTradeNewsOverlaps(trades, events, relevantCurrencies) {
             });
         });
     });
-    return rows.sort((a, b) => Math.abs(a.minutesFromEvent) - Math.abs(b.minutesFromEvent)).slice(0, 250);
+    const sorted = rows.sort((a, b) => Math.abs(a.minutesFromEvent) - Math.abs(b.minutesFromEvent));
+    return limit ? sorted.slice(0, limit) : sorted;
 }
 
-function buildOverlapSummary(rows) {
+function buildOverlapAnalytics(rows) {
+    if (!rows.length) {
+        return { total: 0, wins: 0, losses: 0, winRate: null, netR: null, avgR: null, bestEvent: "—", worstEvent: "—" };
+    }
+    const uniqueRows = [...new Map(rows.map((row) => [row.tradeId || row.id, row])).values()];
+    const rRows = uniqueRows.filter((r) => isFiniteNum(r.originalR));
+    const wins = uniqueRows.filter((r) => r.originalOutcome === "Win" || (isFiniteNum(r.originalR) && Number(r.originalR) > 0)).length;
+    const losses = uniqueRows.filter((r) => r.originalOutcome === "Loss" || (isFiniteNum(r.originalR) && Number(r.originalR) < 0)).length;
+    const netR = rRows.length ? rRows.reduce((s, r) => s + Number(r.originalR), 0) : null;
+    const avgR = rRows.length && netR != null ? netR / rRows.length : null;
+    const winRate = uniqueRows.length ? wins / uniqueRows.length : null;
+    const eventMap = {};
+    rRows.forEach((r) => {
+        const key = r.event || "Unknown";
+        if (!eventMap[key]) eventMap[key] = 0;
+        eventMap[key] += Number(r.originalR);
+    });
+    const eventList = Object.entries(eventMap);
+    const bestEntry = eventList.length ? eventList.reduce((a, b) => b[1] > a[1] ? b : a) : null;
+    const worstEntry = eventList.length ? eventList.reduce((a, b) => b[1] < a[1] ? b : a) : null;
+    const fmtEvent = ([name, r]) => `${name} (${r >= 0 ? "+" : ""}${r.toFixed(1)}R)`;
     return {
-        critical: rows.filter((row) => row.severity === "Critical").length,
-        high: rows.filter((row) => row.severity === "High").length,
-        medium: rows.filter((row) => row.severity === "Medium").length,
-        total: rows.length,
+        total: uniqueRows.length,
+        wins,
+        losses,
+        winRate,
+        netR,
+        avgR,
+        bestEvent: bestEntry ? fmtEvent(bestEntry) : "—",
+        worstEvent: worstEntry ? fmtEvent(worstEntry) : "—",
     };
 }
 
-function buildSweepRows(newsResults) {
-    const source = newsResults?.sweeps || newsResults?.blackoutSweeps || newsResults?.blackout_sweeps;
-    if (Array.isArray(source) && source.length) {
-        return source.map((row, idx) => ({
-            id: row.id || row.window || `sweep-${idx}`,
-            window: row.window || row.label || formatWindow(row),
-            eventsUsed: row.eventsUsed ?? row.events_used,
-            tradesBlocked: row.tradesBlocked ?? row.trades_blocked,
-            winRate: row.winRate ?? row.win_rate,
-            netR: row.netR ?? row.net_r,
-            maxDD: row.maxDD ?? row.max_dd ?? row.max_drawdown_r,
-            expectancy: row.expectancy ?? row.expectancy_r,
-            deltaVsBaseline: row.deltaVsBaseline ?? row.delta_vs_baseline ?? row.net_vs_baseline,
-            blockedWinners: row.blockedWinners ?? row.blocked_winners,
-            blockedLosers: row.blockedLosers ?? row.blocked_losers,
-        }));
-    }
-    return PLACEHOLDER_WINDOWS.map((row) => ({ id: row.window, ...row }));
+function buildOverlapBreakdowns(rows) {
+    const toRows = (groups) => Object.entries(groups).map(([label, items]) => {
+        const rItems = items.filter((r) => isFiniteNum(r.originalR));
+        const wins = items.filter((r) => r.originalOutcome === "Win" || (isFiniteNum(r.originalR) && Number(r.originalR) > 0)).length;
+        const losses = items.filter((r) => r.originalOutcome === "Loss" || (isFiniteNum(r.originalR) && Number(r.originalR) < 0)).length;
+        const netR = rItems.length ? rItems.reduce((s, r) => s + Number(r.originalR), 0) : null;
+        return {
+            id: label,
+            label,
+            count: items.length,
+            wins,
+            losses,
+            winRate: items.length ? wins / items.length : null,
+            netR,
+        };
+    });
+
+    const impactGroups = {};
+    const eventGroups = {};
+    const proximityGroups = { "0–5 min": [], "5–15 min": [], "15–30 min": [], "30m+": [] };
+
+    rows.forEach((r) => {
+        const imp = r.impact || "unknown";
+        if (!impactGroups[imp]) impactGroups[imp] = [];
+        impactGroups[imp].push(r);
+
+        const ev = r.event || "Unknown";
+        if (!eventGroups[ev]) eventGroups[ev] = [];
+        eventGroups[ev].push(r);
+
+        const abs = Math.abs(Number(r.minutesFromEvent));
+        if (abs <= 5) proximityGroups["0–5 min"].push(r);
+        else if (abs <= 15) proximityGroups["5–15 min"].push(r);
+        else if (abs <= 30) proximityGroups["15–30 min"].push(r);
+        else proximityGroups["30m+"].push(r);
+    });
+
+    const IMPACT_ORDER = ["high", "medium", "low", "unknown"];
+    const byImpact = IMPACT_ORDER.filter((k) => impactGroups[k]).map((k) => toRows({ [k]: impactGroups[k] })[0]);
+    const byEvent = toRows(eventGroups).sort((a, b) => b.count - a.count).slice(0, 20);
+    const byProximity = toRows(proximityGroups);
+
+    return { byImpact, byEvent, byProximity };
 }
+
+function buildScenarioComparisonRow(scenario, index, trades, events, relevantCurrencies, dateRange) {
+    const settings = {
+        beforeMinutes: scenario.beforeMinutes,
+        afterMinutes: scenario.afterMinutes,
+        impactMode: scenario.impactMode,
+    };
+    const rows = buildTradeNewsOverlaps(trades, events, relevantCurrencies, settings);
+    const metrics = buildOverlapAnalytics(rows);
+    return {
+        id: scenario.id,
+        name: `Scenario ${index + 1}`,
+        beforeMinutes: settings.beforeMinutes,
+        afterMinutes: settings.afterMinutes,
+        impactMode: settings.impactMode,
+        dateStart: dateRange.dateStart,
+        dateEnd: dateRange.dateEnd,
+        dateRange: dateRange.dateRange,
+        window: formatScenarioWindow(settings),
+        eventsUsed: countScenarioEvents(events, relevantCurrencies, settings),
+        overlappedTrades: metrics.total,
+        wins: metrics.wins,
+        losses: metrics.losses,
+        winRate: metrics.winRate,
+        netR: metrics.netR,
+        avgR: metrics.avgR,
+    };
+}
+
+function countScenarioEvents(events, relevantCurrencies, settings = {}) {
+    if (!relevantCurrencies.length) return 0;
+    const currencies = new Set(relevantCurrencies);
+    const impactOption = OVERLAP_IMPACT_OPTIONS[settings.impactMode] || OVERLAP_IMPACT_OPTIONS.high;
+    const impacts = impactOption.impacts ? new Set(impactOption.impacts) : null;
+    return events.filter((event) => (
+        event.ts != null
+        && currencies.has(event.currency)
+        && (!impacts || impacts.has(event.impact))
+    )).length;
+}
+
+function buildPythonConfigPayload(scenario, fallbackStart, fallbackEnd) {
+    const impactOption = OVERLAP_IMPACT_OPTIONS[scenario.impactMode] || OVERLAP_IMPACT_OPTIONS.high;
+    return {
+        news_blackout_enabled: true,
+        news_blackout_minutes_before: clampMinutes(scenario.beforeMinutes ?? 30),
+        news_blackout_minutes_after: clampMinutes(scenario.afterMinutes ?? 30),
+        news_blackout_impacts: impactOption.impacts || ["low", "medium", "high"],
+        selected_date_range: {
+            date_from: scenario.dateStart || fallbackStart || null,
+            date_to: scenario.dateEnd || fallbackEnd || null,
+        },
+    };
+}
+
+// ── Exact blackout helpers ──────────────────────────────────────────────────
 
 function buildBlockedRows(newsResults) {
     const source = newsResults?.blockedTrades || newsResults?.blocked_trades;
@@ -614,11 +1279,17 @@ function hydrateBreakdown(labels, source) {
     });
 }
 
-function formatWindow(row) {
-    const before = row.minutesBefore ?? row.before ?? row.before_minutes;
-    const after = row.minutesAfter ?? row.after ?? row.after_minutes;
-    if (before != null && after != null) return `${before}m before / ${after}m after`;
-    return "—";
+// ── Pure utilities ───────────────────────────────────────────────────────────
+
+function formatScenarioWindow(row) {
+    return `${clampMinutes(row.beforeMinutes)}m before / ${clampMinutes(row.afterMinutes)}m after`;
+}
+
+function formatDateRangeLabel(start, end) {
+    if (start && end) return `${start} → ${end}`;
+    if (start) return `${start} → open`;
+    if (end) return `start → ${end}`;
+    return "All calendar dates";
 }
 
 function slug(value) {
@@ -631,10 +1302,20 @@ function parseTime(value) {
     return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
 }
 
-function shortDate(value) {
+function tsToDateStr(ts) {
+    return new Date(ts * 1000).toISOString().slice(0, 10);
+}
+
+function shortDateCompact(value) {
     const ms = Date.parse(value);
     if (!Number.isFinite(ms)) return "—";
-    return new Date(ms).toISOString().slice(0, 10);
+    return new Date(ms).toISOString().slice(2, 10); // "YY-MM-DD"
+}
+
+function shortDateTime(value) {
+    const ms = Date.parse(value);
+    if (!Number.isFinite(ms)) return "—";
+    return new Date(ms).toISOString().slice(0, 16).replace("T", " ");
 }
 
 function impactTone(impact) {

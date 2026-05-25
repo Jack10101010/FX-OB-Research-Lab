@@ -5,7 +5,11 @@ import { ThemeProvider } from "@/context/ThemeContext";
 import { AppShell } from "@/components/lab/AppShell";
 import { RouteErrorBoundary } from "@/components/lab/RouteErrorBoundary";
 import Overview from "@/pages/Overview";
+import WorkflowGuide from "@/pages/WorkflowGuide";
+import StrategyLogic from "@/pages/StrategyLogic";
 import StrategyBuilder from "@/pages/StrategyBuilder";
+import Projects from "@/pages/Projects";
+import ProjectDetail from "@/pages/ProjectDetail";
 import Runs from "@/pages/Runs";
 import RunDetail from "@/pages/RunDetail";
 import OrderBlockLab from "@/pages/OrderBlockLab";
@@ -35,6 +39,10 @@ function App() {
                 <AppShell>
                     <Routes>
                         <Route path="/" element={withRouteBoundary(<Overview />)} />
+                        <Route path="/workflow-guide" element={withRouteBoundary(<WorkflowGuide />)} />
+                        <Route path="/strategy-logic" element={withRouteBoundary(<StrategyLogic />)} />
+                        <Route path="/projects" element={withRouteBoundary(<Projects />)} />
+                        <Route path="/projects/:projectId" element={withRouteBoundary(<ProjectDetail />)} />
                         <Route path="/strategy" element={withRouteBoundary(<StrategyBuilder />)} />
                         <Route path="/runs" element={withRouteBoundary(<Runs />)} />
                         <Route path="/runs/:runId" element={withRouteBoundary(<RunDetail />)} />

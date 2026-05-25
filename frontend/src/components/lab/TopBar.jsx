@@ -1,5 +1,5 @@
 import React from "react";
-import { RefreshCw, Clock, FileInput, Plus, Database, Search } from "lucide-react";
+import { Clock, Plus, Database, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function TopBar() {
@@ -24,13 +24,6 @@ export function TopBar() {
                 </div>
                 <div className="flex-1" />
                 <button
-                    data-testid="topbar-load-config"
-                    className="group inline-flex items-center gap-2 px-3 py-1.5 text-[12px] font-mono uppercase tracking-wider border border-[hsl(var(--border-mid))] hover:border-[hsl(var(--accent-secondary))] clip-bevel-sm transition-colors"
-                >
-                    <FileInput className="w-3.5 h-3.5 text-[hsl(var(--accent-secondary))]" />
-                    Load Config
-                </button>
-                <button
                     data-testid="topbar-new-backtest"
                     className="group relative inline-flex items-center gap-2 px-3.5 py-1.5 text-[12px] font-mono uppercase tracking-wider clip-bevel-sm border border-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.10)] text-white hover:bg-[hsl(var(--accent-primary)/0.20)] transition-colors"
                     style={{ boxShadow: "0 0 24px -8px hsl(var(--accent-primary))" }}
@@ -39,7 +32,6 @@ export function TopBar() {
                     New Backtest
                 </button>
             </div>
-            <div className="divider-glow mt-3" />
         </div>
     );
 }

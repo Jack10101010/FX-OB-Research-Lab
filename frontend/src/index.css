@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -114,6 +114,59 @@
         --accent-glow: 350 100% 60%;
         --accent-border: 0 75% 45%;
     }
+
+    [data-theme="terminal"] {
+        /* Base surfaces — deep navy/charcoal stack */
+        --bg: 222 24% 7%;
+        --bg-2: 222 22% 9%;
+        --panel: 220 20% 11%;
+        --panel-2: 220 18% 14%;
+        --panel-3: 218 16% 18%;
+
+        /* Borders — subtle blue-grey */
+        --border-soft: 218 16% 22%;
+        --border-mid: 210 18% 28%;
+
+        /* Text — readable, not harsh white */
+        --text: 210 14% 93%;
+        --text-2: 210 12% 74%;
+        --muted: 210 10% 54%;
+
+        /* Grid — low-contrast slate/blue */
+        --grid: 215 16% 18%;
+
+        /* Accents — calm teal-blue family */
+        --accent-primary: 185 52% 52%;
+        --accent-secondary: 210 52% 58%;
+        --accent-glow: 190 45% 52%;
+        --accent-border: 190 35% 36%;
+
+        /* Title highlight — subtle, not neon */
+        --title-highlight: var(--text-2);
+
+        /* State colors — readable but less fluorescent */
+        --success: 152 52% 48%;
+        --danger: 0 68% 58%;
+        --warning: 38 80% 54%;
+        --info: 200 70% 54%;
+
+        --bull: 152 52% 46%;
+        --bear: 0 65% 56%;
+
+        /* shadcn radius override — softer corners */
+        --radius: 0.5rem;
+
+        /* Structural intensity — calm everything down */
+        --glow-strength: 0.08;
+        --glow-bloom: 0.12;
+        --text-glow-strength: 0;
+        --success-text-glow-strength: 0.12;
+        --grid-opacity: 0.16;
+        --grid-fine-opacity: 0.10;
+        --body-blob-primary-opacity: 0;
+        --body-blob-secondary-opacity: 0;
+        --divider-opacity: 0.14;
+    }
 }
 
 @layer base {
@@ -124,17 +177,35 @@
         height: 100%;
         background: hsl(var(--bg));
         color: hsl(var(--text));
+        font-variant-numeric: normal;
+        font-feature-settings: "zero" 0, "ss01" 0, "ss02" 0, "cv01" 0;
     }
     body {
         margin: 0;
-        font-family: 'Space Grotesk', system-ui, sans-serif;
+        font-family: 'IBM Plex Sans', 'Inter', system-ui, sans-serif;
         -webkit-font-smoothing: antialiased;
-        font-feature-settings: 'ss01', 'cv11';
         background:
-            radial-gradient(ellipse at 12% -10%, hsl(var(--accent-primary) / 0.10), transparent 45%),
-            radial-gradient(ellipse at 95% 110%, hsl(var(--accent-secondary) / 0.08), transparent 50%),
+            radial-gradient(ellipse at 12% -10%, hsl(var(--accent-primary) / var(--body-blob-primary-opacity, 0.10)), transparent 45%),
+            radial-gradient(ellipse at 95% 110%, hsl(var(--accent-secondary) / var(--body-blob-secondary-opacity, 0.08)), transparent 50%),
             hsl(var(--bg));
         background-attachment: fixed;
+    }
+    input,
+    select,
+    textarea,
+    button,
+    table,
+    pre,
+    code,
+    kbd,
+    samp {
+        font-variant-numeric: normal;
+        font-feature-settings: "zero" 0, "ss01" 0, "ss02" 0, "cv01" 0;
+    }
+    input,
+    select,
+    textarea {
+        font-family: 'IBM Plex Sans', 'Inter', system-ui, sans-serif;
     }
     ::selection {
         background: hsl(var(--accent-primary) / 0.35);
@@ -144,7 +215,91 @@
 
 @layer utilities {
     .font-mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
-    .font-display { font-family: 'Space Grotesk', system-ui, sans-serif; }
+    .font-display { font-family: 'IBM Plex Sans', 'Inter', system-ui, sans-serif; }
+    .control-value-font {
+        font-family: 'IBM Plex Sans', 'Inter', system-ui, sans-serif;
+        font-variant-numeric: normal;
+        font-feature-settings: "zero" 0, "ss01" 0, "ss02" 0, "cv01" 0;
+    }
+    button.font-mono,
+    button .font-mono,
+    input.font-mono,
+    select.font-mono,
+    textarea.font-mono,
+    table.font-mono,
+    table .font-mono,
+    label.font-mono,
+    label .font-mono,
+    .control-label.font-mono,
+    .panel-title-label.font-mono,
+    .clip-bevel-sm.font-mono {
+        font-family: 'IBM Plex Sans', 'Inter', system-ui, sans-serif;
+    }
+
+    .control-label,
+    label {
+        font-size: 11.5px;
+        font-weight: 500;
+        letter-spacing: 0.06em;
+        color: hsl(var(--text-2));
+    }
+    .panel-title-label {
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.10em;
+        color: hsl(var(--accent-secondary));
+    }
+
+    /* Standard compact chips for table rows and ledger/status cells. Prefer these for future row-level chips. */
+    .row-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        min-height: 18px;
+        padding: 2px 6px;
+        border: 1px solid hsl(var(--border-soft));
+        border-radius: 3px;
+        background: hsl(var(--panel-2));
+        color: hsl(var(--text-2));
+        font-size: 10.5px;
+        font-weight: 600;
+        line-height: 1;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+        font-variant-numeric: tabular-nums;
+        font-feature-settings: "zero" 0, "ss01" 0, "ss02" 0, "cv01" 0;
+    }
+    .row-chip-muted {
+        border-color: hsl(var(--border-mid) / 0.65);
+        color: hsl(var(--text-2));
+        background: hsl(var(--panel-2));
+    }
+    .row-chip-primary {
+        border-color: hsl(var(--accent-primary) / 0.6);
+        color: hsl(var(--accent-primary));
+        background: hsl(var(--accent-primary) / 0.14);
+    }
+    .row-chip-secondary,
+    .row-chip-info {
+        border-color: hsl(var(--accent-secondary) / 0.6);
+        color: hsl(var(--accent-secondary));
+        background: hsl(var(--accent-secondary) / 0.14);
+    }
+    .row-chip-success {
+        border-color: hsl(var(--success) / 0.6);
+        color: hsl(var(--success));
+        background: hsl(var(--success) / 0.14);
+    }
+    .row-chip-danger {
+        border-color: hsl(var(--danger) / 0.6);
+        color: hsl(var(--danger));
+        background: hsl(var(--danger) / 0.14);
+    }
+    .row-chip-warning {
+        border-color: hsl(var(--warning) / 0.62);
+        color: hsl(var(--warning));
+        background: hsl(var(--warning) / 0.16);
+    }
 
     .text-accent { color: hsl(var(--accent-primary)); }
     .text-accent-2 { color: hsl(var(--accent-secondary)); }
@@ -205,34 +360,34 @@
 
     .neon-glow-primary {
         box-shadow:
-            0 0 0 1px hsl(var(--accent-primary) / 0.45) inset,
-            0 0 22px -6px hsl(var(--accent-primary) / 0.55);
+            0 0 0 1px hsl(var(--accent-primary) / var(--glow-strength, 0.45)) inset,
+            0 0 22px -6px hsl(var(--accent-primary) / var(--glow-bloom, 0.55));
     }
     .neon-glow-secondary {
         box-shadow:
-            0 0 0 1px hsl(var(--accent-secondary) / 0.40) inset,
-            0 0 20px -6px hsl(var(--accent-secondary) / 0.50);
+            0 0 0 1px hsl(var(--accent-secondary) / var(--glow-strength, 0.40)) inset,
+            0 0 20px -6px hsl(var(--accent-secondary) / var(--glow-bloom, 0.50));
     }
     .text-glow-primary {
-        text-shadow: 0 0 12px hsl(var(--accent-primary) / 0.55);
+        text-shadow: 0 0 12px hsl(var(--accent-primary) / var(--text-glow-strength, 0.55));
     }
     .text-glow-secondary {
-        text-shadow: 0 0 12px hsl(var(--accent-secondary) / 0.55);
+        text-shadow: 0 0 12px hsl(var(--accent-secondary) / var(--text-glow-strength, 0.55));
     }
     .text-glow-success {
-        text-shadow: 0 0 10px hsl(var(--success) / 0.55);
+        text-shadow: 0 0 10px hsl(var(--success) / var(--success-text-glow-strength, 0.55));
     }
 
     .grid-bg {
         background-image:
-            linear-gradient(hsl(var(--grid) / 0.55) 1px, transparent 1px),
-            linear-gradient(90deg, hsl(var(--grid) / 0.55) 1px, transparent 1px);
+            linear-gradient(hsl(var(--grid) / var(--grid-opacity, 0.55)) 1px, transparent 1px),
+            linear-gradient(90deg, hsl(var(--grid) / var(--grid-opacity, 0.55)) 1px, transparent 1px);
         background-size: 32px 32px;
     }
     .grid-bg-fine {
         background-image:
-            linear-gradient(hsl(var(--grid) / 0.7) 1px, transparent 1px),
-            linear-gradient(90deg, hsl(var(--grid) / 0.7) 1px, transparent 1px);
+            linear-gradient(hsl(var(--grid) / var(--grid-fine-opacity, 0.70)) 1px, transparent 1px),
+            linear-gradient(90deg, hsl(var(--grid) / var(--grid-fine-opacity, 0.70)) 1px, transparent 1px);
         background-size: 16px 16px;
     }
     .noise::before {
@@ -272,9 +427,245 @@
         background: linear-gradient(
             90deg,
             transparent 0%,
-            hsl(var(--accent-primary) / 0.55) 25%,
-            hsl(var(--accent-secondary) / 0.55) 75%,
+            hsl(var(--accent-primary) / var(--divider-opacity, 0.55)) 25%,
+            hsl(var(--accent-secondary) / var(--divider-opacity, 0.55)) 75%,
             transparent 100%
         );
     }
+}
+
+/* Suppress noisy animations in Research Terminal theme */
+[data-theme="terminal"] .animate-pulse-glow,
+[data-theme="terminal"] .animate-scan {
+    animation: none;
+}
+
+/* =====================================================================
+   RESEARCH TERMINAL — Phase 2 component overrides
+   All rules are scoped to [data-theme="terminal"].
+   Existing cyberpunk themes (violet / emerald / amber / ice / blood)
+   are completely unaffected.
+   ===================================================================== */
+
+/* 1. GEOMETRY — Neutralise octagonal / beveled clip shapes.
+      Both the outer gradient-border wrapper AND inner panel divs use
+      clip-bevel-sm; removing clip-path on both converts them to
+      standard rounded cards. The 1px gradient border trick still works —
+      it just has rounded corners instead of octagonal ones.          */
+[data-theme="terminal"] .clip-bevel,
+[data-theme="terminal"] .clip-bevel-sm,
+[data-theme="terminal"] .clip-corner,
+[data-theme="terminal"] .clip-tag {
+    clip-path: none;
+    border-radius: var(--radius);
+}
+
+/* 2. GLOW UTILITIES — Replace neon bloom with a plain depth shadow.
+      Variables already reduce opacity to near-zero; this also replaces
+      the inset accent ring with a neutral border so no colour leaks.  */
+[data-theme="terminal"] .neon-glow-primary,
+[data-theme="terminal"] .neon-glow-secondary {
+    box-shadow:
+        0 0 0 1px hsl(var(--border-soft)),
+        0 2px 6px hsl(0 0% 0% / 0.24);
+}
+
+/* 3. NOISE TEXTURE — Remove entirely. */
+[data-theme="terminal"] .noise::before {
+    display: none;
+}
+
+/* 4. FINE GRID — Remove. Coarse grid is already dimmed by token. */
+[data-theme="terminal"] .grid-bg-fine {
+    background-image: none;
+}
+
+/* 5. DIVIDER — Replace gradient glow with a quiet single-colour line. */
+[data-theme="terminal"] .divider-glow {
+    background: hsl(var(--border-soft));
+}
+
+/* 6. SELECTION — Calmer highlight. */
+[data-theme="terminal"] ::selection {
+    background: hsl(var(--accent-primary) / 0.20);
+    color: hsl(var(--text));
+}
+
+/* 7. SCROLLBAR — Match terminal palette; no accent-coloured hover glow. */
+[data-theme="terminal"] .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: hsl(var(--border-mid));
+}
+[data-theme="terminal"] .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--accent-primary) / 0.38);
+}
+
+/* 8. TEXT UTILITIES — Strip any residual text-shadow, clarify colours.
+      .text-title-lab: override --title-highlight alias to use full --text
+        (near-white headings, no cyan tint).
+      .text-muted-lab: --muted token was lifted in the theme block
+        (46% → 54% L); this explicit override raises it further to 58% L
+        specifically for label/caption contexts — enough presence without
+        competing with body text.                                       */
+[data-theme="terminal"] .text-title-lab {
+    color: hsl(var(--text));
+    text-shadow: none;
+}
+[data-theme="terminal"] .text-muted-lab {
+    color: hsl(210 10% 58%);
+    text-shadow: none;
+}
+[data-theme="terminal"] .text-accent,
+[data-theme="terminal"] .text-accent-2,
+[data-theme="terminal"] .text-success,
+[data-theme="terminal"] .text-danger {
+    text-shadow: none;
+}
+
+/* 9. NEONPANEL CORNER ACCENTS — Suppress the 4 decorative corner lines
+      that NeonPanel.jsx renders as absolute positioned spans.
+      Selector: direct-child spans of any backdrop-blur-xl container
+      that carry both `absolute` and `pointer-events-none`.
+      These are the only such spans rendered by NeonPanel; layout is
+      unaffected because they are purely decorative overlays.          */
+[data-theme="terminal"] .backdrop-blur-xl > span.absolute.pointer-events-none {
+    opacity: 0;
+}
+
+/* 10. SEGMENT CONTROL — Neutralise the inline boxShadow applied to the
+       active segment button in controls.jsx (line 23).
+       Active background (accent-primary / 0.18) is kept — still a clear
+       visual indicator without a neon inset ring.                     */
+[data-theme="terminal"] [data-testid^="seg-"] {
+    box-shadow: none !important;
+}
+
+/* 11. TABLE ROWS — Slightly softer row text and consistent border tone.
+       DataTable already uses CSS variables for borders and hover states,
+       so token changes cover most of it. These rules handle the header
+       specifically: reduce tracking, use text-2 for a calmer label feel. */
+[data-theme="terminal"] table thead th {
+    color: hsl(var(--text-2));
+    font-weight: 500;
+    letter-spacing: 0.05em;
+    text-transform: none;
+}
+[data-theme="terminal"] table thead tr:last-child td {
+    /* The pixel-height separator row in DataTable */
+    background: hsl(var(--border-soft));
+}
+
+/* 12. SIDEBAR — Nav active-indicator inline glow.
+       The active NavLink left-bar span uses an inline style
+       { boxShadow: "0 0 10px hsl(var(--accent-primary))" }.
+       Scoped tightly to the sidebar via its data-testid.             */
+[data-theme="terminal"] [data-testid="app-sidebar"] .w-\[2px\] {
+    box-shadow: none !important;
+}
+
+/* 13. SIDEBAR — Logo icon inline drop-shadow.
+       The Beaker icon has style={{ filter: "drop-shadow(...)" }} inline.
+       Targets only SVGs inside the 36px (w-9) logo tile.             */
+[data-theme="terminal"] [data-testid="app-sidebar"] .w-9 svg {
+    filter: none !important;
+}
+
+/* =====================================================================
+   RESEARCH TERMINAL — Phase 3 label hooks
+   .panel-title-label  — NeonPanel h3 title, SectionTitle h4
+   .control-label      — Field label spans, StatusMeta/LogBlock labels,
+                         inline section labels throughout StrategyBuilder
+   Classes are additive alongside existing font-mono/uppercase/tracking
+   utilities; cyberpunk themes are completely unaffected.
+   ===================================================================== */
+
+[data-theme="terminal"] .panel-title-label {
+    letter-spacing: 0.08em;
+    text-transform: none;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: hsl(var(--accent-secondary));
+}
+
+[data-theme="terminal"] .control-label {
+    letter-spacing: 0.04em;
+    text-transform: none;
+    font-size: 0.71875rem;
+    font-weight: 500;
+    color: hsl(var(--text-2));
+}
+
+/* -- Input / Select focus ring: clean 2px outline, no neon bloom ------ */
+[data-theme="terminal"] input:focus,
+[data-theme="terminal"] select:focus {
+    box-shadow: 0 0 0 2px hsl(var(--accent-primary) / 0.28) !important;
+    border-color: hsl(var(--accent-primary) / 0.55) !important;
+    outline: none;
+}
+
+/* =====================================================================
+   RESEARCH TERMINAL — Phase 4 global polish
+   All rules scoped to [data-theme="terminal"].
+   Cyberpunk themes completely unaffected.
+   ===================================================================== */
+
+/* 1. SELECT ARROW — replace hardcoded violet (#d946ef) with terminal teal.
+      #45bac4 ≈ hsl(185 52% 52%) matches current --accent-primary value.
+      !important overrides the inline style prop in NeonSelect. */
+[data-theme="terminal"] select {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2345bac4' stroke-width='2'><polyline points='6 9 12 15 18 9'/></svg>") !important;
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    color: hsl(var(--text));
+}
+
+/* 2. INPUT TEXT — override hardcoded text-white Tailwind class. */
+[data-theme="terminal"] input {
+    color: hsl(var(--text));
+}
+
+/* 3. NEONPANEL — remove double-border inset glow shadow, keep subtle depth. */
+[data-theme="terminal"] .backdrop-blur-xl.border {
+    box-shadow: 0 1px 3px hsl(0 0% 0% / 0.18);
+}
+
+/* 4. BUTTONS + SEGMENTS — remove heavy uppercase/tracking on all
+      clip-bevel-sm buttons (NeonButton, Segment). Control bar stays
+      readable at lower visual weight. */
+[data-theme="terminal"] button.clip-bevel-sm {
+    text-transform: none;
+    letter-spacing: 0.04em;
+}
+
+/* 5. NEON TOGGLE — suppress inline glow on the thumb span.
+      Track span has w-9 h-5; thumb is its direct child. */
+[data-theme="terminal"] .w-9.h-5 > span {
+    box-shadow: none !important;
+}
+
+/* 6. METRIC CHIP + PRESET BAR — calm the outer gradient border.
+      Both use .clip-bevel.p-[1px] with bg-gradient-to-br inline.
+      !important overrides the Tailwind gradient utility. */
+[data-theme="terminal"] .clip-bevel.p-\[1px\] {
+    background-image: linear-gradient(
+        to bottom right,
+        hsl(var(--border-mid) / 0.55),
+        hsl(var(--border-soft) / 0.35)
+    ) !important;
+}
+[data-theme="terminal"] .group:hover .clip-bevel.p-\[1px\] {
+    background-image: linear-gradient(
+        to bottom right,
+        hsl(var(--accent-primary) / 0.30),
+        hsl(var(--accent-secondary) / 0.22)
+    ) !important;
+}
+
+/* 7. METRIC CHIP TONE DOT — suppress inline box-shadow glow. */
+[data-theme="terminal"] span.absolute.rounded-full.w-1\.5 {
+    box-shadow: none !important;
+}
+
+/* 8. SPARKLINE — remove drop-shadow filter from SVG polylines. */
+[data-theme="terminal"] polyline {
+    filter: none !important;
 }

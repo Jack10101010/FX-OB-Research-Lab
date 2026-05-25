@@ -1,5 +1,5 @@
 import React from "react";
-import { PageHeader } from "@/components/lab/AppShell";
+import { ActiveRunContext } from "@/components/lab/ActiveRunContext";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { MetricChip } from "@/components/lab/MetricChip";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
@@ -41,10 +41,9 @@ export default function OrderBlockLab() {
 
     return (
         <div className="pb-12">
-            <PageHeader
-                eyebrow="ORDER BLOCK LAB"
-                title={ACTIVE_RUN?.id || "No active run"}
-                subtitle={`${ACTIVE_RUN?.symbol || "Symbol"} · ${ACTIVE_RUN?.detectionTf || "TF"} · ${variantLabel(ACTIVE_TRADE_VARIANT)}`}
+            <ActiveRunContext
+                pageLabel="Order Block Lab"
+                description={`${variantLabel(ACTIVE_TRADE_VARIANT)} — deep order block research using linked trades.`}
                 actions={(
                     <div className="flex items-center gap-2">
                         <button
@@ -66,7 +65,7 @@ export default function OrderBlockLab() {
                 <MetricChip label="Variant" value={variantShort(ACTIVE_TRADE_VARIANT)} sub="selected trades" tone="secondary" icon={GitBranch} />
                 <MetricChip label="Low Sample Rule" value={`n < ${LOW_SAMPLE_N}`} sub="badge every bucket" tone="muted" icon={ShieldCheck} />
                 <MetricChip label="Best Bucket" value={analytics.bestBucket ? formatR(analytics.bestBucket.netR) : "—"} sub={analytics.bestBucket?.label || "Limited Data"} tone="primary" icon={TrendingUp} />
-                <MetricChip label="Active Run" value={activeRunId ? "Imported" : "Mock"} sub={trades.length ? `${trades.length} trades` : "No trades"} tone="secondary" icon={Activity} />
+                <MetricChip label="Active Run" value={activeRunId ? "Imported" : "No Run"} sub={trades.length ? `${trades.length} trades` : "No trades"} tone="secondary" icon={Activity} />
             </div>
 
             <div className="px-6 mt-5 grid grid-cols-1 xl:grid-cols-3 gap-4">

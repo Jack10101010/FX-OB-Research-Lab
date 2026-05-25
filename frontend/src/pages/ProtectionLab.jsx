@@ -1,5 +1,5 @@
 import React from "react";
-import { PageHeader } from "@/components/lab/AppShell";
+import { ActiveRunContext } from "@/components/lab/ActiveRunContext";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { MetricChip } from "@/components/lab/MetricChip";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
@@ -98,13 +98,11 @@ export default function ProtectionLab() {
 
     return (
         <div className="pb-12">
-            <PageHeader
-                eyebrow="PROTECTION LAB"
-                title={ACTIVE_RUN?.id || "No active run"}
-                subtitle={`${ACTIVE_RUN?.symbol || "Symbol"} · ${ACTIVE_RUN?.detectionTf || "TF"} · ${variantLabel(ACTIVE_TRADE_VARIANT)} — defensive logic on enriched OB analytics`}
+            <ActiveRunContext
+                pageLabel="Protection Lab"
+                description={`${variantLabel(ACTIVE_TRADE_VARIANT)} — defensive logic on enriched OB analytics.`}
                 actions={(
                     <div className="flex items-center gap-2">
-                        <Pill tone={activeRunId ? "primary" : "muted"}>{activeRunId ? "IMPORTED" : "MOCK"}</Pill>
                         <Pill tone="secondary">{p.n} TRADES</Pill>
                     </div>
                 )}

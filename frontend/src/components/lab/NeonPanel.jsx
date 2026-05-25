@@ -28,7 +28,7 @@ export function NeonPanel({ children, className, title, action, dense = false, t
             {(title || action) && (
                 <div className={cn("flex items-center justify-between px-4", dense ? "py-2" : "py-3", "border-b border-[hsl(var(--border-soft)/0.6)]")}>
                     {title && (
-                        <h3 className="text-[11px] font-mono tracking-[0.22em] uppercase text-title-lab">
+                        <h3 className="panel-title-label uppercase text-title-lab">
                             {title}
                         </h3>
                     )}
@@ -42,7 +42,7 @@ export function NeonPanel({ children, className, title, action, dense = false, t
 
 export function SectionTitle({ children, className }) {
     return (
-        <h4 className={cn("text-[10px] font-mono tracking-[0.22em] uppercase text-title-lab", className)}>
+        <h4 className={cn("panel-title-label uppercase text-title-lab", className)}>
             {children}
         </h4>
     );

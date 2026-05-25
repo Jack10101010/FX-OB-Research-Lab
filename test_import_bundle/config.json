@@ -18,6 +18,35 @@
     "allow_multi_position",
     "one_per_direction"
   ],
+  "entry_models": [
+    "baseline",
+    "entry_penetration"
+  ],
+  "entry_penetration_thresholds": [
+    10.0,
+    25.0,
+    50.0,
+    75.0
+  ],
+  "protection_modes": [
+    "baseline",
+    "full_ob_breach_exit",
+    "penetration_threshold_exit",
+    "close_confirmed_ob_breach_exit"
+  ],
+  "penetration_thresholds": [
+    50.0,
+    75.0,
+    90.0,
+    100.0
+  ],
+  "close_breach_buffers_pips": [
+    0.0,
+    0.5,
+    1.0,
+    2.0,
+    3.0
+  ],
   "detection_tf": "15min",
   "execution_tf": "1min",
   "date_from": "2025-05-18",

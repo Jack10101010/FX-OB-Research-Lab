@@ -1,11 +1,11 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { PageHeader } from "@/components/lab/AppShell";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { MetricChip } from "@/components/lab/MetricChip";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
 import { NeonSelect, NeonButton } from "@/components/lab/controls";
-import { useDataset } from "@/data/store";
+import { getRunDisplayName, compactTimeframe, useDataset } from "@/data/store";
 import { computeProfitFactor, computeMaxDrawdown } from "@/lib/metrics";
 import { Plus, X, Trophy, Crown } from "lucide-react";
 import {
@@ -21,14 +21,16 @@ const PALETTE = [
 ];
 
 export default function ComparisonLab() {
-    const { RUNS, EQUITY_CURVE, MONTHLY, TRADES, ACTIVE_RUN, getRunData } = useDataset();
-    const [ids, setIds] = useState(() => RUNS.slice(0, 2).map((r) => r.id));
+    const { RUNS, EQUITY_CURVE, TRADES, ACTIVE_RUN, getRunData } = useDataset();
+    const importedRuns = RUNS.filter((r) => r._source === "imported");
+    const [ids, setIds] = useState(() => importedRuns.slice(0, 2).map((r) => r.id));
 
     const setAt = (idx, v) => setIds((prev) => prev.map((x, i) => (i === idx ? v : x)));
     const addRun = () => {
         if (ids.length >= 5) return;
         const used = new Set(ids);
-        const next = RUNS.find((r) => !used.has(r.id)) || RUNS[0];
+        const next = importedRuns.find((r) => !used.has(r.id)) || importedRuns[0];
+        if (!next) return;
         setIds((p) => [...p, next.id]);
     };
     const removeAt = (idx) => {
@@ -53,27 +55,60 @@ export default function ComparisonLab() {
         return { pf: null, maxDd: null };
     };
 
-    // Synthesize per-run equity by using imported curve when available, else scaled baseline.
-    const equityMerged = EQUITY_CURVE.map((p, idx) => {
-        const row = { label: p.label, i: p.i };
-        runs.forEach((r, i) => {
+    // Per-run equity — uses each bundle's own equity curve; null for runs without one.
+    const equityMerged = useMemo(() => {
+        // Use the longest available equity curve as the x-axis skeleton
+        const skeleton = runs.reduce((best, r) => {
             const bundle = getRunData(r.id);
-            if (bundle?.equityCurve?.length) {
-                const e = bundle.equityCurve[Math.min(idx, bundle.equityCurve.length - 1)];
-                row[`r${i}`] = e ? e.netR : null;
-            } else {
-                row[`r${i}`] = Number((p.netR * (r.netR / (baseline?.netR || 1))).toFixed(2));
-            }
+            const curve = bundle?.equityCurve || [];
+            return curve.length > (best?.length || 0) ? curve : best;
+        }, EQUITY_CURVE);
+        if (!skeleton?.length) return [];
+        return skeleton.map((p, idx) => {
+            const row = { label: p.label, i: p.i };
+            runs.forEach((r, i) => {
+                const bundle = getRunData(r.id);
+                if (bundle?.equityCurve?.length) {
+                    const e = bundle.equityCurve[Math.min(idx, bundle.equityCurve.length - 1)];
+                    row[`r${i}`] = e ? e.netR : null;
+                } else {
+                    // No real equity data — omit rather than fabricate
+                    row[`r${i}`] = null;
+                }
+            });
+            return row;
         });
-        return row;
-    });
+    }, [runs, getRunData, EQUITY_CURVE]);
 
-    // Synthesize monthly per-run
-    const monthlyMerged = MONTHLY.map((m) => {
-        const row = { m: m.m };
-        runs.forEach((r, idx) => { row[`r${idx}`] = Number((m.v * (r.netR / (baseline?.netR || 1))).toFixed(2)); });
-        return row;
-    });
+    // Per-run monthly — computed from each bundle's trade timestamps
+    const monthlyMerged = useMemo(() => {
+        const perRun = runs.map((r) => {
+            const bundle = getRunData(r.id);
+            if (!bundle?.trades?.length) return {};
+            const map = {};
+            bundle.trades.forEach((t) => {
+                const date = t.entry ? new Date(t.entry) : null;
+                if (!date || !isFinite(date.getTime())) return;
+                const year = date.getUTCFullYear();
+                const month = date.getUTCMonth();
+                const key = `${year}-${String(month + 1).padStart(2, "0")}`;
+                const m = `${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][month]} '${String(year).slice(-2)}`;
+                if (!map[key]) map[key] = { m, v: 0 };
+                map[key].v += Number(t.r) || 0;
+            });
+            return map;
+        });
+        const allKeys = [...new Set(perRun.flatMap((m) => Object.keys(m)))].sort();
+        if (!allKeys.length) return [];
+        return allKeys.map((key) => {
+            const m = perRun.find((pm) => pm[key])?.m || key;
+            const row = { m };
+            runs.forEach((_, idx) => {
+                row[`r${idx}`] = perRun[idx][key] != null ? Number(perRun[idx][key].v.toFixed(2)) : null;
+            });
+            return row;
+        });
+    }, [runs, getRunData]);
 
     // KPI matrix rows
     const KPI_DEFS = [
@@ -86,7 +121,35 @@ export default function ComparisonLab() {
         { key: "validation",    label: "Validation",       fmt: (v) => `${v.toFixed(1)}%`,                  delta: (v, base) => `${v - base >= 0 ? "+" : ""}${(v - base).toFixed(1)}%`, posIfGreater: true },
     ];
 
-    const winnerIdx = runs.reduce((best, r, i, all) => (r.netR > all[best].netR ? i : best), 0);
+    const winnerIdx = runs.length > 0 ? runs.reduce((best, r, i, all) => (r.netR > all[best].netR ? i : best), 0) : 0;
+
+    // ── Empty state: need at least 2 imported runs to compare ────────
+    if (importedRuns.length < 2) {
+        return (
+            <div className="pb-12">
+                <PageHeader
+                    eyebrow="COMPARISON LAB"
+                    title="Multi-Run Comparison"
+                    subtitle="Compare equity curves, monthly performance, and KPI deltas across multiple runs."
+                    actions={<Link to="/runs"><NeonButton tone="ghost">Browse Runs</NeonButton></Link>}
+                />
+                <div className="px-6 py-20 flex flex-col items-center text-center gap-4">
+                    <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-lab">
+                        {importedRuns.length === 0 ? "No Imported Runs" : "Need At Least 2 Runs"}
+                    </div>
+                    <p className="text-[13px] text-[hsl(var(--text-2))] max-w-[480px] leading-relaxed">
+                        {importedRuns.length === 0
+                            ? "Import at least 2 runs to start comparing strategies."
+                            : "Import one more run to unlock the comparison view."}
+                    </p>
+                    <div className="flex items-center gap-3 mt-2">
+                        <Link to="/projects"><NeonButton tone="secondary">Go to Projects</NeonButton></Link>
+                        <Link to="/strategy"><NeonButton tone="primary">Open Strategy Builder</NeonButton></Link>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="pb-12">
@@ -120,9 +183,9 @@ export default function ComparisonLab() {
                                         </button>
                                     )}
                                 </div>
-                                <NeonSelect testId={`cmp-run-${idx}`} value={id} onChange={(v) => setAt(idx, v)} options={RUNS.map((r) => r.id)} className="w-full" />
+                                <NeonSelect testId={`cmp-run-${idx}`} value={id} onChange={(v) => setAt(idx, v)} options={importedRuns.map((r) => ({ value: r.id, label: getRunDisplayName(r) }))} className="w-full" />
                                 <div className="mt-2 flex items-center justify-between font-mono text-[11px]">
-                                    <span className="text-[hsl(var(--text-2))]">{runs[idx]?.symbol} · {runs[idx]?.detectionTf}</span>
+                                    <span className="text-[hsl(var(--text-2))]">{runs[idx]?.symbol} · {compactTimeframe(runs[idx]?.detectionTf)}</span>
                                     <ColoredR value={runs[idx]?.netR || 0} />
                                 </div>
                             </div>
@@ -141,7 +204,7 @@ export default function ComparisonLab() {
                             key={idx}
                             label={`Δ Net R · ${p.short} − A`}
                             value={`${dNet >= 0 ? "+" : ""}${dNet.toFixed(1)}R`}
-                            sub={`${r.id} vs ${baseline.id}`}
+                            sub={`${getRunDisplayName(r)} vs ${getRunDisplayName(baseline)}`}
                             tone={dNet >= 0 ? "success" : "danger"}
                         />
                     );
@@ -276,7 +339,7 @@ function Legend({ runs }) {
             {runs.map((r, idx) => (
                 <span key={idx} className="inline-flex items-center gap-1.5">
                     <span className="w-2 h-2" style={{ background: PALETTE[idx % PALETTE.length].line }} />
-                    <span className="text-[hsl(var(--text-2))]">{PALETTE[idx % PALETTE.length].short}: {r.id}</span>
+                    <span className="text-[hsl(var(--text-2))]">{PALETTE[idx % PALETTE.length].short}: {getRunDisplayName(r)}</span>
                 </span>
             ))}
         </div>
@@ -299,8 +362,9 @@ function ParetoFrontier({ runs, runMetrics }) {
         const ddAbs = ddRaw != null ? Math.abs(ddRaw) : null;
         return {
             id: r?.id,
+            displayName: getRunDisplayName(r),
             symbol: r?.symbol || "—",
-            tf: r?.detectionTf || "—",
+            tf: compactTimeframe(r?.detectionTf),
             rr: isNum(r?.rr) ? Number(r.rr) : null,
             netR,
             ddAbs,
@@ -382,8 +446,8 @@ function ParetoFrontier({ runs, runMetrics }) {
                     <DataTable
                         testId="pareto-leaderboard"
                         columns={[
-                            { key: "id", label: "Run ID", render: (r) => (
-                                <Link to={`/runs/${encodeURIComponent(r.id)}`} className="text-[hsl(var(--accent-primary))] hover:text-white">{r.id}</Link>
+                            { key: "id", label: "Run", render: (r) => (
+                                <Link to={`/runs/${encodeURIComponent(r.id)}`} className="text-[hsl(var(--accent-primary))] hover:text-white">{r.displayName}</Link>
                             ) },
                             { key: "netR",    label: "Net R",    align: "right", render: (r) => <ColoredR value={r.netR} /> },
                             { key: "ddAbs",   label: "Max DD",   align: "right", render: (r) => r.ddLabel },
@@ -411,7 +475,7 @@ function ParetoTooltip({ active, payload }) {
         <div className="clip-bevel-sm bg-[hsl(var(--panel-2))] border border-[hsl(var(--accent-primary)/0.4)] px-3 py-2 font-mono text-[11px]">
             <div className="flex items-center gap-2">
                 <span className="w-2 h-2" style={{ background: p.pareto ? "hsl(var(--accent-primary))" : "hsl(var(--muted))" }} />
-                <span className="text-white">{p.id}</span>
+                <span className="text-white">{p.displayName}</span>
                 {p.pareto && <span className="text-[9px] uppercase tracking-[0.18em] text-[hsl(var(--accent-primary))]">Efficient</span>}
             </div>
             <div className="text-muted-lab mt-1">{p.symbol} · {p.tf} · RR {p.rrLabel}</div>

@@ -165,6 +165,12 @@ function normalizeTimestamp(value) {
     return isFinite(ms) ? Math.floor(ms / 1000) : null;
 }
 
+function formatEntityId(prefix, value) {
+    if (value == null || value === "") return "";
+    const match = String(value).match(/\d+/);
+    return match ? `${prefix}-${String(Number(match[0])).padStart(3, "0")}` : String(value);
+}
+
 // ─────────────────────── Parsers ───────────────────────
 
 export function parseCandlesCSV(text) {
@@ -187,8 +193,8 @@ export function parseOrderBlocksCSV(text) {
     const { rows } = parseCSV(text);
     return rows.map((r, i) => ({
         id: String(pick(r, "id", "ob_id") || `OB-${String(i + 1).padStart(3, "0")}`),
-        i0: pick(r, "i0", "start_index", "origin_index"),
-        i1: pick(r, "i1", "end_index", "detection_index"),
+        originIndexRaw: pick(r, "i0", "start_index", "origin_index"),
+        detectionIndexRaw: pick(r, "i1", "end_index", "detection_index"),
         originTime: pick(r, "origin_time", "start_time"),
         endTime:    pick(r, "end_time", "detection_time"),
         top:  Number(pick(r, "top", "high") ?? 0),
@@ -196,6 +202,20 @@ export function parseOrderBlocksCSV(text) {
         side: String(pick(r, "side", "direction", "type") || "bull").toLowerCase().startsWith("b")
             ? (String(pick(r, "side", "direction", "type") || "").toLowerCase().includes("bear") ? "bear" : "bull")
             : "bear",
+        obFinalStatus: String(pick(r, "ob_final_status") || ""),
+        obFinalStatusLabel: String(pick(r, "ob_final_status_label") || ""),
+        chartRightTime: pick(r, "chart_right_time"),
+        chartRightTimeSource: String(pick(r, "chart_right_time_source") || ""),
+        linkedTradeId: String(pick(r, "linked_trade_id") || ""),
+        fillTime: pick(r, "fill_time"),
+        exitTime: pick(r, "exit_time"),
+        cancelTime: pick(r, "cancel_time"),
+        invalidationTime: pick(r, "invalidation_time"),
+        protectionTriggerTime: pick(r, "protection_trigger_time"),
+        newsBlackoutTriggerTime: pick(r, "news_blackout_trigger_time"),
+        reverseTouchTime: pick(r, "reverse_touch_time"),
+        sessionCancelTime: pick(r, "session_cancel_time"),
+        lifecycleReason: String(pick(r, "lifecycle_reason") || ""),
     }));
 }
 
@@ -211,13 +231,26 @@ export function parseTradesCSV(text) {
         const rVal = Number(pick(r, "pnl_r", "r", "r_result", "rresult") ?? 0);
         const outcome = outcomeRaw ? cap(outcomeRaw) : (rVal >= 0 ? "Win" : "Loss");
         const structRaw = pick(r, "structure_tag", "structure", "structure_type", "type") || "BOS";
+        const rawObId = pick(r, "ob_id", "order_block_id");
+        const rawTradeId = pick(r, "trade_id", "id", "trade_index");
+        const displayObId = formatEntityId("OB", rawObId);
+        const derivedTradeId = rawObId != null && rawObId !== "" ? formatEntityId("T", rawObId) : "";
+        const fillSession = String(pick(r, "fill_session", "fillSession", "trade_session", "tradeSession", "entry_session", "entrySession") || "");
+        const rawSession = String(pick(r, "session") || "");
         return {
-            id: String(pick(r, "id", "trade_id") || `T-${String(i + 1).padStart(3, "0")}`),
-            obId: pick(r, "ob_id"),
+            id: String(rawTradeId || derivedTradeId || `T-${String(i + 1).padStart(3, "0")}`),
+            rawTradeId: rawTradeId == null ? "" : String(rawTradeId),
+            displayTradeId: derivedTradeId || String(rawTradeId || `T-${String(i + 1).padStart(3, "0")}`),
+            obId: rawObId,
+            displayObId,
             num: i + 1,
             direction,
             structure: String(structRaw).toUpperCase().includes("CHOCH") ? "CHoCH" : "BOS",
-            session: String(pick(r, "session") || "—"),
+            session: rawSession || fillSession || "—",
+            fillSession: fillSession || rawSession || "",
+            fill_session: fillSession || rawSession || "",
+            trade_session: String(pick(r, "trade_session") || ""),
+            entry_session: String(pick(r, "entry_session") || ""),
             obOrigin:   String(pick(r, "ob_origin", "origin_time") || ""),
             detected:   String(pick(r, "detected", "detection_time") || ""),
             entry:      String(pick(r, "fill_time", "entry_time") || ""),
@@ -245,6 +278,12 @@ export function parseTradesCSV(text) {
             fill_penetration_pct: numOrNull(pick(r, "fill_penetration_pct")),
             fill_penetration_pips: numOrNull(pick(r, "fill_penetration_pips")),
             entry_depth_pct: numOrNull(pick(r, "entry_depth_pct")),
+            ob_entry_depth_pct: numOrNull(pick(r, "ob_entry_depth_pct")),
+            obEntryDepthPct: numOrNull(pick(r, "ob_entry_depth_pct", "obEntryDepthPct")),
+            original_edge_entry: numOrNull(pick(r, "original_edge_entry")),
+            originalEdgeEntry: numOrNull(pick(r, "original_edge_entry", "originalEdgeEntry")),
+            adjusted_entry: numOrNull(pick(r, "adjusted_entry")),
+            adjustedEntry: numOrNull(pick(r, "adjusted_entry", "adjustedEntry")),
             max_distance_away_before_fill_price: numOrNull(pick(r, "max_distance_away_before_fill_price")),
             max_distance_away_before_fill_pips: numOrNull(pick(r, "max_distance_away_before_fill_pips")),
             max_distance_away_before_fill_r: numOrNull(pick(r, "max_distance_away_before_fill_r")),
@@ -272,6 +311,9 @@ export function parseTradesCSV(text) {
             entry_model_filled: boolOrNull(pick(r, "entry_model_filled")),
             missed_trade: boolOrNull(pick(r, "missed_trade")),
             missed_reason: String(pick(r, "missed_reason") || ""),
+            missed_session: String(pick(r, "missed_session") || ""),
+            blocked_session: String(pick(r, "blocked_session") || ""),
+            session_filtered_session: String(pick(r, "session_filtered_session") || ""),
             bars_to_fill: numOrNull(pick(r, "bars_to_fill")),
             minutes_to_fill: numOrNull(pick(r, "minutes_to_fill")),
             news_blackout: boolOrNull(pick(r, "news_blackout")),
@@ -283,6 +325,13 @@ export function parseTradesCSV(text) {
             news_blackout_window_start: String(pick(r, "news_blackout_window_start") || ""),
             news_blackout_window_end: String(pick(r, "news_blackout_window_end") || ""),
             news_blackout_minutes_from_event: numOrNull(pick(r, "news_blackout_minutes_from_event")),
+            news_action: String(pick(r, "news_action") || ""),
+            news_flatten_time: String(pick(r, "news_flatten_time") || ""),
+            news_flatten_price: numOrNull(pick(r, "news_flatten_price")),
+            news_flatten_r: numOrNull(pick(r, "news_flatten_r")),
+            news_flatten_target_time: String(pick(r, "news_flatten_target_time") || ""),
+            news_flatten_late: boolOrNull(pick(r, "news_flatten_late")),
+            news_flatten_minutes_before_blackout: numOrNull(pick(r, "news_flatten_minutes_before_blackout")),
         };
     });
 }
@@ -341,6 +390,8 @@ function enrichTradesWithOrderBlocks(trades, obLookup, pipSize) {
             obId: trade.obId ?? ob?.id ?? null,
             obOriginTime: ob?.originTime ?? trade.obOrigin ?? null,
             obDetectionTime: ob?.endTime ?? trade.detected ?? null,
+            obOriginIndexRaw: ob?.originIndexRaw ?? null,
+            obDetectionIndexRaw: ob?.detectionIndexRaw ?? null,
             obTop: ob && isNum(ob.top) ? Number(ob.top) : null,
             obBottom: ob && isNum(ob.bot) ? Number(ob.bot) : null,
             obWidthPips: explicitWidth ?? computedWidth,
@@ -396,7 +447,7 @@ function buildCandleIndex(candles) {
     }
     gaps.sort((a, b) => a - b);
     const medianGap = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 3600;
-    return { byTime, ordered, toleranceSec: Math.max(60, Math.floor(medianGap * 1.5)) };
+    return { byTime, ordered, toleranceSec: Math.max(3600, Math.floor(medianGap * 1.5)) };
 }
 
 function timeToCandleIndex(time, idx) {
@@ -766,14 +817,8 @@ export async function ingestRunBundle(fileList) {
     const hasCandles = !!collected.candles?.length;
     const candleIdx = hasCandles ? buildCandleIndex(collected.candles) : null;
     const mappedOBs = collected.orderBlocks.map((b, idx) => {
-        const explicitI0 = b.i0 != null ? Number(b.i0) : null;
-        const explicitI1 = b.i1 != null ? Number(b.i1) : null;
-        const mapped0 = explicitI0 != null && explicitI0 >= 0
-            ? { i: explicitI0, quality: "exact", time: collected.candles?.[explicitI0]?.time ?? null }
-            : (candleIdx ? timeToCandleIndex(b.originTime, candleIdx) : { i: -1, quality: "missing", time: null });
-        const mapped1 = explicitI1 != null && explicitI1 >= 0
-            ? { i: explicitI1, quality: "exact", time: collected.candles?.[explicitI1]?.time ?? null }
-            : (candleIdx ? timeToCandleIndex(b.endTime, candleIdx) : { i: -1, quality: "missing", time: null });
+        const mapped0 = candleIdx ? timeToCandleIndex(b.originTime, candleIdx) : { i: -1, quality: "missing", time: null };
+        const mapped1 = candleIdx ? timeToCandleIndex(b.endTime, candleIdx) : { i: -1, quality: "missing", time: null };
         // Fallback synthetic spacing if neither indices nor candle mapping worked
         const fallbackI0 = idx * 24;
         const fallbackI1 = idx * 24 + 18;
@@ -788,6 +833,8 @@ export async function ingestRunBundle(fileList) {
             i1: mapped1.i >= 0 ? mapped1.i : fallbackI1,
             time0: mapped0.time,
             time1: mapped1.time,
+            originIndexRaw: b.originIndexRaw,
+            detectionIndexRaw: b.detectionIndexRaw,
             mappingQuality,
             top: b.top,
             bot: b.bot,
@@ -826,6 +873,7 @@ export async function ingestRunBundle(fileList) {
     const cfg = collected.config;
     const sm  = collected.summary;
     const id = String(sm.id || cfg.id || sm.run_id || cfg.run_id || `imported_${Date.now()}`);
+    const originalRunId = id;
     const wins = primaryTrades.filter((t) => t.outcome === "Win").length;
     const losses = primaryTrades.length - wins;
     const netR = primaryTrades.reduce((s, t) => s + (Number(t.r) || 0), 0);
@@ -833,6 +881,7 @@ export async function ingestRunBundle(fileList) {
 
     const runSummary = {
         id,
+        originalRunId,
         symbol:       sm.symbol || cfg.symbol,
         detectionTf:  sm.detection_tf || cfg.detection_tf,
         executionTf:  sm.execution_tf || cfg.execution_tf || "1m",
@@ -853,10 +902,24 @@ export async function ingestRunBundle(fileList) {
         executionMode:sm.execution_mode || cfg.execution_mode || primaryVariant,
         reverseCancels: Number(sm.reverse_cancels ?? sm.reverseCancels ?? 0),
         date:         (sm.completed_at || new Date().toISOString()).slice(0, 10),
+        // ── News blackout reporting ──────────────────────────────────────────
+        news_blackout_enabled: sm.news_blackout_enabled ?? cfg.news_blackout_enabled ?? false,
+        news_events_matched: sm.news_events_matched ?? null,
+        news_windows_created: sm.news_windows_created ?? null,
+        news_blackout_skipped: sm.news_blackout_skipped ?? null,
+        news_pending_paused: sm.news_pending_paused ?? null,
+        news_pending_rearmed: sm.news_pending_rearmed ?? null,
+        news_touch_cancelled: sm.news_touch_cancelled ?? null,
+        news_fills_blocked: sm.news_fills_blocked ?? null,
+        news_active_trades_flattened: sm.news_active_trades_flattened ?? null,
+        news_flattened_r: sm.news_flattened_r ?? null,
+        news_flatten_late_count: sm.news_flatten_late_count ?? null,
+        news_debug: sm.news_debug ?? null,
     };
 
     const bundle = {
         id,
+        originalRunId,
         config: cfg,
         summary: runSummary,
         trades: primaryTrades,

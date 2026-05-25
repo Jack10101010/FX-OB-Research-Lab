@@ -15,7 +15,7 @@ export function Segment({ options, value, onChange, className, testId }) {
                         onClick={() => onChange(val)}
                         data-testid={`seg-${String(val).toLowerCase().replace(/\s+/g, "-")}`}
                         className={cn(
-                            "px-2.5 py-1 text-[11px] font-mono uppercase tracking-wider transition-colors clip-bevel-sm",
+                            "px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.08em] transition-colors clip-bevel-sm",
                             active
                                 ? "bg-[hsl(var(--accent-primary)/0.18)] text-white"
                                 : "text-[hsl(var(--text-2))] hover:text-white",
@@ -33,7 +33,7 @@ export function Segment({ options, value, onChange, className, testId }) {
 export function Field({ label, hint, children, className }) {
     return (
         <label className={cn("flex flex-col gap-1.5", className)}>
-            <span className="text-[10px] font-mono uppercase tracking-[0.18em] text-muted-lab">{label}</span>
+            <span className="control-label uppercase">{label}</span>
             {children}
             {hint && <span className="text-[10px] text-muted-lab">{hint}</span>}
         </label>
@@ -45,7 +45,7 @@ export function NeonInput({ className, ...props }) {
         <input
             {...props}
             className={cn(
-                "bg-[hsl(var(--panel-2))] border border-[hsl(var(--border-soft))] px-3 py-2 text-[12px] font-mono text-white",
+                "control-value-font bg-[hsl(var(--panel-2))] border border-[hsl(var(--border-soft))] px-3 py-2 text-[12px] text-white",
                 "outline-none transition-colors clip-bevel-sm",
                 "focus:border-[hsl(var(--accent-primary))] focus:shadow-[0_0_0_1px_hsl(var(--accent-primary)),_0_0_18px_-4px_hsl(var(--accent-primary))]",
                 className,
@@ -61,7 +61,7 @@ export function NeonSelect({ options, value, onChange, className, testId }) {
             value={value}
             onChange={(e) => onChange(e.target.value)}
             className={cn(
-                "bg-[hsl(var(--panel-2))] border border-[hsl(var(--border-soft))] px-3 py-2 text-[12px] font-mono text-white",
+                "control-value-font bg-[hsl(var(--panel-2))] border border-[hsl(var(--border-soft))] px-3 py-2 text-[12px] text-white",
                 "outline-none transition-colors clip-bevel-sm appearance-none pr-8",
                 "focus:border-[hsl(var(--accent-primary))]",
                 className,
@@ -104,7 +104,7 @@ export function NeonToggle({ checked, onChange, label, testId }) {
                     style={checked ? { boxShadow: "0 0 10px hsl(var(--accent-primary))" } : undefined}
                 />
             </span>
-            {label && <span className="text-[12px] font-mono text-[hsl(var(--text-2))] group-hover:text-white">{label}</span>}
+            {label && <span className="text-[12px] font-medium text-[hsl(var(--text-2))] group-hover:text-white">{label}</span>}
         </button>
     );
 }
@@ -121,7 +121,7 @@ export function NeonButton({ children, tone = "primary", className, icon: Icon, 
         <button
             {...props}
             className={cn(
-                "inline-flex items-center gap-2 px-3 py-1.5 text-[11.5px] font-mono uppercase tracking-wider border clip-bevel-sm text-white transition-colors",
+                "inline-flex items-center gap-2 px-3 py-1.5 text-[11.5px] font-semibold uppercase tracking-[0.08em] border clip-bevel-sm text-white transition-colors",
                 map[tone],
                 className,
             )}

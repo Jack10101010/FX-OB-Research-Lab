@@ -75,20 +75,18 @@ export function DataTable({
 }
 
 export function Pill({ children, tone = "muted", className }) {
-    const map = {
-        muted:     "border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))]",
-        primary:   "border-[hsl(var(--accent-primary)/0.6)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.06)]",
-        secondary: "border-[hsl(var(--accent-secondary)/0.6)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.06)]",
-        success:   "border-[hsl(var(--success)/0.6)] text-[hsl(var(--success))] bg-[hsl(var(--success)/0.06)]",
-        danger:    "border-[hsl(var(--danger)/0.6)] text-[hsl(var(--danger))] bg-[hsl(var(--danger)/0.06)]",
-        warning:   "border-[hsl(var(--warning)/0.6)] text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.06)]",
-    };
+    const toneClass = {
+        muted: "row-chip-muted",
+        primary: "row-chip-primary",
+        secondary: "row-chip-secondary",
+        info: "row-chip-info",
+        success: "row-chip-success",
+        danger: "row-chip-danger",
+        warning: "row-chip-warning",
+    }[tone] || "row-chip-muted";
+
     return (
-        <span className={cn(
-            "inline-flex items-center gap-1 px-1.5 py-[1px] text-[10px] font-mono uppercase tracking-wider border clip-bevel-sm",
-            map[tone],
-            className,
-        )}>
+        <span className={cn("row-chip", toneClass, className)}>
             {children}
         </span>
     );
