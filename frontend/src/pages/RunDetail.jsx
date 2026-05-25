@@ -838,9 +838,9 @@ export default function RunDetail() {
                     {(() => {
                         const cfg = runData?.config || {};
                         const newsOn   = !!(run?.news_blackout_enabled ?? cfg.news_blackout_enabled);
-                        const spread   = cfg.spread   ?? cfg.spread_pips ?? null;
-                        const slippage = cfg.slippage ?? null;
-                        const commission = cfg.commission ?? null;
+                        const spread   = cfg.spread_pips ?? cfg.spread ?? null;
+                        const slippage = cfg.slippage_pips ?? cfg.slippage ?? null;
+                        const commission = cfg.commission_r_per_trade ?? cfg.commission ?? null;
                         const hasAnyCost = [spread, slippage, commission].some((v) => v != null && Number(v) !== 0);
                         if (!newsOn) {
                             return (
@@ -849,7 +849,7 @@ export default function RunDetail() {
                                     <div className="font-mono text-[10px] text-muted-lab">
                                         {"News protection: Off"}
                                         {hasAnyCost
-                                            ? ` · Spread ${spread ?? "—"} · Slip ${slippage ?? "—"} · Comm ${commission ?? "—"}`
+                                            ? ` · Spread ${spread ?? "—"} · Slip ${slippage ?? "—"} · Comm ${commission != null ? `${commission}R` : "—"}`
                                             : " · No cost model applied"}
                                     </div>
                                 </div>
@@ -929,7 +929,7 @@ export default function RunDetail() {
                                             <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Slippage</div>
                                             <div className="text-right text-muted-lab text-[10.5px]">{slippage != null ? `${slippage} pip` : "—"}</div>
                                             <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Commission</div>
-                                            <div className="text-right text-muted-lab text-[10.5px]">{commission != null ? String(commission) : "—"}</div>
+                                            <div className="text-right text-muted-lab text-[10.5px]">{commission != null ? `${commission}R` : "—"}</div>
                                         </div>
                                     ) : (
                                         <div className="font-mono text-[10px] text-muted-lab">No cost model applied</div>
@@ -986,7 +986,7 @@ export default function RunDetail() {
                             { key: "entryPrice",label: "Entry",   align: "right", render: (r) => formatPrice(r.entryPrice) },
                             { key: "stop",      label: "Stop",    align: "right", render: (r) => formatPrice(r.stop) },
                             { key: "tp",        label: "TP",      align: "right", render: (r) => formatPrice(r.tp) },
-                            { key: "r",         label: "R",       align: "right", render: (r) => <LedgerR value={r.r} /> },
+                            { key: "r",         label: "R",       align: "right", render: (r) => <LedgerR trade={r} value={r.r} /> },
                             { key: "outcome",   label: "Result",  render: (r) => <Pill tone={resultTone(r)}>{formatOutcome(r)}</Pill> },
                         ]}
                         rows={filteredLedgerRows}
@@ -994,17 +994,193 @@ export default function RunDetail() {
                 </NeonPanel>
 
                 <NeonPanel title="Order Block Stats">
-                    {obStats.total > 0 ? (
-                        <div className="grid grid-cols-2 gap-3 text-[12px] font-mono">
-                            <Stat label="Bullish OBs"     value={String(obStats.bullish)}   tone="primary" />
-                            <Stat label="Bearish OBs"     value={String(obStats.bearish)}   tone="secondary" />
-                            <Stat label="Total OBs"       value={String(obStats.total)}     tone="muted" />
-                            <Stat label="Reverse Cancels" value={String(run.reverseCancels ?? 0)} tone="warning" />
-                            <Stat label="Avg OB Width"    value={obStats.avgWidthPips != null ? `${obStats.avgWidthPips.toFixed(1)} pips` : "N/A"} tone="muted" />
-                        </div>
-                    ) : (
+                    {obStats.total === 0 ? (
                         <div className="py-6 text-center font-mono text-[11px] text-muted-lab">
                             {runData ? "No order block data in this run." : "Import a run to see order block stats."}
+                        </div>
+                    ) : (
+                        <div className="flex flex-col gap-3.5">
+
+                            {/* ── Zone 1 — Execution Summary (3×2 compact grid) ── */}
+                            <div className="grid grid-cols-3 gap-1.5">
+                                {[
+                                    { label: "Detected", value: obStats.total,         cls: "text-white" },
+                                    { label: "Eligible",  value: obStats.eligibleCount, cls: "text-[hsl(var(--accent-secondary))]" },
+                                    { label: "Executed",  value: obStats.filledCount,   cls: "text-[hsl(var(--accent-primary))]" },
+                                    { label: "Wins",      value: validWinsCount,         cls: "text-[hsl(var(--success))]" },
+                                    { label: "Losses",    value: validLossesCount,       cls: "text-[hsl(var(--danger))]" },
+                                    { label: "Unfilled",  value: obStats.unfilledCount, cls: "text-muted-lab" },
+                                ].map(({ label, value, cls }) => (
+                                    <div key={label} className="flex flex-col items-center justify-center px-2 py-1.5 border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] clip-bevel-sm">
+                                        <span className={`font-mono text-[14px] font-bold leading-none tabular-nums ${cls}`}>{value}</span>
+                                        <span className="mt-0.5 font-mono text-[8.5px] uppercase tracking-wider text-muted-lab">{label}</span>
+                                    </div>
+                                ))}
+                            </div>
+
+                            {/* ── Zone 2 — Integrity badges ───────────────────── */}
+                            {(() => {
+                                const { total, sessionFilteredCount, newsCancelledCount, reverseCancelledCount,
+                                        invalidatedCount, filledCount, eligibleCount, bullish, bearish,
+                                        sessionFilterEnabled, newsEnabled, directionRestricted, directionRespected } = obStats;
+                                const badges = [];
+                                if (sessionFilterEnabled && sessionFilteredCount > 0)
+                                    badges.push({ text: "✓ Session filter", type: "success" });
+                                if (newsEnabled && newsCancelledCount > 0)
+                                    badges.push({ text: "✓ News blackout", type: "success" });
+                                if (directionRestricted && directionRespected)
+                                    badges.push({ text: "✓ Direction OK", type: "success" });
+                                if (total > 0 && invalidatedCount / total > 0.20)
+                                    badges.push({ text: `⚠ High invalidation ${Math.round(invalidatedCount / total * 100)}%`, type: "warning" });
+                                if (eligibleCount > 0 && filledCount / eligibleCount < 0.30)
+                                    badges.push({ text: `⚠ Low fill conv. ${Math.round(filledCount / eligibleCount * 100)}%`, type: "warning" });
+                                if (total > 0 && sessionFilteredCount / total > 0.20)
+                                    badges.push({ text: `⚠ Session filter ${Math.round(sessionFilteredCount / total * 100)}%`, type: "warning" });
+                                if (total > 0 && newsCancelledCount / total > 0.10)
+                                    badges.push({ text: `⚠ News cancel ${Math.round(newsCancelledCount / total * 100)}%`, type: "warning" });
+                                if (total > 0 && (bullish / total > 0.70 || bearish / total > 0.70))
+                                    badges.push({ text: `⚠ ${bullish > bearish ? "Bull" : "Bear"} skew ${Math.round(Math.max(bullish, bearish) / total * 100)}%`, type: "warning" });
+                                if (!badges.length) return null;
+                                return (
+                                    <div className="flex flex-wrap gap-1">
+                                        {badges.slice(0, 6).map((b, i) => (
+                                            <span key={i} className={`px-1.5 py-0.5 font-mono text-[9px] border clip-bevel-sm ${b.type === "success" ? "border-[hsl(var(--success)/0.35)] text-[hsl(var(--success))] bg-[hsl(var(--success)/0.06)]" : "border-[hsl(var(--warning)/0.35)] text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.06)]"}`}>
+                                                {b.text}
+                                            </span>
+                                        ))}
+                                    </div>
+                                );
+                            })()}
+
+                            {/* ── Zone 3 — Lifecycle Funnel ───────────────────── */}
+                            {(() => {
+                                const { total, eligibleCount, filledCount, unfilledCount,
+                                        sessionFilteredCount, newsCancelledCount, reverseCancelledCount,
+                                        invalidatedCount, filledWins, filledLosses, filledBE, filledUnlinked } = obStats;
+                                const pct = (n, d) => d > 0 ? `${Math.round((n / d) * 100)}%` : "—";
+                                const R = (key, indent, connector, label, count, denom, colorCls) => (
+                                    <div key={key} className="flex items-baseline font-mono text-[10.5px]" style={{ paddingLeft: `${indent * 11}px` }}>
+                                        {connector
+                                            ? <span className="text-muted-lab mr-1 w-4 shrink-0 text-[9.5px]">{connector}</span>
+                                            : indent > 0 ? <span className="w-4 mr-1 shrink-0" /> : null}
+                                        <span className={`flex-1 ${colorCls}`}>{label}</span>
+                                        <span className="tabular-nums text-white">{count}</span>
+                                        <span className="tabular-nums text-muted-lab ml-1.5 w-8 text-right text-[9.5px]">{pct(count, denom)}</span>
+                                    </div>
+                                );
+                                const rows = [
+                                    R("det",  0, null, "Detected",         total,               total,         "text-white"),
+                                    R("eli",  1, "├─", "Eligible",         eligibleCount,        total,         "text-[hsl(var(--accent-primary))]"),
+                                    R("fil",  2, "├─", "Filled",           filledCount,          eligibleCount, "text-[hsl(var(--accent-primary))]"),
+                                    ...(filledWins   > 0 ? [R("fw",  3, "├─", "Win",           filledWins,   filledCount, "text-[hsl(var(--success))]")] : []),
+                                    ...(filledLosses > 0 ? [R("fl",  3, "├─", "Loss",          filledLosses, filledCount, "text-[hsl(var(--danger))]")]  : []),
+                                    ...(filledBE     > 0 ? [R("fbe", 3, "└─", "BE / Partial",  filledBE,     filledCount, "text-muted-lab")]            : []),
+                                    R("unf",  2, "└─", "Unfilled",         unfilledCount,        eligibleCount, "text-white"),
+                                    ...(sessionFilteredCount  > 0 ? [R("sf",  1, "├─", "Session Filtered", sessionFilteredCount,  total, "text-[hsl(var(--warning))]")] : []),
+                                    ...(newsCancelledCount    > 0 ? [R("nc",  1, "├─", "News Cancelled",   newsCancelledCount,    total, "text-[hsl(var(--warning))]")] : []),
+                                    ...(invalidatedCount      > 0 ? [R("inv", 1, "├─", "Invalidated",      invalidatedCount,      total, "text-muted-lab")]             : []),
+                                    ...(reverseCancelledCount > 0 ? [R("rc",  1, "└─", "Reverse Cancel",   reverseCancelledCount, total, "text-[hsl(var(--warning))]")] : []),
+                                ];
+                                return (
+                                    <div>
+                                        <div className="text-[9px] font-mono uppercase tracking-widest text-muted-lab mb-1.5 opacity-60">Lifecycle</div>
+                                        <div className="flex flex-col gap-px">{rows}</div>
+                                        {filledUnlinked > 0 && (
+                                            <div className="mt-1.5 font-mono text-[9px] text-muted-lab italic">
+                                                {filledUnlinked} OB{filledUnlinked !== 1 ? "s" : ""} filled but unlinked — W/L may be understated.
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })()}
+
+                            {/* ── Zone 4 — Directional Sanity (stacked) ───────── */}
+                            {(obStats.dirStats.long.trades > 0 || obStats.dirStats.short.trades > 0) && (
+                                <div>
+                                    <div className="text-[9px] font-mono uppercase tracking-widest text-muted-lab mb-1.5 opacity-60">Directional</div>
+                                    <div className="flex flex-col gap-1.5">
+                                        {[
+                                            { key: "long",  label: "Long",  accentCls: "text-[hsl(var(--accent-primary))]",   borderCls: "border-[hsl(var(--accent-primary)/0.2)]" },
+                                            { key: "short", label: "Short", accentCls: "text-[hsl(var(--accent-secondary))]", borderCls: "border-[hsl(var(--accent-secondary)/0.2)]" },
+                                        ].map(({ key, label, accentCls, borderCls }) => {
+                                            const s = obStats.dirStats[key];
+                                            const other = key === "long" ? obStats.dirStats.short : obStats.dirStats.long;
+                                            const convGap = s.convPct != null && other.convPct != null ? Math.abs(s.convPct - other.convPct) : 0;
+                                            const convAmber = convGap > 15 && s.convPct != null && s.convPct < (other.convPct ?? 0);
+                                            return (
+                                                <div key={key} className={`border ${borderCls} bg-[hsl(var(--panel-2)/0.4)] clip-bevel-sm px-2.5 py-2`}>
+                                                    {/* Header row */}
+                                                    <div className="flex items-center justify-between mb-1">
+                                                        <span className={`font-mono text-[9px] uppercase tracking-wider font-semibold ${accentCls}`}>{label}</span>
+                                                        <span className={`font-mono text-[11px] font-semibold tabular-nums ${s.netR >= 0 ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]"}`}>
+                                                            {s.netR >= 0 ? "+" : ""}{s.netR.toFixed(1)}R
+                                                        </span>
+                                                    </div>
+                                                    {/* Stats row */}
+                                                    <div className="flex items-center gap-2 font-mono text-[10px] text-muted-lab flex-wrap">
+                                                        <span>{s.obCount} OBs</span>
+                                                        <span className="opacity-40">·</span>
+                                                        <span>{s.trades}T</span>
+                                                        <span className="opacity-40">·</span>
+                                                        <span><span className="text-[hsl(var(--success))]">{s.wins}W</span> <span className="text-[hsl(var(--danger))]">{s.losses}L</span> <span>{s.be}BE</span></span>
+                                                        {s.convPct != null && (
+                                                            <>
+                                                                <span className="opacity-40">·</span>
+                                                                <span className={convAmber ? "text-[hsl(var(--warning))]" : ""}>{s.convPct.toFixed(0)}% conv</span>
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* ── Zone 5 — Insight Lines ──────────────────────── */}
+                            {(() => {
+                                const { total, filledCount, eligibleCount, sessionFilteredCount,
+                                        reverseCancelledCount, invalidatedCount, bullish, bearish, dirStats } = obStats;
+                                const insights = [];
+                                if (eligibleCount > 0 && filledCount / eligibleCount < 0.28)
+                                    insights.push(`Only ${Math.round(filledCount / eligibleCount * 100)}% of eligible OBs filled — check entry depth or session timing.`);
+                                if (total > 0 && sessionFilteredCount / total > 0.22)
+                                    insights.push(`${Math.round(sessionFilteredCount / total * 100)}% of detected OBs were session-filtered before fill.`);
+                                if (total > 0 && reverseCancelledCount / total > 0.08)
+                                    insights.push(`Reverse conflict cancellations unusually high (${reverseCancelledCount}) — consider conflict settings.`);
+                                if (total > 0 && bullish / total > 0.70)
+                                    insights.push(`Strong bullish detection skew this run (${Math.round(bullish / total * 100)}% of OBs).`);
+                                if (total > 0 && bearish / total > 0.70)
+                                    insights.push(`Strong bearish detection skew this run (${Math.round(bearish / total * 100)}% of OBs).`);
+                                if (invalidatedCount > filledCount && invalidatedCount > 10)
+                                    insights.push(`More OBs invalidated (${invalidatedCount}) than filled (${filledCount}) — review swing/TF sensitivity.`);
+                                if (dirStats.long.netR > 0 && dirStats.short.netR < 0 && Math.abs(dirStats.short.netR) > 2)
+                                    insights.push("Long OBs are driving returns; Short OBs are net negative this run.");
+                                if (!insights.length) return null;
+                                return (
+                                    <div className="flex flex-col gap-1">
+                                        {insights.slice(0, 3).map((insight, i) => (
+                                            <div key={i} className="flex items-start gap-1.5 px-2 py-1.5 border-l-2 border-[hsl(var(--accent-primary)/0.4)] bg-[hsl(var(--accent-primary)/0.05)]">
+                                                <span className="font-mono text-[9.5px] text-[hsl(var(--accent-primary))] shrink-0 mt-px">→</span>
+                                                <span className="font-mono text-[9.5px] text-[hsl(var(--text-2))] leading-snug">{insight}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                );
+                            })()}
+
+                            {/* ── Zone 6 — OB Lab CTA ─────────────────────────── */}
+                            <Link
+                                to="/order-block-lab"
+                                className="flex items-center justify-between gap-2 px-2.5 py-2 border border-[hsl(var(--accent-primary)/0.22)] bg-[hsl(var(--accent-primary)/0.04)] clip-bevel-sm hover:bg-[hsl(var(--accent-primary)/0.09)] hover:border-[hsl(var(--accent-primary)/0.4)] transition-colors"
+                            >
+                                <div>
+                                    <div className="font-mono text-[10px] uppercase tracking-wider text-[hsl(var(--accent-primary))]">→ Order Block Lab</div>
+                                    <div className="font-mono text-[8.5px] text-muted-lab mt-0.5 leading-snug">Structure · Width · Penetration · Age · Session analysis</div>
+                                </div>
+                                <span className="text-[hsl(var(--accent-primary)/0.5)] text-[10px] shrink-0">↗</span>
+                            </Link>
+
                         </div>
                     )}
                 </NeonPanel>
@@ -1321,12 +1497,41 @@ function OutcomeMiniStat({ label, value }) {
     );
 }
 
-function LedgerR({ value }) {
+function LedgerR({ value, trade = null }) {
     const label = formatR(value);
     if (label === "—") return <span className="text-muted-lab">—</span>;
     const n = Number(value);
     const color = n > 0 ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]";
-    return <span className={`${color} tabular-nums font-semibold`}>{label}</span>;
+    const breakdown = trade ? rCostBreakdown(trade) : null;
+    if (!breakdown?.show) return <span className={`${color} tabular-nums font-semibold`}>{label}</span>;
+    return (
+        <span
+            className="inline-flex flex-col items-end leading-tight"
+            title={`Gross ${formatSignedR(breakdown.gross, 2)} · Costs ${formatCostR(breakdown.cost)} · Net ${formatSignedR(breakdown.net, 2)}`}
+        >
+            <span className={`${color} tabular-nums font-semibold`}>{label}</span>
+            <span className="mt-0.5 text-[10px] font-medium tabular-nums text-muted-lab">
+                gross {formatSignedR(breakdown.gross, 2).replace("R", "")} · cost {formatCostR(breakdown.cost).replace("R", "")}
+            </span>
+        </span>
+    );
+}
+
+function rCostBreakdown(trade) {
+    const net = numericTradeR(trade);
+    const gross = parseNumericValue(trade?.grossR ?? trade?.gross_r);
+    const cost = parseNumericValue(trade?.totalCostR ?? trade?.total_cost_r);
+    const show = net != null && (
+        (cost != null && Math.abs(cost) > 0.000001) ||
+        (gross != null && Math.abs(gross - net) > 0.000001)
+    );
+    return { show, net, gross: gross ?? net, cost: cost ?? Math.max(0, (gross ?? net) - net) };
+}
+
+function formatCostR(value) {
+    const n = parseNumericValue(value);
+    if (n == null || Math.abs(n) < 0.000001) return "—";
+    return `${n > 0 ? "-" : ""}${Math.abs(n).toFixed(2)}R`;
 }
 
 function formatObId(value) {
@@ -1346,8 +1551,12 @@ function normalizeOutcome(value) {
 
 function numericTradeR(trade) {
     const raw = trade?.r ?? trade?.pnl_r ?? trade?.pnlR ?? trade?.resultR ?? trade?.news_flatten_r;
-    if (typeof raw === "number") return Number.isFinite(raw) ? raw : null;
-    const parsed = Number(String(raw || "").replace(/[^\d.+-]/g, ""));
+    return parseNumericValue(raw);
+}
+
+function parseNumericValue(value) {
+    if (typeof value === "number") return Number.isFinite(value) ? value : null;
+    const parsed = Number(String(value ?? "").replace(/[^\d.+-]/g, ""));
     return Number.isFinite(parsed) ? parsed : null;
 }
 

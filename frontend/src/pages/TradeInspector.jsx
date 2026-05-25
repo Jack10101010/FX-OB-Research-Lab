@@ -285,6 +285,7 @@ export default function TradeInspector() {
                                     <Row k="Direction" v={trade.direction} />
                                     <Row k="Structure" v={trade.structure} />
                                     <Row k="Session" v={trade.session} />
+                                    <RBreakdownRows trade={trade} />
                                 </div>
                             ) : "No trade selected for this variant."}
                         </TabsContent>
@@ -351,6 +352,7 @@ export default function TradeInspector() {
                             <div className="divider-glow my-2" />
                             <Row k="Status" v={<Pill tone={tradeStatus.tone}>{tradeStatus.label}</Pill>} />
                             <Row k="R Result" v={<ColoredR value={trade.r} />} />
+                            <RBreakdownRows trade={trade} />
                             <Row k="Outcome" v={<Pill tone={trade.outcome === "Win" ? "success" : "danger"}>{trade.outcome}</Pill>} />
                             <Row k="Mapping" v={<Pill tone={mappingQuality === "exact" ? "success" : mappingQuality === "nearest_prior" ? "warning" : "danger"}>{mappingQuality}</Pill>} />
                             <Row k="Reverse Conflict" v={trade.reverseConflict ? <Pill tone="warning">YES</Pill> : <span className="text-muted-lab">No</span>} />
@@ -410,6 +412,7 @@ function VisualVerifier({ trade, status, selectedOB, selectedMarker, fillMap, ex
                     <VerifierRow k="fill_time / entry" v={formatUtc(trade.entry)} />
                     <VerifierRow k="exit_time" v={formatUtc(trade.exit)} />
                     <VerifierRow k="pnl_r" v={formatValue(trade.r)} />
+                    <RBreakdownRows trade={trade} verifier />
                     <VerifierRow k="missed_trade" v={formatBool(trade.missed_trade)} />
                     <VerifierRow k="missed_reason" v={formatValue(trade.missed_reason)} />
                     <VerifierRow k="news_blackout" v={formatBool(trade.news_blackout)} />
@@ -523,6 +526,53 @@ function formatValue(value) {
 
 function formatNumber(value) {
     return value == null || value === "" || !isFinite(Number(value)) ? "N/A" : String(value);
+}
+
+function formatSignedR(value) {
+    const n = numericOrNull(value);
+    if (n == null) return "—";
+    return `${n >= 0 ? "+" : ""}${n.toFixed(2)}R`;
+}
+
+function formatCostR(value) {
+    const n = numericOrNull(value);
+    if (n == null || Math.abs(n) < 0.000001) return "—";
+    return `${n > 0 ? "-" : ""}${Math.abs(n).toFixed(2)}R`;
+}
+
+function rCostBreakdown(trade) {
+    const net = numericOrNull(trade?.netR ?? trade?.net_r ?? trade?.r);
+    const gross = numericOrNull(trade?.grossR ?? trade?.gross_r);
+    const spread = numericOrNull(trade?.spreadCostR ?? trade?.spread_cost_r) ?? 0;
+    const slippage = numericOrNull(trade?.slippageCostR ?? trade?.slippage_cost_r) ?? 0;
+    const commission = numericOrNull(trade?.commissionR ?? trade?.commission_r) ?? 0;
+    const total = numericOrNull(trade?.totalCostR ?? trade?.total_cost_r) ?? (spread + slippage + commission);
+    const show = net != null && (Math.abs(total) > 0.000001 || (gross != null && Math.abs(gross - net) > 0.000001));
+    return {
+        show,
+        gross: gross ?? net,
+        spread,
+        slippage,
+        commission,
+        total,
+        net,
+    };
+}
+
+function RBreakdownRows({ trade, verifier = false }) {
+    const breakdown = rCostBreakdown(trade);
+    if (!breakdown.show) return null;
+    const RowComponent = verifier ? VerifierRow : Row;
+    return (
+        <>
+            <RowComponent k="Gross R" v={formatSignedR(breakdown.gross)} />
+            <RowComponent k="Spread Cost" v={formatCostR(breakdown.spread)} />
+            <RowComponent k="Slippage Cost" v={formatCostR(breakdown.slippage)} />
+            <RowComponent k="Commission" v={formatCostR(breakdown.commission)} />
+            <RowComponent k="Total Cost" v={formatCostR(breakdown.total)} />
+            <RowComponent k="Net R" v={formatSignedR(breakdown.net)} />
+        </>
+    );
 }
 
 function Row({ k, v }) {

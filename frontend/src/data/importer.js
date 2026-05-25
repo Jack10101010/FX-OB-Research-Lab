@@ -228,7 +228,9 @@ export function parseTradesCSV(text) {
             ? "Short"
             : "Long";
         const outcomeRaw = pick(r, "outcome", "result");
-        const rVal = Number(pick(r, "pnl_r", "r", "r_result", "rresult") ?? 0);
+        const grossR = numOrNull(pick(r, "gross_r", "grossR"));
+        const netR = numOrNull(pick(r, "net_r", "netR"));
+        const rVal = netR ?? Number(pick(r, "pnl_r", "r", "r_result", "rresult") ?? 0);
         const outcome = outcomeRaw ? cap(outcomeRaw) : (rVal >= 0 ? "Win" : "Loss");
         const structRaw = pick(r, "structure_tag", "structure", "structure_type", "type") || "BOS";
         const rawObId = pick(r, "ob_id", "order_block_id");
@@ -259,6 +261,18 @@ export function parseTradesCSV(text) {
             stop:       Number(pick(r, "stop", "stop_loss", "sl") ?? 0),
             tp:         Number(pick(r, "tp", "take_profit") ?? 0),
             r: rVal,
+            grossR: grossR ?? rVal,
+            gross_r: grossR ?? rVal,
+            netR: netR ?? rVal,
+            net_r: netR ?? rVal,
+            spreadCostR: numOrNull(pick(r, "spread_cost_r", "spreadCostR")),
+            spread_cost_r: numOrNull(pick(r, "spread_cost_r", "spreadCostR")),
+            slippageCostR: numOrNull(pick(r, "slippage_cost_r", "slippageCostR")),
+            slippage_cost_r: numOrNull(pick(r, "slippage_cost_r", "slippageCostR")),
+            commissionR: numOrNull(pick(r, "commission_r", "commissionR")),
+            commission_r: numOrNull(pick(r, "commission_r", "commissionR")),
+            totalCostR: numOrNull(pick(r, "total_cost_r", "totalCostR")),
+            total_cost_r: numOrNull(pick(r, "total_cost_r", "totalCostR")),
             outcome,
             obWidth:        Number(pick(r, "ob_width", "obwidth") ?? 0),
             reverseConflict: Boolean(pick(r, "reverse_conflict", "reverse_cancel")),
@@ -345,6 +359,8 @@ export function parseNewsEventsCSV(text) {
             currency: String(pick(r, "currency", "ccy") || "").toUpperCase(),
             impact: String(pick(r, "impact", "importance") || "").toLowerCase(),
             event: String(pick(r, "event", "name", "title") || ""),
+            window_start: String(pick(r, "window_start", "blackout_start", "news_blackout_window_start") || ""),
+            window_end: String(pick(r, "window_end", "blackout_end", "news_blackout_window_end") || ""),
             source: String(pick(r, "source") || ""),
             country: String(pick(r, "country") || ""),
         }))

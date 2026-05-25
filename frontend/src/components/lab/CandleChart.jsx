@@ -806,6 +806,58 @@ export function CandleChart({
         }).filter(Boolean);
     })();
 
+    const newsBoundaryLines = (() => {
+        if (!newsEvents?.length) return [];
+        const chart = chartRef.current;
+        if (!chart || !candleTimes.length) return [];
+        const bounds = containerRef.current?.getBoundingClientRect();
+        const maxWidth = bounds?.width || 0;
+        const maxHeight = bounds?.height || height;
+        const axisOffset = 24;
+        const visibleRange = chart.timeScale().getVisibleRange?.();
+        const rangeFrom = normalizeChartTimestamp(visibleRange?.from);
+        const rangeTo = normalizeChartTimestamp(visibleRange?.to);
+        const timeToInterpolatedX = (rawTime) => {
+            if (!Number.isFinite(rawTime)) return null;
+            if ((rangeFrom != null && rawTime < rangeFrom) || (rangeTo != null && rawTime > rangeTo)) return null;
+            const exact = chart.timeScale().timeToCoordinate(rawTime);
+            if (exact != null) return exact;
+            if (!hasRealCandleTime) return null;
+            const floor = snapFloor(rawTime);
+            const ceil = snapCeil(rawTime);
+            if (floor == null || ceil == null) return null;
+            const floorX = chart.timeScale().timeToCoordinate(floor);
+            const ceilX = chart.timeScale().timeToCoordinate(ceil);
+            if (floor === ceil) return floorX ?? ceilX ?? null;
+            if (floorX == null || ceilX == null) return floorX ?? ceilX ?? null;
+            const ratio = clamp((rawTime - floor) / Math.max(1, ceil - floor), 0, 1);
+            return floorX + (ceilX - floorX) * ratio;
+        };
+        const boundaryTime = (event, side) => normalizeChartTimestamp(
+            side === "start"
+                ? (event.blackoutStartTime ?? event.blackoutStart ?? event.blackout_start ?? event.window_start ?? event.news_blackout_window_start)
+                : (event.blackoutEndTime ?? event.blackoutEnd ?? event.blackout_end ?? event.window_end ?? event.news_blackout_window_end),
+        );
+        return newsEvents.flatMap((event, index) => {
+            const start = boundaryTime(event, "start");
+            const end = boundaryTime(event, "end");
+            return [
+                { side: "start", time: start },
+                { side: "end", time: end },
+            ].map((boundary) => {
+                const x = timeToInterpolatedX(boundary.time);
+                if (x == null) return null;
+                return {
+                    id: `${event.id || event.event || event.name || "news"}-${index}-${boundary.side}`,
+                    x: clamp(x, 0, Math.max(0, maxWidth)),
+                    top: 0,
+                    height: Math.max(0, maxHeight - axisOffset),
+                    side: boundary.side,
+                };
+            }).filter(Boolean);
+        });
+    })();
+
     return (
         <div className="relative w-full overflow-hidden" style={{ height: safeHeight }} data-testid="candle-chart">
             <div ref={containerRef} className="w-full h-full" onClick={onTradeClick ? () => onTradeClick(null) : undefined} />
@@ -816,6 +868,9 @@ export function CandleChart({
                 ))}
                 {newsEventLines.map((event) => (
                     <NewsEventLine key={event.id} event={event} showLabel={showNewsLabels} />
+                ))}
+                {newsBoundaryLines.map((line) => (
+                    <NewsBoundaryLine key={line.id} line={line} />
                 ))}
                 {overlays.map((o, index) => (
                     <OrderBlockOverlay key={o.id} ob={o} debugIndex={index} debugOverlays={debugOverlays} showObLabels={showObLabels} />
@@ -1005,6 +1060,25 @@ function OrderBlockMarker({ marker }) {
                 </span>
             )}
         </div>
+    );
+}
+
+function NewsBoundaryLine({ line }) {
+    const isStart = line.side === "start";
+    const color = isStart ? "rgba(217, 119, 6, 0.58)" : "rgba(20, 184, 166, 0.5)";
+    return (
+        <div
+            className="absolute pointer-events-none"
+            title={isStart ? "News blackout start" : "News blackout end"}
+            style={{
+                left: line.x,
+                top: line.top,
+                height: line.height,
+                width: 1,
+                borderLeft: `1px dashed ${color}`,
+                zIndex: 8,
+            }}
+        />
     );
 }
 

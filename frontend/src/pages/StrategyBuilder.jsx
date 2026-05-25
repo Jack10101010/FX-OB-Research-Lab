@@ -613,7 +613,7 @@ export default function StrategyBuilder() {
                     <div className="grid grid-cols-2 gap-3">
                         <Field label="Spread (pips)"><NeonInput type="number" step="0.05" value={cfg.spread} onChange={(e) => set("spread")(Number(e.target.value))} /></Field>
                         <Field label="Slippage (pips)"><NeonInput type="number" step="0.05" value={cfg.slippage} onChange={(e) => set("slippage")(Number(e.target.value))} /></Field>
-                        <Field label="Commission" className="col-span-2"><NeonInput type="number" step="0.01" value={cfg.commission} onChange={(e) => set("commission")(Number(e.target.value))} /></Field>
+                        <Field label="Commission (R/trade)" className="col-span-2"><NeonInput type="number" step="0.01" value={cfg.commission} onChange={(e) => set("commission")(Number(e.target.value))} /></Field>
                         <div className="col-span-2 flex items-center justify-between border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
                             <div>
                                 <div className="control-label text-[11px] font-mono uppercase tracking-wider text-muted-lab">Monte Carlo</div>
@@ -795,6 +795,9 @@ function buildBacktesterConfig(cfg) {
         ob_entry_depth_pct: Number(cfg.obEntryDepthPct || 0),
         entry_buffer_pips: Number(cfg.entryBuffer) || 0,
         stop_buffer_pips: Number(cfg.stopBuffer) || 0,
+        spread_pips: Number(cfg.spread) || 0,
+        slippage_pips: Number(cfg.slippage) || 0,
+        commission_r_per_trade: Number(cfg.commission) || 0,
         verify_limit_ticks: Number(cfg.verifyTicks) || 0,
         execution_modes: [mapBuilderExecutionMode(cfg.executionMode)],
         trade_direction: mapBuilderTradeDirection(cfg.direction),
@@ -1018,7 +1021,7 @@ function buildRunConfigLoadReport(current, run) {
     applyFirstPresent(patch, source, "newsFlattenMinutesBefore", ["news_flatten_minutes_before_blackout", "newsFlattenMinutesBefore"], toNumber);
     applyFirstPresent(patch, source, "spread", ["spread", "spread_pips", "spreadPips"], toNumber);
     applyFirstPresent(patch, source, "slippage", ["slippage", "slippage_pips", "slippagePips"], toNumber);
-    applyFirstPresent(patch, source, "commission", ["commission", "commission_per_trade"], toNumber);
+    applyFirstPresent(patch, source, "commission", ["commission_r_per_trade", "commission", "commission_per_trade"], toNumber);
     applyFirstPresent(patch, source, "monteCarlo", ["monte_carlo", "monteCarlo", "monte_carlo_enabled"], toBool);
 
     Object.keys(patch).forEach((field) => loaded.add(field));

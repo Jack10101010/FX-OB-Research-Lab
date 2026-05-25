@@ -635,6 +635,43 @@ function buildRrToolsFromObs(obs = [], trades = []) {
 }
 
 function buildStrategyMapNewsEvents(bundle, summary, activeVariant) {
+    const config = bundle?.config || summary?.config || {};
+    const beforeMinutes = numericOrNull(firstAvailable(
+        config.news_blackout_minutes_before,
+        config.newsBlackoutBefore,
+        summary?.news_window_minutes_before,
+        summary?.newsWindowMinutesBefore,
+    ));
+    const afterMinutes = numericOrNull(firstAvailable(
+        config.news_blackout_minutes_after,
+        config.newsBlackoutAfter,
+        summary?.news_window_minutes_after,
+        summary?.newsWindowMinutesAfter,
+    ));
+    const withWindow = (event) => {
+        const eventTime = normalizeTimestampSeconds(event?.time ?? event?.eventTime ?? event?.event_time ?? event?.news_blackout_event_time);
+        const rawStart = event?.blackoutStartTime
+            ?? event?.blackoutStart
+            ?? event?.blackout_start
+            ?? event?.window_start
+            ?? event?.news_blackout_window_start
+            ?? event?.newsBlackoutWindowStart;
+        const rawEnd = event?.blackoutEndTime
+            ?? event?.blackoutEnd
+            ?? event?.blackout_end
+            ?? event?.window_end
+            ?? event?.news_blackout_window_end
+            ?? event?.newsBlackoutWindowEnd;
+        const parsedStart = normalizeTimestampSeconds(rawStart);
+        const parsedEnd = normalizeTimestampSeconds(rawEnd);
+        const blackoutStartTime = parsedStart ?? (eventTime != null && beforeMinutes != null ? eventTime - beforeMinutes * 60 : null);
+        const blackoutEndTime = parsedEnd ?? (eventTime != null && afterMinutes != null ? eventTime + afterMinutes * 60 : null);
+        return {
+            ...event,
+            blackoutStartTime,
+            blackoutEndTime,
+        };
+    };
     const runLevel = [
         bundle?.newsEvents,
         bundle?.news_events,
@@ -642,7 +679,7 @@ function buildStrategyMapNewsEvents(bundle, summary, activeVariant) {
         summary?.newsEvents,
         summary?.news_events,
     ].find((events) => Array.isArray(events) && events.length);
-    if (runLevel) return runLevel;
+    if (runLevel) return runLevel.map(withWindow);
 
     const trades = activeVariant && bundle?.tradesByVariant?.[activeVariant]
         ? bundle.tradesByVariant[activeVariant]
@@ -655,10 +692,19 @@ function buildStrategyMapNewsEvents(bundle, summary, activeVariant) {
         const currency = trade.news_blackout_currency || trade.newsBlackoutCurrency || "";
         const impact = trade.news_blackout_impact || trade.newsBlackoutImpact || "";
         const event = trade.news_blackout_event || trade.newsBlackoutEvent || "";
-        const key = [time, currency, impact, event].map((value) => String(value || "").trim().toLowerCase()).join("|");
+        const windowStart = trade.news_blackout_window_start || trade.newsBlackoutWindowStart || "";
+        const windowEnd = trade.news_blackout_window_end || trade.newsBlackoutWindowEnd || "";
+        const key = [time, currency, impact, event, windowStart, windowEnd].map((value) => String(value || "").trim().toLowerCase()).join("|");
         if (seen.has(key)) return;
         seen.add(key);
-        events.push({ time, currency, impact, event });
+        events.push(withWindow({
+            time,
+            currency,
+            impact,
+            event,
+            news_blackout_window_start: windowStart,
+            news_blackout_window_end: windowEnd,
+        }));
     });
     return events;
 }
