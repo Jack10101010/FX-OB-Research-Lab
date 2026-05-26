@@ -1,0 +1,70 @@
+---
+description: FX-OB Research Lab — agent workflow, architecture, and UI standards
+globs: "**/*"
+alwaysApply: true
+---
+
+# FX-OB Research Lab — Project Rules
+
+Premium dark FX order-block research terminal. React + Vite frontend under `frontend/`. Follow these rules on every task.
+
+## Agent workflow
+
+### Minimal reads
+- Read only files needed for the task. Start from the entry point the user named (page, workspace, hook, or `*Analytics.js`).
+- Prefer targeted `grep` over opening large trees. Do not read entire labs or `ProtectionLab.jsx`-scale files unless required.
+- After reading, cite paths you used; do not re-read the same file without new reason.
+
+### Audit-first (large / unclear tasks)
+Before editing when scope is fuzzy or touches multiple labs:
+1. State the goal in one sentence.
+2. List affected areas (max ~5 paths) and the pattern they follow (workspace vs monolith).
+3. Propose the smallest change set; wait for user direction if architecture is ambiguous.
+4. Implement only after the audit unless the user asked for immediate execution.
+
+### No builds / dev servers unless asked
+- Do not run `npm run dev`, `npm run build`, `yarn`, or start servers unless the user explicitly requests it.
+- Prefer static reasoning, existing tests, or lint on touched files only.
+
+### No repo-wide scans unless asked
+- Do not run broad exploration (`Task explore`, full-tree glob, repo-wide refactors) unless the user requests it.
+- Scope search to `frontend/src/components/lab/<area>/` or the file(s) in scope.
+
+### Post-edit report (required)
+After substantive edits, end with:
+- **Changed:** bullet list of files modified and why.
+- **Not changed:** adjacent files/labs intentionally left alone (e.g. ProtectionLab, unrelated workspaces).
+
+## Architecture
+
+### Modular labs — no giant pages
+- **Entries Workspace** (`frontend/src/components/lab/entries/`): `EntriesWorkspace.jsx` coordinates tabs; state in `useEntryWorkspace.js`; UI in feature folders (`model/`, `compare/`, `hypothesis/`, `robustness/`, `promotion/`); shared chrome in `shared/`.
+- **Failures Lab** (`frontend/src/components/lab/failures/`): mirror Entries — `FailuresWorkspace.jsx` → `useFailuresWorkspace` → tab modules; pure logic in `shared/failuresAnalytics.js`, `failuresUtils.js`, `archetypeClassifier.js`, `severityScorer.js`, `failuresRegistry.js`.
+- Do **not** grow single-file labs (ProtectionLab ~1.7k lines is the anti-pattern). New UI = new module file; workspace file stays a thin switch + props.
+- Target: workspace coordinators &lt; ~250 lines; feature panels in their own files; collapsible `NeonPanel` for secondary sections.
+
+### Pure analytics outside JSX
+- All aggregation, cohort math, confidence, and export logic lives in `*Analytics.js`, `*Registry.js`, `*Formatters.js`, or `shared/*Utils.js` — not inside React components.
+- Components: hooks + `useMemo` wiring + render only.
+
+### Data fields: snake_case + camelCase
+- Imported runs may use either convention. Resolve with fallbacks (`field ?? snake_field`), normalize at pipeline boundaries (see `FailuresWorkspace.resolveActiveTrades`, HypothesisLab normalizers).
+- Never assume a single naming style in new analytics.
+
+## UI & data integrity
+
+### Visual system
+- Dark institutional quant SaaS: glass panels, subtle glow, beveled accents. Full spec: **`AI_DESIGN_RULES.md`** at repo root — follow it for all new UI.
+- **Semantic tokens only:** `hsl(var(--token))` from `frontend/src/index.css`. No hardcoded hex/rgb in components.
+- Reuse primitives before inventing: `NeonPanel`, `MetricChip`, `DataTable`, `WorkspaceTabBar`, `controls.jsx`, shadcn `ui/*`, `.row-chip*`, `.panel-title-label`.
+- Avoid excessive `font-mono`, tiny type, and shouty `uppercase` outside established chip/label patterns (see `index.css` — many mono classes map to Plex Sans).
+
+### Honest UI
+- **No fake data:** empty charts/tables/KPIs when dataset is missing or filters zero out cohorts.
+- **Honest empty states:** explain what is missing (no run, no losers, insufficient N) and the next user action — match `FailuresWorkspace` `NoDataState` tone.
+- Sample confidence: reuse `sampleConfidence` / registry patterns from Entries; do not show robust claims on thin N.
+
+## Scope discipline
+- Minimal diff; no drive-by refactors, renames, or theme changes unless requested.
+- Do not modify app source when the user only asked for docs/rules.
+- Commits and PRs only when explicitly requested.
