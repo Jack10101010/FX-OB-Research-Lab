@@ -5,7 +5,7 @@ import {
     FlaskConical, GitCompareArrows, ShieldCheck, Dices, Settings as Cog,
     Beaker, Boxes, ChevronRight, MonitorCog, Lock, CalendarRange, ShieldAlert,
     MousePointerClick, TestTubeDiagonal, Newspaper, FolderKanban,
-    BookOpen, ChevronLeft,
+    BookOpen, ChevronLeft, Microscope,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme, THEMES } from "@/context/ThemeContext";
@@ -30,6 +30,7 @@ const NAV = [
     { to: "/comparison",      label: "Comparison Lab",   icon: GitCompareArrows },
     { to: "/walk-forward",     label: "Walk-Forward Lab",  icon: CalendarRange },
     { to: "/hypothesis-lab",  label: "Hypothesis Lab",   icon: TestTubeDiagonal },
+    { to: "/failures-lab",    label: "Failures Lab",     icon: Microscope },
     { to: "/parity",          label: "Parity Debugger",  icon: ShieldCheck },
     { to: "/monte-carlo",     label: "Monte Carlo",      icon: Dices },
     { to: "/settings",        label: "Settings",         icon: Cog },

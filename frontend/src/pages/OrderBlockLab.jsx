@@ -1,15 +1,15 @@
 import React from "react";
-import { ActiveRunContext } from "@/components/lab/ActiveRunContext";
+import { Link } from "react-router-dom";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { MetricChip } from "@/components/lab/MetricChip";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
 import { NeonSelect, Segment } from "@/components/lab/controls";
-import { useDataset } from "@/data/store";
+import { compactTimeframe, getRunDisplayName, useDataset } from "@/data/store";
 import { setSelectedTradeVariant } from "@/data/store";
 import {
     Activity, AlertTriangle, Boxes, Clipboard, FileText, GitBranch,
     ShieldCheck, TrendingUp, TrendingDown, X, Filter, Layers,
-    BarChart2, Calendar, Database, Target, Award,
+    BarChart2, Calendar, Database, Target, Award, FolderOpen,
 } from "lucide-react";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -29,6 +29,10 @@ const OB_FIELDS = [
     { key: "obWidthPips",                       label: "OB Width (pips)" },
     { key: "max_ob_penetration_pct",            label: "Max Penetration %" },
     { key: "ob_fully_breached",                 label: "Breach Flag" },
+    { key: "obCreatedDuringNews",               label: "News Origin Window" },
+    { key: "obDetectedDuringNews",              label: "News Detection Window" },
+    { key: "obOriginMinutesFromNews",           label: "Origin Minutes From News" },
+    { key: "obDetectionMinutesFromNews",        label: "Detection Minutes From News" },
     { key: "obOriginSession",                   label: "Origin Session" },
     { key: "fillSession",                       label: "Fill Session" },
     { key: "same_candle_exit",                  label: "Same Candle Exit" },
@@ -69,10 +73,186 @@ const RESEARCH_BACKLOG_ITEMS = [
     },
 ];
 
+function LabHero({ pageLabel, titleFallback, description, activeProject, activeRun, activeSummary, activeRunId, tradeCount, variant, actions }) {
+    const run = activeRun || activeSummary || {};
+    const hasRun = !!(activeRun || activeSummary || activeRunId);
+    const projectName = activeProject?.name || "";
+    const projectId = activeProject?.id || null;
+    const runName = activeRun ? getRunDisplayName(activeRun) : run?.name || run?.displayName || run?.id || activeRunId || "";
+    const title = projectName || runName || titleFallback;
+    const symbol = readFirst(run?.symbol, run?.summary?.symbol, run?.config?.symbol, activeSummary?.symbol);
+    const detectionTf = compactTimeframe(readFirst(
+        run?.detectionTf,
+        run?.summary?.detectionTf,
+        run?.summary?.detection_tf,
+        run?.config?.detection_tf,
+        run?.config?.detectionTf,
+        activeSummary?.detectionTf,
+    ));
+    const executionTf = compactTimeframe(readFirst(
+        run?.executionTf,
+        run?.summary?.executionTf,
+        run?.summary?.execution_tf,
+        run?.config?.execution_tf,
+        run?.config?.executionTf,
+        activeSummary?.executionTf,
+    ));
+    const rr = readFirst(run?.rr, run?.summary?.rr, run?.config?.rr_multiple, run?.config?.rrMultiple, activeSummary?.rr);
+    const heroDateRange = readHeroDateRange(run, activeSummary);
+    const dateRange = formatHeroDateRange(heroDateRange);
+    const monthSpan = formatHeroMonthSpan(heroDateRange);
+    const dateRangeLine = dateRange && monthSpan ? `${dateRange} • ${monthSpan}` : dateRange;
+    const runLine = hasRun
+        ? [`Run: ${runName || "Active run"}`, symbol, detectionTf, `${tradeCount} trades`].filter(isMeaningful).join(" · ")
+        : "No active run selected. Import or run a backtest to populate this page.";
+    const configLine = [symbol, detectionTf, executionTf && executionTf !== detectionTf ? `Exec ${executionTf}` : null, rr != null && rr !== "" ? `RR ${rr}` : null, variantLabel(variant)].filter(isMeaningful).join(" · ");
+
+    return (
+        <section className="mx-6 mb-5 px-1 py-4">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0">
+                    <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[hsl(var(--accent-secondary))]">
+                        <span className="h-px w-9 bg-[hsl(var(--accent-secondary)/0.78)]" />
+                        {pageLabel}
+                    </div>
+                    <h1 className="mt-2 truncate text-3xl font-semibold tracking-[-0.01em] text-[hsl(var(--text-1))]">
+                        {title}
+                    </h1>
+                    <div className="mt-2 text-[13px] font-medium text-[hsl(var(--accent-primary))]">
+                        {runLine}
+                    </div>
+                    {configLine && <div className="mt-1 text-[12px] leading-relaxed text-[hsl(var(--text-2))]">{configLine}</div>}
+                    {dateRangeLine && <div className="text-[12px] leading-relaxed text-[hsl(var(--text-3))]">{dateRangeLine}</div>}
+                    {description && <div className="mt-2 max-w-4xl text-[12px] leading-relaxed text-[hsl(var(--text-2))]">{description}</div>}
+                </div>
+                <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                    {projectId && (
+                        <Link
+                            to={`/projects/${encodeURIComponent(projectId)}`}
+                            className="inline-flex items-center gap-2 rounded-md border border-[hsl(var(--accent-secondary)/0.45)] bg-[hsl(var(--accent-secondary)/0.08)] px-3 py-1.5 text-[12px] font-medium text-[hsl(var(--accent-secondary))] transition-colors hover:border-[hsl(var(--accent-secondary)/0.7)] hover:bg-[hsl(var(--accent-secondary)/0.13)] hover:text-white"
+                        >
+                            <FolderOpen className="h-3.5 w-3.5" />
+                            Open Project
+                        </Link>
+                    )}
+                    {hasRun && <HeroBadge tone="primary">Imported</HeroBadge>}
+                    {hasRun && <HeroBadge tone="success">Active Run</HeroBadge>}
+                    {projectId && <HeroBadge tone="secondary">Project Active</HeroBadge>}
+                    {actions}
+                </div>
+            </div>
+        </section>
+    );
+}
+
+function HeroBadge({ tone = "muted", children }) {
+    const toneClass = {
+        primary: "border-[hsl(var(--accent-primary)/0.42)] bg-[hsl(var(--accent-primary)/0.07)] text-[hsl(var(--accent-primary))]",
+        secondary: "border-[hsl(var(--accent-secondary)/0.42)] bg-[hsl(var(--accent-secondary)/0.07)] text-[hsl(var(--accent-secondary))]",
+        success: "border-[hsl(var(--success)/0.42)] bg-[hsl(var(--success)/0.07)] text-[hsl(var(--success))]",
+        muted: "border-[hsl(var(--border-mid))] bg-[hsl(var(--panel-2)/0.54)] text-[hsl(var(--text-2))]",
+    }[tone];
+    return <span className={`inline-flex items-center rounded-[3px] border px-2.5 py-1 text-[11px] font-medium ${toneClass}`}>{children}</span>;
+}
+
+function readFirst(...values) {
+    return values.find((value) => value != null && value !== "" && value !== "—");
+}
+
+function isMeaningful(value) {
+    return value != null && value !== "" && value !== "—" && value !== "N/A";
+}
+
+function readHeroDateRange(run, activeSummary) {
+    const summary = run?.summary || {};
+    const config = run?.config || {};
+    const direct = run?.dateRange || summary.dateRange || summary.date_range || activeSummary?.dateRange;
+    const from = readFirst(run?.dateFrom, summary.date_from, summary.dateFrom, config.date_from, config.dateFrom, config.start_date, config.startDate);
+    const to = readFirst(run?.dateTo, summary.date_to, summary.dateTo, config.date_to, config.dateTo, config.end_date, config.endDate);
+    if (from || to) return { from, to };
+    return direct || null;
+}
+
+function formatHeroDateRange(value) {
+    if (!value) return "";
+    if (typeof value === "object") {
+        const from = formatHeroDate(value.from);
+        const to = formatHeroDate(value.to);
+        return from && to ? `${from} → ${to}` : from || to || "";
+    }
+    const parts = String(value).split("→").map((part) => part.trim()).filter(Boolean);
+    if (parts.length >= 2) {
+        const from = formatHeroDate(parts[0]);
+        const to = formatHeroDate(parts[1]);
+        return from && to ? `${from} → ${to}` : "";
+    }
+    return formatHeroDate(value);
+}
+
+function formatHeroMonthSpan(value) {
+    const range = normalizeHeroDateRange(value);
+    if (!range?.from || !range?.to) return "";
+    const start = parseHeroDateValue(range.from);
+    const end = parseHeroDateValue(range.to);
+    if (!start || !end || end <= start) return "";
+    const days = (end.getTime() - start.getTime()) / 86400000;
+    if (days < 30) return "<1 month";
+    const endMonthDays = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, 0)).getUTCDate();
+    const calendarMonths = ((end.getUTCFullYear() - start.getUTCFullYear()) * 12)
+        + (end.getUTCMonth() - start.getUTCMonth())
+        + ((end.getUTCDate() - start.getUTCDate()) / endMonthDays);
+    const months = Math.max(1, Math.round(Number.isFinite(calendarMonths) ? calendarMonths : days / 30.44));
+    return `${months} ${months === 1 ? "month" : "months"}`;
+}
+
+function normalizeHeroDateRange(value) {
+    if (!value) return null;
+    if (typeof value === "object") return { from: value.from, to: value.to };
+    const parts = String(value).split("→").map((part) => part.trim()).filter(Boolean);
+    if (parts.length >= 2) return { from: parts[0], to: parts[1] };
+    return null;
+}
+
+function parseHeroDateValue(value) {
+    if (!value || value === "?") return null;
+    if (value instanceof Date) return Number.isFinite(value.getTime()) ? value : null;
+    const text = String(value).trim();
+    const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (iso) {
+        const date = new Date(Date.UTC(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3])));
+        return Number.isFinite(date.getTime()) ? date : null;
+    }
+    const short = text.match(/^(\d{1,2})\s+([A-Za-z]{3,})\s+(\d{2}|\d{4})$/);
+    if (short) {
+        const month = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"].indexOf(short[2].slice(0, 3).toLowerCase());
+        const year = Number(short[3].length === 2 ? `20${short[3]}` : short[3]);
+        if (month >= 0) {
+            const date = new Date(Date.UTC(year, month, Number(short[1])));
+            return Number.isFinite(date.getTime()) ? date : null;
+        }
+    }
+    return null;
+}
+
+function formatHeroDate(value) {
+    if (!value || value === "?") return "";
+    const text = String(value).trim();
+    const match = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!match) return text;
+    const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+    if (!Number.isFinite(date.getTime())) return text;
+    return date.toLocaleDateString("en-GB", {
+        day: "numeric",
+        month: "short",
+        year: "2-digit",
+        timeZone: "UTC",
+    });
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function OrderBlockLab() {
-    const { ACTIVE_RUN, TRADES, ACTIVE_TRADE_VARIANT, AVAILABLE_TRADE_VARIANTS, activeRunId } = useDataset();
+    const { ACTIVE_PROJECT, ACTIVE_RUN, TRADES, ACTIVE_TRADE_VARIANT, AVAILABLE_TRADE_VARIANTS, activeRunId, runs } = useDataset();
 
     // Filter state — persisted to localStorage
     const [filters, setFilters] = React.useState(() => {
@@ -97,8 +277,11 @@ export default function OrderBlockLab() {
     }, []);
 
     const trades = React.useMemo(() => (Array.isArray(TRADES) ? TRADES : EMPTY_TRADES), [TRADES]);
+    const activeRun = activeRunId ? runs?.[activeRunId] : null;
+    const orderBlocks = React.useMemo(() => (Array.isArray(ACTIVE_RUN?.orderBlocks) ? ACTIVE_RUN.orderBlocks : []), [ACTIVE_RUN]);
     const filteredTrades = React.useMemo(() => applyFilters(trades, filters), [trades, filters]);
     const analytics = React.useMemo(() => buildOrderBlockAnalytics(filteredTrades), [filteredTrades]);
+    const obPopulationAnalytics = React.useMemo(() => buildNewsCreatedObPopulationAnalytics(orderBlocks, trades), [orderBlocks, trades]);
     const insights = React.useMemo(() => buildInsights(analytics), [analytics]);
 
     const activeFilterCount = Object.values(filters).filter(v => v !== "all").length;
@@ -115,21 +298,29 @@ export default function OrderBlockLab() {
 
     return (
         <div className="pb-16">
-            <ActiveRunContext
+            <LabHero
                 pageLabel="Order Block Lab"
-                description={`${variantLabel(ACTIVE_TRADE_VARIANT)} — deep order block research using linked trades.`}
+                titleFallback="Order Block Lab"
+                description="Deep order block research using linked trades."
+                activeProject={ACTIVE_PROJECT}
+                activeRun={activeRun}
+                activeSummary={ACTIVE_RUN}
+                activeRunId={activeRunId}
+                tradeCount={trades.length}
+                variant={ACTIVE_TRADE_VARIANT}
                 actions={(
-                    <div className="flex items-center gap-2">
+                    <>
+                        <HeroBadge tone="secondary">{trades.length} trades</HeroBadge>
                         <button
                             type="button"
                             onClick={() => setReportOpen(true)}
-                            className="clip-bevel-sm border border-[hsl(var(--accent-primary)/0.45)] bg-[hsl(var(--accent-primary)/0.12)] px-3 py-2 text-[11px] font-display uppercase tracking-wider text-[hsl(var(--accent-primary))] hover:bg-[hsl(var(--accent-primary)/0.2)] transition-colors inline-flex items-center gap-2"
+                            className="inline-flex items-center gap-2 rounded-md border border-[hsl(var(--accent-primary)/0.45)] bg-[hsl(var(--accent-primary)/0.10)] px-3 py-1.5 text-[12px] font-medium text-[hsl(var(--accent-primary))] transition-colors hover:bg-[hsl(var(--accent-primary)/0.16)]"
                         >
                             <FileText className="w-3.5 h-3.5" />
                             Generate Report
                         </button>
                         <VariantSelector variants={AVAILABLE_TRADE_VARIANTS} value={ACTIVE_TRADE_VARIANT} />
-                    </div>
+                    </>
                 )}
             />
 
@@ -170,6 +361,8 @@ export default function OrderBlockLab() {
 
                 {/* ── Full-width bucket panels ───────────────────────────── */}
                 <BucketPanel title="OB Creation Hour Performance" rows={analytics.creationHourRows} onDrill={r => handleDrill("Creation Hour", r)} />
+                <NewsCreatedObPanel analytics={analytics} onDrill={r => handleDrill("News-Created OB Trades", r)} />
+                <NewsCreatedObPopulationPanel analysis={obPopulationAnalytics} />
                 <BucketPanel title="OB Width Analysis" rows={analytics.widthRows} onDrill={r => handleDrill("OB Width", r)} />
                 <BucketPanel title="OB Age / Time-to-Fill" rows={analytics.ageRows} compact onDrill={r => handleDrill("OB Age", r)} />
                 <BucketPanel title="Penetration Depth Analysis" rows={analytics.penetrationRows} compact onDrill={r => handleDrill("Penetration Depth", r)} />
@@ -355,6 +548,220 @@ function BucketPanel({ title, rows, className = "", compact = false, onDrill }) 
                 defaultSortDir="desc"
             />
         </NeonPanel>
+    );
+}
+
+const NEWS_OB_COLUMNS = [
+    { key: "label",               label: "Bucket",     sortable: false, render: (r) => <BucketLabel row={r} /> },
+    { key: "count",               label: "N",          align: "right" },
+    { key: "winRate",             label: "WR",         align: "right", render: (r) => formatPct(r.winRate) },
+    { key: "lossRate",            label: "Loss",       align: "right", render: (r) => formatPct(r.lossRate) },
+    { key: "netR",                label: "Net R",      align: "right", render: (r) => <ColoredR value={round1(r.netR)} /> },
+    { key: "expectancy",          label: "Exp",        align: "right", render: (r) => <span className={r.expectancy >= 0 ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]"}>{formatSigned(round3(r.expectancy))}R</span> },
+    { key: "fullBreachRate",      label: "Breach",     align: "right", render: (r) => formatPct(r.fullBreachRate) },
+    { key: "avgPenetrationPct",   label: "Avg Pen",    align: "right", render: (r) => r.avgPenetrationPct == null ? "—" : `${round1(r.avgPenetrationPct)}%` },
+    { key: "avgAgeHours",         label: "Avg Age",    align: "right", render: (r) => formatAgeHours(r.avgAgeHours) },
+    { key: "directionSplit",      label: "L/S",        align: "right", render: (r) => `${r.longCount || 0}/${r.shortCount || 0}` },
+];
+
+function NewsCreatedObPanel({ analytics, onDrill }) {
+    if (!analytics.newsFieldAvailable) {
+        return (
+            <NeonPanel
+                title="News-Created OB Trade Performance"
+                action={<Pill tone="muted">REIMPORT REQUIRED</Pill>}
+            >
+                <div className="text-[12px] text-muted-lab">
+                    Trade-level news analytics require rerun/reimport with news-created OB tagging enabled.
+                </div>
+            </NeonPanel>
+        );
+    }
+
+    return (
+        <NeonPanel
+            collapsible
+            title="News-Created OB Trade Performance"
+            action={<Pill tone="warning">{analytics.newsCreatedTaggedCount} TAGGED</Pill>}
+        >
+            <div className="mb-3 text-[10.5px] text-muted-lab">
+                Executed trades only. Use the population panel below for all detected OBs.
+            </div>
+            {analytics.newsComparison && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+                    <MetricChip
+                        label="News-Created"
+                        value={formatR(analytics.newsComparison.news.netR)}
+                        sub={`WR ${formatPct(analytics.newsComparison.news.winRate)} · Exp ${formatSigned(round3(analytics.newsComparison.news.expectancy))}R`}
+                        tone={analytics.newsComparison.news.expectancy >= 0 ? "primary" : "danger"}
+                        icon={AlertTriangle}
+                    />
+                    <MetricChip
+                        label="Normal OBs"
+                        value={formatR(analytics.newsComparison.normal.netR)}
+                        sub={`WR ${formatPct(analytics.newsComparison.normal.winRate)} · Exp ${formatSigned(round3(analytics.newsComparison.normal.expectancy))}R`}
+                        tone={analytics.newsComparison.normal.expectancy >= 0 ? "primary" : "secondary"}
+                        icon={Target}
+                    />
+                </div>
+            )}
+            <DataTable
+                testId="oblab-news-created-order-blocks"
+                maxHeight={320}
+                columns={NEWS_OB_COLUMNS}
+                rows={analytics.newsCreatedRows}
+                onRowClick={r => onDrill && r?.tradeRefs?.length && onDrill(r)}
+                defaultSortKey="expectancy"
+                defaultSortDir="asc"
+            />
+        </NeonPanel>
+    );
+}
+
+const OB_POPULATION_COLUMNS = [
+    { key: "label",             label: "OB Cohort",     sortable: false, render: (r) => <BucketLabel row={r} /> },
+    { key: "count",             label: "OB Count",      align: "right" },
+    { key: "fillRate",          label: "Fill Rate",     align: "right", render: (r) => formatPct(r.fillRate) },
+    { key: "winRate",           label: "Linked Win %",  align: "right", render: (r) => r.linkedCount ? formatPct(r.winRate) : "—" },
+    { key: "lossRate",          label: "Linked Loss %", align: "right", render: (r) => r.linkedCount ? formatPct(r.lossRate) : "—" },
+    { key: "invalidationRate",  label: "Invalidated",   align: "right", render: (r) => formatPct(r.invalidationRate) },
+    { key: "unfilledRate",      label: "Unfilled",      align: "right", render: (r) => formatPct(r.unfilledRate) },
+    { key: "cancelledRate",     label: "Cancelled",     align: "right", render: (r) => formatPct(r.cancelledRate) },
+    { key: "avgWidthPips",      label: "Avg Width",     align: "right", render: (r) => formatMaybePips(r.avgWidthPips) },
+    { key: "avgAgeHours",       label: "Avg Age",       align: "right", render: (r) => formatAgeHours(r.avgAgeHours) },
+];
+
+function NewsCreatedObPopulationPanel({ analysis }) {
+    if (!analysis?.hasOrderBlocks) {
+        return (
+            <NeonPanel
+                title="News-Created OB Population"
+                action={<Pill tone="muted">NO OB DATA</Pill>}
+            >
+                <div className="text-[12px] text-muted-lab">
+                    All detected order block analytics require imported order_blocks.csv data.
+                </div>
+            </NeonPanel>
+        );
+    }
+
+    if (!analysis.hasNewsFields) {
+        return (
+            <NeonPanel
+                title="News-Created OB Population"
+                action={<Pill tone="muted">REIMPORT REQUIRED</Pill>}
+            >
+                <div className="space-y-2 text-[12px] text-muted-lab">
+                    <p>All detected order blocks, not just executed trades.</p>
+                    <p>OB-level news analytics require rerun/reimport after news-created OB tagging was added.</p>
+                </div>
+            </NeonPanel>
+        );
+    }
+
+    return (
+        <NeonPanel
+            collapsible
+            title="News-Created OB Population"
+            action={<Pill tone="secondary">{analysis.totalCount} DETECTED OBS</Pill>}
+        >
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                    <div className="text-[12px] text-[hsl(var(--text-2))]">All detected order blocks, not just executed trades.</div>
+                    <div className="mt-1 text-[10.5px] text-muted-lab">
+                        Trade-level stats only include OBs that became trades. OB-level stats include all detected OBs.
+                    </div>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-3">
+                <ObPopulationSummaryCard title="News-created OBs" row={analysis.newsSummary} tone="warning" />
+                <ObPopulationSummaryCard title="Normal OBs" row={analysis.normalSummary} tone="secondary" />
+            </div>
+
+            <ObLifecycleStrip title="News-created lifecycle" row={analysis.newsSummary} />
+            <ObLifecycleStrip title="Normal lifecycle" row={analysis.normalSummary} />
+
+            {analysis.insights.length > 0 && (
+                <div className="my-3 grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {analysis.insights.map((text, index) => (
+                        <div key={index} className="clip-bevel-sm border border-[hsl(var(--warning)/0.35)] bg-[hsl(var(--warning)/0.07)] px-3 py-2 text-[11.5px] text-[hsl(var(--text-2))]">
+                            {text}
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            <DataTable
+                testId="oblab-news-created-ob-population"
+                maxHeight={360}
+                columns={OB_POPULATION_COLUMNS}
+                rows={analysis.rows}
+                defaultSortKey="count"
+                defaultSortDir="desc"
+            />
+        </NeonPanel>
+    );
+}
+
+function ObPopulationSummaryCard({ title, row, tone }) {
+    return (
+        <div className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.42)] p-3">
+            <div className="flex items-center justify-between gap-2">
+                <div className="text-[11px] font-medium text-title-lab">{title}</div>
+                <Pill tone={tone}>{row.count} OBS</Pill>
+            </div>
+            <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                <MiniObMetric label="Fill" value={formatPct(row.fillRate)} />
+                <MiniObMetric label="Win Conv." value={row.linkedCount ? formatPct(row.winRate) : "—"} />
+                <MiniObMetric label="Invalid." value={formatPct(row.invalidationRate)} />
+                <MiniObMetric label="Unfilled" value={formatPct(row.unfilledRate)} />
+                <MiniObMetric label="Cancel" value={formatPct(row.cancelledRate)} />
+                <MiniObMetric label="Width" value={formatMaybePips(row.avgWidthPips)} />
+                <MiniObMetric label="Age" value={formatAgeHours(row.avgAgeHours)} />
+                <MiniObMetric label="Linked" value={String(row.linkedCount)} />
+            </div>
+        </div>
+    );
+}
+
+function MiniObMetric({ label, value }) {
+    return (
+        <div className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel)/0.42)] px-2 py-1.5">
+            <div className="text-[9.5px] text-muted-lab">{label}</div>
+            <div className="mt-0.5 font-mono text-[12px] text-white tabular-nums">{value}</div>
+        </div>
+    );
+}
+
+function ObLifecycleStrip({ title, row }) {
+    const segments = [
+        { label: "Detected", value: row.count, tone: "bg-[hsl(var(--accent-secondary)/0.35)]" },
+        { label: "Filled", value: row.filledCount, tone: "bg-[hsl(var(--accent-primary)/0.45)]" },
+        { label: "Won", value: row.wins, tone: "bg-[hsl(var(--success)/0.5)]" },
+        { label: "Lost", value: row.losses, tone: "bg-[hsl(var(--danger)/0.5)]" },
+        { label: "Invalid.", value: row.invalidatedCount, tone: "bg-[hsl(var(--bear)/0.42)]" },
+        { label: "Cancelled", value: row.cancelledCount, tone: "bg-[hsl(var(--warning)/0.42)]" },
+        { label: "Unfilled", value: row.unfilledCount, tone: "bg-[hsl(var(--panel-3)/0.75)]" },
+    ];
+    const max = Math.max(row.count, 1);
+    return (
+        <div className="mb-2">
+            <div className="mb-1.5 text-[10px] text-muted-lab">{title}</div>
+            <div className="grid grid-cols-7 gap-1.5">
+                {segments.map((segment) => (
+                    <div key={segment.label} className="min-w-0">
+                        <div className="h-1.5 overflow-hidden bg-[hsl(var(--panel-3)/0.5)] clip-bevel-sm">
+                            <div className={`h-full ${segment.tone}`} style={{ width: `${Math.max(3, (segment.value / max) * 100)}%` }} />
+                        </div>
+                        <div className="mt-1 flex items-center justify-between gap-1 text-[9.5px] text-muted-lab">
+                            <span className="truncate">{segment.label}</span>
+                            <span className="font-mono text-[hsl(var(--text-2))]">{segment.value}</span>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </div>
     );
 }
 
@@ -948,6 +1355,7 @@ function buildResearchReport({ run, variant, analytics, filters }) {
         ["Direction",        analytics.directionRows],
         ["Origin Session",   analytics.originSessionRows],
         ["Creation Hour",    analytics.creationHourRows],
+        ["News-Created OB Trades", analytics.newsCreatedRows],
         ["Width Bucket",     analytics.widthRows],
         ["Age Bucket",       analytics.ageRows],
         ["Day of Week",      analytics.dayOfWeekRows],
@@ -1019,11 +1427,18 @@ function buildOrderBlockAnalytics(trades) {
     const fastStopoutRows        = bucketRows(trades, fastStopoutBucket, ["same candle", "<15m", "15–60m", "1–4h", "4h+", "Limited Data"]);
     const distanceBeforeFillRows = bucketRows(trades, distanceBeforeFillBucket, ["0–0.5R", "0.5–1R", "1–2R", "2R+", "Limited Data"]);
     const dayOfWeekRows          = bucketRows(trades, dayOfWeekBucket, DAY_ORDER);
+    const newsFieldAvailable     = trades.some(hasNewsCreatedFields);
+    const newsCreatedRows        = bucketRows(trades, newsCreatedBucket, ["Origin inside news window", "Detection inside news window", "Within 5 min of news", "Within 15 min of news", "Within 30 min of news", "Not news-created", "Limited Data"]);
+    const newsComparisonRows     = bucketRows(trades, newsCreatedComparisonBucket, ["News-created", "Normal OBs", "Limited Data"]);
+    const newsComparison         = buildNewsCreatedComparison(newsComparisonRows);
+    const newsCreatedTaggedCount = newsCreatedRows
+        .filter(row => row.label !== "Not news-created" && row.label !== "Limited Data")
+        .reduce((sum, row) => sum + row.count, 0);
 
     const allRows = [
         ...structureRows, ...directionRows, ...originSessionRows, ...creationHourRows,
         ...widthRows, ...ageRows, ...penetrationRows, ...fastStopoutRows,
-        ...distanceBeforeFillRows, ...dayOfWeekRows,
+        ...distanceBeforeFillRows, ...dayOfWeekRows, ...newsCreatedRows,
     ];
 
     const lowSampleBuckets = allRows.filter(r => r.count > 0 && r.count < LOW_SAMPLE_N).length;
@@ -1050,9 +1465,224 @@ function buildOrderBlockAnalytics(trades) {
         structureRows, directionRows, originSessionRows, creationHourRows,
         widthRows, ageRows, penetrationRows, catastrophicBreach,
         fastStopoutRows, distanceBeforeFillRows, dayOfWeekRows,
+        newsFieldAvailable, newsCreatedRows, newsComparisonRows, newsComparison, newsCreatedTaggedCount,
         sessionMatrix, fieldCompleteness, rollingExpectancy, equityCurves,
         worstLosses, bestWins,
     };
+}
+
+function buildNewsCreatedObPopulationAnalytics(orderBlocks, trades) {
+    const obs = Array.isArray(orderBlocks) ? orderBlocks : [];
+    const tradeLookup = buildTradeLookupForObs(trades);
+    const enriched = obs.map((ob) => ({ ...ob, linkedTrade: linkedTradeForOb(ob, tradeLookup) }));
+    const hasOrderBlocks = enriched.length > 0;
+    const hasNewsFields = enriched.some(hasNewsCreatedFields);
+
+    if (!hasOrderBlocks || !hasNewsFields) {
+        return {
+            hasOrderBlocks,
+            hasNewsFields,
+            totalCount: enriched.length,
+            rows: [],
+            newsSummary: finalizeObPopulationBucket(emptyObPopulationBucket("News-created OBs")),
+            normalSummary: finalizeObPopulationBucket(emptyObPopulationBucket("Normal OBs")),
+            insights: [],
+        };
+    }
+
+    const newsObs = enriched.filter(isNewsCreatedTrade);
+    const normalObs = enriched.filter((ob) => hasNewsCreatedFields(ob) && !isNewsCreatedTrade(ob));
+    const newsSummary = summarizeObPopulation("News-created OBs", newsObs);
+    const normalSummary = summarizeObPopulation("Normal OBs", normalObs);
+    const rows = [
+        summarizeObPopulation("Origin inside news window", enriched.filter((ob) => ob?.obOriginNewsWindow || ob?.obCreatedDuringNews)),
+        summarizeObPopulation("Detection inside news window", enriched.filter((ob) => ob?.obDetectionNewsWindow || ob?.obDetectedDuringNews)),
+        summarizeObPopulation("Origin or detection inside news window", enriched.filter((ob) => ob?.obOriginNewsWindow || ob?.obDetectionNewsWindow || ob?.obCreatedDuringNews || ob?.obDetectedDuringNews)),
+        summarizeObPopulation("Within 5 min of news", enriched.filter((ob) => {
+            const minutes = newsMinutesFromTrade(ob);
+            return minutes != null && Math.abs(minutes) <= 5;
+        })),
+        summarizeObPopulation("Within 15 min of news", enriched.filter((ob) => {
+            const minutes = newsMinutesFromTrade(ob);
+            return minutes != null && Math.abs(minutes) <= 15;
+        })),
+        summarizeObPopulation("Within 30 min of news", enriched.filter((ob) => {
+            const minutes = newsMinutesFromTrade(ob);
+            return minutes != null && Math.abs(minutes) <= 30;
+        })),
+        summarizeObPopulation("Not news-created", normalObs),
+    ];
+
+    return {
+        hasOrderBlocks,
+        hasNewsFields,
+        totalCount: enriched.length,
+        rows,
+        newsSummary,
+        normalSummary,
+        insights: buildObPopulationInsights(newsSummary, normalSummary),
+    };
+}
+
+function buildTradeLookupForObs(trades) {
+    const byTradeId = new Map();
+    const byObId = new Map();
+    (Array.isArray(trades) ? trades : []).forEach((trade) => {
+        [trade?.id, trade?.rawTradeId, trade?.displayTradeId].filter(Boolean).forEach((id) => {
+            byTradeId.set(normalizeEntityKey(id), trade);
+        });
+        [trade?.obId, trade?.displayObId].filter(Boolean).forEach((id) => {
+            byObId.set(normalizeEntityKey(id), trade);
+        });
+    });
+    return { byTradeId, byObId };
+}
+
+function linkedTradeForOb(ob, lookup) {
+    const tradeIds = [ob?.linkedTradeId, ob?.tradeId, ob?.displayTradeId].filter(Boolean);
+    for (const id of tradeIds) {
+        const match = lookup.byTradeId.get(normalizeEntityKey(id));
+        if (match) return match;
+    }
+    const obIds = [ob?.id, ob?.obId, ob?.displayObId].filter(Boolean);
+    for (const id of obIds) {
+        const match = lookup.byObId.get(normalizeEntityKey(id));
+        if (match) return match;
+    }
+    return null;
+}
+
+function normalizeEntityKey(value) {
+    return String(value || "").trim().toLowerCase();
+}
+
+function summarizeObPopulation(label, obs) {
+    return finalizeObPopulationBucket(obs.reduce((bucket, ob) => {
+        addObToPopulationBucket(bucket, ob);
+        return bucket;
+    }, emptyObPopulationBucket(label)));
+}
+
+function emptyObPopulationBucket(label) {
+    return {
+        label,
+        count: 0,
+        filledCount: 0,
+        linkedCount: 0,
+        wins: 0,
+        losses: 0,
+        invalidatedCount: 0,
+        unfilledCount: 0,
+        cancelledCount: 0,
+        widthValues: [],
+        ageValues: [],
+    };
+}
+
+function addObToPopulationBucket(bucket, ob) {
+    bucket.count += 1;
+    const linked = ob?.linkedTrade || null;
+    if (isObFilled(ob, linked)) bucket.filledCount += 1;
+    if (linked) {
+        bucket.linkedCount += 1;
+        const r = Number(linked?.r);
+        const outcome = normalizeStatus(linked?.outcome || linked?.result);
+        if (Number.isFinite(r) ? r > 0 : outcome === "win") bucket.wins += 1;
+        if (Number.isFinite(r) ? r < 0 : outcome === "loss") bucket.losses += 1;
+    }
+    if (isObInvalidated(ob)) bucket.invalidatedCount += 1;
+    if (isObCancelled(ob)) bucket.cancelledCount += 1;
+    if (isObUnfilled(ob, linked)) bucket.unfilledCount += 1;
+
+    const width = obWidthPips(ob);
+    if (Number.isFinite(width)) bucket.widthValues.push(width);
+    const age = obAgeHours(ob, linked);
+    if (Number.isFinite(age)) bucket.ageValues.push(age);
+}
+
+function finalizeObPopulationBucket(bucket) {
+    const n = bucket.count;
+    const linkedN = bucket.linkedCount;
+    return {
+        ...bucket,
+        fillRate: n ? (bucket.filledCount / n) * 100 : 0,
+        winRate: linkedN ? (bucket.wins / linkedN) * 100 : 0,
+        lossRate: linkedN ? (bucket.losses / linkedN) * 100 : 0,
+        invalidationRate: n ? (bucket.invalidatedCount / n) * 100 : 0,
+        unfilledRate: n ? (bucket.unfilledCount / n) * 100 : 0,
+        cancelledRate: n ? (bucket.cancelledCount / n) * 100 : 0,
+        avgWidthPips: bucket.widthValues.length ? bucket.widthValues.reduce((sum, value) => sum + value, 0) / bucket.widthValues.length : null,
+        avgAgeHours: bucket.ageValues.length ? bucket.ageValues.reduce((sum, value) => sum + value, 0) / bucket.ageValues.length : null,
+    };
+}
+
+function buildObPopulationInsights(news, normal) {
+    if (!news?.count || !normal?.count) {
+        return ["Limited comparison: both news-created and normal OB cohorts are required."];
+    }
+    const insights = [];
+    const fillDelta = news.fillRate - normal.fillRate;
+    const invalidationDelta = news.invalidationRate - normal.invalidationRate;
+    const winDelta = news.winRate - normal.winRate;
+    if (Math.abs(fillDelta) >= 5) {
+        insights.push(`News-created OBs filled ${Math.abs(round1(fillDelta)).toFixed(1)} percentage points ${fillDelta < 0 ? "less often" : "more often"} than normal OBs.`);
+    }
+    if (Math.abs(invalidationDelta) >= 5) {
+        insights.push(`News-created OBs invalidated ${Math.abs(round1(invalidationDelta)).toFixed(1)} percentage points ${invalidationDelta > 0 ? "more often" : "less often"} than normal OBs.`);
+    }
+    if (!insights.length && Math.abs(winDelta) >= 5) {
+        insights.push(`Linked news-created trades had a ${winDelta >= 0 ? "+" : ""}${round1(winDelta).toFixed(1)} percentage point win-rate delta versus normal OBs.`);
+    }
+    if (!insights.length) {
+        insights.push("No meaningful OB-population underperformance detected in this sample.");
+    }
+    return insights.slice(0, 2);
+}
+
+function isObFilled(ob, linked) {
+    if ((linked?.entry || linked?.fillTime) && linked?.missed_trade !== true) return true;
+    if (ob?.fillTime) return true;
+    const status = normalizeStatus(ob?.obFinalStatus || ob?.obFinalStatusLabel || ob?.lifecycleReason);
+    return status.includes("fill") || status.includes("win") || status.includes("loss") || status.includes("trade");
+}
+
+function isObInvalidated(ob) {
+    if (ob?.invalidationTime || ob?.ob_fully_breached === true) return true;
+    const status = normalizeStatus(ob?.obFinalStatus || ob?.obFinalStatusLabel || ob?.lifecycleReason);
+    return status.includes("invalid") || status.includes("breach") || status.includes("mitigat");
+}
+
+function isObCancelled(ob) {
+    if (ob?.cancelTime || ob?.sessionCancelTime || ob?.newsBlackoutTriggerTime || ob?.reverseTouchTime) return true;
+    const status = normalizeStatus(ob?.obFinalStatus || ob?.obFinalStatusLabel || ob?.lifecycleReason);
+    return status.includes("cancel") || status.includes("filtered") || status.includes("news_touch") || status.includes("reverse_touch");
+}
+
+function isObUnfilled(ob, linked) {
+    const status = normalizeStatus(ob?.obFinalStatus || ob?.obFinalStatusLabel || ob?.lifecycleReason);
+    if (status.includes("unfilled") || status.includes("no_trade")) return true;
+    return !isObFilled(ob, linked) && !isObCancelled(ob) && !isObInvalidated(ob);
+}
+
+function normalizeStatus(value) {
+    return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_");
+}
+
+function obWidthPips(ob) {
+    const direct = Number(ob?.obWidthPips ?? ob?.ob_width_pips ?? ob?.width_pips);
+    if (Number.isFinite(direct)) return direct;
+    const top = Number(ob?.top ?? ob?.obTop);
+    const bot = Number(ob?.bot ?? ob?.bottom ?? ob?.obBottom);
+    if (!Number.isFinite(top) || !Number.isFinite(bot)) return null;
+    return Math.abs(top - bot) / 0.0001;
+}
+
+function obAgeHours(ob, linked) {
+    const from = parseDate(ob?.endTime || ob?.obDetectionTime || ob?.originTime || ob?.obOriginTime);
+    const to = parseDate(ob?.fillTime || linked?.entry || linked?.fillTime);
+    if (!from || !to) return null;
+    const hours = (to.getTime() - from.getTime()) / 3600000;
+    return Number.isFinite(hours) && hours >= 0 ? hours : null;
 }
 
 function buildCatastrophicBreach(trades) {
@@ -1185,6 +1815,26 @@ function buildInsights(analytics) {
         }
     }
 
+    if (analytics.newsComparison?.news?.count >= LOW_SAMPLE_N && analytics.newsComparison?.normal?.count >= LOW_SAMPLE_N) {
+        const news = analytics.newsComparison.news;
+        const normal = analytics.newsComparison.normal;
+        const expDelta = news.expectancy - normal.expectancy;
+        const wrDelta = news.winRate - normal.winRate;
+        if (expDelta < 0 || wrDelta < 0) {
+            results.push({
+                tone: "warning",
+                label: "News-Created OB Trades",
+                text: `Executed news-created OB trades vs normal: ${formatSigned(round3(expDelta))}R expectancy / ${wrDelta >= 0 ? "+" : ""}${round1(wrDelta).toFixed(1)}% win rate.`,
+            });
+        } else {
+            results.push({
+                tone: "secondary",
+                label: "News-Created OB Trades",
+                text: "Executed news-created OB trades did not underperform in this sample.",
+            });
+        }
+    }
+
     return results.slice(0, 4);
 }
 
@@ -1211,6 +1861,15 @@ function finalizeBucket(bucket) {
     const n          = bucket.count;
     const expectancy = n ? bucket.netR / n : 0;
     const winRate    = n ? (bucket.wins / n) * 100 : 0;
+    const breached = bucket.tradeRefs.filter(t => t?.ob_fully_breached === true).length;
+    const penetrationValues = bucket.tradeRefs
+        .map(t => Number(t?.max_ob_penetration_pct))
+        .filter(Number.isFinite);
+    const ageValues = bucket.tradeRefs
+        .map(ageHours)
+        .filter(Number.isFinite);
+    const longCount = bucket.tradeRefs.filter(t => String(t?.direction || "").toLowerCase().startsWith("long")).length;
+    const shortCount = bucket.tradeRefs.filter(t => String(t?.direction || "").toLowerCase().startsWith("short")).length;
 
     // Profit factor
     const pf = bucket.sumLossR > 0
@@ -1238,6 +1897,12 @@ function finalizeBucket(bucket) {
     return {
         label: bucket.label, count: n, wins: bucket.wins, losses: bucket.losses,
         netR: round1(bucket.netR), winRate, expectancy,
+        lossRate: n ? (bucket.losses / n) * 100 : 0,
+        fullBreachRate: n ? (breached / n) * 100 : 0,
+        avgPenetrationPct: penetrationValues.length ? penetrationValues.reduce((sum, value) => sum + value, 0) / penetrationValues.length : null,
+        avgAgeHours: ageValues.length ? ageValues.reduce((sum, value) => sum + value, 0) / ageValues.length : null,
+        longCount,
+        shortCount,
         profitFactor: pf, ciLo, ciHi,
         maxWinStreak, maxLossStreak,
         tradeRefs: bucket.tradeRefs,
@@ -1331,6 +1996,65 @@ function dayOfWeekBucket(trade) {
     const d = parseDate(trade?.entry || trade?.obOriginTime);
     if (!d) return "Limited Data";
     return ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][d.getUTCDay()];
+}
+
+function hasNewsCreatedFields(trade) {
+    return trade?.hasNewsCreatedTagFields === true
+        || trade?.obOriginNewsWindow === true
+        || trade?.obDetectionNewsWindow === true
+        || trade?.obCreatedDuringNews === true
+        || trade?.obDetectedDuringNews === true
+        || trade?.obOriginMinutesFromNews != null
+        || trade?.obDetectionMinutesFromNews != null
+        || trade?.ob_origin_minutes_from_news != null
+        || trade?.ob_detection_minutes_from_news != null
+        || !!trade?.obOriginNewsEvent
+        || !!trade?.obDetectionNewsEvent
+        || !!trade?.ob_origin_news_event
+        || !!trade?.ob_detection_news_event;
+}
+
+function newsMinutesFromTrade(trade) {
+    const values = [
+        trade?.obOriginMinutesFromNews,
+        trade?.obDetectionMinutesFromNews,
+        trade?.ob_origin_minutes_from_news,
+        trade?.ob_detection_minutes_from_news,
+    ].map(Number).filter(Number.isFinite);
+    if (!values.length) return null;
+    return values.reduce((best, value) => Math.abs(value) < Math.abs(best) ? value : best, values[0]);
+}
+
+function isNewsCreatedTrade(trade) {
+    if (!hasNewsCreatedFields(trade)) return false;
+    if (trade?.obOriginNewsWindow || trade?.obDetectionNewsWindow || trade?.obCreatedDuringNews || trade?.obDetectedDuringNews) return true;
+    const minutes = newsMinutesFromTrade(trade);
+    return minutes != null && Math.abs(minutes) <= 30;
+}
+
+function newsCreatedBucket(trade) {
+    if (!hasNewsCreatedFields(trade)) return "Limited Data";
+    if (trade?.obOriginNewsWindow || trade?.obCreatedDuringNews) return "Origin inside news window";
+    if (trade?.obDetectionNewsWindow || trade?.obDetectedDuringNews) return "Detection inside news window";
+    const minutes = newsMinutesFromTrade(trade);
+    if (minutes == null) return "Not news-created";
+    const abs = Math.abs(minutes);
+    if (abs <= 5) return "Within 5 min of news";
+    if (abs <= 15) return "Within 15 min of news";
+    if (abs <= 30) return "Within 30 min of news";
+    return "Not news-created";
+}
+
+function newsCreatedComparisonBucket(trade) {
+    if (!hasNewsCreatedFields(trade)) return "Limited Data";
+    return isNewsCreatedTrade(trade) ? "News-created" : "Normal OBs";
+}
+
+function buildNewsCreatedComparison(rows) {
+    const news = rows.find(row => row.label === "News-created");
+    const normal = rows.find(row => row.label === "Normal OBs");
+    if (!news?.count || !normal?.count) return null;
+    return { news, normal };
 }
 
 // ─── Session Helpers ──────────────────────────────────────────────────────────
@@ -1445,4 +2169,17 @@ function formatSigned(value) {
 
 function formatPct(value) {
     return `${round1(value).toFixed(1)}%`;
+}
+
+function formatAgeHours(value) {
+    if (!Number.isFinite(Number(value))) return "—";
+    const hours = Number(value);
+    if (hours < 1) return `${Math.round(hours * 60)}m`;
+    if (hours < 24) return `${round1(hours)}h`;
+    return `${round1(hours / 24)}d`;
+}
+
+function formatMaybePips(value) {
+    if (!Number.isFinite(Number(value))) return "—";
+    return `${round1(value)} pips`;
 }

@@ -1,12 +1,12 @@
 import React from "react";
+import { Link } from "react-router-dom";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { MetricChip } from "@/components/lab/MetricChip";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
-import { useDataset } from "@/data/store";
-import { ActiveRunContext } from "@/components/lab/ActiveRunContext";
+import { compactTimeframe, getRunDisplayName, useDataset } from "@/data/store";
 import {
     AlertTriangle, CalendarClock, Clipboard, Download, FileText,
-    Globe2, ListChecks, Newspaper, ShieldAlert,
+    Globe2, ListChecks, Newspaper, ShieldAlert, FolderOpen,
 } from "lucide-react";
 
 const EMPTY_TRADES = [];
@@ -42,8 +42,185 @@ const BACKLOG = [
     "Live / sidecar calendar updater later",
 ];
 
+function LabHero({ pageLabel, titleFallback, description, activeProject, activeRun, activeSummary, activeRunId, tradeCount, actions }) {
+    const run = activeRun || activeSummary || {};
+    const hasRun = !!(activeRun || activeSummary || activeRunId);
+    const projectName = activeProject?.name || "";
+    const projectId = activeProject?.id || null;
+    const runName = activeRun ? getRunDisplayName(activeRun) : run?.name || run?.displayName || run?.id || activeRunId || "";
+    const title = projectName || runName || titleFallback;
+    const symbol = readFirst(run?.symbol, run?.summary?.symbol, run?.config?.symbol, activeSummary?.symbol);
+    const detectionTf = compactTimeframe(readFirst(
+        run?.detectionTf,
+        run?.summary?.detectionTf,
+        run?.summary?.detection_tf,
+        run?.config?.detection_tf,
+        run?.config?.detectionTf,
+        activeSummary?.detectionTf,
+    ));
+    const executionTf = compactTimeframe(readFirst(
+        run?.executionTf,
+        run?.summary?.executionTf,
+        run?.summary?.execution_tf,
+        run?.config?.execution_tf,
+        run?.config?.executionTf,
+        activeSummary?.executionTf,
+    ));
+    const rr = readFirst(run?.rr, run?.summary?.rr, run?.config?.rr_multiple, run?.config?.rrMultiple, activeSummary?.rr);
+    const heroDateRange = readHeroDateRange(run, activeSummary);
+    const dateRange = formatHeroDateRange(heroDateRange);
+    const monthSpan = formatHeroMonthSpan(heroDateRange);
+    const dateRangeLine = dateRange && monthSpan ? `${dateRange} • ${monthSpan}` : dateRange;
+    const runLine = hasRun
+        ? [`Run: ${runName || "Active run"}`, symbol, detectionTf, `${tradeCount} trades`].filter(isMeaningful).join(" · ")
+        : "No active run selected. Import or run a backtest to populate this page.";
+    const configLine = [symbol, detectionTf, executionTf && executionTf !== detectionTf ? `Exec ${executionTf}` : null, rr != null && rr !== "" ? `RR ${rr}` : null].filter(isMeaningful).join(" · ");
+
+    return (
+        <section className="mx-6 mb-5 px-1 py-4">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0">
+                    <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[hsl(var(--accent-secondary))]">
+                        <span className="h-px w-9 bg-[hsl(var(--accent-secondary)/0.78)]" />
+                        {pageLabel}
+                    </div>
+                    <h1 className="mt-2 truncate text-3xl font-semibold tracking-[-0.01em] text-[hsl(var(--text-1))]">
+                        {title}
+                    </h1>
+                    <div className="mt-2 text-[13px] font-medium text-[hsl(var(--accent-primary))]">
+                        {runLine}
+                    </div>
+                    {configLine && <div className="mt-1 text-[12px] leading-relaxed text-[hsl(var(--text-2))]">{configLine}</div>}
+                    {dateRangeLine && <div className="text-[12px] leading-relaxed text-[hsl(var(--text-3))]">{dateRangeLine}</div>}
+                    {description && <div className="mt-2 max-w-4xl text-[12px] leading-relaxed text-[hsl(var(--text-2))]">{description}</div>}
+                </div>
+                <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                    {projectId && (
+                        <Link
+                            to={`/projects/${encodeURIComponent(projectId)}`}
+                            className="inline-flex items-center gap-2 rounded-md border border-[hsl(var(--accent-secondary)/0.45)] bg-[hsl(var(--accent-secondary)/0.08)] px-3 py-1.5 text-[12px] font-medium text-[hsl(var(--accent-secondary))] transition-colors hover:border-[hsl(var(--accent-secondary)/0.7)] hover:bg-[hsl(var(--accent-secondary)/0.13)] hover:text-white"
+                        >
+                            <FolderOpen className="h-3.5 w-3.5" />
+                            Open Project
+                        </Link>
+                    )}
+                    {hasRun && <HeroBadge tone="primary">Imported</HeroBadge>}
+                    {hasRun && <HeroBadge tone="success">Active Run</HeroBadge>}
+                    {projectId && <HeroBadge tone="secondary">Project Active</HeroBadge>}
+                    {actions}
+                </div>
+            </div>
+        </section>
+    );
+}
+
+function HeroBadge({ tone = "muted", children }) {
+    const toneClass = {
+        primary: "border-[hsl(var(--accent-primary)/0.42)] bg-[hsl(var(--accent-primary)/0.07)] text-[hsl(var(--accent-primary))]",
+        secondary: "border-[hsl(var(--accent-secondary)/0.42)] bg-[hsl(var(--accent-secondary)/0.07)] text-[hsl(var(--accent-secondary))]",
+        success: "border-[hsl(var(--success)/0.42)] bg-[hsl(var(--success)/0.07)] text-[hsl(var(--success))]",
+        warning: "border-[hsl(var(--warning)/0.42)] bg-[hsl(var(--warning)/0.08)] text-[hsl(var(--warning))]",
+        muted: "border-[hsl(var(--border-mid))] bg-[hsl(var(--panel-2)/0.54)] text-[hsl(var(--text-2))]",
+    }[tone];
+    return <span className={`inline-flex items-center rounded-[3px] border px-2.5 py-1 text-[11px] font-medium ${toneClass}`}>{children}</span>;
+}
+
+function readFirst(...values) {
+    return values.find((value) => value != null && value !== "" && value !== "—");
+}
+
+function isMeaningful(value) {
+    return value != null && value !== "" && value !== "—" && value !== "N/A";
+}
+
+function readHeroDateRange(run, activeSummary) {
+    const summary = run?.summary || {};
+    const config = run?.config || {};
+    const direct = run?.dateRange || summary.dateRange || summary.date_range || activeSummary?.dateRange;
+    const from = readFirst(run?.dateFrom, summary.date_from, summary.dateFrom, config.date_from, config.dateFrom, config.start_date, config.startDate);
+    const to = readFirst(run?.dateTo, summary.date_to, summary.dateTo, config.date_to, config.dateTo, config.end_date, config.endDate);
+    if (from || to) return { from, to };
+    return direct || null;
+}
+
+function formatHeroDateRange(value) {
+    if (!value) return "";
+    if (typeof value === "object") {
+        const from = formatHeroDate(value.from);
+        const to = formatHeroDate(value.to);
+        return from && to ? `${from} → ${to}` : from || to || "";
+    }
+    const parts = String(value).split("→").map((part) => part.trim()).filter(Boolean);
+    if (parts.length >= 2) {
+        const from = formatHeroDate(parts[0]);
+        const to = formatHeroDate(parts[1]);
+        return from && to ? `${from} → ${to}` : "";
+    }
+    return formatHeroDate(value);
+}
+
+function formatHeroMonthSpan(value) {
+    const range = normalizeHeroDateRange(value);
+    if (!range?.from || !range?.to) return "";
+    const start = parseHeroDateValue(range.from);
+    const end = parseHeroDateValue(range.to);
+    if (!start || !end || end <= start) return "";
+    const days = (end.getTime() - start.getTime()) / 86400000;
+    if (days < 30) return "<1 month";
+    const endMonthDays = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, 0)).getUTCDate();
+    const calendarMonths = ((end.getUTCFullYear() - start.getUTCFullYear()) * 12)
+        + (end.getUTCMonth() - start.getUTCMonth())
+        + ((end.getUTCDate() - start.getUTCDate()) / endMonthDays);
+    const months = Math.max(1, Math.round(Number.isFinite(calendarMonths) ? calendarMonths : days / 30.44));
+    return `${months} ${months === 1 ? "month" : "months"}`;
+}
+
+function normalizeHeroDateRange(value) {
+    if (!value) return null;
+    if (typeof value === "object") return { from: value.from, to: value.to };
+    const parts = String(value).split("→").map((part) => part.trim()).filter(Boolean);
+    if (parts.length >= 2) return { from: parts[0], to: parts[1] };
+    return null;
+}
+
+function parseHeroDateValue(value) {
+    if (!value || value === "?") return null;
+    if (value instanceof Date) return Number.isFinite(value.getTime()) ? value : null;
+    const text = String(value).trim();
+    const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (iso) {
+        const date = new Date(Date.UTC(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3])));
+        return Number.isFinite(date.getTime()) ? date : null;
+    }
+    const short = text.match(/^(\d{1,2})\s+([A-Za-z]{3,})\s+(\d{2}|\d{4})$/);
+    if (short) {
+        const month = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"].indexOf(short[2].slice(0, 3).toLowerCase());
+        const year = Number(short[3].length === 2 ? `20${short[3]}` : short[3]);
+        if (month >= 0) {
+            const date = new Date(Date.UTC(year, month, Number(short[1])));
+            return Number.isFinite(date.getTime()) ? date : null;
+        }
+    }
+    return null;
+}
+
+function formatHeroDate(value) {
+    if (!value || value === "?") return "";
+    const text = String(value).trim();
+    const match = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!match) return text;
+    const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+    if (!Number.isFinite(date.getTime())) return text;
+    return date.toLocaleDateString("en-GB", {
+        day: "numeric",
+        month: "short",
+        year: "2-digit",
+        timeZone: "UTC",
+    });
+}
+
 export default function NewsLab() {
-    const { ACTIVE_RUN, TRADES, activeRunId, runs } = useDataset();
+    const { ACTIVE_PROJECT, ACTIVE_RUN, TRADES, activeRunId, runs } = useDataset();
     const trades = React.useMemo(() => (Array.isArray(TRADES) ? TRADES : EMPTY_TRADES), [TRADES]);
     const [currencyFilter, setCurrencyFilter] = React.useState("ALL");
     const [impactFilter, setImpactFilter] = React.useState("ALL");
@@ -229,17 +406,23 @@ export default function NewsLab() {
 
     return (
         <div className="pb-12">
-            <ActiveRunContext
+            <LabHero
                 pageLabel="News Lab"
+                titleFallback="News Lab"
                 description="Research high-impact economic event filters, blackout windows, and blocked trade quality."
+                activeProject={ACTIVE_PROJECT}
+                activeRun={activeRun}
+                activeSummary={ACTIVE_RUN}
+                activeRunId={activeRunId}
+                tradeCount={trades.length}
                 actions={(
-                    <div className="flex items-center gap-2">
-                        <Pill tone="secondary">FRONTEND V1</Pill>
-                        <Pill tone={hasNewsData ? "success" : "warning"}>
-                            {hasNewsEvents ? "NEWS CSV READY" : hasNewsResults ? "EXACT NEWS RESULTS" : "LIMITED DATA"}
-                        </Pill>
-                        <Pill tone="primary">{trades.length} TRADES</Pill>
-                    </div>
+                    <>
+                        <HeroBadge tone="secondary">Frontend V1</HeroBadge>
+                        <HeroBadge tone={hasNewsData ? "success" : "warning"}>
+                            {hasNewsEvents ? "News CSV Ready" : hasNewsResults ? "Exact News Results" : "Limited Data"}
+                        </HeroBadge>
+                        <HeroBadge tone="primary">{trades.length} trades</HeroBadge>
+                    </>
                 )}
             />
 

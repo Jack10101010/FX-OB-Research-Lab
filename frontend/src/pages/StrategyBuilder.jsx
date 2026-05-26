@@ -63,6 +63,8 @@ export default function StrategyBuilder() {
         spread: 0.2,
         slippage: 0.2,
         commission: 0,
+        entryResearchExports: true,
+        entryPenetrationThresholds: "10,25,50,75",
         monteCarlo: false,
     });
     const set = (k) => (v) => setCfg((c) => ({ ...c, [k]: v }));
@@ -614,6 +616,20 @@ export default function StrategyBuilder() {
                         <Field label="Spread (pips)"><NeonInput type="number" step="0.05" value={cfg.spread} onChange={(e) => set("spread")(Number(e.target.value))} /></Field>
                         <Field label="Slippage (pips)"><NeonInput type="number" step="0.05" value={cfg.slippage} onChange={(e) => set("slippage")(Number(e.target.value))} /></Field>
                         <Field label="Commission (R/trade)" className="col-span-2"><NeonInput type="number" step="0.01" value={cfg.commission} onChange={(e) => set("commission")(Number(e.target.value))} /></Field>
+                        <div className="col-span-2 flex items-center justify-between gap-3 border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
+                            <div>
+                                <div className="control-label text-[11px] font-mono uppercase tracking-wider text-muted-lab">Entry Research Exports</div>
+                                <div className="text-[10.5px] text-muted-lab">Exports baseline plus penetration model trade lists for Entries Lab.</div>
+                            </div>
+                            <NeonToggle checked={cfg.entryResearchExports} onChange={set("entryResearchExports")} />
+                        </div>
+                        <Field label="Entry Penetration Thresholds" className={`col-span-2 transition-opacity ${cfg.entryResearchExports ? "" : "opacity-45"}`} hint="Comma-separated percentages. Valid values are greater than 0 and less than 100.">
+                            <NeonInput
+                                value={cfg.entryPenetrationThresholds}
+                                onChange={(e) => set("entryPenetrationThresholds")(e.target.value)}
+                                disabled={!cfg.entryResearchExports}
+                            />
+                        </Field>
                         <div className="col-span-2 flex items-center justify-between border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
                             <div>
                                 <div className="control-label text-[11px] font-mono uppercase tracking-wider text-muted-lab">Monte Carlo</div>
@@ -645,6 +661,8 @@ export default function StrategyBuilder() {
                         <StatusMeta k="Detection TF" v={sanityConfig.detection_timeframe || "—"} />
                         <StatusMeta k="Execution TF" v={sanityConfig.execution_timeframe || "—"} />
                         <StatusMeta k="Execution mode" v={formatExecutionMode((sanityConfig.execution_modes || [])[0])} />
+                        <StatusMeta k="Entry research exports" v={formatEntryResearchExports(sanityConfig)} />
+                        <StatusMeta k="Entry thresholds" v={(sanityConfig.entry_penetration_thresholds || []).join(", ") || "—"} />
                         <StatusMeta k="Entry Depth" v={sanityConfig.ob_entry_depth_pct != null ? `${sanityConfig.ob_entry_depth_pct}%` : "—"} />
                         <StatusMeta k="Min OB Size" v={sanityConfig.min_ob_size_pips != null ? `${sanityConfig.min_ob_size_pips} pips` : "—"} />
                         <StatusMeta k="Max OB Size" v={sanityConfig.max_ob_size_pips != null ? `${sanityConfig.max_ob_size_pips} pips` : "—"} />
@@ -780,6 +798,8 @@ export default function StrategyBuilder() {
 
 function buildBacktesterConfig(cfg) {
     const allowedSessions = Boolean(cfg.sessionFilter) ? selectedAllowedSessions(cfg) : [];
+    const entryThresholds = normalizeEntryThresholds(cfg.entryPenetrationThresholds);
+    const entryResearchEnabled = cfg.entryResearchExports !== false && entryThresholds.length > 0;
     const config = {
         symbol: cfg.symbol || "EURUSD",
         candle_file: normalizeCandleFile(cfg.dataFile),
@@ -801,7 +821,8 @@ function buildBacktesterConfig(cfg) {
         verify_limit_ticks: Number(cfg.verifyTicks) || 0,
         execution_modes: [mapBuilderExecutionMode(cfg.executionMode)],
         trade_direction: mapBuilderTradeDirection(cfg.direction),
-        entry_models: ["baseline"],
+        entry_models: entryResearchEnabled ? ["baseline", "entry_penetration"] : ["baseline"],
+        entry_penetration_thresholds: entryResearchEnabled ? entryThresholds : [],
         protection_modes: ["baseline"],
         session_filter_enabled: Boolean(cfg.sessionFilter),
         allowed_sessions: allowedSessions,
@@ -826,6 +847,15 @@ function buildBacktesterConfig(cfg) {
         };
     }
     return config;
+}
+
+function normalizeEntryThresholds(value) {
+    const raw = Array.isArray(value) ? value : String(value ?? "").split(",");
+    return [...new Set(raw
+        .map((item) => Number(String(item).trim()))
+        .filter((item) => Number.isFinite(item) && item > 0 && item < 100)
+        .map((item) => Number(item.toFixed(4))))]
+        .sort((a, b) => a - b);
 }
 
 function selectedAllowedSessions(cfg) {
@@ -926,6 +956,14 @@ function formatNewsWindow(config) {
     return `${before ?? "—"}m before / ${after ?? "—"}m after`;
 }
 
+function formatEntryResearchExports(config) {
+    const models = Array.isArray(config?.entry_models) ? config.entry_models : [];
+    if (!models.length) return "—";
+    return models.includes("entry_penetration")
+        ? "baseline + penetration"
+        : "baseline only";
+}
+
 function formatSeconds(value) {
     return value == null ? "—" : `${value}s`;
 }
@@ -973,6 +1011,8 @@ const LOAD_FIELD_LABELS = {
     spread: "spread",
     slippage: "slippage",
     commission: "commission",
+    entryResearchExports: "entry research exports",
+    entryPenetrationThresholds: "entry penetration thresholds",
     monteCarlo: "Monte Carlo",
 };
 
@@ -1022,6 +1062,8 @@ function buildRunConfigLoadReport(current, run) {
     applyFirstPresent(patch, source, "spread", ["spread", "spread_pips", "spreadPips"], toNumber);
     applyFirstPresent(patch, source, "slippage", ["slippage", "slippage_pips", "slippagePips"], toNumber);
     applyFirstPresent(patch, source, "commission", ["commission_r_per_trade", "commission", "commission_per_trade"], toNumber);
+    applyFirstPresent(patch, source, "entryResearchExports", ["entry_models", "entryModels"], mapConfigEntryResearchExports);
+    applyFirstPresent(patch, source, "entryPenetrationThresholds", ["entry_penetration_thresholds", "entryPenetrationThresholds"], mapConfigEntryThresholds);
     applyFirstPresent(patch, source, "monteCarlo", ["monte_carlo", "monteCarlo", "monte_carlo_enabled"], toBool);
 
     Object.keys(patch).forEach((field) => loaded.add(field));
@@ -1061,6 +1103,16 @@ function toBool(value) {
     if (["true", "1", "yes", "y"].includes(text)) return true;
     if (["false", "0", "no", "n"].includes(text)) return false;
     return Boolean(value);
+}
+
+function mapConfigEntryResearchExports(value) {
+    const models = ensureArray(value).map((item) => String(item).trim().toLowerCase());
+    return models.includes("entry_penetration");
+}
+
+function mapConfigEntryThresholds(value) {
+    const thresholds = normalizeEntryThresholds(value);
+    return thresholds.length ? thresholds.join(",") : null;
 }
 
 function ensureArray(value) {

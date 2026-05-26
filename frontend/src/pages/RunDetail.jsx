@@ -29,6 +29,52 @@ function tradeResultSign(trade) {
     return r > 0 ? 1 : -1;
 }
 
+function formatRunMonthSpan(value) {
+    const range = normalizeRunDateRange(value);
+    if (!range?.from || !range?.to) return "";
+    const start = parseRunDateValue(range.from);
+    const end = parseRunDateValue(range.to);
+    if (!start || !end || end <= start) return "";
+    const days = (end.getTime() - start.getTime()) / 86400000;
+    if (days < 30) return "<1 month";
+    const endMonthDays = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, 0)).getUTCDate();
+    const calendarMonths = ((end.getUTCFullYear() - start.getUTCFullYear()) * 12)
+        + (end.getUTCMonth() - start.getUTCMonth())
+        + ((end.getUTCDate() - start.getUTCDate()) / endMonthDays);
+    const months = Math.max(1, Math.round(Number.isFinite(calendarMonths) ? calendarMonths : days / 30.44));
+    return `${months} ${months === 1 ? "month" : "months"}`;
+}
+
+function normalizeRunDateRange(value) {
+    if (!value) return null;
+    if (typeof value === "object") return { from: value.from, to: value.to };
+    const parts = String(value).split("→").map((part) => part.trim()).filter(Boolean);
+    if (parts.length >= 2) return { from: parts[0], to: parts[1] };
+    return null;
+}
+
+function parseRunDateValue(value) {
+    if (!value || value === "?") return null;
+    if (value instanceof Date) return Number.isFinite(value.getTime()) ? value : null;
+    const text = String(value).trim();
+    const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (iso) {
+        const date = new Date(Date.UTC(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3])));
+        return Number.isFinite(date.getTime()) ? date : null;
+    }
+    const short = text.match(/^(\d{1,2})\s+([A-Za-z]{3,})\s+(\d{2}|\d{4})$/);
+    if (short) {
+        const month = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
+            .indexOf(short[2].slice(0, 3).toLowerCase());
+        const year = Number(short[3].length === 2 ? `20${short[3]}` : short[3]);
+        if (month >= 0) {
+            const date = new Date(Date.UTC(year, month, Number(short[1])));
+            return Number.isFinite(date.getTime()) ? date : null;
+        }
+    }
+    return null;
+}
+
 export default function RunDetail() {
     const { ACTIVE_RUN, TRADES, RUNS, getRunData, ACTIVE_TRADE_VARIANT, AVAILABLE_TRADE_VARIANTS } = useDataset();
     const params = useParams();
@@ -41,7 +87,10 @@ export default function RunDetail() {
     const runSymbol = run.symbol || runData?.summary?.symbol || runData?.config?.symbol || "—";
     const runTf = compactTimeframe(run.detectionTf || runData?.summary?.detectionTf || runData?.summary?.detection_tf || runData?.config?.detection_timeframe || "—");
     const runRr = Number(run.rr ?? runData?.summary?.rr ?? runData?.config?.rr_multiple);
-    const runDateRange = formatRunDateRange(run.dateRange || runData?.summary?.dateRange || "2025-05-18 → 2026-05-18");
+    const rawRunDateRange = run.dateRange || runData?.summary?.dateRange || "2025-05-18 → 2026-05-18";
+    const runDateRange = formatRunDateRange(rawRunDateRange);
+    const runMonthSpan = formatRunMonthSpan(rawRunDateRange);
+    const runDateRangeLine = runDateRange && runMonthSpan ? `${runDateRange} • ${runMonthSpan}` : runDateRange;
     const [editingName, setEditingName] = React.useState(false);
     const [draftName, setDraftName] = React.useState(displayName);
     // ── Equity chart controls ────────────────────────────────────────────────
@@ -569,22 +618,22 @@ export default function RunDetail() {
 
     return (
         <div className="pb-12">
-            <div className="px-6 pt-6 pb-4">
+            <section className="mx-6 mb-5 px-1 py-4">
                 <div className="flex items-start justify-between gap-4 flex-wrap">
                     <div className="min-w-0">
-                        <div className="text-[10px] font-mono uppercase tracking-[0.32em] text-[hsl(var(--accent-primary))] mb-2">
-                            <span className="inline-block w-6 h-px bg-[hsl(var(--accent-primary))] mr-2 align-middle" />
+                        <div className="mb-2 flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[hsl(var(--accent-secondary))]">
+                            <span className="h-px w-9 bg-[hsl(var(--accent-secondary)/0.78)]" />
                             Run Detail
                         </div>
-                        <h1 className="font-display text-[28px] sm:text-[34px] leading-tight font-semibold text-white tracking-tight truncate">
+                        <h1 className="truncate text-3xl font-semibold tracking-[-0.01em] text-[hsl(var(--text-1))]">
                             {displayName}
                         </h1>
-                        <div className="mt-1.5 text-[12px] font-mono text-[hsl(var(--accent-primary))] truncate">
+                        <div className="mt-2 truncate text-[13px] font-medium text-[hsl(var(--accent-primary))]">
                             Run: {displayName} · {runSymbol} · {runTf} · {run.trades} trades
                         </div>
-                        <div className="mt-1 text-[12px] text-muted-lab">
+                        <div className="mt-1 text-[12px] leading-relaxed text-[hsl(var(--text-2))]">
                             <div>{runSymbol} · {runTf} · RR {Number.isFinite(runRr) ? runRr.toFixed(1) : "—"}</div>
-                            <div>{runDateRange}</div>
+                            <div className="text-[hsl(var(--text-3))]">{runDateRangeLine}</div>
                         </div>
                     </div>
                     <div className="flex items-center gap-2 flex-wrap">
@@ -595,7 +644,7 @@ export default function RunDetail() {
                         <Link to="/comparison"><NeonButton icon={GitCompareArrows} tone="ghost">Compare Run</NeonButton></Link>
                     </div>
                 </div>
-            </div>
+            </section>
 
             <div className="px-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                 <MetricChip

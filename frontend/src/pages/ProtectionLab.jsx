@@ -1,13 +1,19 @@
 import React from "react";
-import { ActiveRunContext } from "@/components/lab/ActiveRunContext";
+import { Link } from "react-router-dom";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { MetricChip } from "@/components/lab/MetricChip";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
-import { useDataset } from "@/data/store";
+import { compactTimeframe, getRunDisplayName, useDataset } from "@/data/store";
 import {
     ShieldAlert, ShieldCheck, AlertTriangle, TrendingUp, Activity,
     Hash, Target, Clock, Newspaper, Ban, ListChecks, Check, ChevronDown, ChevronUp,
+    Shield, BarChart2, Zap, FolderOpen,
 } from "lucide-react";
+import { ProtectionDataQualityPanel } from "@/components/lab/protection/ProtectionDataQualityPanel";
+import { ProtectionSectionDivider } from "@/components/lab/protection/ProtectionSectionDivider";
+import { ProtectionVisualAnalytics } from "@/components/lab/protection/ProtectionVisualAnalytics";
+import { ProtectionPowerTools } from "@/components/lab/protection/ProtectionPowerTools";
+import { buildPairedTrades, calcEfficiencyRatio, calcRobustnessScore } from "@/components/lab/protection/protectionAnalytics";
 
 // ── Protection Lab V1 ────────────────────────────────────────────────
 // Read-only research surface for defensive-logic ideas derived from enriched
@@ -42,34 +48,226 @@ const WHAT_IF_FILTERS = [
 const WHAT_IF_GROUPS = ["Session", "Time", "Structure", "Direction", "Advanced"];
 
 const WHAT_IF_PRESETS = [
-    { label: "Avoid New York", keys: ["noNyFill"] },
-    { label: "Avoid toxic hour", keys: ["no1500"] },
-    { label: "Avoid hard invalidation losses", keys: ["noFullBreach"] },
-    { label: "Conservative filter", keys: ["noNyFill", "no1500", "noFullBreach"] },
+    { label: "Block New York fills", keys: ["noNyFill"] },
+    { label: "Block toxic hour", keys: ["no1500"] },
+    { label: "Block hard invalidation losses", keys: ["noFullBreach"] },
+    { label: "Defensive screen set", keys: ["noNyFill", "no1500", "noFullBreach"] },
 ];
 
 const FAST_STOPOUT_ORDER = ["same candle", "<15m", "15–60m", "1–4h", "4h+", "Limited Data"];
 
 const PROTECTION_BACKLOG = [
-    { title: "BE escape exact simulation", status: "Requires exporter data", body: "Intratrade return-to-entry timestamps needed to confirm a break-even exit actually triggered after hard invalidation." },
-    { title: "Immediate hard invalidation exit exact simulation", status: "Requires exporter data", body: "Candle-level exit prices at the moment the far side of the OB is hard invalidated." },
-    { title: "Penetration threshold sweep", status: "Requires exporter data", body: "Sweep exit thresholds with candle-level fills instead of capping flagged trades at 0R." },
-    { title: "News blackout overlay", status: "Future data required", body: "High-impact news calendar to compare hard invalidation / fast-stopout rates inside news windows." },
-    { title: "Pre-fill invalidation cancel", status: "Requires exporter data", body: "Pre-fill invalidation flags and pending-order lifecycle to model cancelling orders before entry." },
-    { title: "Dynamic stop logic", status: "Future execution model", body: "Per-trade trailing / structure-based stops rather than a single run-level stop config." },
-    { title: "Compare protection variants vs baseline", status: "Future simulation", body: "Run simulated protection variants side-by-side against the unprotected baseline." },
-    { title: "Export protection configs to Python engine", status: "Requires exporter integration", body: "Serialize chosen protection rules back to the FX-OB backtester for exact re-simulation." },
+    { title: "Break-even escape exact backtest", status: "Requires exporter data", body: "Intratrade return-to-entry timestamps are required to prove a break-even escape actually triggered after hard invalidation." },
+    { title: "Immediate hard invalidation exit", status: "Requires exporter data", body: "Needs candle-level exit prices at the moment the far side of the OB is invalidated." },
+    { title: "Penetration threshold sweep", status: "Requires exporter data", body: "Backtest threshold exits with candle-level fills instead of estimating affected losses at 0R." },
+    { title: "News protection overlay", status: "Requires calendar tagging", body: "Review hard invalidation and fast-stopout rates inside configured news windows." },
+    { title: "Pre-fill invalidation cancel", status: "Requires exporter data", body: "Use pending-order lifecycle fields to model cancelling vulnerable orders before entry." },
+    { title: "Dynamic stop defense", status: "Requires execution model", body: "Evaluate per-trade trailing or structure-based stops rather than a single run-level stop configuration." },
+    { title: "Protection variant comparison", status: "Requires Exact Protection Backtest", body: "Review protection variants side-by-side against the unprotected reference set." },
+    { title: "Export protection configs to Python engine", status: "Requires exporter integration", body: "Serialize selected protection rules back to the FX-OB backtester for exact re-simulation." },
     {
-        title: "Confirmed OB Entry / Close-Inside Entry",
-        status: "Future Entry Lab item",
-        body: "Wait for a 1m candle to close inside the order block before triggering an entry model, instead of resting a passive limit at the OB edge. Intended to avoid straight-through blast fills. Variants: close-inside then market entry; close-inside then limit-at-edge retest; close-inside then stop/trigger entry; close-inside plus reaction/displacement confirmation. Caveat: may worsen spread/slippage or miss trades because entry becomes reactive rather than resting.",
+        title: "Confirmed OB entry / close-inside entry",
+        status: "Entry Lab candidate",
+        body: "Require a 1m candle close inside the order block before triggering entry instead of resting a passive limit at the OB edge. Intended to avoid straight-through blast fills. Candidate variants: close-inside market entry, close-inside edge retest, close-inside stop trigger, or close-inside with reaction confirmation. Caveat: may increase spread/slippage or miss valid trades.",
     },
 ];
 
+function ProtectionLabHero({ activeProject, activeRun, activeSummary, activeRunId, tradeCount, variant }) {
+    const run = activeRun || activeSummary || {};
+    const hasRun = !!(activeRun || activeSummary || activeRunId);
+    const projectName = activeProject?.name || "";
+    const projectId = activeProject?.id || null;
+    const runName = activeRun ? getRunDisplayName(activeRun) : run?.name || run?.displayName || run?.id || activeRunId || "";
+    const title = projectName || runName || "Protection Lab";
+    const symbol = readFirst(run?.symbol, run?.summary?.symbol, run?.config?.symbol, activeSummary?.symbol);
+    const detectionTf = compactTimeframe(readFirst(
+        run?.detectionTf,
+        run?.summary?.detectionTf,
+        run?.summary?.detection_tf,
+        run?.config?.detection_tf,
+        run?.config?.detectionTf,
+        activeSummary?.detectionTf,
+    ));
+    const executionTf = compactTimeframe(readFirst(
+        run?.executionTf,
+        run?.summary?.executionTf,
+        run?.summary?.execution_tf,
+        run?.config?.execution_tf,
+        run?.config?.executionTf,
+        activeSummary?.executionTf,
+    ));
+    const rr = readFirst(run?.rr, run?.summary?.rr, run?.config?.rr_multiple, run?.config?.rrMultiple, activeSummary?.rr);
+    const heroDateRange = readHeroDateRange(run, activeSummary);
+    const dateRange = formatHeroDateRange(heroDateRange);
+    const monthSpan = formatHeroMonthSpan(heroDateRange);
+    const dateRangeLine = dateRange && monthSpan ? `${dateRange} • ${monthSpan}` : dateRange;
+    const runLine = hasRun
+        ? [`Run: ${runName || "Active run"}`, symbol, detectionTf, `${tradeCount} trades`].filter(isMeaningful).join(" · ")
+        : "No active run selected. Import or run a backtest to populate this page.";
+    const configLine = [symbol, detectionTf, executionTf && executionTf !== detectionTf ? `Exec ${executionTf}` : null, rr != null && rr !== "" ? `RR ${rr}` : null, variantLabel(variant)].filter(isMeaningful).join(" · ");
+
+    return (
+        <section className="mx-6 mb-5 px-1 py-4">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0">
+                    <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[hsl(var(--accent-secondary))]">
+                        <span className="h-px w-9 bg-[hsl(var(--accent-secondary)/0.78)]" />
+                        Protection Lab
+                    </div>
+                    <h1 className="mt-2 truncate text-3xl font-semibold tracking-[-0.01em] text-[hsl(var(--text-1))]">
+                        {title}
+                    </h1>
+                    <div className="mt-2 text-[13px] font-medium text-[hsl(var(--accent-primary))]">
+                        {runLine}
+                    </div>
+                    {configLine && (
+                        <div className="mt-1 text-[12px] leading-relaxed text-[hsl(var(--text-2))]">
+                            {configLine}
+                        </div>
+                    )}
+                    {dateRangeLine && (
+                        <div className="text-[12px] leading-relaxed text-[hsl(var(--text-3))]">
+                            {dateRangeLine}
+                        </div>
+                    )}
+                    <div className="mt-2 max-w-4xl text-[12px] leading-relaxed text-[hsl(var(--text-2))]">
+                        Quantitative trade defense, drawdown control, and expectancy preservation.
+                    </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                    {projectId && (
+                        <Link
+                            to={`/projects/${encodeURIComponent(projectId)}`}
+                            className="inline-flex items-center gap-2 rounded-md border border-[hsl(var(--accent-secondary)/0.45)] bg-[hsl(var(--accent-secondary)/0.08)] px-3 py-1.5 text-[12px] font-medium text-[hsl(var(--accent-secondary))] transition-colors hover:border-[hsl(var(--accent-secondary)/0.7)] hover:bg-[hsl(var(--accent-secondary)/0.13)] hover:text-white"
+                        >
+                            <FolderOpen className="h-3.5 w-3.5" />
+                            Open Project
+                        </Link>
+                    )}
+                    {hasRun && <HeroBadge tone="primary">Imported</HeroBadge>}
+                    {hasRun && <HeroBadge tone="success">Active Run</HeroBadge>}
+                    {projectId && <HeroBadge tone="secondary">Project Active</HeroBadge>}
+                    <HeroBadge tone="muted">{tradeCount} trades</HeroBadge>
+                </div>
+            </div>
+        </section>
+    );
+}
+
+function HeroBadge({ tone = "muted", children }) {
+    const toneClass = {
+        primary: "border-[hsl(var(--accent-primary)/0.42)] bg-[hsl(var(--accent-primary)/0.07)] text-[hsl(var(--accent-primary))]",
+        secondary: "border-[hsl(var(--accent-secondary)/0.42)] bg-[hsl(var(--accent-secondary)/0.07)] text-[hsl(var(--accent-secondary))]",
+        success: "border-[hsl(var(--success)/0.42)] bg-[hsl(var(--success)/0.07)] text-[hsl(var(--success))]",
+        muted: "border-[hsl(var(--border-mid))] bg-[hsl(var(--panel-2)/0.54)] text-[hsl(var(--text-2))]",
+    }[tone];
+    return (
+        <span className={`inline-flex items-center rounded-[3px] border px-2.5 py-1 text-[11px] font-medium ${toneClass}`}>
+            {children}
+        </span>
+    );
+}
+
+function readFirst(...values) {
+    return values.find((value) => value != null && value !== "" && value !== "—");
+}
+
+function isMeaningful(value) {
+    return value != null && value !== "" && value !== "—" && value !== "N/A";
+}
+
+function readHeroDateRange(run, activeSummary) {
+    const summary = run?.summary || {};
+    const config = run?.config || {};
+    const direct = run?.dateRange || summary.dateRange || summary.date_range || activeSummary?.dateRange;
+    const from = readFirst(run?.dateFrom, summary.date_from, summary.dateFrom, config.date_from, config.dateFrom, config.start_date, config.startDate);
+    const to = readFirst(run?.dateTo, summary.date_to, summary.dateTo, config.date_to, config.dateTo, config.end_date, config.endDate);
+    if (from || to) return { from, to };
+    return direct || null;
+}
+
+function formatHeroDateRange(value) {
+    if (!value) return "";
+    if (typeof value === "object") {
+        const from = formatHeroDate(value.from);
+        const to = formatHeroDate(value.to);
+        return from && to ? `${from} → ${to}` : from || to || "";
+    }
+    const parts = String(value).split("→").map((part) => part.trim()).filter(Boolean);
+    if (parts.length >= 2) {
+        const from = formatHeroDate(parts[0]);
+        const to = formatHeroDate(parts[1]);
+        return from && to ? `${from} → ${to}` : "";
+    }
+    return formatHeroDate(value);
+}
+
+function formatHeroMonthSpan(value) {
+    const range = normalizeHeroDateRange(value);
+    if (!range?.from || !range?.to) return "";
+    const start = parseHeroDateValue(range.from);
+    const end = parseHeroDateValue(range.to);
+    if (!start || !end || end <= start) return "";
+    const days = (end.getTime() - start.getTime()) / 86400000;
+    if (days < 30) return "<1 month";
+    const endMonthDays = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, 0)).getUTCDate();
+    const calendarMonths = ((end.getUTCFullYear() - start.getUTCFullYear()) * 12)
+        + (end.getUTCMonth() - start.getUTCMonth())
+        + ((end.getUTCDate() - start.getUTCDate()) / endMonthDays);
+    const months = Math.max(1, Math.round(Number.isFinite(calendarMonths) ? calendarMonths : days / 30.44));
+    return `${months} ${months === 1 ? "month" : "months"}`;
+}
+
+function normalizeHeroDateRange(value) {
+    if (!value) return null;
+    if (typeof value === "object") return { from: value.from, to: value.to };
+    const parts = String(value).split("→").map((part) => part.trim()).filter(Boolean);
+    if (parts.length >= 2) return { from: parts[0], to: parts[1] };
+    return null;
+}
+
+function parseHeroDateValue(value) {
+    if (!value || value === "?") return null;
+    if (value instanceof Date) return Number.isFinite(value.getTime()) ? value : null;
+    const text = String(value).trim();
+    const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (iso) {
+        const date = new Date(Date.UTC(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3])));
+        return Number.isFinite(date.getTime()) ? date : null;
+    }
+    const short = text.match(/^(\d{1,2})\s+([A-Za-z]{3,})\s+(\d{2}|\d{4})$/);
+    if (short) {
+        const month = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
+            .indexOf(short[2].slice(0, 3).toLowerCase());
+        const year = Number(short[3].length === 2 ? `20${short[3]}` : short[3]);
+        if (month >= 0) {
+            const date = new Date(Date.UTC(year, month, Number(short[1])));
+            return Number.isFinite(date.getTime()) ? date : null;
+        }
+    }
+    return null;
+}
+
+function formatHeroDate(value) {
+    if (!value || value === "?") return "";
+    const text = String(value).trim();
+    const match = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!match) return text;
+    const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+    if (!Number.isFinite(date.getTime())) return text;
+    return date.toLocaleDateString("en-GB", {
+        day: "numeric",
+        month: "short",
+        year: "2-digit",
+        timeZone: "UTC",
+    });
+}
+
 export default function ProtectionLab() {
-    const { ACTIVE_RUN, TRADES, ACTIVE_TRADE_VARIANT, activeRunId, runs } = useDataset();
+    const { ACTIVE_PROJECT, ACTIVE_RUN, TRADES, ACTIVE_TRADE_VARIANT, activeRunId, runs } = useDataset();
     const trades = React.useMemo(() => (Array.isArray(TRADES) ? TRADES : EMPTY_TRADES), [TRADES]);
     const [whatIfFilters, setWhatIfFilters] = React.useState({});
+    const [selectedProtectionMode, setSelectedProtectionMode] = React.useState(null);
     const activeRun = activeRunId ? runs?.[activeRunId] : null;
     const closeTimingTrades = React.useMemo(() => tradesForCloseBreachTiming(trades, activeRun), [trades, activeRun]);
     const p = React.useMemo(() => buildProtection(trades), [trades]);
@@ -77,6 +275,39 @@ export default function ProtectionLab() {
     const exactProtectionRows = React.useMemo(() => buildExactProtectionRows(activeRun, p.netR), [activeRun, p.netR]);
     const whatIf = React.useMemo(() => buildWhatIfSimulation(trades, whatIfFilters), [trades, whatIfFilters]);
     const hasExactProtection = exactProtectionRows.length > 0;
+
+    // ── Phase 1–3 upgrade additions ──────────────────────────────────────────
+    const protectionTradesByMode = React.useMemo(() => {
+        const pr = activeRun?.protectionResults;
+        if (!pr?.tradesByMode) return {};
+        return normalizeProtectionTradesByMode(pr.tradesByMode);
+    }, [activeRun]);
+
+    // Auto-select first non-baseline mode when modes load
+    React.useEffect(() => {
+        const modeKeys = Object.keys(protectionTradesByMode);
+        if (!selectedProtectionMode && modeKeys.length) {
+            const nonBaseline = modeKeys.find(k => k !== "baseline") || modeKeys[0];
+            setSelectedProtectionMode(nonBaseline);
+        }
+    }, [protectionTradesByMode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    const exactProtectionRowsAugmented = React.useMemo(() => {
+        return exactProtectionRows.map(row => ({
+            ...row,
+            efficiencyRatio: calcEfficiencyRatio(row),
+            robustnessScore: calcRobustnessScore(row, p.maxDD),
+        }));
+    }, [exactProtectionRows, p.maxDD]);
+
+    const breachTimestamps = React.useMemo(() => {
+        return trades.map(t => t?.close_breach_time).filter(Boolean);
+    }, [trades]);
+
+    const pairedTradesData = React.useMemo(() =>
+        buildPairedTrades(trades, protectionTradesByMode, selectedProtectionMode),
+        [trades, protectionTradesByMode, selectedProtectionMode],
+    );
     const exportProtectionResults = () => {
         const rows = exactProtectionRows.map((row) => ({
             mode: row.mode,
@@ -98,49 +329,60 @@ export default function ProtectionLab() {
 
     return (
         <div className="pb-12">
-            <ActiveRunContext
-                pageLabel="Protection Lab"
-                description={`${variantLabel(ACTIVE_TRADE_VARIANT)} — defensive logic on enriched OB analytics.`}
-                actions={(
-                    <div className="flex items-center gap-2">
-                        <Pill tone="secondary">{p.n} TRADES</Pill>
-                    </div>
-                )}
+            <ProtectionLabHero
+                activeProject={ACTIVE_PROJECT}
+                activeRun={activeRun}
+                activeSummary={ACTIVE_RUN}
+                activeRunId={activeRunId}
+                tradeCount={p.n}
+                variant={ACTIVE_TRADE_VARIANT}
             />
 
-            {/* Baseline KPI row */}
-            <div className="px-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-                <MetricChip label="Trades"       value={String(p.n)}              sub="active variant"               tone="primary"   icon={Hash} />
+            {/* Baseline KPI row — 8 chips */}
+            <div className="px-6 mb-5 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
+                <MetricChip label="Trades"       value={String(p.n)}              sub="active trade variant"         tone="primary"   icon={Hash} />
                 <MetricChip label="Win Rate"     value={fmtPct(p.winRate)}        sub={`${p.wins}W / ${p.losses}L`}  tone="secondary" icon={Target} />
-                <MetricChip label="Net R"        value={fmtR(p.netR)}             sub="cumulative"                   tone={p.netR >= 0 ? "primary" : "danger"} icon={TrendingUp} />
-                <MetricChip label="Expectancy"   value={fmtExp(p.expectancy)}     sub="per trade"                    tone="primary"   icon={Activity} />
-                <MetricChip label="Hard Invalidations" value={String(p.breached)}       sub={p.breachKnown ? `${p.breachKnown} flagged` : "no flags"} tone={p.breached ? "danger" : "muted"} icon={AlertTriangle} />
-                <MetricChip label="No Hard Invalidation" value={String(p.nonBreached)}    sub={`${p.breachUnknown} unknown`} tone={p.nonBreached ? "success" : "muted"} icon={ShieldCheck} />
+                <MetricChip label="Net R"        value={fmtR(p.netR)}             sub="cost-adjusted total"          tone={p.netR >= 0 ? "primary" : "danger"} icon={TrendingUp}
+                    sparkline={p.equityPoints?.length > 1 ? p.equityPoints : undefined} />
+                <MetricChip label="Expectancy"   value={fmtExp(p.expectancy)}     sub="Net R per trade"              tone="primary"   icon={Activity} />
+                <MetricChip label="Max DD"       value={p.maxDD !== 0 ? fmtR(p.maxDD) : "—"}  sub="worst equity dip"  tone={p.maxDD < -2 ? "danger" : p.maxDD < 0 ? "warning" : "muted"} icon={AlertTriangle} />
+                <MetricChip label="Profit Factor" value={p.profitFactor != null ? String(p.profitFactor) : "—"} sub="gross wins ÷ losses"  tone={p.profitFactor != null && p.profitFactor >= 1.5 ? "success" : p.profitFactor != null && p.profitFactor < 1 ? "danger" : "muted"} icon={BarChart2} />
+                <MetricChip label="Hard Invalidations" value={String(p.breached)} sub={p.breachKnown ? `${p.breachKnown} flagged` : "no flags"} tone={p.breached ? "danger" : "muted"} icon={ShieldAlert} />
+                <MetricChip label="No Hard Invalidation" value={String(p.nonBreached)} sub={`${p.breachUnknown} unknown`} tone={p.nonBreached ? "success" : "muted"} icon={ShieldCheck} />
             </div>
 
-            <div className="px-6 mt-5 grid grid-cols-1 xl:grid-cols-3 gap-4">
+            {/* Data quality panel — collapsed when all critical fields are present */}
+            <ProtectionDataQualityPanel trades={trades} />
+
+            <ProtectionSectionDivider
+                icon={<Shield className="w-3.5 h-3.5" />}
+                label="Protection Overview"
+                subLabel="exact backtests, research estimates, and defensive screening"
+            />
+
+            <div className="px-6 mt-2 grid grid-cols-1 xl:grid-cols-3 gap-4">
                 {/* Research safety legend */}
                 <NeonPanel
                     className="xl:col-span-3"
-                    title="Research Safety · Estimate Confidence"
+                    title="Research Confidence · Exact vs Research Estimate"
                     action={<div className="flex items-center gap-1.5"><ConfidenceTag level="exact" /><ConfidenceTag level="estimated" /><ConfidenceTag level="requires" /></div>}
                 >
                     <div className="flex items-start gap-2 text-[11.5px] font-mono text-[hsl(var(--warning))]" data-testid="protlab-research-safety">
                         <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
                         <span>
-                            Estimated protections are optimistic upper bounds derived from hard invalidation / penetration flags only — not candle-level simulations, and not proven results.
-                            Exact figures require exporter data: intratrade return-to-entry, candle-level exit prices, high-impact news windows, and pre-fill invalidation / pending lifecycle.
+                            Research-estimate protection results are directional only. They use hard invalidation and penetration flags, not candle-level re-simulation.
+                            Exact protection figures require exporter data: intratrade return-to-entry, candle-level exit prices, news windows, and pending-order lifecycle.
                         </span>
                     </div>
                     {hasExactProtection && (
-                        <Note tone="muted">Exact results come from Python protection simulation. Estimated panels below are exploratory only.</Note>
+                        <Note tone="muted">Exact results come from Python protection backtests. Research-estimate panels remain directional only.</Note>
                     )}
                 </NeonPanel>
 
                 {hasExactProtection && (
                     <NeonPanel
                         className="xl:col-span-3"
-                        title="Exact Protection Simulation Results"
+                        title="Exact Protection Backtest Results"
                         action={(
                             <div className="flex items-center gap-2">
                                 <button
@@ -149,35 +391,35 @@ export default function ProtectionLab() {
                                     disabled={!hasExactProtection}
                                     className="px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider border border-[hsl(var(--accent-secondary)/0.55)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.06)] hover:bg-[hsl(var(--accent-secondary)/0.12)] disabled:opacity-40 clip-bevel-sm"
                                 >
-                                    Export Protection Results CSV
+                                    Export Protection Backtest CSV
                                 </button>
                                 <Pill tone="success">{exactProtectionRows.length} MODES</Pill>
                             </div>
                         )}
                     >
-                        <Note>Higher Net R and lower drawdown are better. Most protection modes currently underperform baseline.</Note>
+                        <Note>Review protected variants against the unprotected reference set. Higher Net R, lower drawdown, and controlled winner cost are preferred.</Note>
                         <DataTable
                             testId="protlab-exact-protection"
                             columns={[
-                                { key: "mode", label: "Mode", render: (r) => <ModeLabel row={r} /> },
+                                { key: "mode", label: "Protection Result", render: (r) => <ModeLabel row={r} /> },
                                 { key: "threshold", label: "Threshold / Buffer", align: "right", render: (r) => r.thresholdLabel },
                                 { key: "trades", label: "Trades", align: "right", render: (r) => fmtCount(r.trades) },
                                 { key: "winRate", label: "WR", align: "right", render: (r) => fmtMaybePct(r.winRate) },
                                 { key: "netR", label: "Net R", align: "right", render: (r) => (r.netR == null ? "—" : <ColoredR value={num(r.netR)} />) },
                                 { key: "maxDD", label: "Max DD", align: "right", render: (r) => fmtMaybeR(r.maxDD) },
                                 { key: "expectancy", label: "Expectancy", align: "right", render: (r) => fmtMaybeExp(r.expectancy) },
-                                { key: "protectionExits", label: "Protection Exits", align: "right", render: (r) => fmtCount(r.protectionExits) },
+                                { key: "protectionExits", label: "Defense Exits", align: "right", render: (r) => fmtCount(r.protectionExits) },
                                 { key: "avgProtectionExitR", label: "Avg Exit R", align: "right", render: (r) => fmtMaybeExp(r.avgProtectionExitR) },
                                 { key: "totalProtectionExitR", label: "Total Exit R", align: "right", render: (r) => fmtMaybeR(r.totalProtectionExitR) },
-                                { key: "winnersCut", label: "Winners Cut", align: "right", render: (r) => fmtCount(r.winnersCut) },
-                                { key: "loserRSaved", label: "Loser R Saved", align: "right", render: (r) => fmtMaybeR(r.loserRSaved) },
-                                { key: "netVsBaseline", label: "Net vs Baseline", align: "right", render: (r) => <DeltaVsBaseline row={r} /> },
+                                { key: "winnersCut", label: "Winner Cost", align: "right", render: (r) => fmtCount(r.winnersCut) },
+                                { key: "loserRSaved", label: "Loss R Saved", align: "right", render: (r) => fmtMaybeR(r.loserRSaved) },
+                                { key: "netVsBaseline", label: "Net vs Unprotected", align: "right", render: (r) => <DeltaVsBaseline row={r} /> },
                             ]}
                             rows={exactProtectionRows}
                             rowKey="mode"
                             selectedKey="baseline"
                         />
-                        <Note>Baseline trade variants remain unchanged; protected trade CSVs are imported separately from normal variant switching.</Note>
+                        <Note>Unprotected trade variants remain unchanged. Protected trade CSVs are imported as separate protection result sets.</Note>
                     </NeonPanel>
                 )}
 
@@ -192,8 +434,8 @@ export default function ProtectionLab() {
                 />
 
                 {/* A) Baseline */}
-                <NeonPanel title={hasExactProtection ? "A · Baseline · Exploratory Fallback" : "A · Baseline"} action={<ConfidenceTag level="exact" />}>
-                    <Desc icon={ShieldCheck}>Original strategy result. No defensive intervention.</Desc>
+                <NeonPanel title={hasExactProtection ? "A · Unprotected Baseline · Research Reference" : "A · Unprotected Baseline"} action={<ConfidenceTag level="exact" />}>
+                    <Desc icon={ShieldCheck}>Unprotected strategy result before any protection rule is applied.</Desc>
                     <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 font-mono text-[11.5px] mt-3" data-testid="protlab-baseline">
                         {[
                             ["Trades", String(p.n)],
@@ -204,7 +446,7 @@ export default function ProtectionLab() {
                             ["Expectancy", fmtExp(p.expectancy)],
                             ["Hard Invalidations", String(p.breached)],
                             ["No Hard Invalidation", String(p.nonBreached)],
-                            ["Invalidation Unknown", String(p.breachUnknown)],
+                            ["Unknown Invalidation State", String(p.breachUnknown)],
                         ].map(([k, v]) => (
                             <React.Fragment key={k}>
                                 <div className="text-muted-lab uppercase tracking-wider text-[10px]">{k}</div>
@@ -216,55 +458,55 @@ export default function ProtectionLab() {
 
                 {/* B) Break-even Escape After Hard Invalidation */}
                 <NeonPanel
-                    title={hasExactProtection ? "B · Break-even Escape After Hard Invalidation · Exploratory" : "B · Break-even Escape After Hard Invalidation"}
+                    title={hasExactProtection ? "B · Break-Even Escape After Hard Invalidation · Estimate" : "B · Break-Even Escape After Hard Invalidation"}
                     action={<div className="flex items-center gap-1.5"><ConfidenceTag level="estimated" /><ConfidenceTag level="requires" /></div>}
                 >
                     <Desc icon={AlertTriangle}>
-                        If the OB is hard invalidated while the trade is active, arm a break-even escape. If price returns to entry, assume exit at 0R.
+                        If the OB is hard invalidated while the trade is active, arm a break-even escape. If price returns to entry, model a 0R exit.
                     </Desc>
                     <div className="grid grid-cols-2 gap-2 mt-3">
-                        <MetricChip label="Hard Invalidation Losses" value={String(p.breachedLossCount)} sub="flagged & losing" tone={p.breachedLossCount ? "danger" : "muted"} icon={AlertTriangle} />
-                        <MetricChip label="Max R Saved" value={fmtR(p.maxSavedBreached)} sub="if all → BE (optimistic)" tone={p.maxSavedBreached > 0 ? "success" : "muted"} icon={ShieldCheck} />
+                        <MetricChip label="Invalidation Losses" value={String(p.breachedLossCount)} sub="flagged losing trades" tone={p.breachedLossCount ? "danger" : "muted"} icon={AlertTriangle} />
+                        <MetricChip label="Max Loss R Saved" value={fmtR(p.maxSavedBreached)} sub="if all return to 0R" tone={p.maxSavedBreached > 0 ? "success" : "muted"} icon={ShieldCheck} />
                     </div>
-                    <Note>Optimistic / not exact — assumes every hard invalidation loss returns to entry. Requires intratrade return-to-entry export for exact simulation.</Note>
+                    <Note>Research estimate: assumes every hard invalidation loss returns to entry. Exact validation requires intratrade return-to-entry export.</Note>
                     <Note tone={p.breachKnown ? "muted" : "warning"}>
-                        Hard invalidation flags present on {p.breachKnown} / {p.n} trades{p.breachKnown ? "" : " — requires exporter field ob_fully_breached"}.
+                        Hard invalidation state is available on {p.breachKnown} / {p.n} trades{p.breachKnown ? "" : " — requires exporter field ob_fully_breached"}.
                     </Note>
                 </NeonPanel>
 
                 {/* C) Immediate Exit After Hard Invalidation */}
-                <NeonPanel title={hasExactProtection ? "C · Immediate Exit After Hard Invalidation · Exploratory" : "C · Immediate Exit After Hard Invalidation"} action={<ConfidenceTag level="estimated" />}>
+                <NeonPanel title={hasExactProtection ? "C · Immediate Hard Invalidation Exit · Estimate" : "C · Immediate Hard Invalidation Exit"} action={<ConfidenceTag level="estimated" />}>
                     <Desc icon={ShieldAlert}>Exit immediately when price fully consumes the OB beyond its far-side invalidation threshold.</Desc>
                     <div className="grid grid-cols-2 gap-2 mt-3">
-                        <MetricChip label="Affected" value={String(p.breached)} sub="hard invalidations" tone={p.breached ? "danger" : "muted"} icon={AlertTriangle} />
-                        <MetricChip label="Current Net R" value={fmtR(p.breachedNetR)} sub="invalidated, as-is" tone={p.breachedNetR >= 0 ? "primary" : "danger"} icon={TrendingUp} />
-                        <MetricChip label="If Capped 0R" value={fmtR(p.cappedBreachedNetR)} sub="losses → 0R" tone="secondary" icon={ShieldCheck} />
-                        <MetricChip label="Improvement" value={fmtR(p.maxSavedBreached)} sub="theoretical" tone={p.maxSavedBreached > 0 ? "success" : "muted"} icon={TrendingUp} />
+                        <MetricChip label="Affected Trades" value={String(p.breached)} sub="hard invalidations" tone={p.breached ? "danger" : "muted"} icon={AlertTriangle} />
+                        <MetricChip label="Current Net R" value={fmtR(p.breachedNetR)} sub="invalidated trades" tone={p.breachedNetR >= 0 ? "primary" : "danger"} icon={TrendingUp} />
+                        <MetricChip label="0R Exit Model" value={fmtR(p.cappedBreachedNetR)} sub="losses capped at 0R" tone="secondary" icon={ShieldCheck} />
+                        <MetricChip label="Research-Estimate R Saved" value={fmtR(p.maxSavedBreached)} sub="directional estimate" tone={p.maxSavedBreached > 0 ? "success" : "muted"} icon={TrendingUp} />
                     </div>
-                    <Note>Rough estimate — caps hard invalidation losing trades at 0R; real exits may be better or worse. Needs candle-level exit price for exact figures.</Note>
+                    <Note>Research estimate: caps hard invalidation losing trades at 0R. Exact backtest needs candle-level exit price at trigger time.</Note>
                 </NeonPanel>
 
                 {/* D) Max Penetration Threshold */}
                 <NeonPanel
                     className="xl:col-span-3"
-                    title={hasExactProtection ? "D · Max Penetration Threshold · Exploratory" : "D · Max Penetration Threshold"}
+                    title={hasExactProtection ? "D · OB Penetration Defense · Estimate" : "D · OB Penetration Defense"}
                     action={<ConfidenceTag level="estimated" />}
                 >
                     <Desc icon={Activity}>
-                        Exit when OB penetration crosses a threshold. Theoretical saved R caps affected losing trades at 0R.
+                        Exit when OB penetration crosses a configured threshold. Research-estimate R saved caps affected losing trades at 0R.
                     </Desc>
                     <DataTable
                         testId="protlab-penetration"
                         columns={[
                             { key: "threshold", label: "Threshold", render: (r) => `≥ ${r.threshold}%` },
-                            { key: "count", label: "Affected", align: "right" },
+                            { key: "count", label: "Affected Trades", align: "right" },
                             { key: "curNet", label: "Current Net R", align: "right", render: (r) => <ColoredR value={r.curNet} /> },
-                            { key: "savedR", label: "Theoretical Saved R", align: "right", render: (r) => <span className="text-[hsl(var(--success))]">{fmtR(r.savedR)}</span> },
+                            { key: "savedR", label: "Research-Estimate R Saved", align: "right", render: (r) => <span className="text-[hsl(var(--success))]">{fmtR(r.savedR)}</span> },
                         ]}
                         rows={p.thresholds}
                         rowKey="threshold"
                     />
-                    <Note tone="warning">Needs candle-level simulation for exact exit price.</Note>
+                    <Note tone="warning">Requires candle-level simulation for exact exit price.</Note>
                     <Note tone={p.penKnown ? "muted" : "warning"}>
                         Penetration data present on {p.penKnown} / {p.n} trades{p.penKnown ? "" : " — requires exporter field max_ob_penetration_pct"}.
                     </Note>
@@ -273,10 +515,10 @@ export default function ProtectionLab() {
                 {/* E) Fast Stopout Filter */}
                 <NeonPanel
                     className="xl:col-span-3"
-                    title="E · Fast Stopout Filter"
+                    title="E · Fast Stopout Profile"
                     action={<div className="flex items-center gap-1.5"><Clock className="w-3.5 h-3.5 text-[hsl(var(--accent-secondary))]" /><ConfidenceTag level="exact" /></div>}
                 >
-                    <Desc icon={Clock}>Descriptive only — distribution of trades by time-to-exit. No intervention applied.</Desc>
+                    <Desc icon={Clock}>Descriptive defense profile: distribution of trades by time-to-exit. No intervention is applied.</Desc>
                     <DataTable
                         testId="protlab-fast-stopout"
                         columns={[
@@ -288,44 +530,44 @@ export default function ProtectionLab() {
                         rows={p.fastBuckets}
                         rowKey="label"
                     />
-                    {!p.hasFastData && <Note tone="warning">No time-to-exit data in current dataset — requires exporter fields same_candle_exit / minutes_to_exit.</Note>}
+                    {!p.hasFastData && <Note tone="warning">No time-to-exit data in current dataset. Requires exporter fields same_candle_exit / minutes_to_exit.</Note>}
                 </NeonPanel>
 
                 <NeonPanel className="xl:col-span-3" title="Loss Analytics · Hard Invalidations by Weekday × Hour"
                     action={<Pill tone={bt.fullGrid.total ? "danger" : "muted"}>{bt.fullGrid.total} INVALIDATIONS</Pill>}>
-                    <Desc icon={AlertTriangle}>Hard invalidation = price fully consumed the order block beyond its far-side invalidation threshold. Bucketed by entry / fill time (UTC).</Desc>
+                    <Desc icon={AlertTriangle}>Hard invalidation means price fully consumed the order block beyond its far-side threshold. Bucketed by entry/fill time in UTC.</Desc>
                     <div className="mt-3 grid grid-cols-2 md:grid-cols-4 2xl:grid-cols-8 gap-2.5" data-testid="protlab-fullbreach-mini-chips">
-                        <MetricChip label="Worst Loss Hour"
+                        <MetricChip label="Highest Invalidation Hour"
                             value={bt.mostHour ? `${padH(bt.mostHour.hour)}:00 UTC` : "—"}
                             sub={bt.mostHour ? `${bt.mostHour.count} invalidation${bt.mostHour.count === 1 ? "" : "s"}` : "no invalidations"}
                             tone={bt.mostHour ? "primary" : "muted"} icon={Clock} />
-                        <MetricChip label="Worst Net Loss Hour"
+                        <MetricChip label="Worst Net R Hour"
                             value={bt.worstHour ? `${padH(bt.worstHour.hour)}:00 UTC` : "—"}
                             sub={bt.worstHour ? `${fmtR(bt.worstHour.netR)} net` : "by Net R"}
                             tone={bt.worstHour && bt.worstHour.netR < 0 ? "danger" : "muted"} icon={AlertTriangle} />
-                        <MetricChip label="Most Invalidated Day"
+                        <MetricChip label="Highest Invalidation Day"
                             value={bt.mostDay ? WEEKDAYS[bt.mostDay.day] : "—"}
                             sub={bt.mostDay ? `${bt.mostDay.count} invalidation${bt.mostDay.count === 1 ? "" : "s"}` : "no invalidations"}
                             tone={bt.mostDay ? "primary" : "muted"} icon={Activity} />
-                        <MetricChip label="Worst Loss Day"
+                        <MetricChip label="Worst Net R Day"
                             value={bt.worstDay ? WEEKDAYS[bt.worstDay.day] : "—"}
                             sub={bt.worstDay ? `${fmtR(bt.worstDay.netR)} net` : "by Net R"}
                             tone={bt.worstDay && bt.worstDay.netR < 0 ? "danger" : "muted"} icon={AlertTriangle} />
-                        <MetricChip label="Most Invalidated Session"
+                        <MetricChip label="Highest Invalidation Session"
                             value={bt.mostSession && bt.mostSession.fullCount ? bt.mostSession.session : "—"}
                             sub={bt.mostSession && bt.mostSession.fullCount ? `${bt.mostSession.fullCount} invalidations` : "no invalidations"}
                             tone={bt.mostSession && bt.mostSession.fullCount ? "secondary" : "muted"} icon={Target} />
-                        <MetricChip label="Worst Loss Session"
+                        <MetricChip label="Worst Net R Session"
                             value={bt.worstSession ? bt.worstSession.session : "—"}
                             sub={bt.worstSession ? `${fmtR(bt.worstSession.netR)} net` : "by Net R"}
                             tone={bt.worstSession && bt.worstSession.netR < 0 ? "danger" : "muted"} icon={ShieldAlert} />
-                        <MetricChip label="Invalidated Winners %"
+                        <MetricChip label="Invalidated Winners"
                             value={bt.fullBreachCount ? fmtPct(bt.breachedWinnersPct) : "—"}
                             sub={bt.fullBreachCount ? `${bt.breachedWinners} / ${bt.fullBreachCount} invalidated` : "no invalidations"}
                             tone={bt.fullBreachCount && bt.breachedWinnersPct > 0 ? "success" : "muted"} icon={ShieldCheck} />
-                        <MetricChip label="Wick vs Close"
+                        <MetricChip label="Wick vs Close Invalidation"
                             value={bt.hasBaselineCloseFields ? `${bt.fullBreachCount} / ${bt.closeConfirmed}` : "Limited Data"}
-                            sub={bt.hasBaselineCloseFields ? `${fmtPct(bt.closeVsFullPct)} confirmed` : "baseline close fields missing"}
+                            sub={bt.hasBaselineCloseFields ? `${fmtPct(bt.closeVsFullPct)} confirmed` : "close-confirmation fields missing"}
                             tone={bt.hasBaselineCloseFields ? "primary" : "muted"} icon={TrendingUp} />
                     </div>
                     <div className="mt-3 grid grid-cols-1 2xl:grid-cols-[minmax(0,960px)_minmax(0,1fr)] gap-5 items-start">
@@ -335,11 +577,11 @@ export default function ProtectionLab() {
                         <div className="min-w-0 space-y-3 self-start" data-testid="protlab-fullbreach-insights">
                             <InsightCluster>
                                 <MiniInsightTable title="Session Distribution" rows={bt.sessionDistributionRows} columns={["session", "share"]} />
-                                <MiniInsightTable title="Failure Rate by Session" rows={bt.sessionRateRows} columns={["session", "rate"]} />
+                                <MiniInsightTable title="Invalidation Rate by Session" rows={bt.sessionRateRows} columns={["session", "rate"]} />
                                 <MiniInsightTable title="Invalidated Expectancy by Session" rows={bt.sessionExpectancyRows} columns={["session", "expectancy"]} />
                             </InsightCluster>
                             <InsightCluster>
-                                <MiniInsightTable title="Top Toxic Hours" rows={bt.topToxicHours} columns={["hour", "netR"]} danger />
+                                <MiniInsightTable title="Worst Invalidation Hours" rows={bt.topToxicHours} columns={["hour", "netR"]} danger />
                                 <InsightGroup title="Worst Day × Session">
                                     <InsightRow
                                         label={bt.worstDaySession ? bt.worstDaySession.label : "Limited Data"}
@@ -348,7 +590,7 @@ export default function ProtectionLab() {
                                         tone="danger"
                                     />
                                 </InsightGroup>
-                                <InsightGroup title="Hard Invalidation Losses">
+                                <InsightGroup title="Hard Invalidation Loss Share">
                                     <InsightRow
                                         label="Loss Share"
                                         value={fmtPct(bt.breachedLosersPct)}
@@ -359,27 +601,27 @@ export default function ProtectionLab() {
                             </InsightCluster>
                         </div>
                     </div>
-                    {bt.fullUndated > 0 && <Note tone="warning">{bt.fullUndated} hard invalidation trade{bt.fullUndated === 1 ? "" : "s"} lack a parseable entry/fill time and are omitted from the grid.</Note>}
+                    {bt.fullUndated > 0 && <Note tone="warning">{bt.fullUndated} hard invalidation trade{bt.fullUndated === 1 ? "" : "s"} lack parseable entry/fill time and are omitted from the grid.</Note>}
                 </NeonPanel>
 
                 <NeonPanel className="xl:col-span-3" title="Loss Analytics · Close-Confirmed Invalidations"
                     action={<Pill tone={bt.hasCloseFields ? (bt.closeGrid.total ? "danger" : "muted") : "muted"}>{bt.hasCloseFields ? `${bt.closeGrid.total} CONFIRMED` : "LIMITED DATA"}</Pill>}>
                     {bt.hasCloseFields ? (
                         <>
-                            <Desc icon={ShieldAlert}>Trades with a close-confirmed OB invalidation. Bucketed by close_breach_time (UTC).</Desc>
+                            <Desc icon={ShieldAlert}>Trades where the OB invalidation was confirmed by candle close. Bucketed by close_breach_time in UTC.</Desc>
                             <div className="mt-3">
                                 <WeekHourHeatmap grid={bt.closeGrid} testId="protlab-closebreach-heatmap" />
                             </div>
-                            {bt.closeUndated > 0 && <Note tone="warning">{bt.closeUndated} close-confirmed invalidation{bt.closeUndated === 1 ? "" : "s"} lack a parseable close_breach_time and are omitted from the grid.</Note>}
+                            {bt.closeUndated > 0 && <Note tone="warning">{bt.closeUndated} close-confirmed invalidation{bt.closeUndated === 1 ? "" : "s"} lack parseable close_breach_time and are omitted from the grid.</Note>}
                         </>
                     ) : (
                         <div data-testid="protlab-closebreach-heatmap">
-                            <Note tone="warning">Limited Data — requires exporter fields close_confirmed_ob_breach / close_breach_time.</Note>
+                            <Note tone="warning">Limited data: requires exporter fields close_confirmed_ob_breach / close_breach_time.</Note>
                         </div>
                     )}
                 </NeonPanel>
 
-                <NeonPanel className="xl:col-span-3" title="Loss Analytics · Failure Session Breakdown" action={<ConfidenceTag level={bt.hasBaselineCloseFields ? "exact" : "estimated"} />}>
+                <NeonPanel className="xl:col-span-3" title="Loss Analytics · Invalidation Session Breakdown" action={<ConfidenceTag level={bt.hasBaselineCloseFields ? "exact" : "estimated"} />}>
                     <DataTable
                         testId="protlab-breach-session"
                         columns={[
@@ -388,30 +630,30 @@ export default function ProtectionLab() {
                             { key: "closeCount", label: "Close-Confirmed", align: "right", render: (r) => (bt.hasBaselineCloseFields ? String(r.closeCount) : "—") },
                             { key: "netR", label: "Net R", align: "right", render: (r) => <ColoredR value={r.netR} /> },
                             { key: "avgR", label: "Avg R", align: "right", render: (r) => fmtExp(r.avgR) },
-                            { key: "breachRate", label: "Failure Rate", align: "right", render: (r) => (r.breachRate == null ? "—" : fmtPct(r.breachRate)) },
+                            { key: "breachRate", label: "Invalidation Rate", align: "right", render: (r) => (r.breachRate == null ? "—" : fmtPct(r.breachRate)) },
                         ]}
                         rows={bt.sessionRows}
                         rowKey="session"
                     />
-                    <Note>Net R / Avg R are over hard invalidation trades per session (entry/fill session). Failure rate = hard invalidations ÷ trades in that session.</Note>
+                    <Note>Net R / Avg R are calculated over hard invalidation trades per entry/fill session. Invalidation rate = hard invalidations ÷ trades in that session.</Note>
                 </NeonPanel>
 
                 <BreachSessionMatrix matrix={bt.matrix} />
 
-                {/* F + G) Future protections */}
-                <NeonPanel className="xl:col-span-3" title="Future Protections · Requires Exporter Data" action={<ConfidenceTag level="requires" />}>
+                {/* F + G) Protection candidates */}
+                <NeonPanel className="xl:col-span-3" title="Protection Research Queue · Data Required" action={<ConfidenceTag level="requires" />}>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3" data-testid="protlab-future">
-                        <FutureCard icon={Newspaper} title="F · News Blackout"
-                            body="Future filter to compare hard invalidation / fast-stopout rates around high-impact news windows."
-                            status="Future data required" />
-                        <FutureCard icon={Ban} title="G · Cancel Pending If Pre-Fill Invalidation"
-                            body="Future rule: cancel a pending order if the OB is hard invalidated before entry."
-                            status="Requires pre-fill invalidation export / pending lifecycle analytics" />
+                        <FutureCard icon={Newspaper} title="F · News Protection Window"
+                            body="Evaluate hard invalidation and fast-stopout rates around configured high-impact news windows."
+                            status="Requires calendar tagging" />
+                        <FutureCard icon={Ban} title="G · Cancel Pending On Pre-Fill Invalidation"
+                            body="Cancel a pending order if the OB is hard invalidated before entry."
+                            status="Requires pending lifecycle export" />
                     </div>
                 </NeonPanel>
 
                 {/* Protection backlog */}
-                <NeonPanel className="xl:col-span-3" title="Protection Backlog" action={<div className="flex items-center gap-1.5"><ListChecks className="w-3.5 h-3.5 text-muted-lab" /><Pill tone="muted">{PROTECTION_BACKLOG.length} ITEMS</Pill></div>}>
+                <NeonPanel className="xl:col-span-3" title="Protection Research Queue" collapsible defaultCollapsed action={<div className="flex items-center gap-1.5"><ListChecks className="w-3.5 h-3.5 text-muted-lab" /><Pill tone="muted">{PROTECTION_BACKLOG.length} ITEMS</Pill></div>}>
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5" data-testid="protlab-backlog">
                         {PROTECTION_BACKLOG.map((item) => (
                             <div key={item.title} className="border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] clip-bevel-sm px-3 py-2.5">
@@ -425,6 +667,40 @@ export default function ProtectionLab() {
                     </div>
                 </NeonPanel>
             </div>
+
+            {/* ── Phase 2: Visual Analytics ──────────────────────────────────────── */}
+            <ProtectionSectionDivider
+                icon={<BarChart2 className="w-3.5 h-3.5" />}
+                label="Visual Analytics"
+                subLabel="equity impact, R distribution, drawdown, and OB risk profile"
+                className="mt-4"
+            />
+            <ProtectionVisualAnalytics
+                baselineTrades={trades}
+                tradesByMode={protectionTradesByMode}
+                selectedMode={selectedProtectionMode}
+                onModeChange={setSelectedProtectionMode}
+                pairs={pairedTradesData.pairs}
+                breachTimestamps={breachTimestamps}
+                hasProtectedData={Object.keys(protectionTradesByMode).length > 0}
+            />
+
+            {/* ── Phase 3: Power Tools ───────────────────────────────────────────── */}
+            <ProtectionSectionDivider
+                icon={<Zap className="w-3.5 h-3.5" />}
+                label="Protection Workbench"
+                subLabel="paired trade audit, mode matrix, and research hypotheses"
+                className="mt-4"
+            />
+            <ProtectionPowerTools
+                baselineTrades={trades}
+                tradesByMode={protectionTradesByMode}
+                selectedMode={selectedProtectionMode}
+                onModeChange={setSelectedProtectionMode}
+                exactRows={exactProtectionRowsAugmented}
+                baselineMaxDD={p.maxDD}
+                activeRunId={activeRunId}
+            />
         </div>
     );
 }
@@ -433,8 +709,8 @@ export default function ProtectionLab() {
 function ConfidenceTag({ level }) {
     const map = {
         exact:     { tone: "success", text: "EXACT" },
-        estimated: { tone: "warning", text: "ESTIMATED" },
-        requires:  { tone: "muted",   text: "REQUIRES EXPORTER DATA" },
+        estimated: { tone: "warning", text: "RESEARCH ESTIMATE" },
+        requires:  { tone: "muted",   text: "DATA REQUIRED" },
     };
     const c = map[level] || map.requires;
     return <Pill tone={c.tone}>{c.text}</Pill>;
@@ -592,7 +868,7 @@ function ModeLabel({ row }) {
     return (
         <div className="flex flex-wrap items-center gap-1.5">
             <span className={`font-mono font-semibold ${labelClass}`}>{prettyMode(row.mode)}</span>
-            {row.isBaseline && <Pill tone="secondary">BASELINE</Pill>}
+            {row.isBaseline && <Pill tone="secondary">UNPROTECTED</Pill>}
             {row.isBest && <Pill tone="success">BEST NET R</Pill>}
             {row.underperforms && <Pill tone="danger">UNDERPERFORMS</Pill>}
         </div>
@@ -601,7 +877,7 @@ function ModeLabel({ row }) {
 
 function DeltaVsBaseline({ row }) {
     if (row.isBaseline) {
-        return <span className="font-mono text-[hsl(var(--accent-secondary))]">BASELINE</span>;
+        return <span className="font-mono text-[hsl(var(--accent-secondary))]">UNPROTECTED</span>;
     }
     if (row.netVsBaseline == null || !isFiniteNumber(row.netVsBaseline)) return "—";
     const value = Number(row.netVsBaseline);
@@ -613,7 +889,7 @@ function WhatIfFilterSimulator({ filters, activeFilters, onToggle, onClear, onPr
     const [copied, setCopied] = React.useState(false);
     const [collapsed, setCollapsed] = React.useState(false);
     const [savedSimulations, setSavedSimulations] = React.useState([]);
-    const [draftName, setDraftName] = React.useState("Simulation 1");
+    const [draftName, setDraftName] = React.useState("Screen 1");
     const activeItems = filters.filter((f) => activeFilters[f.key]);
     const activeCount = activeItems.length;
     const activeSummary = activeItems.map((filter) => `${filter.summary} (${result.filterCounts[filter.key] || 0} trades)`).join(", ");
@@ -622,14 +898,14 @@ function WhatIfFilterSimulator({ filters, activeFilters, onToggle, onClear, onPr
     const baselineSignature = `${result.original.n}|${result.original.netR}|${result.original.maxDD}`;
     React.useEffect(() => {
         setSavedSimulations([]);
-        setDraftName("Simulation 1");
+        setDraftName("Screen 1");
     }, [baselineSignature]);
     const nextSimulationName = (items = savedSimulations) => {
         const nextNumber = items.reduce((max, simulation) => {
-            const match = String(simulation.label || "").match(/Simulation\s+(\d+)/i);
+            const match = String(simulation.label || "").match(/Screen\s+(\d+)/i);
             return match ? Math.max(max, Number(match[1])) : max;
         }, 0) + 1;
-        return `Simulation ${nextNumber}`;
+        return `Screen ${nextNumber}`;
     };
     const activeSaved = activeSignature ? savedSimulations.find((simulation) => simulation.signature === activeSignature) : null;
     const isDuplicateSimulation = !!activeSaved;
@@ -663,7 +939,7 @@ function WhatIfFilterSimulator({ filters, activeFilters, onToggle, onClear, onPr
         isActive: activeSaved?.id === simulation.id,
     }));
     const tableRows = [
-        { ...result.original, kind: "baseline", id: "baseline", label: "Baseline", removedCount: 0, delta: null },
+        { ...result.original, kind: "baseline", id: "baseline", label: "Unprotected Baseline", removedCount: 0, delta: null },
         ...(activeCount && !activeSaved ? [{ ...result.filtered, kind: "current", id: "current", label: draftName, filters: activeSummary, removedCount: result.removed.n, delta: result.deltaNetR }] : []),
         ...savedRows,
     ];
@@ -700,10 +976,10 @@ function WhatIfFilterSimulator({ filters, activeFilters, onToggle, onClear, onPr
     return (
         <NeonPanel
             className="xl:col-span-3"
-            title="What-If Filter Simulator"
+            title="Defensive Screen Simulator"
             action={(
                 <div className="flex items-center gap-2">
-                    <Pill tone={activeCount ? "warning" : "muted"}>{activeCount ? `${activeCount} FILTERS ACTIVE` : "BASELINE MODE"}</Pill>
+                    <Pill tone={activeCount ? "warning" : "muted"}>{activeCount ? `${activeCount} SCREENS ACTIVE` : "UNPROTECTED BASELINE"}</Pill>
                     {activeCount ? <Pill tone={result.deltaNetR >= 0 ? "success" : "danger"}>{fmtR(result.deltaNetR)}</Pill> : null}
                     <button
                         type="button"
@@ -724,7 +1000,7 @@ function WhatIfFilterSimulator({ filters, activeFilters, onToggle, onClear, onPr
                 }}
             >
                 <div className="mt-3 border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.38)] clip-bevel-sm px-3 py-2 text-[11px] font-mono text-[hsl(var(--text-2))]">
-                    {activeCount ? <>Active filters: <span className="text-white">{activeSummary}</span></> : "No active filters"}
+                    {activeCount ? <>Active screens: <span className="text-white">{activeSummary}</span></> : "No defensive screens active"}
                 </div>
                 {collapsed ? null : (
                     <>
@@ -745,28 +1021,28 @@ function WhatIfFilterSimulator({ filters, activeFilters, onToggle, onClear, onPr
                             disabled={!savedSimulations.length}
                             className="px-2.5 py-1.5 text-[10px] font-mono uppercase tracking-wider border border-[hsl(var(--border-mid))] text-muted-lab hover:text-white disabled:opacity-40 disabled:hover:text-muted-lab clip-bevel-sm"
                         >
-                            Clear Saved Simulations
+                            Clear Saved Screens
                         </button>
                         <button
                             type="button"
                             onClick={promoteHypothesis}
                             disabled={!activeCount}
-                            title="Creates a clean hypothesis/config idea from the selected filters so it can later be tested by the Python backtester. This frontend simulation is exploratory only."
+                            title="Creates a clean hypothesis/config idea from the selected screens so it can later be tested by the Python backtester. This frontend screen is research-only."
                             className="px-2.5 py-1.5 text-[10px] font-mono uppercase tracking-wider border border-[hsl(var(--warning)/0.55)] text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.08)] hover:bg-[hsl(var(--warning)/0.14)] disabled:opacity-40 clip-bevel-sm"
                         >
                             {copied ? "Hypothesis copied" : "Promote to Exact Backtest"}
                         </button>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-2 grow basis-full 2xl:basis-auto 2xl:min-w-[680px]">
-                            <MetricChip label="Remaining" value={String(result.filtered.n)} sub={`${result.removed.n} removed`} tone="primary" icon={ShieldCheck} />
-                            <MetricChip label="Filtered Net R" value={fmtR(result.filtered.netR)} sub={`${fmtR(result.deltaNetR)} vs base`} tone={result.deltaNetR >= 0 ? "success" : "danger"} icon={TrendingUp} />
-                            <MetricChip label="Filtered WR" value={fmtPct(result.filtered.winRate)} sub={`${result.filtered.wins}W / ${result.filtered.losses}L`} tone="secondary" icon={Target} />
+                            <MetricChip label="Remaining Trades" value={String(result.filtered.n)} sub={`${result.removed.n} screened out`} tone="primary" icon={ShieldCheck} />
+                            <MetricChip label="Screened Net R" value={fmtR(result.filtered.netR)} sub={`${fmtR(result.deltaNetR)} vs unprotected`} tone={result.deltaNetR >= 0 ? "success" : "danger"} icon={TrendingUp} />
+                            <MetricChip label="Screened WR" value={fmtPct(result.filtered.winRate)} sub={`${result.filtered.wins}W / ${result.filtered.losses}L`} tone="secondary" icon={Target} />
                             <MetricChip label="Removed Subset" value={fmtR(result.removed.netR)} sub={`${result.removed.n} trades · ${fmtExp(result.removed.expectancy)}`} tone={result.removed.netR >= 0 ? "success" : "danger"} icon={AlertTriangle} />
                         </div>
                     </div>
 
                     <div className="mt-3 space-y-2" data-testid="protlab-whatif-filters" data-whatif-keep-active="true">
                         <div className="text-[10.5px] font-mono uppercase tracking-wider text-muted-lab">
-                            Matching trades are removed from baseline. Remaining trades are recalculated as if those setups were never taken.
+                            Matching trades are removed from the unprotected baseline. Remaining trades are recalculated as if those setups were never taken.
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-2">
                             {WHAT_IF_GROUPS.map((group) => (
@@ -803,7 +1079,7 @@ function WhatIfFilterSimulator({ filters, activeFilters, onToggle, onClear, onPr
                         />
                     </div>
                     <div className="mt-2 text-[10.5px] font-mono uppercase tracking-wider text-muted-lab">
-                        Promote creates a copyable hypothesis/config idea only; it does not run Python.
+                        Promotion creates a copyable hypothesis/config idea only; it does not run Python.
                     </div>
                     </>
                 )}
@@ -832,15 +1108,15 @@ function WhatIfResultsTable({
             <table className="w-full min-w-[980px] text-[11px] font-mono">
                 <thead className="text-[9.5px] uppercase tracking-[0.18em] text-title-lab">
                     <tr className="border-b border-[hsl(var(--border-soft))]">
-                        <th className="px-3 py-2 text-left font-medium">Set</th>
+                        <th className="px-3 py-2 text-left font-medium">Research Set</th>
                         <th className="px-3 py-2 text-right font-medium">Trades</th>
-                        <th className="px-3 py-2 text-right font-medium">Removed</th>
+                        <th className="px-3 py-2 text-right font-medium">Screened Out</th>
                         <th className="px-3 py-2 text-right font-medium">WR</th>
                         <th className="px-3 py-2 text-right font-medium">Net R</th>
                         <th className="px-3 py-2 text-right font-medium">Expectancy</th>
                         <th className="px-3 py-2 text-right font-medium">Max DD</th>
-                        <th className="px-3 py-2 text-right font-medium">Delta vs Base</th>
-                        <th className="px-3 py-2 text-right font-medium">Action</th>
+                        <th className="px-3 py-2 text-right font-medium">Delta vs Unprotected</th>
+                        <th className="px-3 py-2 text-right font-medium">Screen Action</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -863,15 +1139,15 @@ function WhatIfResultsTable({
                                 <div className="flex items-center gap-2">
                                     {row.kind === "current" ? (
                                         <>
-                                            <span className="text-[hsl(var(--warning))] font-semibold">Current simulation</span>
+                                            <span className="text-[hsl(var(--warning))] font-semibold">Current screen</span>
                                             <input
                                                 value={draftName}
                                                 onChange={(event) => onDraftNameChange(event.target.value)}
                                                 onClick={(event) => event.stopPropagation()}
                                                 className="w-36 bg-[hsl(var(--panel-2)/0.7)] border border-[hsl(var(--warning)/0.38)] text-white px-2 py-1 text-[10px] uppercase tracking-wider clip-bevel-sm outline-none focus:border-[hsl(var(--warning))]"
-                                                aria-label="Current simulation name"
+                                                aria-label="Current screen name"
                                             />
-                                            <Pill tone="warning">WORKING DRAFT</Pill>
+                                            <Pill tone="warning">DRAFT</Pill>
                                         </>
                                     ) : (
                                         <>
@@ -886,7 +1162,7 @@ function WhatIfResultsTable({
                                             ) : (
                                                 <span className="text-white">{row.label}</span>
                                             )}
-                                            {row.kind === "baseline" ? <Pill tone="secondary">BASELINE</Pill> : null}
+                                            {row.kind === "baseline" ? <Pill tone="secondary">UNPROTECTED</Pill> : null}
                                             {row.kind === "saved" && row.isActive ? <Pill tone="warning">ACTIVE</Pill> : null}
                                             {row.kind === "saved" && row.filters ? (
                                                 <button
@@ -898,7 +1174,7 @@ function WhatIfResultsTable({
                                                     title={row.filters}
                                                     className="text-[9px] uppercase tracking-wider text-muted-lab hover:text-white border border-[hsl(var(--border-soft))] px-1.5 py-0.5 clip-bevel-sm"
                                                 >
-                                                    Details
+                                                    Screen Details
                                                 </button>
                                             ) : null}
                                         </>
@@ -926,10 +1202,10 @@ function WhatIfResultsTable({
                                         type="button"
                                         onClick={onSave}
                                         disabled={!canSaveSimulation}
-                                        title={isDuplicateSimulation ? "This exact filter set is already saved." : "Save this current simulation."}
+                                        title={isDuplicateSimulation ? "This exact screen set is already saved." : "Save this defensive screen."}
                                         className="px-2 py-1 text-[9.5px] uppercase tracking-wider border border-[hsl(var(--success)/0.55)] text-[hsl(var(--success))] bg-[hsl(var(--success)/0.07)] hover:bg-[hsl(var(--success)/0.13)] disabled:opacity-40 clip-bevel-sm"
                                     >
-                                        Save
+                                        Save Screen
                                     </button>
                                 ) : row.kind === "saved" ? (
                                     <button
@@ -940,7 +1216,7 @@ function WhatIfResultsTable({
                                         }}
                                         className="px-2 py-1 text-[9.5px] uppercase tracking-wider border border-[hsl(var(--danger)/0.45)] text-[hsl(var(--danger))] bg-[hsl(var(--danger)/0.06)] hover:bg-[hsl(var(--danger)/0.12)] clip-bevel-sm"
                                     >
-                                        Remove
+                                        Remove Screen
                                     </button>
                                 ) : (
                                     <span className="text-muted-lab">—</span>
@@ -1221,6 +1497,15 @@ function buildProtection(trades) {
     // Hide the empty "Limited Data" bucket; keep named buckets for a stable view.
     const fastBuckets = fastAll.filter((b) => b.label !== "Limited Data" || b.count > 0);
 
+    // ── Additional analytics (Phase 1 upgrade) ────────────────────────────────
+    const maxDD = maxDrawdownR(list);
+    const grossWins = list.filter(t => rOf(t) > 0).reduce((s, t) => s + rOf(t), 0);
+    const grossLosses = Math.abs(list.filter(t => rOf(t) < 0).reduce((s, t) => s + rOf(t), 0));
+    const rawPF = grossLosses > 0 ? grossWins / grossLosses : (grossWins > 0 ? 99 : 0);
+    const profitFactor = Number.isFinite(rawPF) ? round1(rawPF) : null;
+    let cum = 0;
+    const equityPoints = list.map(t => { cum += rOf(t); return round1(cum); });
+
     return {
         n, wins, losses, netR: round1(rawNet), winRate, expectancy,
         breachKnown, breached, nonBreached, breachUnknown,
@@ -1230,6 +1515,7 @@ function buildProtection(trades) {
         cappedBreachedNetR: round1(cappedBreachedNetR),
         penKnown, thresholds,
         fastBuckets, hasFastData,
+        maxDD, profitFactor, equityPoints,
     };
 }
 
@@ -1684,20 +1970,20 @@ function WeekHourHeatmap({ grid, testId }) {
 function BreachSessionMatrix({ matrix }) {
     if (!matrix) {
         return (
-            <NeonPanel className="xl:col-span-3" title="Origin Session × Failure Session" action={<Pill tone="muted">LIMITED DATA</Pill>}>
+            <NeonPanel className="xl:col-span-3" title="Origin Session × Invalidation Session" action={<Pill tone="muted">LIMITED DATA</Pill>}>
                 <div data-testid="protlab-breach-matrix">
-                    <Note tone="warning">Limited Data — origin session unavailable (requires obOriginSession / obOriginTime). Cannot build the origin × failure matrix.</Note>
+                    <Note tone="warning">Limited Data — origin session unavailable (requires obOriginSession / obOriginTime). Cannot build the origin × invalidation matrix.</Note>
                 </div>
             </NeonPanel>
         );
     }
     return (
-        <NeonPanel className="xl:col-span-3" title="Origin Session × Failure Session" action={<Pill tone="muted">{matrix.total} INVALIDATIONS</Pill>}>
+        <NeonPanel className="xl:col-span-3" title="Origin Session × Invalidation Session" action={<Pill tone="muted">{matrix.total} INVALIDATIONS</Pill>}>
             <div className="overflow-x-auto scrollbar-thin" data-testid="protlab-breach-matrix">
                 <table className="w-full min-w-[640px] font-mono text-[11px] border-separate border-spacing-1">
                     <thead>
                         <tr>
-                            <th className="text-muted-lab text-left px-2 py-1 text-[10px] uppercase tracking-wider whitespace-nowrap">Origin / Failure</th>
+                            <th className="text-muted-lab text-left px-2 py-1 text-[10px] uppercase tracking-wider whitespace-nowrap">Origin / Invalidation</th>
                             {matrix.cols.map((c) => (
                                 <th key={c} className="text-muted-lab px-2 py-1 text-[10px] uppercase tracking-wider">{c}</th>
                             ))}

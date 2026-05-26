@@ -190,37 +190,84 @@ export function parseCandlesCSV(text) {
 }
 
 export function parseOrderBlocksCSV(text) {
-    const { rows } = parseCSV(text);
-    return rows.map((r, i) => ({
-        id: String(pick(r, "id", "ob_id") || `OB-${String(i + 1).padStart(3, "0")}`),
-        originIndexRaw: pick(r, "i0", "start_index", "origin_index"),
-        detectionIndexRaw: pick(r, "i1", "end_index", "detection_index"),
-        originTime: pick(r, "origin_time", "start_time"),
-        endTime:    pick(r, "end_time", "detection_time"),
-        top:  Number(pick(r, "top", "high") ?? 0),
-        bot:  Number(pick(r, "bot", "bottom", "low") ?? 0),
-        side: String(pick(r, "side", "direction", "type") || "bull").toLowerCase().startsWith("b")
-            ? (String(pick(r, "side", "direction", "type") || "").toLowerCase().includes("bear") ? "bear" : "bull")
-            : "bear",
-        obFinalStatus: String(pick(r, "ob_final_status") || ""),
-        obFinalStatusLabel: String(pick(r, "ob_final_status_label") || ""),
-        chartRightTime: pick(r, "chart_right_time"),
-        chartRightTimeSource: String(pick(r, "chart_right_time_source") || ""),
-        linkedTradeId: String(pick(r, "linked_trade_id") || ""),
-        fillTime: pick(r, "fill_time"),
-        exitTime: pick(r, "exit_time"),
-        cancelTime: pick(r, "cancel_time"),
-        invalidationTime: pick(r, "invalidation_time"),
-        protectionTriggerTime: pick(r, "protection_trigger_time"),
-        newsBlackoutTriggerTime: pick(r, "news_blackout_trigger_time"),
-        reverseTouchTime: pick(r, "reverse_touch_time"),
-        sessionCancelTime: pick(r, "session_cancel_time"),
-        lifecycleReason: String(pick(r, "lifecycle_reason") || ""),
-    }));
+    const { headers, rows } = parseCSV(text);
+    const hasNewsCreatedTagFields = headers.some((header) => header.startsWith("ob_origin_news_") || header.startsWith("ob_detection_news_"));
+    return rows.map((r, i) => {
+        const originNewsWindow = boolOrNull(pick(r, "ob_origin_news_window", "obOriginNewsWindow", "obCreatedDuringNews")) ?? false;
+        const detectionNewsWindow = boolOrNull(pick(r, "ob_detection_news_window", "obDetectionNewsWindow", "obDetectedDuringNews")) ?? false;
+        return {
+            id: String(pick(r, "id", "ob_id") || `OB-${String(i + 1).padStart(3, "0")}`),
+            originIndexRaw: pick(r, "i0", "start_index", "origin_index"),
+            detectionIndexRaw: pick(r, "i1", "end_index", "detection_index"),
+            originTime: pick(r, "origin_time", "start_time"),
+            endTime:    pick(r, "end_time", "detection_time"),
+            top:  Number(pick(r, "top", "high") ?? 0),
+            bot:  Number(pick(r, "bot", "bottom", "low") ?? 0),
+            side: String(pick(r, "side", "direction", "type") || "bull").toLowerCase().startsWith("b")
+                ? (String(pick(r, "side", "direction", "type") || "").toLowerCase().includes("bear") ? "bear" : "bull")
+                : "bear",
+            obFinalStatus: String(pick(r, "ob_final_status", "obFinalStatus") || ""),
+            obFinalStatusLabel: String(pick(r, "ob_final_status_label", "obFinalStatusLabel") || ""),
+            chartRightTime: pick(r, "chart_right_time"),
+            chartRightTimeSource: String(pick(r, "chart_right_time_source") || ""),
+            linkedTradeId: String(pick(r, "linked_trade_id", "linkedTradeId", "trade_id") || ""),
+            fillTime: pick(r, "fill_time", "fillTime"),
+            exitTime: pick(r, "exit_time", "exitTime"),
+            cancelTime: pick(r, "cancel_time", "cancelTime"),
+            invalidationTime: pick(r, "invalidation_time", "invalidationTime"),
+            protectionTriggerTime: pick(r, "protection_trigger_time"),
+            newsBlackoutTriggerTime: pick(r, "news_blackout_trigger_time", "newsBlackoutTriggerTime"),
+            reverseTouchTime: pick(r, "reverse_touch_time", "reverseTouchTime"),
+            sessionCancelTime: pick(r, "session_cancel_time", "sessionCancelTime"),
+            lifecycleReason: String(pick(r, "lifecycle_reason", "lifecycleReason") || ""),
+            obWidthPips: numOrNull(pick(r, "ob_width_pips", "obWidthPips", "width_pips")),
+            maxObPenetrationPct: numOrNull(pick(r, "max_ob_penetration_pct", "maxObPenetrationPct")),
+            max_ob_penetration_pct: numOrNull(pick(r, "max_ob_penetration_pct", "maxObPenetrationPct")),
+            obOriginSession: String(pick(r, "ob_origin_session", "origin_session", "obOriginSession") || ""),
+            obDetectionSession: String(pick(r, "ob_detection_session", "detection_session", "obDetectionSession") || ""),
+            fillSession: String(pick(r, "fill_session", "fillSession") || ""),
+            ob_origin_news_window: originNewsWindow,
+            ob_detection_news_window: detectionNewsWindow,
+            obOriginNewsWindow: originNewsWindow,
+            obDetectionNewsWindow: detectionNewsWindow,
+            obCreatedDuringNews: originNewsWindow,
+            obDetectedDuringNews: detectionNewsWindow,
+            ob_origin_news_event: String(pick(r, "ob_origin_news_event") || ""),
+            ob_detection_news_event: String(pick(r, "ob_detection_news_event") || ""),
+            obOriginNewsEvent: String(pick(r, "ob_origin_news_event", "obOriginNewsEvent") || ""),
+            obDetectionNewsEvent: String(pick(r, "ob_detection_news_event", "obDetectionNewsEvent") || ""),
+            ob_origin_news_currency: String(pick(r, "ob_origin_news_currency") || ""),
+            ob_detection_news_currency: String(pick(r, "ob_detection_news_currency") || ""),
+            obOriginNewsCurrency: String(pick(r, "ob_origin_news_currency", "obOriginNewsCurrency") || ""),
+            obDetectionNewsCurrency: String(pick(r, "ob_detection_news_currency", "obDetectionNewsCurrency") || ""),
+            ob_origin_news_impact: String(pick(r, "ob_origin_news_impact") || ""),
+            ob_detection_news_impact: String(pick(r, "ob_detection_news_impact") || ""),
+            obOriginNewsImpact: String(pick(r, "ob_origin_news_impact", "obOriginNewsImpact") || ""),
+            obDetectionNewsImpact: String(pick(r, "ob_detection_news_impact", "obDetectionNewsImpact") || ""),
+            ob_origin_news_event_time: String(pick(r, "ob_origin_news_event_time") || ""),
+            ob_detection_news_event_time: String(pick(r, "ob_detection_news_event_time") || ""),
+            obOriginNewsEventTime: String(pick(r, "ob_origin_news_event_time", "obOriginNewsEventTime") || ""),
+            obDetectionNewsEventTime: String(pick(r, "ob_detection_news_event_time", "obDetectionNewsEventTime") || ""),
+            ob_origin_news_window_start: String(pick(r, "ob_origin_news_window_start") || ""),
+            ob_origin_news_window_end: String(pick(r, "ob_origin_news_window_end") || ""),
+            ob_detection_news_window_start: String(pick(r, "ob_detection_news_window_start") || ""),
+            ob_detection_news_window_end: String(pick(r, "ob_detection_news_window_end") || ""),
+            obOriginNewsWindowStart: String(pick(r, "ob_origin_news_window_start", "obOriginNewsWindowStart") || ""),
+            obOriginNewsWindowEnd: String(pick(r, "ob_origin_news_window_end", "obOriginNewsWindowEnd") || ""),
+            obDetectionNewsWindowStart: String(pick(r, "ob_detection_news_window_start", "obDetectionNewsWindowStart") || ""),
+            obDetectionNewsWindowEnd: String(pick(r, "ob_detection_news_window_end", "obDetectionNewsWindowEnd") || ""),
+            ob_origin_minutes_from_news: numOrNull(pick(r, "ob_origin_minutes_from_news")),
+            ob_detection_minutes_from_news: numOrNull(pick(r, "ob_detection_minutes_from_news")),
+            obOriginMinutesFromNews: numOrNull(pick(r, "ob_origin_minutes_from_news", "obOriginMinutesFromNews")),
+            obDetectionMinutesFromNews: numOrNull(pick(r, "ob_detection_minutes_from_news", "obDetectionMinutesFromNews")),
+            hasNewsCreatedTagFields,
+        };
+    });
 }
 
 export function parseTradesCSV(text) {
-    const { rows } = parseCSV(text);
+    const { headers, rows } = parseCSV(text);
+    const hasNewsCreatedTagFields = headers.some((header) => header.startsWith("ob_origin_news_") || header.startsWith("ob_detection_news_"));
     return rows.map((r, i) => {
         const directionRaw = pick(r, "direction", "side", "dir") || "Long";
         const directionText = String(directionRaw).toLowerCase();
@@ -239,6 +286,8 @@ export function parseTradesCSV(text) {
         const derivedTradeId = rawObId != null && rawObId !== "" ? formatEntityId("T", rawObId) : "";
         const fillSession = String(pick(r, "fill_session", "fillSession", "trade_session", "tradeSession", "entry_session", "entrySession") || "");
         const rawSession = String(pick(r, "session") || "");
+        const originNewsWindow = boolOrNull(pick(r, "ob_origin_news_window", "obOriginNewsWindow", "obCreatedDuringNews")) ?? false;
+        const detectionNewsWindow = boolOrNull(pick(r, "ob_detection_news_window", "obDetectionNewsWindow", "obDetectedDuringNews")) ?? false;
         return {
             id: String(rawTradeId || derivedTradeId || `T-${String(i + 1).padStart(3, "0")}`),
             rawTradeId: rawTradeId == null ? "" : String(rawTradeId),
@@ -330,6 +379,41 @@ export function parseTradesCSV(text) {
             session_filtered_session: String(pick(r, "session_filtered_session") || ""),
             bars_to_fill: numOrNull(pick(r, "bars_to_fill")),
             minutes_to_fill: numOrNull(pick(r, "minutes_to_fill")),
+            ob_origin_news_window: originNewsWindow,
+            ob_detection_news_window: detectionNewsWindow,
+            obOriginNewsWindow: originNewsWindow,
+            obDetectionNewsWindow: detectionNewsWindow,
+            obCreatedDuringNews: originNewsWindow,
+            obDetectedDuringNews: detectionNewsWindow,
+            ob_origin_news_event: String(pick(r, "ob_origin_news_event") || ""),
+            ob_detection_news_event: String(pick(r, "ob_detection_news_event") || ""),
+            obOriginNewsEvent: String(pick(r, "ob_origin_news_event", "obOriginNewsEvent") || ""),
+            obDetectionNewsEvent: String(pick(r, "ob_detection_news_event", "obDetectionNewsEvent") || ""),
+            ob_origin_news_currency: String(pick(r, "ob_origin_news_currency") || ""),
+            ob_detection_news_currency: String(pick(r, "ob_detection_news_currency") || ""),
+            obOriginNewsCurrency: String(pick(r, "ob_origin_news_currency", "obOriginNewsCurrency") || ""),
+            obDetectionNewsCurrency: String(pick(r, "ob_detection_news_currency", "obDetectionNewsCurrency") || ""),
+            ob_origin_news_impact: String(pick(r, "ob_origin_news_impact") || ""),
+            ob_detection_news_impact: String(pick(r, "ob_detection_news_impact") || ""),
+            obOriginNewsImpact: String(pick(r, "ob_origin_news_impact", "obOriginNewsImpact") || ""),
+            obDetectionNewsImpact: String(pick(r, "ob_detection_news_impact", "obDetectionNewsImpact") || ""),
+            ob_origin_news_event_time: String(pick(r, "ob_origin_news_event_time") || ""),
+            ob_detection_news_event_time: String(pick(r, "ob_detection_news_event_time") || ""),
+            obOriginNewsEventTime: String(pick(r, "ob_origin_news_event_time", "obOriginNewsEventTime") || ""),
+            obDetectionNewsEventTime: String(pick(r, "ob_detection_news_event_time", "obDetectionNewsEventTime") || ""),
+            ob_origin_news_window_start: String(pick(r, "ob_origin_news_window_start") || ""),
+            ob_origin_news_window_end: String(pick(r, "ob_origin_news_window_end") || ""),
+            ob_detection_news_window_start: String(pick(r, "ob_detection_news_window_start") || ""),
+            ob_detection_news_window_end: String(pick(r, "ob_detection_news_window_end") || ""),
+            obOriginNewsWindowStart: String(pick(r, "ob_origin_news_window_start", "obOriginNewsWindowStart") || ""),
+            obOriginNewsWindowEnd: String(pick(r, "ob_origin_news_window_end", "obOriginNewsWindowEnd") || ""),
+            obDetectionNewsWindowStart: String(pick(r, "ob_detection_news_window_start", "obDetectionNewsWindowStart") || ""),
+            obDetectionNewsWindowEnd: String(pick(r, "ob_detection_news_window_end", "obDetectionNewsWindowEnd") || ""),
+            ob_origin_minutes_from_news: numOrNull(pick(r, "ob_origin_minutes_from_news")),
+            ob_detection_minutes_from_news: numOrNull(pick(r, "ob_detection_minutes_from_news")),
+            obOriginMinutesFromNews: numOrNull(pick(r, "ob_origin_minutes_from_news", "obOriginMinutesFromNews")),
+            obDetectionMinutesFromNews: numOrNull(pick(r, "ob_detection_minutes_from_news", "obDetectionMinutesFromNews")),
+            hasNewsCreatedTagFields,
             news_blackout: boolOrNull(pick(r, "news_blackout")),
             news_blackout_trigger_time: String(pick(r, "news_blackout_trigger_time") || ""),
             news_blackout_event_time: String(pick(r, "news_blackout_event_time") || ""),
@@ -412,6 +496,41 @@ function enrichTradesWithOrderBlocks(trades, obLookup, pipSize) {
             obBottom: ob && isNum(ob.bot) ? Number(ob.bot) : null,
             obWidthPips: explicitWidth ?? computedWidth,
             obDirection: ob?.side === "bear" ? "Bearish" : ob?.side === "bull" ? "Bullish" : null,
+            ob_origin_news_window: trade.ob_origin_news_window || ob?.ob_origin_news_window || false,
+            ob_detection_news_window: trade.ob_detection_news_window || ob?.ob_detection_news_window || false,
+            obOriginNewsWindow: trade.obOriginNewsWindow || ob?.obOriginNewsWindow || false,
+            obDetectionNewsWindow: trade.obDetectionNewsWindow || ob?.obDetectionNewsWindow || false,
+            obCreatedDuringNews: trade.obCreatedDuringNews || ob?.obCreatedDuringNews || false,
+            obDetectedDuringNews: trade.obDetectedDuringNews || ob?.obDetectedDuringNews || false,
+            ob_origin_news_event: trade.ob_origin_news_event || ob?.ob_origin_news_event || "",
+            ob_detection_news_event: trade.ob_detection_news_event || ob?.ob_detection_news_event || "",
+            obOriginNewsEvent: trade.obOriginNewsEvent || ob?.obOriginNewsEvent || "",
+            obDetectionNewsEvent: trade.obDetectionNewsEvent || ob?.obDetectionNewsEvent || "",
+            ob_origin_news_currency: trade.ob_origin_news_currency || ob?.ob_origin_news_currency || "",
+            ob_detection_news_currency: trade.ob_detection_news_currency || ob?.ob_detection_news_currency || "",
+            obOriginNewsCurrency: trade.obOriginNewsCurrency || ob?.obOriginNewsCurrency || "",
+            obDetectionNewsCurrency: trade.obDetectionNewsCurrency || ob?.obDetectionNewsCurrency || "",
+            ob_origin_news_impact: trade.ob_origin_news_impact || ob?.ob_origin_news_impact || "",
+            ob_detection_news_impact: trade.ob_detection_news_impact || ob?.ob_detection_news_impact || "",
+            obOriginNewsImpact: trade.obOriginNewsImpact || ob?.obOriginNewsImpact || "",
+            obDetectionNewsImpact: trade.obDetectionNewsImpact || ob?.obDetectionNewsImpact || "",
+            ob_origin_news_event_time: trade.ob_origin_news_event_time || ob?.ob_origin_news_event_time || "",
+            ob_detection_news_event_time: trade.ob_detection_news_event_time || ob?.ob_detection_news_event_time || "",
+            obOriginNewsEventTime: trade.obOriginNewsEventTime || ob?.obOriginNewsEventTime || "",
+            obDetectionNewsEventTime: trade.obDetectionNewsEventTime || ob?.obDetectionNewsEventTime || "",
+            ob_origin_news_window_start: trade.ob_origin_news_window_start || ob?.ob_origin_news_window_start || "",
+            ob_origin_news_window_end: trade.ob_origin_news_window_end || ob?.ob_origin_news_window_end || "",
+            ob_detection_news_window_start: trade.ob_detection_news_window_start || ob?.ob_detection_news_window_start || "",
+            ob_detection_news_window_end: trade.ob_detection_news_window_end || ob?.ob_detection_news_window_end || "",
+            obOriginNewsWindowStart: trade.obOriginNewsWindowStart || ob?.obOriginNewsWindowStart || "",
+            obOriginNewsWindowEnd: trade.obOriginNewsWindowEnd || ob?.obOriginNewsWindowEnd || "",
+            obDetectionNewsWindowStart: trade.obDetectionNewsWindowStart || ob?.obDetectionNewsWindowStart || "",
+            obDetectionNewsWindowEnd: trade.obDetectionNewsWindowEnd || ob?.obDetectionNewsWindowEnd || "",
+            ob_origin_minutes_from_news: trade.ob_origin_minutes_from_news ?? ob?.ob_origin_minutes_from_news ?? null,
+            ob_detection_minutes_from_news: trade.ob_detection_minutes_from_news ?? ob?.ob_detection_minutes_from_news ?? null,
+            obOriginMinutesFromNews: trade.obOriginMinutesFromNews ?? ob?.obOriginMinutesFromNews ?? null,
+            obDetectionMinutesFromNews: trade.obDetectionMinutesFromNews ?? ob?.obDetectionMinutesFromNews ?? null,
+            hasNewsCreatedTagFields: trade.hasNewsCreatedTagFields || ob?.hasNewsCreatedTagFields || false,
         };
     });
 }
@@ -842,6 +961,7 @@ export async function ingestRunBundle(fileList) {
             ? "missing"
             : (mapped0.quality === "nearest_prior" || mapped1.quality === "nearest_prior" ? "nearest_prior" : "exact");
         return {
+            ...b,
             id: b.id,
             originTime: b.originTime,
             endTime: b.endTime,
@@ -888,6 +1008,7 @@ export async function ingestRunBundle(fileList) {
     // Build run id and summary
     const cfg = collected.config;
     const sm  = collected.summary;
+    const entryResultsSummary = sm.entry_results || sm.entryResults || {};
     const id = String(sm.id || cfg.id || sm.run_id || cfg.run_id || `imported_${Date.now()}`);
     const originalRunId = id;
     const wins = primaryTrades.filter((t) => t.outcome === "Win").length;
@@ -914,7 +1035,8 @@ export async function ingestRunBundle(fileList) {
         validation:   Number(sm.validation ?? 100),
         integrity,
         protection_results: sm.protection_results || {},
-        entry_results: sm.entry_results || {},
+        entry_results: entryResultsSummary,
+        entryResults: entryResultsSummary,
         executionMode:sm.execution_mode || cfg.execution_mode || primaryVariant,
         reverseCancels: Number(sm.reverse_cancels ?? sm.reverseCancels ?? 0),
         date:         (sm.completed_at || new Date().toISOString()).slice(0, 10),
@@ -953,7 +1075,7 @@ export async function ingestRunBundle(fileList) {
             tradesOmittedForStorage: false,
         },
         entryResults: {
-            summary: sm.entry_results || {},
+            summary: entryResultsSummary,
             tradesByMode: entryTradesByMode,
             equityCurveByMode: entryEquityCurveByMode,
             sourceFiles: collected.entrySourceFiles,
