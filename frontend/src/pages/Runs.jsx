@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { PageHeader } from "@/components/lab/AppShell";
+import { LabRunHero } from "@/components/lab/LabRunHero";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
 import { Field, NeonSelect, NeonInput } from "@/components/lab/controls";
@@ -107,10 +107,10 @@ export default function Runs() {
 
     return (
         <div className="pb-12">
-            <PageHeader
-                eyebrow="RUNS INVENTORY"
+            <LabRunHero
+                pageLabel="Runs Inventory"
                 title="All Backtest Runs"
-                subtitle={`${filtered.length} run${filtered.length === 1 ? "" : "s"} matching filters`}
+                description={`${filtered.length} run${filtered.length === 1 ? "" : "s"} matching filters`}
             />
 
             <div className="px-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3 mb-4">

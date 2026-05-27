@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { PageHeader } from "@/components/lab/AppShell";
+import { LabRunHero } from "@/components/lab/LabRunHero";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
 import { Segment, NeonSelect, Field } from "@/components/lab/controls";
@@ -26,10 +26,10 @@ export default function SweepLab() {
 
     return (
         <div className="pb-12">
-            <PageHeader
-                eyebrow="SWEEP LAB"
+            <LabRunHero
+                pageLabel="Sweep Lab"
                 title="Parameter Sweep Analysis"
-                subtitle="Explore the response surface of each strategy parameter. Identify stable, robust, and high-Net-R configurations."
+                description="Explore the response surface of each strategy parameter. Identify stable, robust, and high-Net-R configurations."
             />
 
             <div className="px-6 mb-4">

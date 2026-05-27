@@ -2,8 +2,7 @@ import React from "react";
 import { cn } from "@/lib/utils";
 import { ChevronUp, ChevronDown, ChevronsUpDown } from "lucide-react";
 
-// Premium dense data table styled for research dashboards.
-// v2: adds column sorting + heatmap mode.
+// Premium dense data table — canonical table primitive for research dashboards.
 export function DataTable({
     columns,
     rows,
@@ -13,13 +12,15 @@ export function DataTable({
     compact = true,
     testId,
     maxHeight,
-    // v2 additions
-    heatmap = false,           // shade numeric cells by intensity (green/red)
-    defaultSortKey = null,     // column key to sort by on mount
-    defaultSortDir = "desc",   // "asc" | "desc"
+    heatmap = false,
+    defaultSortKey = null,
+    defaultSortDir = "desc",
 }) {
     const [sortKey, setSortKey] = React.useState(defaultSortKey);
     const [sortDir, setSortDir] = React.useState(defaultSortDir);
+
+    const cellPad = compact ? "px-3 py-1.5" : "px-4 py-2.5";
+    const headPad = compact ? "px-3 py-2" : "px-4 py-2.5";
 
     const handleHeaderClick = (col) => {
         if (col.sortable === false) return;
@@ -48,7 +49,6 @@ export function DataTable({
         });
     }, [rows, sortKey, sortDir, columns]);
 
-    // Compute per-column max absolute value for heatmap scaling
     const heatRanges = React.useMemo(() => {
         if (!heatmap) return {};
         const out = {};
@@ -67,7 +67,7 @@ export function DataTable({
             className="relative overflow-auto scrollbar-thin"
             style={maxHeight ? { maxHeight } : undefined}
         >
-            <table className="w-full text-[12px] font-mono border-collapse">
+            <table className="w-full border-collapse text-[12px] font-display">
                 <thead className="sticky top-0 z-10 bg-[hsl(var(--panel-2))] backdrop-blur">
                     <tr>
                         {columns.map((col) => (
@@ -75,15 +75,20 @@ export function DataTable({
                                 key={col.key}
                                 onClick={() => handleHeaderClick(col)}
                                 className={cn(
-                                    "text-left text-[10px] font-mono uppercase tracking-[0.18em] text-title-lab font-medium",
-                                    compact ? "px-3 py-2" : "px-4 py-2.5",
-                                    col.align === "right" && "text-right",
-                                    col.align === "center" && "text-center",
-                                    col.sortable !== false && "cursor-pointer hover:text-white transition-colors select-none",
+                                    "font-display text-[10.5px] font-semibold uppercase tracking-[0.06em] leading-tight text-title-lab align-middle",
+                                    headPad,
+                                    col.align === "right" ? "text-right" : col.align === "center" ? "text-center" : "text-left",
+                                    col.sortable !== false && "cursor-pointer hover:text-[hsl(var(--text))] transition-colors select-none",
                                 )}
                                 style={col.width ? { width: col.width } : undefined}
                             >
-                                <span className={cn("inline-flex items-center gap-1", col.align === "right" && "flex-row-reverse")}>
+                                <span
+                                    className={cn(
+                                        "inline-flex items-center gap-1 whitespace-nowrap",
+                                        col.align === "right" && "w-full justify-end",
+                                        col.align === "center" && "w-full justify-center",
+                                    )}
+                                >
                                     {col.label}
                                     {col.sortable !== false && <SortIcon active={sortKey === col.key} dir={sortDir} />}
                                 </span>
@@ -126,12 +131,12 @@ export function DataTable({
                                             key={col.key}
                                             style={cellStyle}
                                             className={cn(
-                                                compact ? "px-3 py-1.5" : "px-4 py-2.5",
+                                                cellPad,
                                                 col.align === "right" && "text-right",
                                                 col.align === "center" && "text-center",
-                                                col.mono === false ? "font-sans" : "font-mono",
-                                                "text-[hsl(var(--text-2))]",
-                                                selected && "text-white",
+                                                col.mono === true ? "font-mono" : "font-display",
+                                                "align-middle tabular-nums leading-snug whitespace-nowrap text-[hsl(var(--text-2))]",
+                                                selected && "text-[hsl(var(--text))]",
                                             )}
                                         >
                                             {col.render ? col.render(row, idx) : row[col.key]}

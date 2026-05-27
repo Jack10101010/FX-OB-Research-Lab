@@ -1,10 +1,11 @@
 import React from "react";
 import { Link, useParams } from "react-router-dom";
 import { NeonPanel } from "@/components/lab/NeonPanel";
+import { LabRunHero } from "@/components/lab/LabRunHero";
 import { MetricChip } from "@/components/lab/MetricChip";
 import { EquityCurveV2, MiniLine } from "@/components/lab/EquityCurve";
 import { DataTable, Pill } from "@/components/lab/DataTable";
-import { NeonButton, NeonInput, NeonSelect } from "@/components/lab/controls";
+import { NeonButton, NeonInput, NeonSelect, FilterToggle } from "@/components/lab/controls";
 import { compactTimeframe, formatRunDateRange, getRunDisplayName, updateRunBundle, useDataset } from "@/data/store";
 import { setSelectedTradeVariant } from "@/data/store";
 import { FolderKanban, Map as MapIcon, GitCompareArrows, TrendingUp, Hash, Activity, Target, AlertTriangle, ShieldCheck, Edit3 } from "lucide-react";
@@ -618,35 +619,24 @@ export default function RunDetail() {
 
     return (
         <div className="pb-12">
-            <section className="mx-6 mb-5 px-1 py-4">
-                <div className="flex items-start justify-between gap-4 flex-wrap">
-                    <div className="min-w-0">
-                        <div className="mb-2 flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[hsl(var(--accent-secondary))]">
-                            <span className="h-px w-9 bg-[hsl(var(--accent-secondary)/0.78)]" />
-                            Run Detail
-                        </div>
-                        <h1 className="truncate text-3xl font-semibold tracking-[-0.01em] text-[hsl(var(--text-1))]">
-                            {displayName}
-                        </h1>
-                        <div className="mt-2 truncate text-[13px] font-medium text-[hsl(var(--accent-primary))]">
-                            Run: {displayName} · {runSymbol} · {runTf} · {run.trades} trades
-                        </div>
-                        <div className="mt-1 text-[12px] leading-relaxed text-[hsl(var(--text-2))]">
-                            <div>{runSymbol} · {runTf} · RR {Number.isFinite(runRr) ? runRr.toFixed(1) : "—"}</div>
-                            <div className="text-[hsl(var(--text-3))]">{runDateRangeLine}</div>
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-2 flex-wrap">
+            <LabRunHero
+                pageLabel="Run Detail"
+                title={displayName}
+                runLine={`Run: ${displayName} · ${runSymbol} · ${runTf} · ${run.trades} trades`}
+                configLine={`${runSymbol} · ${runTf} · RR ${Number.isFinite(runRr) ? runRr.toFixed(1) : "—"}`}
+                dateRangeLine={runDateRangeLine}
+                actions={(
+                    <>
                         <Link to={projectId ? `/projects/${encodeURIComponent(projectId)}` : "/projects"}>
                             <NeonButton icon={FolderKanban} tone="ghost">Open Project</NeonButton>
                         </Link>
                         <Link to="/strategy-map"><NeonButton icon={MapIcon} tone="primary">Open Strategy Map</NeonButton></Link>
                         <Link to="/comparison"><NeonButton icon={GitCompareArrows} tone="ghost">Compare Run</NeonButton></Link>
-                    </div>
-                </div>
-            </section>
+                    </>
+                )}
+            />
 
-            <div className="px-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            <div className="kpi-strip">
                 <MetricChip
                     label="Net R"
                     value={`${validNetR >= 0 ? "+" : ""}${validNetR.toFixed(1)}R`}
@@ -695,19 +685,14 @@ export default function RunDetail() {
                             { label: "Excl. News",   active: equityExcludeNews,   set: setEquityExcludeNews   },
                             { label: "Excl. Missed", active: equityExcludeMissed, set: setEquityExcludeMissed },
                         ].map(({ label, active, set }) => (
-                            <button
+                            <FilterToggle
                                 key={label}
-                                type="button"
+                                active={active}
+                                inactiveBorder="mid"
                                 onClick={() => set((v) => !v)}
-                                className={[
-                                    "px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider border transition-colors",
-                                    active
-                                        ? "border-[hsl(var(--accent-primary)/0.7)] bg-[hsl(var(--accent-primary)/0.12)] text-[hsl(var(--accent-primary))]"
-                                        : "border-[hsl(var(--border-mid))] text-muted-lab hover:text-white",
-                                ].join(" ")}
                             >
                                 {label}
-                            </button>
+                            </FilterToggle>
                         ))}
                         <span className="ml-auto text-[9.5px] font-mono text-muted-lab opacity-60 italic">
                             Equity filters affect chart only
@@ -720,19 +705,14 @@ export default function RunDetail() {
                             { label: "Drawdown",   active: showDrawdown, set: setShowDrawdown },
                             { label: "News",       active: showNews,     set: setShowNews     },
                         ].map(({ label, active, set }) => (
-                            <button
+                            <FilterToggle
                                 key={label}
-                                type="button"
+                                active={active}
+                                inactiveBorder="mid"
                                 onClick={() => set((v) => !v)}
-                                className={[
-                                    "px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider border transition-colors",
-                                    active
-                                        ? "border-[hsl(var(--accent-primary)/0.7)] bg-[hsl(var(--accent-primary)/0.12)] text-[hsl(var(--accent-primary))]"
-                                        : "border-[hsl(var(--border-mid))] text-muted-lab hover:text-white",
-                                ].join(" ")}
                             >
                                 {label}
-                            </button>
+                            </FilterToggle>
                         ))}
                     </div>
                     {equityChartData.length === 0 ? (
@@ -1025,16 +1005,16 @@ export default function RunDetail() {
                         testId="run-detail-trades"
                         maxHeight={360}
                         columns={[
-                            { key: "displayTradeId", label: "Trade ID", render: (r) => r.displayTradeId || r.id || "—" },
-                            { key: "displayObId",    label: "OB ID",    render: (r) => r.displayObId || formatObId(r.obId) },
+                            { key: "displayTradeId", label: "Trade ID", mono: true, render: (r) => r.displayTradeId || r.id || "—" },
+                            { key: "displayObId",    label: "OB ID",    mono: true, render: (r) => r.displayObId || formatObId(r.obId) },
                             { key: "direction", label: "Dir", render: (r) => <Pill tone={r.direction === "Long" ? "success" : "danger"}>{r.direction}</Pill> },
                             { key: "structure", label: "Struct" },
                             { key: "fillSession", label: "Fill Session", render: displaySession },
-                            { key: "entry",     label: "Entry Time", render: (r) => formatUtcDisplay(r.entry) },
-                            { key: "exit",      label: "Exit Time",  render: (r) => formatUtcDisplay(r.exit) },
-                            { key: "entryPrice",label: "Entry",   align: "right", render: (r) => formatPrice(r.entryPrice) },
-                            { key: "stop",      label: "Stop",    align: "right", render: (r) => formatPrice(r.stop) },
-                            { key: "tp",        label: "TP",      align: "right", render: (r) => formatPrice(r.tp) },
+                            { key: "entry",     label: "Entry Time", mono: true, render: (r) => formatUtcDisplay(r.entry) },
+                            { key: "exit",      label: "Exit Time",  mono: true, render: (r) => formatUtcDisplay(r.exit) },
+                            { key: "entryPrice",label: "Entry",   align: "right", mono: true, render: (r) => formatPrice(r.entryPrice) },
+                            { key: "stop",      label: "Stop",    align: "right", mono: true, render: (r) => formatPrice(r.stop) },
+                            { key: "tp",        label: "TP",      align: "right", mono: true, render: (r) => formatPrice(r.tp) },
                             { key: "r",         label: "R",       align: "right", render: (r) => <LedgerR trade={r} value={r.r} /> },
                             { key: "outcome",   label: "Result",  render: (r) => <Pill tone={resultTone(r)}>{formatOutcome(r)}</Pill> },
                         ]}

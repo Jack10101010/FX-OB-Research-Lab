@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { LabRunHero } from "@/components/lab/LabRunHero";
 import { NeonPanel } from "@/components/lab/NeonPanel";
-import { NeonInput, NeonSelect, Segment, NeonButton } from "@/components/lab/controls";
+import { NeonInput, NeonSelect, Segment, NeonButton, FilterToggle } from "@/components/lab/controls";
 import { Pill } from "@/components/lab/DataTable";
 import { CandleChart } from "@/components/lab/CandleChart";
 import { compactTimeframe, formatRunDateRange, getRunDisplayName, rehydrateRunCandles, useDataset } from "@/data/store";
@@ -366,33 +367,18 @@ export default function StrategyMap() {
 
     return (
         <div className="pb-12">
-            <div className="px-6 pt-6 pb-4">
-                <div className="flex items-start justify-between gap-4 flex-wrap">
-                    <div className="min-w-0">
-                        <div className="text-[10px] font-mono uppercase tracking-[0.32em] text-[hsl(var(--accent-primary))] mb-2">
-                            <span className="inline-block w-6 h-px bg-[hsl(var(--accent-primary))] mr-2 align-middle" />
-                            Strategy Map
-                        </div>
-                        <h1 className="font-display text-[28px] sm:text-[34px] leading-tight font-semibold text-white tracking-tight truncate">
-                            {heroTitle}
-                        </h1>
-                        <div className="mt-1.5 text-[12px] font-mono text-[hsl(var(--accent-primary))] truncate">
-                            Run: {getRunDisplayName(bundle || activeRunMeta || { id: runId })} · {heroSymbol} · {heroTf} · {heroTrades ?? "—"} trades
-                        </div>
-                        <div className="mt-1 text-[12px] text-muted-lab">
-                            <div>{heroSymbol} · {heroTf} · RR {Number.isFinite(heroRr) ? heroRr.toFixed(1) : "—"}</div>
-                            <div>{heroDateRange || "—"}</div>
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                        {projectId && (
-                            <Link to={`/projects/${encodeURIComponent(projectId)}`}>
-                                <NeonButton icon={FolderKanban} tone="ghost">Open Project</NeonButton>
-                            </Link>
-                        )}
-                    </div>
-                </div>
-            </div>
+            <LabRunHero
+                pageLabel="Strategy Map"
+                title={heroTitle}
+                runLine={`Run: ${getRunDisplayName(bundle || activeRunMeta || { id: runId })} · ${heroSymbol} · ${heroTf} · ${heroTrades ?? "—"} trades`}
+                configLine={`${heroSymbol} · ${heroTf} · RR ${Number.isFinite(heroRr) ? heroRr.toFixed(1) : "—"}`}
+                dateRangeLine={heroDateRange || "—"}
+                actions={projectId && (
+                    <Link to={`/projects/${encodeURIComponent(projectId)}`}>
+                        <NeonButton icon={FolderKanban} tone="ghost">Open Project</NeonButton>
+                    </Link>
+                )}
+            />
 
             <div className={`px-6 grid grid-cols-1 gap-3 min-w-0 ${showTradeList ? "xl:grid-cols-[240px_minmax(0,1fr)]" : ""}`}>
                 {showTradeList && (
@@ -1455,16 +1441,15 @@ function variantLabel(v) {
 }
 
 function Toggle({ label, checked, onChange, dot }) {
-    const dotColor = { primary: "hsl(var(--accent-primary))", secondary: "hsl(var(--accent-secondary))", success: "hsl(var(--success))", danger: "hsl(var(--danger))", warning: "hsl(var(--warning))" }[dot];
     return (
-        <button
+        <FilterToggle
+            active={checked}
+            inactiveBorder="mid"
+            dot={dot}
             onClick={() => onChange(!checked)}
-            className={`inline-flex items-center gap-2 px-2.5 py-1 text-[11px] font-mono uppercase tracking-wider clip-bevel-sm border transition-colors ${
-                checked ? "border-[hsl(var(--accent-primary)/0.6)] bg-[hsl(var(--panel-2))] text-white" : "border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] opacity-60"
-            }`}
+            className="text-[11px] tracking-wider"
         >
-            <span className="w-1.5 h-1.5 rounded-full" style={{ background: dotColor, boxShadow: `0 0 6px ${dotColor}` }} />
             {label}
-        </button>
+        </FilterToggle>
     );
 }

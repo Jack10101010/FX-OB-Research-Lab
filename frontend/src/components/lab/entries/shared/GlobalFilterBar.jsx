@@ -1,6 +1,7 @@
 import React from "react";
 import { cn } from "@/lib/utils";
 import { Filter, X } from "lucide-react";
+import { FilterToggle } from "@/components/lab/controls";
 import { SESSIONS } from "../analytics/entryFormatters";
 
 const DIRECTIONS = ["Long", "Short"];
@@ -11,14 +12,13 @@ export function GlobalFilterBar({ filters, toggleSession, toggleDirection, clear
     return (
         <div className="border-b border-[hsl(var(--border-soft)/0.5)] bg-[hsl(var(--panel)/0.5)]">
             <div className="px-6 py-2 flex items-center gap-3 flex-wrap">
-                <button
-                    type="button"
+                <FilterToggle
+                    active={hasActiveFilters}
                     onClick={() => setOpen(o => !o)}
+                    tone={hasActiveFilters ? "warning" : "primary"}
                     className={cn(
-                        "flex items-center gap-1.5 px-2.5 py-1 clip-bevel-sm border text-[10px] font-mono uppercase tracking-wider transition-colors",
-                        hasActiveFilters
-                            ? "border-[hsl(var(--warning)/0.6)] text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.08)]"
-                            : "border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))] bg-transparent hover:border-[hsl(var(--accent-primary)/0.4)] hover:text-white",
+                        "gap-1.5",
+                        !hasActiveFilters && "bg-transparent",
                     )}
                 >
                     <Filter className="w-3 h-3" />
@@ -26,9 +26,8 @@ export function GlobalFilterBar({ filters, toggleSession, toggleDirection, clear
                     {hasActiveFilters && (
                         <span className="w-1.5 h-1.5 rounded-full bg-[hsl(var(--warning))]" />
                     )}
-                </button>
+                </FilterToggle>
 
-                {/* Active filter pills */}
                 {filters.sessions.map(s => (
                     <FilterPill key={s} label={s} onRemove={() => toggleSession(s)} />
                 ))}
@@ -39,7 +38,7 @@ export function GlobalFilterBar({ filters, toggleSession, toggleDirection, clear
                     <button
                         type="button"
                         onClick={clearFilters}
-                        className="flex items-center gap-1 text-[9.5px] font-mono uppercase tracking-wider text-muted-lab hover:text-white transition-colors"
+                        className="flex items-center gap-1 text-[9.5px] font-display uppercase tracking-wider text-muted-lab hover:text-white transition-colors"
                     >
                         <X className="w-3 h-3" />
                         Clear all
@@ -60,24 +59,20 @@ export function GlobalFilterBar({ filters, toggleSession, toggleDirection, clear
 function FilterGroup({ label, items, active, onToggle }) {
     return (
         <div className="flex items-center gap-2">
-            <span className="text-[9.5px] font-mono uppercase tracking-[0.2em] text-muted-lab w-16 shrink-0">{label}</span>
+            <span className="text-[9.5px] font-display uppercase tracking-[0.2em] text-muted-lab w-16 shrink-0">{label}</span>
             <div className="flex flex-wrap gap-1.5">
                 {items.map(item => {
                     const isActive = active.includes(item);
                     return (
-                        <button
+                        <FilterToggle
                             key={item}
-                            type="button"
+                            size="compact"
+                            active={isActive}
                             onClick={() => onToggle(item)}
-                            className={cn(
-                                "px-2 py-0.5 clip-bevel-sm border text-[10px] font-mono uppercase tracking-wider transition-colors",
-                                isActive
-                                    ? "border-[hsl(var(--accent-primary)/0.7)] bg-[hsl(var(--accent-primary)/0.14)] text-white"
-                                    : "border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))] hover:border-[hsl(var(--accent-primary)/0.4)] hover:text-white",
-                            )}
+                            className={isActive ? "!text-white" : undefined}
                         >
                             {item}
-                        </button>
+                        </FilterToggle>
                     );
                 })}
             </div>
@@ -87,9 +82,9 @@ function FilterGroup({ label, items, active, onToggle }) {
 
 function FilterPill({ label, onRemove }) {
     return (
-        <span className="flex items-center gap-1 px-2 py-0.5 clip-bevel-sm border border-[hsl(var(--accent-primary)/0.5)] bg-[hsl(var(--accent-primary)/0.10)] text-[10px] font-mono uppercase tracking-wider text-white">
+        <span className="flex items-center gap-1 px-2 py-0.5 clip-bevel-sm border border-[hsl(var(--accent-primary)/0.5)] bg-[hsl(var(--accent-primary)/0.10)] text-[10px] font-display uppercase tracking-wider text-white">
             {label}
-            <button type="button" onClick={onRemove} className="hover:text-[hsl(var(--danger))] transition-colors">
+            <button type="button" onClick={onRemove} className="hover:text-[hsl(var(--danger))] transition-colors" aria-label={`Remove ${label} filter`}>
                 <X className="w-2.5 h-2.5" />
             </button>
         </span>

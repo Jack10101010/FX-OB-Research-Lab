@@ -34,7 +34,11 @@ function RowTags({ row }) {
     if (!row.isBaseline && row.exact && conf.tone !== "success") {
         tags.push(<Pill key="conf" tone={conf.tone}>{conf.label}</Pill>);
     }
-    return tags.length ? <div className="flex flex-wrap gap-1">{tags}</div> : <span className="text-muted-lab">—</span>;
+    return tags.length ? (
+        <div className="flex max-w-[210px] flex-wrap items-center gap-1 leading-none [&_.row-chip]:whitespace-nowrap">
+            {tags}
+        </div>
+    ) : <span className="text-muted-lab">—</span>;
 }
 
 const SORT_STORAGE_KEY = "fxob_entries_workspace_exact_sort_v1";
@@ -49,12 +53,12 @@ function formatMinutes(value) {
 }
 
 function gridTemplate(colVis) {
-    return "minmax(160px,2fr) minmax(160px,1.5fr) 60px 56px 56px 60px 56px 56px 60px 64px 64px 64px 72px"
-        + (colVis.profitFactor ? " 48px" : "")
-        + (colVis.avgMAE ? " 56px" : "")
-        + (colVis.avgMFE ? " 56px" : "")
-        + (colVis.avgTimeToTP ? " 72px" : "")
-        + (colVis.avgTimeToSL ? " 72px" : "");
+    return "minmax(190px,2fr) minmax(190px,1.35fr) 64px 62px 62px 66px 58px 58px 62px 72px 72px 72px 78px"
+        + (colVis.profitFactor ? " 54px" : "")
+        + (colVis.avgMAE ? " 62px" : "")
+        + (colVis.avgMFE ? " 62px" : "")
+        + (colVis.avgTimeToTP ? " 86px" : "")
+        + (colVis.avgTimeToSL ? " 86px" : "");
 }
 
 function FamilySection({ family, rows, colVis, open, onToggle }) {
@@ -77,7 +81,7 @@ function FamilySection({ family, rows, colVis, open, onToggle }) {
 function ResultRow({ row, colVis }) {
     return (
         <div className={cn(
-            "grid text-[11.5px] font-mono border-b border-[hsl(var(--border-soft)/0.3)] transition-colors px-3 py-1.5 gap-2",
+            "grid min-h-[38px] items-center gap-2 border-b border-[hsl(var(--border-soft)/0.3)] px-3 py-2 text-[12px] font-display tabular-nums transition-colors",
             "hover:bg-[hsl(var(--panel-2)/0.5)]",
             row.isBestNetR && !row.isBaseline
                 ? "bg-[hsl(var(--success)/0.08)] border-[hsl(var(--success)/0.4)] shadow-[inset_3px_0_0_hsl(var(--success))]"
@@ -87,10 +91,10 @@ function ResultRow({ row, colVis }) {
         )}
             style={{ gridTemplateColumns: gridTemplate(colVis) }}
         >
-            <div className={cn("truncate", row.isBaseline ? "text-[hsl(var(--accent-secondary))] font-semibold" : row.isBestNetR ? "text-[hsl(var(--success))] font-semibold" : "text-white")}>
+            <div className={cn("truncate pr-1 font-medium", row.isBaseline ? "text-[hsl(var(--accent-secondary))] font-semibold" : row.isBestNetR ? "text-[hsl(var(--success))] font-semibold" : "text-white")}>
                 {row.label}
             </div>
-            <div><RowTags row={row} /></div>
+            <div className="min-w-0"><RowTags row={row} /></div>
             <div className="text-right text-[hsl(var(--text-2))]">{row.threshold || "—"}</div>
             <div className="text-right text-[hsl(var(--text-2))]">{fmtCount(row.eligible ?? row.trades)}</div>
             <div className="text-right text-[hsl(var(--text-2))]">{fmtCount(row.fills)}</div>
@@ -133,7 +137,7 @@ function TableHeader({ colVis, sortState, onSort }) {
         ...(colVis.avgTimeToSL ? [{ key: "avgTimeToSL", label: "Avg SL Time" }] : []),
     ];
     return (
-        <div className="sticky top-0 z-10 bg-[hsl(var(--panel-2))] backdrop-blur border-b border-[hsl(var(--border-soft))]"
+        <div className="sticky top-0 z-10 grid gap-2 border-b border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] px-3 backdrop-blur"
             style={{ display: "grid", gridTemplateColumns: gridTemplate(colVis) }}
         >
             {headers.map((h, i) => (
@@ -143,7 +147,7 @@ function TableHeader({ colVis, sortState, onSort }) {
                     disabled={h.sortable === false}
                     onClick={() => onSort(h.key)}
                     className={cn(
-                        "px-3 py-2 text-[9.5px] font-mono uppercase tracking-[0.18em] text-title-lab disabled:cursor-default",
+                        "py-2 text-[10.5px] font-display font-semibold uppercase leading-tight tracking-[0.06em] text-title-lab disabled:cursor-default",
                         i > 1 ? "text-right" : "text-left",
                         h.sortable === false ? "" : "hover:text-white transition-colors",
                     )}
@@ -218,7 +222,7 @@ export function ExactResultsPanel({ exactRows, colVis, setColVis }) {
             }
         >
             <div className="overflow-x-auto scrollbar-thin">
-                <div className="min-w-[1100px]">
+                <div className="min-w-[1280px]">
                     <TableHeader colVis={colVis} sortState={sortState} onSort={handleSort} />
                     {families.map(family => (
                         <FamilySection

@@ -4,7 +4,8 @@
 // Mirrors EntriesWorkspace.jsx architecture exactly.
 
 import React, { useMemo } from "react";
-import { useDataset } from "@/data/store";
+import { getRunDisplayName, useDataset } from "@/data/store";
+import { LabRunHero } from "@/components/lab/LabRunHero";
 import { WorkspaceTabBar } from "../entries/shared/WorkspaceTabBar";
 import { useFailuresWorkspace, FAILURES_TABS, applyFilter } from "./shared/useFailuresWorkspace";
 import { FailuresCohortFilter } from "./global/FailuresCohortFilter";
@@ -81,10 +82,19 @@ function resolveActiveConfig(dataset) {
         || {};
 }
 
+function resolveActiveRun(dataset) {
+    const activeRunId = dataset?.activeRunId;
+    const runCollection = dataset?.runs;
+    const keyedRun = activeRunId && runCollection && !Array.isArray(runCollection) ? runCollection[activeRunId] : null;
+    const listedRun = activeRunId && Array.isArray(dataset?.RUNS) ? dataset.RUNS.find((run) => run?.id === activeRunId) : null;
+    return dataset?.ACTIVE_RUN || dataset?.activeRun || keyedRun || listedRun || dataset?.runData || null;
+}
+
 export function FailuresWorkspace() {
     const dataset = useDataset();
     const trades = useMemo(() => resolveActiveTrades(dataset), [dataset]);
     const config = useMemo(() => resolveActiveConfig(dataset), [dataset]);
+    const activeRun = useMemo(() => resolveActiveRun(dataset), [dataset]);
 
     const {
         activeTab,
@@ -96,6 +106,8 @@ export function FailuresWorkspace() {
         setSeverityMin,
         clearFilters,
         hasActiveFilters,
+        filtersExpanded,
+        setFiltersExpanded,
     } = useFailuresWorkspace();
 
     // ── Data pipeline ─────────────────────────────────────────────────────────
@@ -131,6 +143,7 @@ export function FailuresWorkspace() {
         allLosers:  scoredLosers,       // unfiltered scored losers (for cohort compare)
         allTrades:  trades,             // full trade list (needed for equity curve, streaks)
         config,                         // backtest config (executionTf etc.)
+        filters,                        // current cohort filter state (for ViewManager saved views)
     };
 
     // ── Render ────────────────────────────────────────────────────────────────
@@ -141,6 +154,18 @@ export function FailuresWorkspace() {
 
     return (
         <div className="flex flex-col min-h-0">
+            <LabRunHero
+                pageLabel="Failures Lab"
+                title={activeRun ? getRunDisplayName(activeRun) : "Failure Research Workspace"}
+                runLine={`${trades.length} trades · ${scoredLosers.length} losses`}
+                configLine={[
+                    activeRun?.symbol || config?.symbol,
+                    activeRun?.detectionTf || config?.detection_tf || config?.detectionTf,
+                ].filter(Boolean).join(" · ")}
+                description="Failure forensics across losing trades, invalidation patterns, sessions, streaks, and prevention candidates."
+                className="mt-4 mb-0"
+            />
+
             {/* Tab rail */}
             <WorkspaceTabBar
                 tabs={FAILURES_TABS}
@@ -162,6 +187,8 @@ export function FailuresWorkspace() {
                 hasActiveFilters={hasActiveFilters}
                 totalLosers={scoredLosers.length}
                 filteredLosers={filteredLosers.length}
+                expanded={filtersExpanded}
+                onExpandedChange={setFiltersExpanded}
             />
 
             {/* Module render switch */}
@@ -174,7 +201,7 @@ export function FailuresWorkspace() {
                 {activeTab === "streaks"    && <StreakAnalysis        {...sharedProps} />}
                 {activeTab === "prevention" && <PreventionEngine     {...sharedProps} />}
                 {activeTab === "drilldown"  && <FailureDrilldown     {...sharedProps} />}
-                {activeTab === "workspace"  && <ViewManager          {...sharedProps} />}
+                {activeTab === "workspace"  && <ViewManager          {...sharedProps} filters={filters} />}
             </div>
         </div>
     );

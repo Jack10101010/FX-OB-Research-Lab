@@ -13,6 +13,17 @@ export {
 
 import { archetypeColour, archetypeTone, archetypeLabel } from "./failuresRegistry";
 
+export function safeLabel(value, fallback = "—") {
+    if (value == null || value === "") return fallback;
+    if (typeof value === "object") return value.label ?? value.name ?? value.id ?? fallback;
+    return String(value);
+}
+
+export function safeTone(value, fallback = "muted") {
+    if (value && typeof value === "object") return value.tone ?? fallback;
+    return fallback;
+}
+
 // ── Duration ─────────────────────────────────────────────────────────────────
 
 export function fmtDuration(mins) {
@@ -61,6 +72,7 @@ export function severityColour(score) {
 // ── Classification confidence ─────────────────────────────────────────────────
 
 export function confidenceLabel(conf) {
+    if (conf && typeof conf === "object") return safeLabel(conf);
     const map = {
         HIGH:          "HIGH",
         MEDIUM:        "MED",
@@ -72,6 +84,7 @@ export function confidenceLabel(conf) {
 }
 
 export function confidenceTone(conf) {
+    if (conf && typeof conf === "object") return safeTone(conf);
     const map = {
         HIGH:         "success",
         MEDIUM:       "secondary",

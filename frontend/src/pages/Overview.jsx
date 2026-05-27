@@ -1,6 +1,6 @@
 import React from "react";
 import { Link } from "react-router-dom";
-import { PageHeader } from "@/components/lab/AppShell";
+import { LabRunHero } from "@/components/lab/LabRunHero";
 import { MetricChip } from "@/components/lab/MetricChip";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { EquityCurve } from "@/components/lab/EquityCurve";
@@ -30,10 +30,10 @@ export default function Overview() {
     if (!hasImportedRuns) {
         return (
             <div className="pb-12">
-                <PageHeader
-                    eyebrow="OVERVIEW DASHBOARD"
+                <LabRunHero
+                    pageLabel="Overview Dashboard"
                     title="FX-OB Research Lab"
-                    subtitle="Backtest, validate, and refine Forex order-block strategies. Research only — no live execution."
+                    description="Backtest, validate, and refine Forex order-block strategies. Research only — no live execution."
                     actions={
                         <>
                             <NeonButton icon={BarChart3} tone="ghost">Latest Run Summary</NeonButton>
@@ -62,10 +62,10 @@ export default function Overview() {
 
     return (
         <div className="pb-12">
-            <PageHeader
-                eyebrow="OVERVIEW DASHBOARD"
+            <LabRunHero
+                pageLabel="Overview Dashboard"
                 title="FX-OB Research Lab"
-                subtitle="Backtest, validate, and refine Forex order-block strategies. Research only — no live execution."
+                description="Backtest, validate, and refine Forex order-block strategies. Research only — no live execution."
                 actions={
                     <>
                         <NeonButton icon={BarChart3} tone="ghost">Latest Run Summary</NeonButton>
@@ -77,7 +77,7 @@ export default function Overview() {
             <ActiveRunContext />
 
             {/* KPI ROW */}
-            <div className="px-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+            <div className="kpi-strip">
                 <MetricChip testId="kpi-net-r"      label="Net R (Latest)"   value={`${ACTIVE_RUN.netR >= 0 ? "+" : ""}${ACTIVE_RUN.netR}R`} sub={`${ACTIVE_RUN.symbol} ${ACTIVE_RUN.detectionTf} · RR ${Number(ACTIVE_RUN.rr).toFixed(1)}`} tone="primary"   icon={TrendingUp} sparkline={spark} />
                 <MetricChip testId="kpi-win-rate"   label="Win Rate"         value={`${Number(ACTIVE_RUN.winRate).toFixed(1)}%`}  sub={`${ACTIVE_RUN.wins} / ${ACTIVE_RUN.trades} trades`}     tone="secondary" icon={Target} sparkline={spark.map((v) => v * 0.4)} />
                 <MetricChip testId="kpi-trades"     label="Trades"           value={String(ACTIVE_RUN.trades)}    sub="Validated set"        tone="muted"     icon={Hash} />
@@ -100,11 +100,11 @@ export default function Overview() {
                         <DataTable
                             testId="top-sweep-table"
                             columns={[
-                                { key: "rr",        label: "RR",       render: (r) => <span className={r.rr === ACTIVE_RUN.rr ? "text-[hsl(var(--accent-primary))]" : ""}>{r.rr.toFixed(1)}</span> },
+                                { key: "rr",        label: "RR",       mono: true, render: (r) => <span className={r.rr === ACTIVE_RUN.rr ? "text-[hsl(var(--accent-primary))]" : ""}>{r.rr.toFixed(1)}</span> },
                                 { key: "trades",    label: "Trades",   align: "right" },
                                 { key: "winRate",   label: "Win Rate", align: "right", render: (r) => `${r.winRate.toFixed(1)}%` },
                                 { key: "netR",      label: "Net R",    align: "right", render: (r) => <ColoredR value={r.netR} /> },
-                                { key: "expectancy",label: "E[R]",     align: "right", render: (r) => `${r.expectancy.toFixed(3)}R` },
+                                { key: "expectancy",label: "E[R]",     align: "right", mono: true, render: (r) => `${r.expectancy.toFixed(3)}R` },
                             ]}
                             rows={SWEEP_RR}
                             rowKey="rr"
@@ -120,14 +120,14 @@ export default function Overview() {
                         <DataTable
                             testId="recent-runs-table"
                             columns={[
-                                { key: "id",        label: "Run ID" },
+                                { key: "id",        label: "Run ID",   mono: true },
                                 { key: "symbol",    label: "Symbol" },
-                                { key: "detectionTf", label: "TF" },
-                                { key: "rr",        label: "RR",       align: "right", render: (r) => r.rr.toFixed(1) },
+                                { key: "detectionTf", label: "TF",     mono: true },
+                                { key: "rr",        label: "RR",       align: "right", mono: true, render: (r) => r.rr.toFixed(1) },
                                 { key: "trades",    label: "Trades",   align: "right" },
                                 { key: "winRate",   label: "Win Rate", align: "right", render: (r) => `${r.winRate.toFixed(1)}%` },
                                 { key: "netR",      label: "Net R",    align: "right", render: (r) => <ColoredR value={r.netR} /> },
-                                { key: "date",      label: "Date",     align: "right" },
+                                { key: "date",      label: "Date",     align: "right", mono: true },
                             ]}
                             rows={recent}
                         />

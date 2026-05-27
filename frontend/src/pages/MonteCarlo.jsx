@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { PageHeader } from "@/components/lab/AppShell";
+import { LabRunHero } from "@/components/lab/LabRunHero";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { MetricChip } from "@/components/lab/MetricChip";
 import { Field, NeonInput, NeonToggle, NeonButton, Segment } from "@/components/lab/controls";
@@ -16,10 +16,10 @@ export default function MonteCarlo() {
 
     return (
         <div className="pb-12">
-            <PageHeader
-                eyebrow="MONTE CARLO"
+            <LabRunHero
+                pageLabel="Monte Carlo"
                 title="Robustness Simulation"
-                subtitle="Stress-test the validated run by randomising trade order, spread, and slippage. Placeholder mock until engine integration."
+                description="Stress-test the validated run by randomising trade order, spread, and slippage. Placeholder mock until engine integration."
                 actions={<NeonButton icon={Play} tone="primary">Run Simulation</NeonButton>}
             />
 

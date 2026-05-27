@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { PageHeader } from "@/components/lab/AppShell";
+import { LabRunHero } from "@/components/lab/LabRunHero";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { MetricChip } from "@/components/lab/MetricChip";
 import { DataTable, Pill } from "@/components/lab/DataTable";
@@ -24,10 +24,10 @@ export default function ParityDebugger() {
 
     return (
         <div className="pb-12">
-            <PageHeader
-                eyebrow="PARITY DEBUGGER"
+            <LabRunHero
+                pageLabel="Parity Debugger"
                 title="Pine ↔ Python Validation"
-                subtitle="Validate the Python engine against TradingView exports. This page protects against silent logic drift."
+                description="Validate the Python engine against TradingView exports. This page protects against silent logic drift."
             />
 
             <div className="px-6 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">

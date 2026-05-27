@@ -642,7 +642,7 @@ function normalizeProtectionModeKey(value) {
 }
 
 function normalizeEntryModeKey(value) {
-    return String(value || "")
+    const normalized = String(value || "")
         .trim()
         .toLowerCase()
         .replace(/^trades_(single_position|allow_multi_position|one_per_direction)__/, "")
@@ -650,6 +650,7 @@ function normalizeEntryModeKey(value) {
         .replace(/[^a-z0-9]+/g, "_")
         .replace(/_+/g, "_")
         .replace(/^_+|_+$/g, "");
+    return normalized.replace(/^entry_penetration_(\d+)$/, "entry_penetration_$1p0");
 }
 
 function newsDateRange(events) {

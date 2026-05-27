@@ -50,7 +50,7 @@ export function ModelKPIStrip({ exactRows, selectedModelKey, setSelectedModelKey
     const sparkVals = exactRows.filter(r => r.exact && isFiniteNumber(r.netR)).map(r => num(r.netR));
 
     return (
-        <div className="flex flex-wrap gap-2 mb-4">
+        <div className="kpi-strip mb-4">
             <MetricChip
                 label="Net R"
                 value={fmtNetR(row.netR)}

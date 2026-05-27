@@ -3,7 +3,7 @@
 // No React. No side effects.
 
 import { rOf, durationMinutes, directionOf, structureOf, obWidthOf } from "./failuresUtils";
-import { fmtDuration, severityLabel } from "./failuresFormatters";
+import { fmtDuration, safeLabel, severityLabel } from "./failuresFormatters";
 
 // ── HypothesisLab bridge ──────────────────────────────────────────────────────
 // Schema verified from EntryHypothesisLab.jsx — STORAGE_KEY = "fxob_entry_hypotheses_v1"
@@ -73,7 +73,7 @@ export const CSV_COLUMNS = {
     r:                 { label: "R",               get: t => rOf(t).toFixed(2) },
     ob_width:          { label: "OB Width (pips)", get: t => obWidthOf(t) ?? "" },
     archetype:         { label: "Archetype",       get: t => t?.archetype ?? "" },
-    confidence:        { label: "Confidence",      get: t => t?.confidence ?? "" },
+    confidence:        { label: "Confidence",      get: t => safeLabel(t?.confidence, "") },
     severity:          { label: "Severity",        get: t => t?.severity != null ? t.severity.toFixed(1) : "" },
     severity_label:    { label: "Severity Level",  get: t => t?.severity != null ? severityLabel(t.severity) : "" },
     duration_mins:     { label: "Duration (min)",  get: t => { const d = durationMinutes(t); return d != null ? Math.round(d) : ""; } },

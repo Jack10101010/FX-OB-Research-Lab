@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { PageHeader } from "@/components/lab/AppShell";
+import { LabRunHero } from "@/components/lab/LabRunHero";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { DataTable, Pill } from "@/components/lab/DataTable";
 import { Field, NeonInput, NeonSelect, NeonButton } from "@/components/lab/controls";
@@ -28,10 +28,10 @@ export default function Projects() {
 
     return (
         <div className="pb-12">
-            <PageHeader
-                eyebrow="RESEARCH PROJECTS"
+            <LabRunHero
+                pageLabel="Research Projects"
                 title="Projects"
-                subtitle="Start with a project, then add baseline, variants, candidates, and final validated configs."
+                description="Start with a project, then add baseline, variants, candidates, and final validated configs."
                 actions={
                     <Link to="/strategy">
                         <NeonButton icon={Play} tone="primary">Open Strategy Builder</NeonButton>

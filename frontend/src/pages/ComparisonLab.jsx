@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { PageHeader } from "@/components/lab/AppShell";
+import { LabRunHero } from "@/components/lab/LabRunHero";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { MetricChip } from "@/components/lab/MetricChip";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
@@ -127,10 +127,10 @@ export default function ComparisonLab() {
     if (importedRuns.length < 2) {
         return (
             <div className="pb-12">
-                <PageHeader
-                    eyebrow="COMPARISON LAB"
+                <LabRunHero
+                    pageLabel="Comparison Lab"
                     title="Multi-Run Comparison"
-                    subtitle="Compare equity curves, monthly performance, and KPI deltas across multiple runs."
+                    description="Compare equity curves, monthly performance, and KPI deltas across multiple runs."
                     actions={<Link to="/runs"><NeonButton tone="ghost">Browse Runs</NeonButton></Link>}
                 />
                 <div className="px-6 py-20 flex flex-col items-center text-center gap-4">
@@ -153,10 +153,10 @@ export default function ComparisonLab() {
 
     return (
         <div className="pb-12">
-            <PageHeader
-                eyebrow="COMPARISON LAB"
+            <LabRunHero
+                pageLabel="Comparison Lab"
                 title="Multi-Run Comparison"
-                subtitle={`Comparing ${runs.length} run${runs.length === 1 ? "" : "s"} — Run A is the baseline.`}
+                description={`Comparing ${runs.length} run${runs.length === 1 ? "" : "s"} — Run A is the baseline.`}
                 actions={
                     <>
                         <Link to="/runs"><NeonButton tone="ghost">Browse Runs</NeonButton></Link>

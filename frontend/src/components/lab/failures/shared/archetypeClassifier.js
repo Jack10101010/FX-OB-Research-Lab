@@ -36,6 +36,29 @@ function ratioToConfidence(ratio) {
     return CONFIDENCE.UNCLASSIFIED;
 }
 
+/**
+ * Criterion quality score: some fields are derived estimates, others are explicit flags.
+ * Explicit boolean flags → quality 1.0 (high quality signal)
+ * Numeric threshold derivations → quality 0.7 (inferred, not directly recorded)
+ */
+function criterionQuality(field) {
+    const explicit = ["ob_fully_breached", "close_confirmed_ob_breach"];
+    return explicit.includes(field) ? 1.0 : 0.7;
+}
+
+/**
+ * For OR-mode archetypes, confidence depends on which criterion matched and its quality.
+ * This prevents hard_invalidation from always getting HIGH confidence regardless of
+ * whether the match came from an explicit boolean flag or a numeric threshold.
+ */
+function orModeConfidence(matchedFields) {
+    if (!matchedFields.length) return CONFIDENCE.UNCLASSIFIED;
+    const maxQuality = Math.max(...matchedFields.map(criterionQuality));
+    if (maxQuality >= 1.0) return CONFIDENCE.HIGH;
+    if (maxQuality >= 0.7) return CONFIDENCE.MEDIUM;
+    return CONFIDENCE.LOW;
+}
+
 // ── Criterion evaluation ──────────────────────────────────────────────────────
 
 function evalCriterion(criterion, trade, config) {
@@ -123,21 +146,27 @@ export function classify(trade, config) {
             : matched.length === total;
 
         if (shouldMatch) {
-            const ratio = matchRatio(matched.length, total);
+            const matchedFields = matched.map(r => r.field);
+            // For OR-mode archetypes, confidence depends on which specific criterion fired.
+            // For ALL-mode archetypes, use the standard ratio-based confidence.
+            const confidence = arch.criteriaMode === "any"
+                ? orModeConfidence(matchedFields)
+                : ratioToConfidence(matchRatio(matched.length, total));
             return {
                 archetype:       arch.id,
-                confidence:      ratioToConfidence(ratio),
-                matchedCriteria: matched.map(r => r.field),
+                confidence,
+                matchedCriteria: matchedFields,
                 matchCount:      matched.length,
                 totalCriteria:   total,
             };
         }
     }
 
-    // Catch-all
+    // Catch-all: UNCLASSIFIED is more honest than LOW.
+    // LOW implies a partial match was found; UNCLASSIFIED means no archetype criteria fired.
     return {
         archetype:       "standard_loss",
-        confidence:      CONFIDENCE.LOW,
+        confidence:      CONFIDENCE.UNCLASSIFIED,
         matchedCriteria: [],
         matchCount:      0,
         totalCriteria:   0,

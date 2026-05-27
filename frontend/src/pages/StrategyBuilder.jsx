@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { PageHeader } from "@/components/lab/AppShell";
+import { LabRunHero } from "@/components/lab/LabRunHero";
 import { NeonPanel, SectionTitle } from "@/components/lab/NeonPanel";
 import { Field, NeonInput, NeonSelect, Segment, NeonToggle, NeonButton } from "@/components/lab/controls";
 import { HelpCircle, Play, Save, FileInput, Copy, ShieldAlert, Trash2, Check, ChevronDown, ChevronUp, FolderPlus } from "lucide-react";
@@ -63,8 +63,9 @@ export default function StrategyBuilder() {
         spread: 0.2,
         slippage: 0.2,
         commission: 0,
+        entryResearchExportMode: "light",
         entryResearchExports: true,
-        entryPenetrationThresholds: "10,25,50,75",
+        entryPenetrationThresholds: "25,50",
         monteCarlo: false,
     });
     const set = (k) => (v) => setCfg((c) => ({ ...c, [k]: v }));
@@ -263,10 +264,10 @@ export default function StrategyBuilder() {
 
     return (
         <div className="pb-12">
-            <PageHeader
-                eyebrow="STRATEGY BUILDER"
+            <LabRunHero
+                pageLabel="Strategy Builder"
                 title="Create New Backtest"
-                subtitle="Configure research parameters. This builder writes config only — execution happens against local Python engine."
+                description="Configure research parameters. This builder writes config only — execution happens against local Python engine."
                 actions={
                     <>
                         <NeonButton icon={Play} tone="primary" onClick={onRunLocal} disabled={runBusy || runInProgress} data-testid="builder-run-backtest">
@@ -616,13 +617,30 @@ export default function StrategyBuilder() {
                         <Field label="Spread (pips)"><NeonInput type="number" step="0.05" value={cfg.spread} onChange={(e) => set("spread")(Number(e.target.value))} /></Field>
                         <Field label="Slippage (pips)"><NeonInput type="number" step="0.05" value={cfg.slippage} onChange={(e) => set("slippage")(Number(e.target.value))} /></Field>
                         <Field label="Commission (R/trade)" className="col-span-2"><NeonInput type="number" step="0.01" value={cfg.commission} onChange={(e) => set("commission")(Number(e.target.value))} /></Field>
-                        <div className="col-span-2 flex items-center justify-between gap-3 border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
-                            <div>
-                                <div className="control-label text-[11px] font-mono uppercase tracking-wider text-muted-lab">Entry Research Exports</div>
-                                <div className="text-[10.5px] text-muted-lab">Exports baseline plus penetration model trade lists for Entries Lab.</div>
+                        <Field label="Entry Research Exports" className="col-span-2" hint="Light is the default for long research runs. Full can be slow on multi-month datasets.">
+                            <NeonSelect
+                                value={resolveEntryExportMode(cfg)}
+                                onChange={(value) => {
+                                    if (value === "off") {
+                                        setCfg((current) => ({ ...current, entryResearchExportMode: "off", entryResearchExports: false, entryPenetrationThresholds: "" }));
+                                    } else if (value === "full") {
+                                        setCfg((current) => ({ ...current, entryResearchExportMode: "full", entryResearchExports: true, entryPenetrationThresholds: "10,25,50,75" }));
+                                    } else {
+                                        setCfg((current) => ({ ...current, entryResearchExportMode: "light", entryResearchExports: true, entryPenetrationThresholds: "25,50" }));
+                                    }
+                                }}
+                                options={[
+                                    { value: "off", label: "Off · baseline only" },
+                                    { value: "light", label: "Light · penetration 25 / 50" },
+                                    { value: "full", label: "Full · penetration 10 / 25 / 50 / 75" },
+                                ]}
+                            />
+                        </Field>
+                        {entryExportFullRangeWarning(cfg) && (
+                            <div className="col-span-2 border border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.07)] clip-bevel-sm px-3 py-2 text-[10.5px] text-[hsl(var(--warning))]">
+                                Full entry exports rerun the complete simulation for every threshold. Use Light or shorten the date range before a long backtest.
                             </div>
-                            <NeonToggle checked={cfg.entryResearchExports} onChange={set("entryResearchExports")} />
-                        </div>
+                        )}
                         <Field label="Entry Penetration Thresholds" className={`col-span-2 transition-opacity ${cfg.entryResearchExports ? "" : "opacity-45"}`} hint="Comma-separated percentages. Valid values are greater than 0 and less than 100.">
                             <NeonInput
                                 value={cfg.entryPenetrationThresholds}
@@ -798,8 +816,9 @@ export default function StrategyBuilder() {
 
 function buildBacktesterConfig(cfg) {
     const allowedSessions = Boolean(cfg.sessionFilter) ? selectedAllowedSessions(cfg) : [];
-    const entryThresholds = normalizeEntryThresholds(cfg.entryPenetrationThresholds);
-    const entryResearchEnabled = cfg.entryResearchExports !== false && entryThresholds.length > 0;
+    const entryMode = resolveEntryExportMode(cfg);
+    const entryThresholds = entryMode === "off" ? [] : normalizeEntryThresholds(cfg.entryPenetrationThresholds);
+    const entryResearchEnabled = entryMode !== "off" && entryThresholds.length > 0;
     const config = {
         symbol: cfg.symbol || "EURUSD",
         candle_file: normalizeCandleFile(cfg.dataFile),
@@ -856,6 +875,24 @@ function normalizeEntryThresholds(value) {
         .filter((item) => Number.isFinite(item) && item > 0 && item < 100)
         .map((item) => Number(item.toFixed(4))))]
         .sort((a, b) => a - b);
+}
+
+function resolveEntryExportMode(cfg) {
+    if (cfg?.entryResearchExportMode === "off" || cfg?.entryResearchExports === false) return "off";
+    if (cfg?.entryResearchExportMode === "full") return "full";
+    if (cfg?.entryResearchExportMode === "light") return "light";
+    const thresholds = normalizeEntryThresholds(cfg?.entryPenetrationThresholds);
+    if (!thresholds.length) return "off";
+    return thresholds.length > 2 || thresholds.includes(10) || thresholds.includes(75) ? "full" : "light";
+}
+
+function entryExportFullRangeWarning(cfg) {
+    if (resolveEntryExportMode(cfg) !== "full") return false;
+    const start = Date.parse(cfg?.dateFrom);
+    const end = Date.parse(cfg?.dateTo);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return false;
+    const months = (end - start) / (1000 * 60 * 60 * 24 * 30.44);
+    return months >= 12;
 }
 
 function selectedAllowedSessions(cfg) {
@@ -959,8 +996,9 @@ function formatNewsWindow(config) {
 function formatEntryResearchExports(config) {
     const models = Array.isArray(config?.entry_models) ? config.entry_models : [];
     if (!models.length) return "—";
+    const thresholds = Array.isArray(config?.entry_penetration_thresholds) ? config.entry_penetration_thresholds : [];
     return models.includes("entry_penetration")
-        ? "baseline + penetration"
+        ? `baseline + penetration (${thresholds.length > 2 ? "full" : "light"})`
         : "baseline only";
 }
 
@@ -1011,6 +1049,7 @@ const LOAD_FIELD_LABELS = {
     spread: "spread",
     slippage: "slippage",
     commission: "commission",
+    entryResearchExportMode: "entry research export mode",
     entryResearchExports: "entry research exports",
     entryPenetrationThresholds: "entry penetration thresholds",
     monteCarlo: "Monte Carlo",
@@ -1064,6 +1103,9 @@ function buildRunConfigLoadReport(current, run) {
     applyFirstPresent(patch, source, "commission", ["commission_r_per_trade", "commission", "commission_per_trade"], toNumber);
     applyFirstPresent(patch, source, "entryResearchExports", ["entry_models", "entryModels"], mapConfigEntryResearchExports);
     applyFirstPresent(patch, source, "entryPenetrationThresholds", ["entry_penetration_thresholds", "entryPenetrationThresholds"], mapConfigEntryThresholds);
+    if ("entryResearchExports" in patch || "entryPenetrationThresholds" in patch) {
+        patch.entryResearchExportMode = mapConfigEntryResearchExportMode(source.entry_models || source.entryModels, source);
+    }
     applyFirstPresent(patch, source, "monteCarlo", ["monte_carlo", "monteCarlo", "monte_carlo_enabled"], toBool);
 
     Object.keys(patch).forEach((field) => loaded.add(field));
@@ -1108,6 +1150,13 @@ function toBool(value) {
 function mapConfigEntryResearchExports(value) {
     const models = ensureArray(value).map((item) => String(item).trim().toLowerCase());
     return models.includes("entry_penetration");
+}
+
+function mapConfigEntryResearchExportMode(value, source) {
+    const models = ensureArray(value).map((item) => String(item).trim().toLowerCase());
+    const thresholds = normalizeEntryThresholds(source?.entry_penetration_thresholds || source?.entryPenetrationThresholds);
+    if (!models.includes("entry_penetration")) return thresholds.length ? (thresholds.length > 2 || thresholds.includes(10) || thresholds.includes(75) ? "full" : "light") : "off";
+    return thresholds.length > 2 || thresholds.includes(10) || thresholds.includes(75) ? "full" : "light";
 }
 
 function mapConfigEntryThresholds(value) {

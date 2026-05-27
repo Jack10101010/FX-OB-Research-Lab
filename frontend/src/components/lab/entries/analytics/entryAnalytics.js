@@ -17,6 +17,10 @@ export function rOf(trade) {
     return Number.isFinite(Number(trade?.r)) ? Number(trade.r) : 0;
 }
 
+function canonicalEntryMode(value) {
+    return normalizeMode(value).replace(/^entry_penetration_(\d+)$/, "entry_penetration_$1p0");
+}
+
 export function maxDrawdown(trades) {
     let equity = 0, peak = 0, dd = 0;
     (trades || []).forEach(t => {
@@ -131,7 +135,7 @@ export function flattenEntrySummary(summary, activeVariant = "single_position") 
         if (["single_position", "allow_multi_position", "one_per_direction"].includes(key)) {
             if (key === activeVariant) rows.push(...flattenEntrySummary(value, activeVariant));
         } else {
-            rows.push({ ...value, mode: normalizeMode(value.mode || value.entry_mode || value.entry_model || key) });
+            rows.push({ ...value, mode: canonicalEntryMode(value.mode || value.entry_mode || value.entry_model || key) });
         }
     });
     return rows;
@@ -143,14 +147,18 @@ export function buildEntryResultRows(run, trades, selectedVariant) {
     const activeVariant = selectedVariant || run?.primaryVariant || run?.summary?.executionMode || "single_position";
     const entryResults  = run?.entryResults || {};
     const exact         = flattenEntrySummary(entryResults.summary || run?.summary?.entry_results || {}, activeVariant);
-    const exactByMode   = new Map(exact.map(r => [normalizeMode(r.mode), r]));
+    const exactByMode   = new Map(exact.map(r => [canonicalEntryMode(r.mode), r]));
     const tradesByMode  = entryResults.tradesByMode || {};
     const baseline      = baselineEntryRow(trades);
 
     const rows = PLANNED_ENTRY_MODES.flatMap(planned => {
-        const modeKey   = normalizeMode(planned.mode);
+        const modeKey   = canonicalEntryMode(planned.mode);
         const src       = exactByMode.get(modeKey);
-        const modeTrades = tradesByMode[`${activeVariant}__${modeKey}`] || tradesByMode[modeKey];
+        const legacyModeKey = modeKey.replace(/^entry_penetration_(\d+)p0$/, "entry_penetration_$1");
+        const modeTrades = tradesByMode[`${activeVariant}__${modeKey}`]
+            || tradesByMode[modeKey]
+            || tradesByMode[`${activeVariant}__${legacyModeKey}`]
+            || tradesByMode[legacyModeKey];
         if (planned.mode === "baseline") return [{ ...planned, ...baseline }];
         if (src || modeTrades?.length)   return [entryRowFromSummary(planned, src || {}, baseline, modeTrades)];
         return [];

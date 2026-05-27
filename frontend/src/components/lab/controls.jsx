@@ -109,6 +109,103 @@ export function NeonToggle({ checked, onChange, label, testId }) {
     );
 }
 
+/** Status pill for lab run heroes (Run Detail, Protection, OBL pattern). */
+export function HeroBadge({ tone = "muted", children, className }) {
+    const toneClass = {
+        primary:   "border-[hsl(var(--accent-primary)/0.42)] bg-[hsl(var(--accent-primary)/0.07)] text-[hsl(var(--accent-primary))]",
+        secondary: "border-[hsl(var(--accent-secondary)/0.42)] bg-[hsl(var(--accent-secondary)/0.07)] text-[hsl(var(--accent-secondary))]",
+        success:   "border-[hsl(var(--success)/0.42)] bg-[hsl(var(--success)/0.07)] text-[hsl(var(--success))]",
+        warning:   "border-[hsl(var(--warning)/0.42)] bg-[hsl(var(--warning)/0.08)] text-[hsl(var(--warning))]",
+        danger:    "border-[hsl(var(--danger)/0.42)] bg-[hsl(var(--danger)/0.07)] text-[hsl(var(--danger))]",
+        muted:     "border-[hsl(var(--border-mid))] bg-[hsl(var(--panel-2)/0.54)] text-[hsl(var(--text-2))]",
+    }[tone] || "border-[hsl(var(--border-mid))] bg-[hsl(var(--panel-2)/0.54)] text-[hsl(var(--text-2))]";
+
+    return (
+        <span className={cn("inline-flex items-center rounded-[3px] border px-2.5 py-1 text-[11px] font-medium font-display", toneClass, className)}>
+            {children}
+        </span>
+    );
+}
+
+const FILTER_TOGGLE_SIZE = {
+    default: "px-2.5 py-1 text-[10px]",
+    compact: "px-2 py-0.5 text-[10px]",
+};
+
+const FILTER_TOGGLE_ACTIVE = {
+    primary: "border-[hsl(var(--accent-primary)/0.7)] bg-[hsl(var(--accent-primary)/0.12)] text-[hsl(var(--accent-primary))]",
+    success: "border-[hsl(var(--success)/0.9)] bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))]",
+    danger: "border-[hsl(var(--danger)/0.9)] bg-[hsl(var(--danger)/0.15)] text-[hsl(var(--danger))]",
+    warning: "border-[hsl(var(--warning)/0.9)] bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))]",
+    muted: "border-[hsl(var(--text-2)/0.9)] bg-[hsl(var(--text-2)/0.12)] text-[hsl(var(--text))]",
+};
+
+const FILTER_TOGGLE_INACTIVE = {
+    soft: "border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))] hover:border-[hsl(var(--accent-primary)/0.4)] hover:text-[hsl(var(--text))]",
+    mid: "border-[hsl(var(--border-mid))] text-muted-lab hover:border-[hsl(var(--accent-primary)/0.4)] hover:text-[hsl(var(--text))]",
+};
+
+const FILTER_TOGGLE_DOT = {
+    primary: "hsl(var(--accent-primary))",
+    secondary: "hsl(var(--accent-secondary))",
+    success: "hsl(var(--success))",
+    danger: "hsl(var(--danger))",
+    warning: "hsl(var(--warning))",
+};
+
+/** Toggle chip for filter bars and panel controls (GlobalFilterBar / Run Detail pattern). */
+export function FilterToggle({
+    active = false,
+    onClick,
+    children,
+    className,
+    testId,
+    type = "button",
+    disabled,
+    title,
+    size = "default",
+    tone = "primary",
+    inactiveBorder = "soft",
+    dot,
+}) {
+    const dotColor = dot ? FILTER_TOGGLE_DOT[dot] || FILTER_TOGGLE_DOT.primary : null;
+    const activeClass = FILTER_TOGGLE_ACTIVE[tone] || FILTER_TOGGLE_ACTIVE.primary;
+    const inactiveClass = FILTER_TOGGLE_INACTIVE[inactiveBorder] || FILTER_TOGGLE_INACTIVE.soft;
+    const layerActive = dot && active
+        ? "border-[hsl(var(--accent-primary)/0.6)] bg-[hsl(var(--panel-2))] text-[hsl(var(--text))]"
+        : activeClass;
+
+    return (
+        <button
+            type={type}
+            data-testid={testId}
+            disabled={disabled}
+            title={title}
+            onClick={onClick}
+            className={cn(
+                "inline-flex items-center gap-1.5 clip-bevel-sm border font-display font-medium uppercase tracking-[0.08em] transition-colors select-none",
+                FILTER_TOGGLE_SIZE[size] || FILTER_TOGGLE_SIZE.default,
+                active ? (dot ? layerActive : activeClass) : inactiveClass,
+                !active && dot && "opacity-60",
+                disabled && "opacity-40 cursor-not-allowed",
+                className,
+            )}
+        >
+            {dotColor && (
+                <span
+                    className="w-1.5 h-1.5 rounded-full shrink-0"
+                    style={{
+                        background: dotColor,
+                        opacity: active ? 1 : 0.45,
+                        boxShadow: active ? `0 0 6px ${dotColor}` : undefined,
+                    }}
+                />
+            )}
+            {children}
+        </button>
+    );
+}
+
 export function NeonButton({ children, tone = "primary", className, icon: Icon, ...props }) {
     const map = {
         primary:   "border-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.10)] hover:bg-[hsl(var(--accent-primary)/0.22)]",

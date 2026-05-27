@@ -17,6 +17,9 @@
         --text: 240 10% 96%;
         --text-2: 240 8% 78%;
         --muted: 240 8% 52%;
+        /* Aliases for Codex-era class names (hsl(var(--text-1)) etc.) */
+        --text-1: var(--text);
+        --text-3: var(--muted);
         --grid: 250 18% 14%;
 
         --accent-primary: 300 100% 62%;
@@ -305,6 +308,26 @@
     .text-accent-2 { color: hsl(var(--accent-secondary)); }
     .text-title-lab { color: hsl(var(--title-highlight)); }
     .text-muted-lab { color: hsl(var(--muted)); }
+
+    /* Canonical full-width KPI row — use on run/lab pages (Phase 2+). */
+    .kpi-strip {
+        padding-left: 1.5rem;
+        padding-right: 1.5rem;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.75rem;
+    }
+    @media (min-width: 768px) {
+        .kpi-strip {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+    }
+    @media (min-width: 1024px) {
+        .kpi-strip {
+            grid-template-columns: repeat(6, minmax(0, 1fr));
+        }
+    }
+
     .text-success { color: hsl(var(--success)); }
     .text-danger { color: hsl(var(--danger)); }
 

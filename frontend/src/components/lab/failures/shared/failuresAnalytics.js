@@ -506,25 +506,58 @@ export const PREVENTION_RULES = [
     { key: "excl_hr_20",       label: "Exclude 20:00–22:00 UTC entries",   group: "Hour",       matchFn: t => { const h = entryHour(t); return h === 20 || h === 21; } },
 ];
 
+/**
+ * preventionConfidence(n) → "SPECULATIVE" | "WEAK" | "MODERATE" | "STRONG"
+ * Explicit confidence tier for prevention rules — distinct from sample confidence.
+ * Reflects how seriously a candidate rule should be taken.
+ */
+export function preventionConfidence(n) {
+    if (n >= 30) return "STRONG";
+    if (n >= 15) return "MODERATE";
+    if (n >= 5)  return "WEAK";
+    return "SPECULATIVE";
+}
+
 export function computePreventionRules(trades, classified) {
     if (!trades.length) return [];
 
     const losers  = classified.length ? classified.filter(t => rOf(t) < 0) : filterLosers(trades);
     const winners = filterWinners(trades);
 
-    const avgLossR = losers.length
-        ? losers.reduce((s, t) => s + Math.abs(rOf(t)), 0) / losers.length
-        : 1;
-    const avgWinR = winners.length
-        ? winners.reduce((s, t) => s + rOf(t), 0) / winners.length
-        : 1;
-
     const rows = PREVENTION_RULES.map(rule => {
-        const lCaught  = losers.filter(rule.matchFn).length;
-        const wRemoved = winners.filter(rule.matchFn).length;
-        const netR     = round1(lCaught * avgLossR - wRemoved * avgWinR);
-        const wPct     = winners.length ? round1((wRemoved / winners.length) * 100) : 0;
-        const lPct     = losers.length  ? round1((lCaught  / losers.length)  * 100) : 0;
+        // Use actual R values of MATCHED trades — not global averages.
+        // Global average substitution was a Phase 1 bug that inflated/deflated net R
+        // depending on whether the matched session/day had atypical loss sizes.
+        const matchedLosers  = losers.filter(rule.matchFn);
+        const matchedWinners = winners.filter(rule.matchFn);
+
+        const lCaught  = matchedLosers.length;
+        const wRemoved = matchedWinners.length;
+
+        const savedR      = matchedLosers.reduce((s, t) => s + Math.abs(rOf(t)), 0);
+        const sacrificedR = matchedWinners.reduce((s, t) => s + rOf(t), 0);
+        const netR        = round1(savedR - sacrificedR);
+
+        const avgActualLossR = lCaught  ? round2(savedR / lCaught)  : null;
+        const avgActualWinR  = wRemoved ? round2(sacrificedR / wRemoved) : null;
+
+        const wPct = winners.length ? round1((wRemoved / winners.length) * 100) : 0;
+        const lPct = losers.length  ? round1((lCaught  / losers.length)  * 100) : 0;
+
+        // Severity-weighted net R: high-severity losses are more valuable to catch.
+        // Each matched loss is weighted by (1 + severity/10), so critical losses (sev=8)
+        // contribute 1.8× vs uncored losses (sev=0) contributing 1.0×.
+        const severityWeightedSaved = matchedLosers.reduce((s, t) => {
+            const w = 1 + Math.min((t.severity ?? 0), 10) / 10;
+            return s + Math.abs(rOf(t)) * w;
+        }, 0);
+        const severityNetR = round1(severityWeightedSaved - sacrificedR);
+
+        const avgSeverity = lCaught
+            ? round1(matchedLosers.reduce((s, t) => s + (t.severity ?? 0), 0) / lCaught)
+            : null;
+
+        const tier = preventionConfidence(lCaught);
 
         return {
             key:               rule.key,
@@ -534,13 +567,416 @@ export function computePreventionRules(trades, classified) {
             losersCaughtPct:   lPct,
             winnersRemoved:    wRemoved,
             winnersRemovedPct: wPct,
+            savedR:            round1(savedR),
+            sacrificedR:       round1(sacrificedR),
             netRDelta:         netR,
+            severityNetR,
+            avgActualLossR,
+            avgActualWinR,
+            avgSeverity,
             falsePosWarning:   wPct > 15,
             sampleN:           lCaught,
-            confidence:        sampleConfidence(lCaught),
+            confidence:        tier,          // SPECULATIVE / WEAK / MODERATE / STRONG
+            isSpeculative:     tier === "SPECULATIVE",
         };
     });
 
-    // Sort by net R delta descending
+    // Sort by net R delta descending (actual R, not severity-weighted by default)
     return rows.sort((a, b) => b.netRDelta - a.netRDelta);
+}
+
+// ── Section 8 — Overview support builders ─────────────────────────────────────
+
+/**
+ * buildCurrentStreak(trades) → number
+ * Count of consecutive losses at the end of the trade series.
+ */
+export function buildCurrentStreak(trades) {
+    if (!Array.isArray(trades) || !trades.length) return 0;
+    let count = 0;
+    for (let i = trades.length - 1; i >= 0; i--) {
+        if (rOf(trades[i]) < 0) count++;
+        else break;
+    }
+    return count;
+}
+
+/**
+ * buildStreakLeaderboard(trades, n=5) → StreakZone[]
+ * Returns the worst N losing streaks with metadata.
+ */
+export function buildStreakLeaderboard(trades, n = 5) {
+    if (!Array.isArray(trades)) return [];
+    const { streakZones } = computeStreakStats(trades);
+    return streakZones
+        .sort((a, b) => b.length - a.length)
+        .slice(0, n)
+        .map((zone, rank) => {
+            const zoneTrades = trades.slice(zone.start, zone.end + 1);
+            const totalR     = zoneTrades.reduce((s, t) => s + rOf(t), 0);
+            const startTrade = trades[zone.start];
+            const endTrade   = trades[zone.end];
+            return {
+                rank:       rank + 1,
+                length:     zone.length,
+                totalR:     round2(totalR),
+                startEntry: startTrade?.entry ?? startTrade?.fill_time ?? null,
+                endEntry:   endTrade?.entry   ?? endTrade?.fill_time   ?? null,
+            };
+        });
+}
+
+/**
+ * buildWeekdayFailureStats(trades) → DayRow[]
+ * Per-weekday loss/win counts and loss rate, sorted Mon→Sun (filtered to days with trades).
+ */
+export function buildWeekdayFailureStats(trades) {
+    const LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    const rows = Array.from({ length: 7 }, (_, i) => ({
+        weekday: i, label: LABELS[i], lossCount: 0, winCount: 0, total: 0,
+    }));
+    for (const t of trades) {
+        const d = entryWeekday(t);
+        if (d == null || d > 6) continue;
+        rows[d].total++;
+        rOf(t) < 0 ? rows[d].lossCount++ : rows[d].winCount++;
+    }
+    return rows
+        .filter(r => r.total > 0)
+        .map(r => ({ ...r, lossRate: round1((r.lossCount / r.total) * 100) }));
+}
+
+/**
+ * buildHourBucketStats(trades) → HourBucket[]
+ * Aggregates trades into 4-hour UTC buckets.
+ */
+export function buildHourBucketStats(trades) {
+    const buckets = [
+        { label: "00–04 UTC", hours: [0,1,2,3],     lossCount: 0, total: 0 },
+        { label: "04–08 UTC", hours: [4,5,6,7],     lossCount: 0, total: 0 },
+        { label: "08–12 UTC", hours: [8,9,10,11],   lossCount: 0, total: 0 },
+        { label: "12–16 UTC", hours: [12,13,14,15], lossCount: 0, total: 0 },
+        { label: "16–20 UTC", hours: [16,17,18,19], lossCount: 0, total: 0 },
+        { label: "20–24 UTC", hours: [20,21,22,23], lossCount: 0, total: 0 },
+    ];
+    for (const t of trades) {
+        const h = entryHour(t);
+        if (h == null) continue;
+        const b = buckets.find(bk => bk.hours.includes(h));
+        if (!b) continue;
+        b.total++;
+        if (rOf(t) < 0) b.lossCount++;
+    }
+    return buckets.map(b => ({
+        label:     b.label,
+        lossCount: b.lossCount,
+        total:     b.total,
+        lossRate:  b.total ? round1((b.lossCount / b.total) * 100) : 0,
+    }));
+}
+
+/**
+ * buildSeverityDistribution(losers) → { low, moderate, high, critical, total }
+ * Buckets severity scores: low <4, moderate 4–6, high 6–8, critical 8+.
+ */
+export function buildSeverityDistribution(losers) {
+    const dist = { low: 0, moderate: 0, high: 0, critical: 0 };
+    for (const t of losers) {
+        const s = t.severity ?? 0;
+        if      (s >= 8) dist.critical++;
+        else if (s >= 6) dist.high++;
+        else if (s >= 4) dist.moderate++;
+        else             dist.low++;
+    }
+    return { ...dist, total: losers.length };
+}
+
+/**
+ * buildOverviewInsights(losers, allTrades, sessionStats, dirStats, weekdayStats) → string[]
+ * Derives plain-English insight lines from the data.
+ */
+export function buildOverviewInsights(losers, allTrades, sessionStats, dirStats, weekdayStats) {
+    const insights = [];
+    if (!losers.length) return insights;
+
+    // Leading loss session (min 5 trades for statistical relevance)
+    const worstSession = [...sessionStats]
+        .filter(s => s.total >= 5)
+        .sort((a, b) => b.lossRate - a.lossRate)[0];
+    if (worstSession) {
+        insights.push(
+            `${worstSession.session} session has the highest loss rate: ${worstSession.lossRate}% (${worstSession.lossCount}/${worstSession.total} trades)`,
+        );
+    }
+
+    // Directional asymmetry
+    const { long: l, short: s } = dirStats;
+    if (l && s && l.lossRate != null && s.lossRate != null) {
+        const diff = Math.abs(l.lossRate - s.lossRate);
+        if (diff > 8) {
+            const worse = l.lossRate > s.lossRate ? "Long" : "Short";
+            const rate  = l.lossRate > s.lossRate ? l.lossRate : s.lossRate;
+            insights.push(
+                `${worse} trades have a significantly higher loss rate (${rate}%) — ${diff.toFixed(0)}pp worse than the opposite direction`,
+            );
+        }
+    }
+
+    // Worst weekday (min 5 trades)
+    const worstDay = [...weekdayStats]
+        .filter(d => d.total >= 5)
+        .sort((a, b) => b.lossRate - a.lossRate)[0];
+    if (worstDay && worstDay.lossRate > 50) {
+        insights.push(
+            `${worstDay.label} has a ${worstDay.lossRate}% loss rate — consider excluding or reviewing entries on this day`,
+        );
+    }
+
+    // High/critical severity concentration
+    const highSev    = losers.filter(t => (t.severity ?? 0) >= 6).length;
+    const highSevPct = round1((highSev / losers.length) * 100);
+    if (highSevPct > 20) {
+        insights.push(
+            `${highSevPct}% of losses are HIGH or CRITICAL severity — these are the highest-priority trades for forensic review`,
+        );
+    }
+
+    return insights;
+}
+
+// ── Section 9 — Phase 2 Intelligence ─────────────────────────────────────────
+
+/**
+ * buildBurstDetection(trades, windowHours=48, minLosses=3) → BurstWindow[]
+ * Finds time windows where losses cluster more densely than the dataset average.
+ * Requires trades to have parseable entry timestamps.
+ * Returns the worst burst windows sorted by lossCount desc.
+ */
+export function buildBurstDetection(trades, windowHours = 48, minLosses = 3) {
+    if (!Array.isArray(trades) || trades.length < minLosses) return [];
+
+    // Collect timestamped losers
+    const losers = [];
+    for (const t of trades) {
+        if (rOf(t) >= 0) continue;
+        const ts = _parseEntryMs(t);
+        if (ts == null) continue;
+        losers.push({ t, ts });
+    }
+    if (losers.length < minLosses) return [];
+
+    losers.sort((a, b) => a.ts - b.ts);
+
+    const windowMs = windowHours * 3600 * 1000;
+    const burst    = [];
+
+    // Sliding window: for each loser, find all losers within [ts, ts + window]
+    for (let i = 0; i < losers.length; i++) {
+        const start = losers[i].ts;
+        const end   = start + windowMs;
+        const group = losers.filter(l => l.ts >= start && l.ts <= end);
+        if (group.length < minLosses) continue;
+
+        const totalR   = group.reduce((s, l) => s + rOf(l.t), 0);
+        const sessions = {};
+        for (const l of group) {
+            const sess = l.t.session || sessionOf(l.t.entry) || "Unknown";
+            sessions[sess] = (sessions[sess] || 0) + 1;
+        }
+        const topSession = Object.entries(sessions).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+
+        burst.push({
+            startTs:    new Date(start).toISOString().slice(0, 16).replace("T", " "),
+            endTs:      new Date(end).toISOString().slice(0, 16).replace("T", " "),
+            lossCount:  group.length,
+            totalR:     round2(totalR),
+            topSession,
+            sessions,
+        });
+    }
+
+    // Deduplicate overlapping windows by keeping highest-density unique start points
+    // (simple: sort by lossCount desc, keep top 5 non-overlapping by start time)
+    burst.sort((a, b) => b.lossCount - a.lossCount || a.startTs.localeCompare(b.startTs));
+    const deduped = [];
+    const seen = new Set();
+    for (const w of burst) {
+        // Skip if we've already captured a window that starts within 12 hours of this one
+        const hourKey = w.startTs.slice(0, 13); // "YYYY-MM-DD HH"
+        if (seen.has(hourKey)) continue;
+        seen.add(hourKey);
+        deduped.push(w);
+        if (deduped.length >= 5) break;
+    }
+    return deduped;
+}
+
+// Internal: parse entry timestamp to ms epoch
+function _parseEntryMs(trade) {
+    const raw = trade?.entry ?? trade?.entryTime ?? trade?.fill_time;
+    if (!raw) return null;
+    const d = typeof raw === "number"
+        ? (raw > 1e10 ? new Date(raw) : new Date(raw * 1000))
+        : new Date(String(raw).trim().replace(/^(\d{4}-\d{2}-\d{2})\s/, "$1T"));
+    const ms = d?.getTime?.();
+    return Number.isFinite(ms) ? ms : null;
+}
+
+/**
+ * buildStreakContext(trades) → StreakContextZone[]
+ * Enriches each streak zone with session, direction, and hour concentration.
+ * Used by StreakAnalysis to surface "4 of 5 losses were London Longs" patterns.
+ */
+export function buildStreakContext(trades) {
+    if (!Array.isArray(trades) || !trades.length) return [];
+    const { streakZones } = computeStreakStats(trades);
+
+    return streakZones
+        .sort((a, b) => b.length - a.length) // worst streaks first
+        .slice(0, 8)                           // cap at 8 zones for display
+        .map((zone, rank) => {
+            const zoneTrades = trades.slice(zone.start, zone.end + 1);
+            const n          = zoneTrades.length;
+
+            const sessions   = {};
+            const directions = {};
+            const hours      = [];
+
+            for (const t of zoneTrades) {
+                const sess = t.session || sessionOf(t?.entry) || "Unknown";
+                sessions[sess] = (sessions[sess] || 0) + 1;
+
+                const dir = directionOf(t);
+                directions[dir] = (directions[dir] || 0) + 1;
+
+                const h = entryHour(t);
+                if (h != null) hours.push(h);
+            }
+
+            const topSessionEntry    = Object.entries(sessions).sort((a, b) => b[1] - a[1])[0];
+            const topDirectionEntry  = Object.entries(directions).sort((a, b) => b[1] - a[1])[0];
+            const avgHour            = hours.length ? round1(hours.reduce((s, h) => s + h, 0) / hours.length) : null;
+
+            const totalR = zoneTrades.reduce((s, t) => s + rOf(t), 0);
+            const startEntry = trades[zone.start]?.entry ?? trades[zone.start]?.fill_time ?? null;
+            const endEntry   = trades[zone.end]?.entry   ?? trades[zone.end]?.fill_time   ?? null;
+
+            return {
+                rank:              rank + 1,
+                length:            zone.length,
+                totalR:            round2(totalR),
+                startEntry,
+                endEntry,
+                sessions,
+                directions,
+                topSession:        topSessionEntry?.[0] ?? null,
+                topSessionPct:     topSessionEntry ? round1((topSessionEntry[1] / n) * 100) : null,
+                topDirection:      topDirectionEntry?.[0] ?? null,
+                topDirectionPct:   topDirectionEntry ? round1((topDirectionEntry[1] / n) * 100) : null,
+                avgHourUTC:        avgHour,
+                // Flag if a single session or direction dominates (≥70%)
+                sessionDominated:  topSessionEntry  ? topSessionEntry[1]  / n >= 0.7 : false,
+                directionDominated:topDirectionEntry ? topDirectionEntry[1] / n >= 0.7 : false,
+            };
+        });
+}
+
+/**
+ * computeFalseLosserCandidates(losers) → FalseLosserCandidate[]
+ * Identifies losing trades that may be false losers based on currently-available fields.
+ * Returns candidates with typed reasons and an explicit uncertainty notice.
+ *
+ * WITHOUT post-stop continuation data this is always UNCERTAIN — we flag patterns
+ * that are consistent with false losers but cannot confirm them.
+ */
+export function computeFalseLosserCandidates(losers) {
+    if (!Array.isArray(losers) || !losers.length) return [];
+
+    const candidates = [];
+
+    for (const t of losers) {
+        const signals = [];
+
+        // Signal 1: very fast stopout (< 10 min) — timing issue or stop raid
+        const durMins = durationMinutes(t);
+        if (durMins != null && durMins < 10) {
+            signals.push({ type: "fast_stopout", label: `Stopped out in ${Math.round(durMins)} min — possible stop raid` });
+        }
+
+        // Signal 2: fast stopout archetype with low/unclassified confidence
+        if (t.archetype === "fast_stopout" && (t.confidence === "UNCLASSIFIED" || t.confidence === "LOW" || t.confidence === "BORDERLINE")) {
+            signals.push({ type: "low_conf_timing", label: "Fast stopout with low classifier confidence — ambiguous invalidation" });
+        }
+
+        // Signal 3: hard invalidation via numeric threshold only (not explicit boolean)
+        // These trades matched max_ob_penetration_pct ≥ 100 but NOT ob_fully_breached=true
+        if (
+            t.archetype === "hard_invalidation" &&
+            t.max_ob_penetration_pct != null &&
+            t.ob_fully_breached !== true &&
+            Number(t.max_ob_penetration_pct) >= 100 &&
+            Number(t.max_ob_penetration_pct) < 110
+        ) {
+            signals.push({ type: "marginal_breach", label: `OB penetration ${Number(t.max_ob_penetration_pct).toFixed(0)}% — marginal breach, may not be structural` });
+        }
+
+        // Signal 4: close-confirmed without full breach — stop may have been too tight
+        if (t.archetype === "close_confirmed" && t.ob_fully_breached !== true) {
+            signals.push({ type: "close_conf_no_breach", label: "Close-confirmed without full OB breach — stop may have been too tight" });
+        }
+
+        // Only include trades with ≥ 1 signal
+        if (!signals.length) continue;
+
+        candidates.push({
+            id:        t?.id ?? t?.trade_id ?? null,
+            entry:     t?.entry ?? t?.fill_time ?? null,
+            direction: directionOf(t),
+            session:   t?.session || sessionOf(t?.entry) || "—",
+            r:         rOf(t),
+            archetype: t?.archetype ?? "standard_loss",
+            severity:  t?.severity  ?? null,
+            signals,
+            // Explicit uncertainty: we cannot confirm false losers without post-stop data
+            confirmed: false,
+            note: "Candidate only — confirmation requires post-stop continuation data (MAE/MFE/post_stop_continuation_r)",
+            _trade: t,
+        });
+    }
+
+    // Sort by signal count desc, then by severity desc
+    return candidates.sort((a, b) =>
+        b.signals.length - a.signals.length || (b.severity ?? 0) - (a.severity ?? 0)
+    );
+}
+
+/**
+ * buildDrilldownRows(losers) → DrilldownRow[]
+ * Flat rows for the DataTable in FailureDrilldown.
+ * Includes a _trade reference to the full trade object for the detail panel.
+ */
+export function buildDrilldownRows(losers) {
+    if (!Array.isArray(losers)) return [];
+    return losers.map((t, i) => {
+        const rawTs = t?.entry ?? t?.fill_time ?? t?.entryTime ?? null;
+        let dateStr = "—";
+        if (rawTs) {
+            try {
+                const d = new Date(rawTs);
+                dateStr = `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,"0")}-${String(d.getUTCDate()).padStart(2,"0")} ${String(d.getUTCHours()).padStart(2,"0")}:${String(d.getUTCMinutes()).padStart(2,"0")}`;
+            } catch { dateStr = String(rawTs); }
+        }
+        return {
+            _idx:       i,
+            id:         t?.id ?? t?.trade_id ?? i,
+            datetime:   dateStr,
+            direction:  directionOf(t),
+            session:    t?.session || sessionOf(t?.entry) || "—",
+            r:          rOf(t),
+            archetype:  t?.archetype  ?? "standard_loss",
+            confidence: t?.confidence ?? "UNCLASSIFIED",
+            severity:   t?.severity   ?? null,
+            _trade:     t, // full trade object for detail panel
+        };
+    });
 }

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { PageHeader } from "@/components/lab/AppShell";
+import { LabRunHero } from "@/components/lab/LabRunHero";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { Field, NeonInput, NeonToggle, Segment } from "@/components/lab/controls";
 import { useTheme, THEMES } from "@/context/ThemeContext";
@@ -115,10 +115,10 @@ export default function Settings() {
 
     return (
         <div className="pb-12">
-            <PageHeader
-                eyebrow="SETTINGS"
+            <LabRunHero
+                pageLabel="Settings"
                 title="Workspace Configuration"
-                subtitle="Theme, data paths, symbol metadata, display preferences."
+                description="Theme, data paths, symbol metadata, display preferences."
             />
 
             <div className="px-6 grid grid-cols-1 xl:grid-cols-3 gap-4">

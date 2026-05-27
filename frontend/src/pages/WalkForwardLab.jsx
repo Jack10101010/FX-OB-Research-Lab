@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { PageHeader } from "@/components/lab/AppShell";
+import { LabRunHero } from "@/components/lab/LabRunHero";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { MetricChip } from "@/components/lab/MetricChip";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
@@ -60,10 +60,10 @@ export default function WalkForwardLab() {
     if (folds.length < 2) {
         return (
             <div className="pb-12">
-                <PageHeader
-                    eyebrow="WALK-FORWARD LAB"
+                <LabRunHero
+                    pageLabel="Walk-Forward Lab"
                     title="Walk-Forward Robustness"
-                    subtitle="Evaluate whether strategy parameters hold up across time using imported runs as sequential out-of-sample folds."
+                    description="Evaluate whether strategy parameters hold up across time using imported runs as sequential out-of-sample folds."
                     actions={browseAction}
                 />
                 <div className="px-6">
@@ -136,10 +136,10 @@ export default function WalkForwardLab() {
 
     return (
         <div className="pb-12">
-            <PageHeader
-                eyebrow="WALK-FORWARD LAB"
+            <LabRunHero
+                pageLabel="Walk-Forward Lab"
                 title="Walk-Forward Robustness"
-                subtitle={`${count} imported runs treated as sequential OOS folds — ordered by date range where available.`}
+                description={`${count} imported runs treated as sequential OOS folds — ordered by date range where available.`}
                 actions={browseAction}
             />
 

@@ -1,8 +1,9 @@
 import React from "react";
-import { PageHeader } from "@/components/lab/AppShell";
+import { LabRunHero } from "@/components/lab/LabRunHero";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { MetricChip } from "@/components/lab/MetricChip";
 import { ColoredR, Pill } from "@/components/lab/DataTable";
+import { HeroBadge } from "@/components/lab/controls";
 import { useDataset } from "@/data/store";
 import {
     FlaskConical, TrendingUp, TrendingDown, Target, AlertTriangle,
@@ -212,15 +213,16 @@ export default function HypothesisLab() {
 
     return (
         <div className="pb-12">
-            <PageHeader
-                eyebrow="HYPOTHESIS LAB"
+            <LabRunHero
+                pageLabel="Hypothesis Lab"
                 title={ACTIVE_RUN?.id || "No active run"}
-                subtitle={`${ACTIVE_RUN?.symbol || "Symbol"} · ${ACTIVE_RUN?.detectionTf || "TF"} · ${variantLabel(ACTIVE_TRADE_VARIANT)} — combine imported run insights into quick what-if hypotheses before promoting them to exact Python tests`}
+                runLine={`${ACTIVE_RUN?.symbol || "Symbol"} · ${ACTIVE_RUN?.detectionTf || "TF"} · ${variantLabel(ACTIVE_TRADE_VARIANT)}`}
+                description="Combine imported run insights into quick research estimates before promoting them to exact Python tests."
                 actions={(
                     <div className="flex items-center gap-2">
-                        <Pill tone={activeRunId ? "primary" : "muted"}>{activeRunId ? "IMPORTED" : "NO RUN"}</Pill>
-                        <Pill tone="secondary">{trades.length} TRADES</Pill>
-                        <Pill tone="warning">FRONTEND ESTIMATES</Pill>
+                        <HeroBadge tone={activeRunId ? "primary" : "muted"}>{activeRunId ? "Imported" : "No Run"}</HeroBadge>
+                        <HeroBadge tone="secondary">{trades.length} trades</HeroBadge>
+                        <HeroBadge tone="warning">Frontend Estimates</HeroBadge>
                     </div>
                 )}
             />

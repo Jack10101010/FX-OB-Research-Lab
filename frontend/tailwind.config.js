@@ -8,6 +8,11 @@ module.exports = {
                 display: ['"Space Grotesk"', 'system-ui', 'sans-serif'],
                 mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
             },
+            fontSize: {
+                tiny: ['10px', { lineHeight: '1.2', letterSpacing: '0.08em' }],
+                caption: ['11px', { lineHeight: '1.35', letterSpacing: '0.06em' }],
+                'body-sm': ['12px', { lineHeight: '1.5' }],
+            },
             borderRadius: {
                 lg: 'var(--radius)',
                 md: 'calc(var(--radius) + 2px)',

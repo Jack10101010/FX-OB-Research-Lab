@@ -7,7 +7,9 @@ import { useSearchParams } from "react-router-dom";
 import { useState, useCallback } from "react";
 import { sessionOf } from "../../entries/analytics/entryFormatters";
 
-const LS_FAILURES_FILTERS = "fxob_failures_filters_v1";
+const LS_FAILURES_FILTERS = "fxob_failures_workspace_filters_v1";
+const LS_FAILURES_UI = "fxob_failures_workspace_ui_v1";
+const LEGACY_FAILURES_FILTERS = "fxob_failures_filters_v1";
 
 // ── Tab definitions ───────────────────────────────────────────────────────────
 
@@ -32,18 +34,61 @@ const DEFAULT_FILTERS = {
     severityMin: null, // null = no min
 };
 
+const DEFAULT_UI = {
+    activeTab: FAILURES_TABS[0].key,
+    filtersExpanded: false,
+};
+
 // ── Persistence helpers ───────────────────────────────────────────────────────
 
-function loadFilters() {
+function readJson(key, fallback) {
     try {
-        return { ...DEFAULT_FILTERS, ...JSON.parse(localStorage.getItem(LS_FAILURES_FILTERS) || "{}") };
+        const raw = localStorage.getItem(key);
+        return raw ? JSON.parse(raw) : fallback;
     } catch {
-        return DEFAULT_FILTERS;
+        return fallback;
     }
 }
 
+function writeJson(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+}
+
+function sanitizeFilters(value) {
+    const source = value && typeof value === "object" ? value : {};
+    const severity = Number(source.severityMin);
+    return {
+        sessions: Array.isArray(source.sessions) ? source.sessions.filter((item) => typeof item === "string") : [],
+        directions: Array.isArray(source.directions) ? source.directions.filter((item) => typeof item === "string") : [],
+        archetypes: Array.isArray(source.archetypes) ? source.archetypes.filter((item) => typeof item === "string") : [],
+        severityMin: Number.isFinite(severity) ? severity : null,
+    };
+}
+
+function sanitizeUi(value) {
+    const source = value && typeof value === "object" ? value : {};
+    const activeTab = FAILURES_TABS.some((tab) => tab.key === source.activeTab) ? source.activeTab : DEFAULT_UI.activeTab;
+    return {
+        activeTab,
+        filtersExpanded: typeof source.filtersExpanded === "boolean" ? source.filtersExpanded : DEFAULT_UI.filtersExpanded,
+    };
+}
+
+function loadFilters() {
+    const stored = readJson(LS_FAILURES_FILTERS, null) ?? readJson(LEGACY_FAILURES_FILTERS, null);
+    return sanitizeFilters({ ...DEFAULT_FILTERS, ...(stored || {}) });
+}
+
 function saveFilters(f) {
-    try { localStorage.setItem(LS_FAILURES_FILTERS, JSON.stringify(f)); } catch {}
+    writeJson(LS_FAILURES_FILTERS, sanitizeFilters(f));
+}
+
+function loadUi() {
+    return sanitizeUi(readJson(LS_FAILURES_UI, DEFAULT_UI));
+}
+
+function saveUi(value) {
+    writeJson(LS_FAILURES_UI, sanitizeUi(value));
 }
 
 // ── applyFilter (pure) ────────────────────────────────────────────────────────
@@ -78,23 +123,42 @@ export function applyFilter(trades, filters) {
 
 export function useFailuresWorkspace() {
     const [searchParams, setSearchParams] = useSearchParams();
-    const activeTab = searchParams.get("tab") || FAILURES_TABS[0].key;
+    const [ui, setUiState] = useState(loadUi);
+    const requestedTab = searchParams.get("tab");
+    const activeTab = FAILURES_TABS.some((tab) => tab.key === requestedTab)
+        ? requestedTab
+        : ui.activeTab;
 
     const setActiveTab = useCallback((key) => {
+        if (!FAILURES_TABS.some((tab) => tab.key === key)) return;
         setSearchParams(prev => {
             const p = new URLSearchParams(prev);
             p.set("tab", key);
             return p;
         });
+        setUiState((prev) => {
+            const next = { ...prev, activeTab: key };
+            saveUi(next);
+            return next;
+        });
     }, [setSearchParams]);
 
     const [filters, setFiltersState] = useState(loadFilters);
 
+    const setFiltersExpanded = useCallback((expanded) => {
+        setUiState((prev) => {
+            const next = { ...prev, filtersExpanded: typeof expanded === "function" ? expanded(prev.filtersExpanded) : Boolean(expanded) };
+            saveUi(next);
+            return next;
+        });
+    }, []);
+
     const setFilters = useCallback((patch) => {
         setFiltersState(prev => {
             const next = typeof patch === "function" ? patch(prev) : { ...prev, ...patch };
-            saveFilters(next);
-            return next;
+            const clean = sanitizeFilters(next);
+            saveFilters(clean);
+            return clean;
         });
     }, []);
 
@@ -142,6 +206,8 @@ export function useFailuresWorkspace() {
         // Filter state + actions
         filters,
         setFilters,
+        filtersExpanded: ui.filtersExpanded,
+        setFiltersExpanded,
         toggleSession,
         toggleDirection,
         toggleArchetype,
