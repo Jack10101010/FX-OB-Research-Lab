@@ -4,8 +4,8 @@ import { LabRunHero } from "@/components/lab/LabRunHero";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
 import { Field, NeonSelect, NeonInput } from "@/components/lab/controls";
-import { useDataset, updateRunBundle, deleteRunBundle, clearAllRuns, getRunsBackupPayload, getRunDisplayName, compactTimeframe, formatRunDateRange } from "@/data/store";
-import { Check, Download, Edit3, ShieldAlert, Trash2, X } from "lucide-react";
+import { useDataset, updateRunBundle, deleteRunBundle, clearAllRuns, getRunsBackupPayload, getRunDisplayName, compactTimeframe, formatRunDateRange, reloadFullRunFromSidecar, autoReloadIndexedRunsFromSidecar } from "@/data/store";
+import { Check, Download, Edit3, RefreshCw, ShieldAlert, Trash2, X } from "lucide-react";
 
 const RUN_SORT_OPTIONS = [
     { value: "created_asc", label: "Created ↑ oldest first" },
@@ -23,7 +23,7 @@ function normalizeRunsSort(value) {
 }
 
 export default function Runs() {
-    const { RUNS, PROJECTS, importedCount, persistWarning, candlePersistenceNotice, getRunData } = useDataset();
+    const { RUNS, PROJECTS, importedCount, persistWarning, candlePersistenceNotice, getRunData, autoReloadInProgress, autoReloadFailedCount } = useDataset();
     const [symbol, setSymbol] = useState("All");
     const [tf, setTf] = useState("All");
     const [mode, setMode] = useState("All");
@@ -38,8 +38,16 @@ export default function Runs() {
     const [q, setQ] = useState("");
     const [editingId, setEditingId] = useState("");
     const [editName, setEditName] = useState("");
+    const [reloadBusyId, setReloadBusyId] = useState("");
+    const [reloadError, setReloadError] = useState("");
 
     const runStoreId = (run) => run?._bundleId || run?.id;
+
+    useEffect(() => {
+        autoReloadIndexedRunsFromSidecar().catch((error) => {
+            console.debug("[Runs] auto reload failed", error);
+        });
+    }, []);
 
     useEffect(() => {
         try {
@@ -89,6 +97,25 @@ export default function Runs() {
     const deleteAllRuns = () => {
         if (!confirmDelete("Delete all runs?")) return;
         clearAllRuns();
+    };
+    const reloadFullRun = async (event, run) => {
+        event?.preventDefault();
+        event?.stopPropagation();
+        const id = runStoreId(run);
+        if (!id) {
+            setReloadError("Could not reload full run data from sidecar. Make sure sidecar is running and output folder exists.");
+            return;
+        }
+        setReloadBusyId(id);
+        setReloadError("");
+        try {
+            await reloadFullRunFromSidecar(id);
+        } catch (error) {
+            const detail = error?.message ? ` (${error.message})` : "";
+            setReloadError(`Could not reload full run data from sidecar. Make sure sidecar is running and output folder exists.${detail}`);
+        } finally {
+            setReloadBusyId("");
+        }
     };
 
     const filtered = useMemo(() => {
@@ -176,7 +203,7 @@ export default function Runs() {
                     <div className="flex items-start gap-2 border border-[hsl(var(--warning)/0.35)] bg-[hsl(var(--warning)/0.06)] clip-bevel-sm px-3 py-2">
                         <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5 text-[hsl(var(--warning))]" />
                         <span className="text-[11px] leading-relaxed text-[hsl(var(--text-2))]">
-                            Some run data may not have been persisted because browser storage is full. Export a backup or re-import from output folders.
+                            {persistWarning}
                         </span>
                     </div>
                 </div>
@@ -187,6 +214,36 @@ export default function Runs() {
                         <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5 text-[hsl(var(--accent-secondary))]" />
                         <span className="text-[11px] leading-relaxed text-[hsl(var(--text-2))]">
                             {candlePersistenceNotice}
+                        </span>
+                    </div>
+                </div>
+            )}
+            {reloadError && (
+                <div className="px-6 mb-3">
+                    <div className="flex items-start gap-2 border border-[hsl(var(--warning)/0.35)] bg-[hsl(var(--warning)/0.06)] clip-bevel-sm px-3 py-2">
+                        <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5 text-[hsl(var(--warning))]" />
+                        <span className="text-[11px] leading-relaxed text-[hsl(var(--text-2))]">
+                            {reloadError}
+                        </span>
+                    </div>
+                </div>
+            )}
+            {autoReloadInProgress && (
+                <div className="px-6 mb-3">
+                    <div className="flex items-start gap-2 border border-[hsl(var(--accent-secondary)/0.3)] bg-[hsl(var(--accent-secondary)/0.06)] clip-bevel-sm px-3 py-2">
+                        <RefreshCw className="w-4 h-4 shrink-0 mt-0.5 text-[hsl(var(--accent-secondary))] animate-spin" />
+                        <span className="text-[11px] leading-relaxed text-[hsl(var(--text-2))]">
+                            Reloading saved runs from sidecar...
+                        </span>
+                    </div>
+                </div>
+            )}
+            {!autoReloadInProgress && autoReloadFailedCount > 0 && (
+                <div className="px-6 mb-3">
+                    <div className="flex items-start gap-2 border border-[hsl(var(--warning)/0.35)] bg-[hsl(var(--warning)/0.06)] clip-bevel-sm px-3 py-2">
+                        <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5 text-[hsl(var(--warning))]" />
+                        <span className="text-[11px] leading-relaxed text-[hsl(var(--text-2))]">
+                            Sidecar unavailable for {autoReloadFailedCount} run{autoReloadFailedCount === 1 ? "" : "s"}. Start sidecar to reload full run data.
                         </span>
                     </div>
                 </div>
@@ -205,6 +262,8 @@ export default function Runs() {
                                     setEditName={setEditName}
                                     startRename={startRename}
                                     deleteRun={deleteRun}
+                                    reloadFullRun={reloadFullRun}
+                                    reloadBusyId={reloadBusyId}
                                     saveRename={saveRename}
                                     cancelRename={cancelRename}
                                 />
@@ -213,12 +272,12 @@ export default function Runs() {
                             { key: "projectName", label: "Project", render: (r) => <ProjectLabel run={r} /> },
                             { key: "detectionTf", label: "TF", render: (r) => compactTimeframe(r.detectionTf) },
                             { key: "dateRange",   label: "Date Range", render: (r) => formatRunDateRange(r.dateRange) },
-                            { key: "rr",          label: "RR",         align: "right", render: (r) => r.rr.toFixed(1) },
-                            { key: "trades",      label: "Trades",     align: "right", render: (r) => r.validTradeCount ?? r.trades ?? "—" },
-                            { key: "winRate",     label: "WR",         align: "right", render: (r) => `${r.winRate.toFixed(1)}%` },
-                            { key: "netR",        label: "Net R",      align: "right", render: (r) => <ColoredR value={r.netR} /> },
+                            { key: "rr",          label: "RR",         align: "right", render: (r) => formatNumericCell(r.rr, 1) },
+                            { key: "trades",      label: "Trades",     align: "right", render: (r) => formatIntegerCell(r.validTradeCount ?? r.trades) },
+                            { key: "winRate",     label: "WR",         align: "right", render: (r) => formatPercentCell(r.winRate, 1) },
+                            { key: "netR",        label: "Net R",      align: "right", render: (r) => <SafeColoredR value={r.netR} /> },
                             { key: "maxDd",       label: "Max DD",     align: "right", render: (r) => <MaxDdValue value={r.maxDd} /> },
-                            { key: "validation",  label: "Val",        align: "right", render: (r) => <span className="text-[hsl(var(--success))]">{r.validation.toFixed(1)}%</span> },
+                            { key: "validation",  label: "Val",        align: "right", render: (r) => <span className="text-[hsl(var(--success))]">{formatPercentCell(r.validation, 1)}</span> },
                         ]}
                         rows={filtered}
                         rowKey="id"
@@ -336,7 +395,28 @@ function MaxDdValue({ value }) {
     return <span className="text-[hsl(var(--danger))] tabular-nums">{`${number.toFixed(1)}R`}</span>;
 }
 
-function RunNameCell({ run, editingId, editName, setEditName, startRename, deleteRun, saveRename, cancelRename }) {
+function SafeColoredR({ value }) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return <span className="text-muted-lab">—</span>;
+    return <ColoredR value={number} />;
+}
+
+function formatNumericCell(value, digits = 1) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number.toFixed(digits) : "—";
+}
+
+function formatIntegerCell(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? String(Math.trunc(number)) : "—";
+}
+
+function formatPercentCell(value, digits = 1) {
+    const formatted = formatNumericCell(value, digits);
+    return formatted === "—" ? "—" : `${formatted}%`;
+}
+
+function RunNameCell({ run, editingId, editName, setEditName, startRename, deleteRun, reloadFullRun, reloadBusyId, saveRename, cancelRename }) {
     const label = getRunDisplayName(run);
     const storeId = run._bundleId || run.id;
     const identityTitle = [
@@ -388,9 +468,27 @@ function RunNameCell({ run, editingId, editName, setEditName, startRename, delet
     return (
         <span className="group/name inline-flex items-center gap-1.5" title={identityTitle}>
             <Link to={`/runs/${encodeURIComponent(storeId)}`} className="text-[hsl(var(--accent-primary))] hover:text-white">{label}</Link>
+            {run.hasFullData ? <Pill tone="success">Memory full data</Pill> : <Pill tone="warning">Index only</Pill>}
+            {run.autoReloadStatus === "loading" && <Pill tone="secondary">Auto-loading</Pill>}
+            {run.autoReloadStatus === "failed" && <Pill tone="warning">Auto-load failed</Pill>}
+            {run.reloadAvailable && run.autoReloadStatus !== "loading" && run.autoReloadStatus !== "failed" && <Pill tone="secondary">Auto-load on open</Pill>}
             {run.candlesStorage === "indexeddb" && <Pill tone="secondary">Candles stored</Pill>}
+            {run._source === "imported" && !run.hasCandles && !run.candlesStorage && <Pill tone="muted">No candles</Pill>}
             {run._source === "imported" && (
                 <>
+                    {!run.hasFullData && run.reloadAvailable && (
+                        <button
+                            type="button"
+                            onClick={(event) => reloadFullRun(event, run)}
+                            disabled={reloadBusyId === storeId}
+                            className="inline-flex items-center gap-1 px-1.5 h-6 clip-bevel-sm border border-[hsl(var(--accent-secondary)/0.5)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.07)] hover:bg-[hsl(var(--accent-secondary)/0.12)] disabled:opacity-60"
+                            aria-label="Reload full run data"
+                            title="Reload full run data from sidecar now. Run Detail will also auto-load it when opened."
+                        >
+                            <RefreshCw className={`w-3.5 h-3.5 ${reloadBusyId === storeId ? "animate-spin" : ""}`} />
+                            <span className="text-[10px] font-medium">Reload</span>
+                        </button>
+                    )}
                     <button
                         type="button"
                         onClick={(event) => startRename(event, run)}

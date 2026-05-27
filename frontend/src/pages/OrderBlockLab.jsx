@@ -4,6 +4,7 @@ import { MetricChip } from "@/components/lab/MetricChip";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
 import { HeroBadge, NeonSelect, Segment } from "@/components/lab/controls";
 import { LabRunHero } from "@/components/lab/LabRunHero";
+import { RunConfigStrip } from "@/components/lab/RunConfigStrip";
 import { useDataset } from "@/data/store";
 import { setSelectedTradeVariant } from "@/data/store";
 import {
@@ -102,7 +103,7 @@ export default function OrderBlockLab() {
 
     const trades = React.useMemo(() => (Array.isArray(TRADES) ? TRADES : EMPTY_TRADES), [TRADES]);
     const activeRun = activeRunId ? runs?.[activeRunId] : null;
-    const orderBlocks = React.useMemo(() => (Array.isArray(ACTIVE_RUN?.orderBlocks) ? ACTIVE_RUN.orderBlocks : []), [ACTIVE_RUN]);
+    const orderBlocks = React.useMemo(() => (Array.isArray(activeRun?.orderBlocks) ? activeRun.orderBlocks : []), [activeRun]);
     const filteredTrades = React.useMemo(() => applyFilters(trades, filters), [trades, filters]);
     const analytics = React.useMemo(() => buildOrderBlockAnalytics(filteredTrades), [filteredTrades]);
     const obPopulationAnalytics = React.useMemo(() => buildNewsCreatedObPopulationAnalytics(orderBlocks, trades), [orderBlocks, trades]);
@@ -147,6 +148,8 @@ export default function OrderBlockLab() {
                     </>
                 )}
             />
+
+            <RunConfigStrip run={activeRun} />
 
             {/* ── KPI Chips ─────────────────────────────────────────────── */}
             <div className="kpi-strip">

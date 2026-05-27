@@ -1,8 +1,9 @@
 // ── FailuresTemporal.jsx ─────────────────────────────────────────────────────
-// Phase 2: Weekday + hourly tables · streak distribution · burst detection.
+// Phase 2/3: Weekday + hourly tables · heatmap · streak distribution · burst detection.
 
 import React, { useMemo } from "react";
 import { NeonPanel } from "@/components/lab/NeonPanel";
+import { FailuresHeatmap } from "./FailuresHeatmap";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
 import { AlertTriangle } from "lucide-react";
 import {
@@ -80,6 +81,9 @@ export function FailuresTemporal({ losers = [], allLosers = [], allTrades = [] }
                     <span className="text-[10px] font-mono text-muted-lab">at end of dataset</span>
                 </div>
             )}
+
+            {/* ── Heatmap ───────────────────────────────────────────────────── */}
+            <FailuresHeatmap allTrades={allTrades} />
 
             {/* Tables */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

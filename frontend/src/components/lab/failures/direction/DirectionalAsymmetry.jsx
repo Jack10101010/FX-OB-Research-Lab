@@ -1,11 +1,12 @@
 // ── DirectionalAsymmetry.jsx ─────────────────────────────────────────────────
-// Phase 1: Long vs short failure metrics, CVaR tail risk, asymmetry warning.
+// Phase 1/3: Long vs short failure metrics, CVaR tail risk, asymmetry warning + diverging bar.
 
 import React, { useMemo } from "react";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { Pill } from "@/components/lab/DataTable";
 import { AlertTriangle } from "lucide-react";
 import { computeDirectionalStats } from "../shared/failuresAnalytics";
+import { DirectionDivergingBar } from "./DirectionDivergingBar";
 import { archetypeLabel } from "../shared/failuresRegistry";
 import { safeLabel, safeTone } from "../shared/failuresFormatters";
 
@@ -129,6 +130,9 @@ export function DirectionalAsymmetry({ losers = [], allLosers = [], allTrades = 
                     </div>
                 </NeonPanel>
             )}
+
+            {/* ── Diverging bar chart ────────────────────────────────────────── */}
+            <DirectionDivergingBar allTrades={allTrades} />
         </div>
     );
 }

@@ -882,6 +882,7 @@ export async function ingestRunBundle(fileList) {
 
     if (newsOnlyImport) {
         const id = `news_calendar_${Date.now()}`;
+        const sourceFiles = collected.recognized.map((file) => file.name);
         const bundle = {
             id,
             config: {},
@@ -903,6 +904,7 @@ export async function ingestRunBundle(fileList) {
                 validation: 100,
                 executionMode: "news_calendar",
                 date: new Date().toISOString().slice(0, 10),
+                sourceFiles,
             },
             trades: [],
             tradesByVariant: {},
@@ -915,6 +917,7 @@ export async function ingestRunBundle(fileList) {
             entryResults: { summary: {}, tradesByMode: {}, equityCurveByMode: {}, sourceFiles: [], tradesOmittedForStorage: false },
             newsEvents: collected.newsEvents,
             newsSourceFiles: collected.newsSourceFiles,
+            sourceFiles,
             orderBlocks: [],
             candles: null,
             hasCandles: false,
@@ -1016,6 +1019,7 @@ export async function ingestRunBundle(fileList) {
     const losses = primaryTrades.length - wins;
     const netR = primaryTrades.reduce((s, t) => s + (Number(t.r) || 0), 0);
     const integrity = buildIntegrity({ collected, primaryTrades, netR, primaryVariant });
+    const sourceFiles = collected.recognized.map((file) => file.name);
 
     const runSummary = {
         id,
@@ -1054,6 +1058,7 @@ export async function ingestRunBundle(fileList) {
         news_flattened_r: sm.news_flattened_r ?? null,
         news_flatten_late_count: sm.news_flatten_late_count ?? null,
         news_debug: sm.news_debug ?? null,
+        sourceFiles,
     };
 
     const bundle = {
@@ -1084,6 +1089,7 @@ export async function ingestRunBundle(fileList) {
         },
         newsEvents: collected.newsEvents,
         newsSourceFiles: collected.newsSourceFiles,
+        sourceFiles,
         orderBlocks: mappedOBs,
         candles: hasCandles ? collected.candles : null,
         hasCandles,

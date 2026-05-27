@@ -1,11 +1,12 @@
 // ── StreakAnalysis.jsx ───────────────────────────────────────────────────────
-// Phase 2: Streak KPIs, Wald-Wolfowitz runs test, sequence dependency, leaderboard,
-// and streak context (session/direction concentration inside each streak zone).
+// Phase 2/3: Streak KPIs, Wald-Wolfowitz runs test, sequence dependency, leaderboard,
+// streak context, and trade sequence dot strip.
 
 import React, { useMemo, useState } from "react";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { MetricChip } from "@/components/lab/MetricChip";
 import { DataTable } from "@/components/lab/DataTable";
+import { StreakDotStrip } from "./StreakDotStrip";
 import { Pill } from "@/components/lab/DataTable";
 import { TrendingDown, ChevronDown, ChevronRight } from "lucide-react";
 import {
@@ -148,6 +149,9 @@ export function StreakAnalysis({ losers = [], allLosers = [], allTrades = [] }) 
 
     return (
         <div className="p-6 space-y-4">
+            {/* ── Trade sequence dot strip ─────────────────────────────────── */}
+            <StreakDotStrip allTrades={allTrades} />
+
             {/* KPI strip */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <MetricChip

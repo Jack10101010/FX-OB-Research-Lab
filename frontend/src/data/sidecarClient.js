@@ -51,6 +51,13 @@ export function getSidecarRunBundle(jobId, baseUrl = DEFAULT_SIDECAR_URL) {
     return requestSidecar(`/runs/${encodeURIComponent(jobId)}/bundle`, {}, baseUrl);
 }
 
+export function getRunBundleByRunId(runId, options = {}, baseUrl = DEFAULT_SIDECAR_URL) {
+    const params = new URLSearchParams();
+    if (options.includeCandles === true) params.set("include_candles", "true");
+    const suffix = params.toString() ? `?${params.toString()}` : "";
+    return requestSidecar(`/runs/${encodeURIComponent(runId)}/bundle${suffix}`, {}, baseUrl);
+}
+
 export function getLatestSidecarOutputs(baseUrl = DEFAULT_SIDECAR_URL) {
     return requestSidecar("/outputs/latest", {}, baseUrl);
 }

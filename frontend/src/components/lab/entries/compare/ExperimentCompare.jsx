@@ -2,6 +2,7 @@ import React, { useEffect, useMemo } from "react";
 import { useDataset }              from "@/data/store";
 import { NeonPanel }               from "@/components/lab/NeonPanel";
 import { Pill }                    from "@/components/lab/DataTable";
+import { ComparisonConfigStrip }   from "@/components/lab/RunConfigStrip";
 import { RunSelectorBar }          from "./RunSelectorBar";
 import { EntryDeltaTable }         from "./EntryDeltaTable";
 import { ExperimentEquityOverlay } from "./ExperimentEquityOverlay";
@@ -58,6 +59,11 @@ export function ExperimentCompare({ activeRun, activeVariant }) {
                     setSelectedRunIds={setSelectedRunIds}
                 />
             </NeonPanel>
+
+            {/* Config comparison strip — visible when 2+ runs selected */}
+            {selectedRuns.length >= 2 && (
+                <ComparisonConfigStrip runs={selectedRuns} />
+            )}
 
             {/* Delta table */}
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">

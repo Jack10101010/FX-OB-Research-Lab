@@ -6,6 +6,7 @@
 import React, { useMemo } from "react";
 import { getRunDisplayName, useDataset } from "@/data/store";
 import { LabRunHero } from "@/components/lab/LabRunHero";
+import { RunConfigStrip } from "@/components/lab/RunConfigStrip";
 import { WorkspaceTabBar } from "../entries/shared/WorkspaceTabBar";
 import { useFailuresWorkspace, FAILURES_TABS, applyFilter } from "./shared/useFailuresWorkspace";
 import { FailuresCohortFilter } from "./global/FailuresCohortFilter";
@@ -165,6 +166,8 @@ export function FailuresWorkspace() {
                 description="Failure forensics across losing trades, invalidation patterns, sessions, streaks, and prevention candidates."
                 className="mt-4 mb-0"
             />
+
+            <RunConfigStrip run={activeRun} dense />
 
             {/* Tab rail */}
             <WorkspaceTabBar

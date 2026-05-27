@@ -3,6 +3,7 @@ import { NeonPanel } from "@/components/lab/NeonPanel";
 import { MetricChip } from "@/components/lab/MetricChip";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
 import { LabRunHero } from "@/components/lab/LabRunHero";
+import { RunConfigStrip } from "@/components/lab/RunConfigStrip";
 import { useDataset } from "@/data/store";
 import {
     ShieldAlert, ShieldCheck, AlertTriangle, TrendingUp, Activity,
@@ -150,6 +151,8 @@ export default function ProtectionLab() {
                 variant={ACTIVE_TRADE_VARIANT}
                 showTradeCountBadge
             />
+
+            <RunConfigStrip run={activeRun} />
 
             {/* Baseline KPI row — 8 chips (4×2 grid at lg; canonical kpi-strip base) */}
             <div className="kpi-strip mb-5 lg:!grid-cols-4">

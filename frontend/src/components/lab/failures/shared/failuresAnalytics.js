@@ -980,3 +980,166 @@ export function buildDrilldownRows(losers) {
         };
     });
 }
+
+// ── Section 10 — Phase 3 Visual Analytics ────────────────────────────────────
+
+/**
+ * buildFailuresEquityCurveData(trades)
+ * Builds the point array for the equity curve + archetype dot overlay.
+ * Returns array of { i, label, netR, tradeR, isLoss, archetype, severity, direction }
+ * sorted chronologically (same order as input trades).
+ */
+export function buildFailuresEquityCurveData(trades) {
+    if (!Array.isArray(trades) || !trades.length) return [];
+
+    // Month-label helper for x-axis ticks
+    const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    function monthLabel(ts) {
+        if (!ts) return null;
+        try {
+            const d = new Date(ts);
+            if (!isFinite(d.getTime())) return null;
+            return `${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+        } catch { return null; }
+    }
+
+    let cumR = 0;
+    let lastLabel = null;
+    const points = [];
+
+    for (let i = 0; i < trades.length; i++) {
+        const t = trades[i];
+        const r = rOf(t);
+        cumR += r;
+        const ts = t?.entry ?? t?.fill_time ?? t?.entryTime ?? null;
+        const label = monthLabel(ts);
+        const isNewMonth = label && label !== lastLabel;
+        if (label) lastLabel = label;
+
+        points.push({
+            i,
+            label:     isNewMonth ? label : null,
+            netR:      round2(cumR),
+            tradeR:    round2(r),
+            isLoss:    r < 0,
+            archetype: t?.archetype  ?? "standard_loss",
+            severity:  t?.severity   ?? null,
+            direction: directionOf(t),
+            session:   t?.session    ?? sessionOf(ts) ?? null,
+        });
+    }
+    return points;
+}
+
+/**
+ * buildArchetypeRadarData(losers)
+ * Returns an array of radar-ready data objects, one per archetype that has ≥1 trade.
+ * Each object: { archetypeId, axes: [ { axis, value, rawValue }, ... ], count }
+ *
+ * Axes (all normalised 0–100 for radar consistency):
+ *  "Severity"     — avg severity score (0–10) → ×10 for 0-100 scale
+ *  "R Magnitude"  — avg |R| of losses → normalised relative to max across archetypes
+ *  "Session Conc" — Herfindahl concentration index of session distribution (0–1) → ×100
+ *  "Dir Skew"     — |long% - 50%| → 0-50, ×2 for 0-100 scale (50=pure, 0=balanced)
+ *  "Frequency"    — pct of all losers → direct
+ */
+export function buildArchetypeRadarData(losers) {
+    if (!Array.isArray(losers) || !losers.length) return [];
+
+    const total = losers.length;
+
+    // Group by archetype
+    const groups = {};
+    for (const t of losers) {
+        const a = t.archetype ?? "standard_loss";
+        if (!groups[a]) groups[a] = [];
+        groups[a].push(t);
+    }
+
+    const rawStats = Object.entries(groups).map(([archetypeId, trades]) => {
+        // Severity
+        const sevVals = trades.map(t => t.severity).filter(v => v != null && isFinite(v));
+        const avgSev  = sevVals.length ? sevVals.reduce((s,v) => s+v, 0) / sevVals.length : 0;
+
+        // R magnitude (avg absolute loss)
+        const rMag = trades.reduce((s, t) => s + Math.abs(rOf(t)), 0) / trades.length;
+
+        // Session concentration (Herfindahl)
+        const sessMap = {};
+        for (const t of trades) {
+            const s = t.session ?? sessionOf(t?.entry) ?? "Unknown";
+            sessMap[s] = (sessMap[s] || 0) + 1;
+        }
+        const hhi = Object.values(sessMap)
+            .reduce((s, c) => s + Math.pow(c / trades.length, 2), 0);
+
+        // Direction skew: how far from 50/50
+        const longs  = trades.filter(t => directionOf(t) === "long").length;
+        const longPct = trades.length > 0 ? (longs / trades.length) * 100 : 50;
+        const dirSkew = Math.abs(longPct - 50); // 0=balanced, 50=pure one direction
+
+        // Frequency
+        const freq = (trades.length / total) * 100;
+
+        return {
+            archetypeId,
+            count: trades.length,
+            _avgSev: avgSev,
+            _rMag: rMag,
+            _hhi: hhi,
+            _dirSkew: dirSkew,
+            _freq: freq,
+        };
+    });
+
+    // Normalise R magnitude relative to max across archetypes
+    const maxRMag = Math.max(...rawStats.map(s => s._rMag), 0.001);
+
+    return rawStats.map(s => ({
+        archetypeId: s.archetypeId,
+        count: s.count,
+        axes: [
+            { axis: "Severity",     value: Math.min(100, s._avgSev * 10),            rawValue: round1(s._avgSev)  },
+            { axis: "R Magnitude",  value: Math.min(100, (s._rMag / maxRMag) * 100), rawValue: round2(s._rMag)   },
+            { axis: "Session Conc", value: Math.min(100, s._hhi * 100),              rawValue: round1(s._hhi * 100) },
+            { axis: "Dir Skew",     value: Math.min(100, s._dirSkew * 2),            rawValue: round1(s._dirSkew) },
+            { axis: "Frequency",    value: Math.min(100, s._freq),                   rawValue: round1(s._freq)   },
+        ],
+    }));
+}
+
+/**
+ * buildTradeDotStrip(trades)
+ * Returns a compact array for the W/L streak dot strip SVG.
+ * Each element: { i, isLoss, r, archetype, streakDepth, session, direction }
+ * streakDepth = how many consecutive losses at this point (0 for wins).
+ */
+export function buildTradeDotStrip(trades) {
+    if (!Array.isArray(trades) || !trades.length) return [];
+
+    const dots = [];
+    let streakDepth = 0;
+
+    for (let i = 0; i < trades.length; i++) {
+        const t = trades[i];
+        const r = rOf(t);
+        const isLoss = r < 0;
+
+        if (isLoss) {
+            streakDepth++;
+        } else {
+            streakDepth = 0;
+        }
+
+        dots.push({
+            i,
+            isLoss,
+            r:           round2(r),
+            archetype:   t?.archetype  ?? "standard_loss",
+            streakDepth,
+            session:     t?.session    ?? sessionOf(t?.entry) ?? null,
+            direction:   directionOf(t),
+        });
+    }
+    return dots;
+}

@@ -1,15 +1,24 @@
 import React from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { LabRunHero } from "@/components/lab/LabRunHero";
 import { MetricChip } from "@/components/lab/MetricChip";
 import { EquityCurveV2, MiniLine } from "@/components/lab/EquityCurve";
 import { DataTable, Pill } from "@/components/lab/DataTable";
 import { NeonButton, NeonInput, NeonSelect, FilterToggle } from "@/components/lab/controls";
-import { compactTimeframe, formatRunDateRange, getRunDisplayName, updateRunBundle, useDataset } from "@/data/store";
-import { setSelectedTradeVariant } from "@/data/store";
+import { RunConfigStrip } from "@/components/lab/RunConfigStrip";
+import { compactTimeframe, formatRunDateRange, getRunDisplayName, reloadFullRunFromSidecar, updateRunBundle, useDataset } from "@/data/store";
+import { setActiveRunId, setSelectedTradeVariant } from "@/data/store";
+import {
+    buildAccountEquityCurve,
+    formatAccountValue,
+    normalizeAccountSettings,
+    summarizeAccountEquity,
+} from "@/components/lab/account/accountEquity";
 import { FolderKanban, Map as MapIcon, GitCompareArrows, TrendingUp, Hash, Activity, Target, AlertTriangle, ShieldCheck, Edit3 } from "lucide-react";
 import { BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+
+const ACCOUNT_SETTINGS_KEY = "fxob_account_view_settings_v1";
 
 function isValidExecutedTrade(trade) {
     const outcome = String(trade?.outcome || trade?.result || "").toUpperCase().replace(/[^A-Z0-9]+/g, "_");
@@ -76,22 +85,101 @@ function parseRunDateValue(value) {
     return null;
 }
 
+function readFirstPresent(...values) {
+    return values.find((value) => value != null && value !== "" && value !== "—");
+}
+
+function readNumberValue(...values) {
+    const value = readFirstPresent(...values);
+    if (value == null) return null;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+}
+
+function formatNumberValue(value) {
+    if (value == null || value === "") return "—";
+    const n = Number(value);
+    return Number.isFinite(n) ? String(n) : "—";
+}
+
+function formatPercentValue(value) {
+    const formatted = formatNumberValue(value);
+    return formatted === "—" ? formatted : `${formatted}%`;
+}
+
+function formatPipValue(value) {
+    const formatted = formatNumberValue(value);
+    if (formatted === "—") return formatted;
+    return `${formatted} ${Number(formatted) === 1 ? "pip" : "pips"}`;
+}
+
+function formatTickValue(value) {
+    const formatted = formatNumberValue(value);
+    if (formatted === "—") return formatted;
+    return `${formatted} ${Number(formatted) === 1 ? "tick" : "ticks"}`;
+}
+
+function formatStructureFilterValue(value) {
+    const text = String(value || "both").toLowerCase();
+    if (text === "bos") return "BOS";
+    if (text === "choch") return "CHoCH";
+    return "Both";
+}
+
+function loadAccountViewSettings() {
+    try {
+        return normalizeAccountSettings(JSON.parse(localStorage.getItem(ACCOUNT_SETTINGS_KEY) || "{}"));
+    } catch {
+        return normalizeAccountSettings();
+    }
+}
+
+function saveAccountViewSettings(settings) {
+    try {
+        localStorage.setItem(ACCOUNT_SETTINGS_KEY, JSON.stringify(normalizeAccountSettings(settings)));
+    } catch {
+        // Account display preferences are optional.
+    }
+}
+
 export default function RunDetail() {
     const { ACTIVE_RUN, TRADES, RUNS, getRunData, ACTIVE_TRADE_VARIANT, AVAILABLE_TRADE_VARIANTS } = useDataset();
     const params = useParams();
+    const navigate = useNavigate();
     const runId = params.runId === "active" ? ACTIVE_RUN.id : decodeURIComponent(params.runId || ACTIVE_RUN.id);
     const run = RUNS.find((r) => r.id === runId) || ACTIVE_RUN;
     // Per-run lookup: imported bundles carry their own trades + equity curve.
     const runData = getRunData(runId);
+    const runConfig = runData?.config || run?.config || {};
     const displayName = getRunDisplayName(runData || run);
     const projectId = runData?.projectId || runData?.summary?.projectId || run?.projectId || run?.summary?.projectId;
     const runSymbol = run.symbol || runData?.summary?.symbol || runData?.config?.symbol || "—";
     const runTf = compactTimeframe(run.detectionTf || runData?.summary?.detectionTf || runData?.summary?.detection_tf || runData?.config?.detection_timeframe || "—");
     const runRr = Number(run.rr ?? runData?.summary?.rr ?? runData?.config?.rr_multiple);
+    const entryDepthPct = readNumberValue(runConfig.ob_entry_depth_pct, runConfig.obEntryDepthPct, run.obEntryDepthPct);
+    const entryBufferPips = readNumberValue(runConfig.entry_buffer_pips, runConfig.entry_buffer, runConfig.entryBuffer, run.entryBuffer);
+    const stopBufferPips = readNumberValue(runConfig.stop_buffer_pips, runConfig.stop_buffer, runConfig.stopBuffer, run.stopBuffer);
+    const verifyLimitTicks = readNumberValue(runConfig.verify_limit_ticks, runConfig.verify_ticks, runConfig.verifyTicks, run.verifyTicks);
+    const structureFilter = readFirstPresent(runConfig.structure_filter, runConfig.structureFilter, runConfig.structure_type, run.structureFilter);
     const rawRunDateRange = run.dateRange || runData?.summary?.dateRange || "2025-05-18 → 2026-05-18";
     const runDateRange = formatRunDateRange(rawRunDateRange);
     const runMonthSpan = formatRunMonthSpan(rawRunDateRange);
     const runDateRangeLine = runDateRange && runMonthSpan ? `${runDateRange} • ${runMonthSpan}` : runDateRange;
+    const runSwitcherOptions = React.useMemo(() => (RUNS || []).map((candidate) => {
+        const candidateData = getRunData(candidate.id);
+        const candidateConfig = candidateData?.config || candidate?.config || {};
+        const candidateStructure = readFirstPresent(
+            candidateConfig.structure_filter,
+            candidateConfig.structureFilter,
+            candidateConfig.structure_type,
+            candidate.structureFilter,
+        );
+        const label = candidate.displayName || candidate.name || getRunDisplayName(candidateData || candidate) || candidate.id;
+        return {
+            value: candidate.id,
+            label: candidateStructure ? `${label} · ${formatStructureFilterValue(candidateStructure)}` : label,
+        };
+    }), [RUNS, getRunData]);
     const [editingName, setEditingName] = React.useState(false);
     const [draftName, setDraftName] = React.useState(displayName);
     // ── Equity chart controls ────────────────────────────────────────────────
@@ -108,6 +196,22 @@ export default function RunDetail() {
     const [ledgerSessionFilter,   setLedgerSessionFilter]   = React.useState("All");
     const [ledgerDirectionFilter, setLedgerDirectionFilter] = React.useState("All");
     const [ledgerSearch,          setLedgerSearch]          = React.useState("");
+    const [accountSettings, setAccountSettings] = React.useState(loadAccountViewSettings);
+    const [reloadBusy, setReloadBusy] = React.useState(false);
+    const [reloadError, setReloadError] = React.useState("");
+    const autoReloadAttempted = React.useRef(new Set());
+    React.useEffect(() => {
+        saveAccountViewSettings(accountSettings);
+    }, [accountSettings]);
+    const accountModeEnabled = accountSettings.mode !== "r_only";
+    const accountModeOptions = [
+        { value: "fixed_dollar", label: "Fixed dollar risk" },
+        { value: "initial_equity_pct", label: "% of initial balance" },
+        { value: "current_equity_pct", label: "% of current equity" },
+    ];
+    const patchAccountSettings = React.useCallback((patch) => {
+        setAccountSettings((current) => normalizeAccountSettings({ ...current, ...patch }));
+    }, []);
     React.useEffect(() => {
         setDraftName(displayName);
         setEditingName(false);
@@ -123,14 +227,85 @@ export default function RunDetail() {
         setEditingName(false);
     };
     const isActiveRun = run.id === ACTIVE_RUN.id;
-    const tradesForRun  = isActiveRun ? TRADES : (runData?.trades || null);
+    React.useEffect(() => {
+        const hasRunSpecificData = Boolean(
+            runData
+            && !runData.indexOnly
+            && runData.storageMode !== "index_only"
+            && (
+                (Array.isArray(runData.trades) && runData.trades.length)
+                || Object.values(runData.tradesByVariant || {}).some((trades) => Array.isArray(trades) && trades.length)
+                || (Array.isArray(runData.orderBlocks) && runData.orderBlocks.length)
+            )
+        );
+        if (runId && runId !== ACTIVE_RUN.id && hasRunSpecificData) {
+            setActiveRunId(runId);
+        }
+    }, [ACTIVE_RUN.id, runData, runId]);
+    const selectedRunVariant =
+        ACTIVE_TRADE_VARIANT && runData?.tradesByVariant?.[ACTIVE_TRADE_VARIANT]
+            ? ACTIVE_TRADE_VARIANT
+            : runData?.primaryVariant;
+    const tradesForRun =
+        (selectedRunVariant && runData?.tradesByVariant?.[selectedRunVariant])
+        || runData?.trades
+        || (isActiveRun ? TRADES : null);
+    const hasFullRunData = Boolean(
+        runData?.hasFullData
+        || (Array.isArray(runData?.trades) && runData.trades.length)
+        || Object.values(runData?.tradesByVariant || {}).some((trades) => Array.isArray(trades) && trades.length)
+        || Object.values(runData?.entryResults?.tradesByMode || {}).some((trades) => Array.isArray(trades) && trades.length)
+    );
+    const isIndexOnlyRun = Boolean(runData?.indexOnly || runData?.storageMode === "index_only" || (runData && !hasFullRunData));
+    const shouldAutoReloadRun = Boolean(isIndexOnlyRun && runData?.reloadAvailable && runId);
+    const requestFullRunReload = React.useCallback(async () => {
+        if (!runId || reloadBusy) return;
+        console.debug("[RunDetail] reload start", {
+            runId,
+            indexOnly: Boolean(runData?.indexOnly || runData?.storageMode === "index_only"),
+            reloadAvailable: Boolean(runData?.reloadAvailable),
+            hasFullData: Boolean(runData?.hasFullData),
+            tradesBefore: Array.isArray(runData?.trades) ? runData.trades.length : 0,
+        });
+        setReloadBusy(true);
+        setReloadError("");
+        try {
+            const reloadedRun = await reloadFullRunFromSidecar(runId);
+            console.debug("[RunDetail] reload success", {
+                runId,
+                tradesAfter: Array.isArray(reloadedRun?.trades) ? reloadedRun.trades.length : 0,
+                variants: Object.keys(reloadedRun?.tradesByVariant || {}),
+            });
+        } catch (error) {
+            console.debug("[RunDetail] reload failure", { runId, error });
+            const detail = error?.message ? ` (${error.message})` : "";
+            setReloadError(`Could not reload full run data from sidecar. Make sure sidecar is running and output folder exists.${detail}`);
+        } finally {
+            setReloadBusy(false);
+        }
+    }, [reloadBusy, runData, runId]);
+    React.useEffect(() => {
+        if (!shouldAutoReloadRun || autoReloadAttempted.current.has(runId)) return;
+        console.debug("[RunDetail] auto reload check", {
+            runId,
+            indexOnly: isIndexOnlyRun,
+            reloadAvailable: Boolean(runData?.reloadAvailable),
+            hasFullData: hasFullRunData,
+            tradesBefore: Array.isArray(runData?.trades) ? runData.trades.length : 0,
+        });
+        autoReloadAttempted.current.add(runId);
+        requestFullRunReload();
+    }, [hasFullRunData, isIndexOnlyRun, requestFullRunReload, runData, runId, shouldAutoReloadRun]);
     const totalTradeRows = tradesForRun?.length || 0;
     const validTradesForRun = React.useMemo(
         () => (Array.isArray(tradesForRun) ? tradesForRun.filter(isValidExecutedTrade) : []),
         [tradesForRun],
     );
     const validTradeCount = validTradesForRun.length;
-    const validNetR = validTradesForRun.reduce((sum, trade) => sum + (Number(trade.r) || 0), 0);
+    const validNetR = validTradesForRun.reduce((sum, trade) => {
+        const r = numericTradeR(trade);
+        return r == null ? sum : sum + r;
+    }, 0);
     const validWinsCount = validTradesForRun.filter((trade) => tradeResultSign(trade) > 0).length;
     const validLossesCount = validTradesForRun.filter((trade) => tradeResultSign(trade) < 0).length;
     const validWinRate = validWinsCount + validLossesCount > 0
@@ -138,11 +313,11 @@ export default function RunDetail() {
         : null;
     const expectancy = validTradeCount > 0 ? validNetR / validTradeCount : null;
     const grossWins = validTradesForRun.reduce((sum, trade) => {
-        const r = Number(trade.r) || 0;
+        const r = numericTradeR(trade) ?? 0;
         return r > 0 ? sum + r : sum;
     }, 0);
     const grossLosses = validTradesForRun.reduce((sum, trade) => {
-        const r = Number(trade.r) || 0;
+        const r = numericTradeR(trade) ?? 0;
         return r < 0 ? sum + Math.abs(r) : sum;
     }, 0);
     const pf = grossLosses > 0 ? grossWins / grossLosses : (grossWins > 0 ? Infinity : null);
@@ -151,13 +326,44 @@ export default function RunDetail() {
         let peak = 0;
         let worst = 0;
         validTradesForRun.forEach((trade) => {
-            cumR += Number(trade.r) || 0;
+            cumR += numericTradeR(trade) ?? 0;
             if (cumR > peak) peak = cumR;
             const drawdown = cumR - peak;
             if (drawdown < worst) worst = drawdown;
         });
         return Math.abs(worst);
     })() : null;
+    const accountSummary = React.useMemo(
+        () => summarizeAccountEquity(validTradesForRun, accountSettings),
+        [validTradesForRun, accountSettings],
+    );
+    const accountCurrency = accountSettings.currency;
+    const netMetricValue = accountModeEnabled
+        ? formatAccountValue(accountSummary.netPnlAmount, accountCurrency)
+        : `${validNetR >= 0 ? "+" : ""}${validNetR.toFixed(1)}R`;
+    const netMetricSub = accountModeEnabled
+        ? `${formatSignedR(validNetR, 1)} total R · ${validTradeCount} valid`
+        : `${validTradeCount} valid trade${validTradeCount === 1 ? "" : "s"}`;
+    const expectancyMetricValue = accountModeEnabled
+        ? formatAccountValue(accountSummary.expectancyAmount, accountCurrency)
+        : (expectancy != null ? `${expectancy.toFixed(3)}R` : "N/A");
+    const expectancyMetricSub = accountModeEnabled
+        ? `${expectancy != null ? formatSignedR(expectancy, 3) : "—"} / trade`
+        : (expectancy != null ? "PER TRADE" : "Limited Data");
+    const maxDdMetricValue = accountModeEnabled
+        ? formatAccountValue(accountSummary.maxDrawdownAmount, accountCurrency)
+        : (maxDd != null ? `${maxDd.toFixed(1)}R` : "N/A");
+    const maxDdMetricSub = accountModeEnabled
+        ? `${Math.abs(accountSummary.maxDrawdownPct || 0).toFixed(1)}% · ${maxDd != null ? `${maxDd.toFixed(1)}R` : "—"} drawdown`
+        : (maxDd != null ? "Worst equity dip" : "Limited Data");
+    const accountAuditLine = accountModeEnabled
+        ? [
+            `Total R ${formatSignedR(accountSummary.totalR ?? validNetR, 2)}`,
+            accountSettings.mode === "current_equity_pct"
+                ? `Final risk ${formatAccountValue(accountSummary.finalRiskAmount, accountCurrency)}`
+                : null,
+        ].filter(Boolean).join(" · ")
+        : "";
     const tradeSubtext = totalTradeRows && totalTradeRows !== validTradeCount
         ? `${validTradeCount} valid · ${totalTradeRows} rows`
         : `${validTradeCount || Number(run.trades) || 0} valid trades`;
@@ -236,12 +442,15 @@ export default function RunDetail() {
     const equityChartData = React.useMemo(() => {
         if (!filteredTradesForEquity.length) return [];
         const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+        const accountCurve = accountModeEnabled
+            ? buildAccountEquityCurve(filteredTradesForEquity, accountSettings)
+            : [];
         // Synthetic anchor — the curve starts at 0R before the first trade
         const startPoint = {
             i:                      0,
             date:                   "",
             label:                  "",      // no x-label; first real trade's month is the first tick
-            netR:                   0,
+            netR:                   accountModeEnabled ? accountSettings.startingBalance : 0,
             tradeR:                 0,
             outcome:                "",
             direction:              "",
@@ -256,14 +465,24 @@ export default function RunDetail() {
             drawdown:               0,
             isAtHigh:               true,
             isStart:                true,
+            equityAfter:            accountModeEnabled ? accountSettings.startingBalance : null,
+            cumulativeR:            0,
         };
         let cumR = 0;
-        let peak = 0;
-        const tradePoints = filteredTradesForEquity.map((trade, idx) => {
-            cumR += Number(trade.r) || 0;
-            const netR = Number(cumR.toFixed(2));
+        let peak = accountModeEnabled ? accountSettings.startingBalance : 0;
+        const chartRows = accountModeEnabled ? accountCurve : filteredTradesForEquity;
+        const tradePoints = chartRows.map((row, idx) => {
+            const trade = accountModeEnabled ? row.trade : row;
+            const r = numericTradeR(trade) ?? 0;
+            cumR += r;
+            const accountPoint = accountModeEnabled ? row : null;
+            const netR = accountModeEnabled
+                ? Number(accountPoint?.equityAfter ?? accountPoint?.netR ?? accountSettings.startingBalance)
+                : Number(cumR.toFixed(2));
             if (netR > peak) peak = netR;
-            const drawdown = Number((netR - peak).toFixed(2));
+            const drawdown = accountModeEnabled
+                ? Number(accountPoint?.accountDrawdownAmount ?? (netR - peak))
+                : Number((netR - peak).toFixed(2));
             let label = "";
             if (trade.entry) {
                 const d = new Date(trade.entry);
@@ -276,7 +495,7 @@ export default function RunDetail() {
                 date:                   trade.entry ? String(trade.entry).slice(0, 10) : "",
                 label,
                 netR,
-                tradeR:                 Number(trade.r) || 0,
+                tradeR:                 r,
                 outcome:                trade.outcome || "",
                 direction:              trade.direction || "",
                 structure:              trade.structure || "",
@@ -289,10 +508,14 @@ export default function RunDetail() {
                 protection_exit_reason: trade.protection_exit_reason || "",
                 drawdown,
                 isAtHigh:               drawdown >= 0,
+                equityAfter:            accountPoint?.equityAfter ?? null,
+                pnlAmount:              accountPoint?.pnlAmount ?? null,
+                riskAmount:             accountPoint?.riskAmount ?? null,
+                cumulativeR:            Number(cumR.toFixed(2)),
             };
         });
         return [startPoint, ...tradePoints];
-    }, [filteredTradesForEquity]);
+    }, [accountModeEnabled, accountSettings, filteredTradesForEquity]);
 
     // ── Per-run analytics — computed from this run's trades, not global store ──
     const MONTHLY = React.useMemo(() => {
@@ -306,7 +529,7 @@ export default function RunDetail() {
             const key = `${year}-${String(month + 1).padStart(2, "0")}`;
             const m = `${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][month]} '${String(year).slice(-2)}`;
             if (!map[key]) map[key] = { key, m, v: 0 };
-            map[key].v += Number(t.r) || 0;
+            map[key].v += numericTradeR(t) ?? 0;
         });
         return Object.values(map)
             .sort((a, b) => a.key.localeCompare(b.key))
@@ -623,10 +846,29 @@ export default function RunDetail() {
                 pageLabel="Run Detail"
                 title={displayName}
                 runLine={`Run: ${displayName} · ${runSymbol} · ${runTf} · ${run.trades} trades`}
-                configLine={`${runSymbol} · ${runTf} · RR ${Number.isFinite(runRr) ? runRr.toFixed(1) : "—"}`}
+                configLine={[
+                    runSymbol,
+                    runTf,
+                    `RR ${Number.isFinite(runRr) ? runRr.toFixed(1) : "—"}`,
+                    structureFilter ? `Structure ${formatStructureFilterValue(structureFilter)}` : null,
+                    entryDepthPct != null ? `Entry Depth ${formatPercentValue(entryDepthPct)}` : null,
+                    entryBufferPips != null ? `Entry Buffer ${formatPipValue(entryBufferPips)}` : null,
+                    stopBufferPips != null ? `Stop Buffer ${formatPipValue(stopBufferPips)}` : null,
+                    verifyLimitTicks != null ? `Verify ${formatTickValue(verifyLimitTicks)}` : null,
+                ].filter(Boolean).join(" · ")}
                 dateRangeLine={runDateRangeLine}
                 actions={(
                     <>
+                        <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] text-muted-lab">Run</span>
+                            <NeonSelect
+                                value={run?.id || runId || ""}
+                                onChange={(value) => {
+                                    if (value && value !== runId) navigate(`/runs/${encodeURIComponent(value)}`);
+                                }}
+                                options={runSwitcherOptions}
+                            />
+                        </div>
                         <Link to={projectId ? `/projects/${encodeURIComponent(projectId)}` : "/projects"}>
                             <NeonButton icon={FolderKanban} tone="ghost">Open Project</NeonButton>
                         </Link>
@@ -636,11 +878,113 @@ export default function RunDetail() {
                 )}
             />
 
+            <RunConfigStrip run={runData} />
+
+            {isIndexOnlyRun && (
+                <div className="px-6 mb-4">
+                    <div className="flex items-start justify-between gap-3 border border-[hsl(var(--accent-secondary)/0.35)] bg-[hsl(var(--accent-secondary)/0.06)] clip-bevel-sm px-3 py-2">
+                        <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-[hsl(var(--accent-secondary))]" />
+                        <div className="min-w-0 flex-1 text-[11.5px] leading-relaxed text-[hsl(var(--text-2))]">
+                            <span className="text-[hsl(var(--text))] font-medium">Metadata-only run.</span>{" "}
+                            {reloadBusy
+                                ? "Reloading full run data from sidecar..."
+                                : runData?.reloadAvailable
+                                    ? "Full data is kept out of localStorage and auto-loads from the sidecar/output folder when opened."
+                                    : "Full trade data is not in memory after refresh. Reload full run data from the sidecar/output folder for detailed analytics."}
+                            {reloadError && (
+                                <span className="block mt-1 text-[hsl(var(--warning))]">{reloadError}</span>
+                            )}
+                        </div>
+                        {runData?.reloadAvailable && (
+                            <NeonButton tone="secondary" onClick={requestFullRunReload} disabled={reloadBusy}>
+                                {reloadBusy ? "Reloading..." : "Reload Full Data"}
+                            </NeonButton>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            <div className="px-6 mb-4">
+                <div className="flex flex-wrap items-end gap-2 border border-[hsl(var(--border-soft)/0.7)] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm px-3 py-2">
+                    <div className="mr-1">
+                        <div className="text-[9px] font-mono uppercase tracking-widest text-muted-lab opacity-70">Account View</div>
+                        <div className="text-[11px] text-[hsl(var(--text-2))]">R remains the source of truth.</div>
+                    </div>
+                    <label className="min-w-[118px]">
+                        <span className="mb-1 block text-[9px] font-mono uppercase tracking-widest text-muted-lab">Unit</span>
+                        <NeonSelect
+                            value={accountModeEnabled ? "account" : "r_only"}
+                            onChange={(value) => {
+                                patchAccountSettings({
+                                    mode: value === "account"
+                                        ? (accountSettings.mode === "r_only" ? "fixed_dollar" : accountSettings.mode)
+                                        : "r_only",
+                                });
+                            }}
+                            options={[
+                                { value: "r_only", label: "R" },
+                                { value: "account", label: "Account" },
+                            ]}
+                        />
+                    </label>
+                    {accountModeEnabled && (
+                        <>
+                            <label className="min-w-[190px]">
+                                <span className="mb-1 block text-[9px] font-mono uppercase tracking-widest text-muted-lab">Account Mode</span>
+                                <NeonSelect
+                                    value={accountSettings.mode}
+                                    onChange={(value) => patchAccountSettings({ mode: value })}
+                                    options={accountModeOptions}
+                                />
+                            </label>
+                            <label className="w-[92px]">
+                                <span className="mb-1 block text-[9px] font-mono uppercase tracking-widest text-muted-lab">Currency</span>
+                                <NeonInput
+                                    value={accountSettings.currency}
+                                    onChange={(event) => patchAccountSettings({ currency: event.target.value })}
+                                />
+                            </label>
+                            <label className="w-[140px]">
+                                <span className="mb-1 block text-[9px] font-mono uppercase tracking-widest text-muted-lab">Starting Balance</span>
+                                <NeonInput
+                                    type="number"
+                                    value={accountSettings.startingBalance}
+                                    onChange={(event) => patchAccountSettings({ startingBalance: event.target.value })}
+                                />
+                            </label>
+                            {accountSettings.mode === "fixed_dollar" ? (
+                                <label className="w-[130px]">
+                                    <span className="mb-1 block text-[9px] font-mono uppercase tracking-widest text-muted-lab">Risk Amount</span>
+                                    <NeonInput
+                                        type="number"
+                                        value={accountSettings.fixedRiskAmount}
+                                        onChange={(event) => patchAccountSettings({ fixedRiskAmount: event.target.value })}
+                                    />
+                                </label>
+                            ) : (
+                                <label className="w-[100px]">
+                                    <span className="mb-1 block text-[9px] font-mono uppercase tracking-widest text-muted-lab">Risk %</span>
+                                    <NeonInput
+                                        type="number"
+                                        value={accountSettings.riskPct}
+                                        onChange={(event) => patchAccountSettings({ riskPct: event.target.value })}
+                                    />
+                                </label>
+                            )}
+                            <div className="basis-full text-[10.5px] leading-relaxed text-muted-lab">
+                                Account KPIs use all valid trades. Equity chart follows current chart filters.
+                                {accountAuditLine ? ` ${accountAuditLine}.` : ""}
+                            </div>
+                        </>
+                    )}
+                </div>
+            </div>
+
             <div className="kpi-strip">
                 <MetricChip
-                    label="Net R"
-                    value={`${validNetR >= 0 ? "+" : ""}${validNetR.toFixed(1)}R`}
-                    sub={`${validTradeCount} valid trade${validTradeCount === 1 ? "" : "s"}`}
+                    label={accountModeEnabled ? "Net PnL" : "Net R"}
+                    value={netMetricValue}
+                    sub={netMetricSub}
                     tone="primary"
                     icon={TrendingUp}
                     valueClassName={validNetR > 0 ? "!text-[hsl(var(--success))] text-glow-success" : validNetR < 0 ? "!text-[hsl(var(--danger))]" : "!text-[hsl(var(--text))]"}
@@ -653,16 +997,16 @@ export default function RunDetail() {
                     icon={Target}
                 />
                 <MetricChip label="Trades"         value={String(validTradeCount)}                  sub={tradeSubtext}                    tone="muted"     icon={Hash} />
-                <MetricChip label="Expectancy"     value={expectancy != null ? `${expectancy.toFixed(3)}R` : "N/A"}  sub={expectancy != null ? "PER TRADE" : "Limited Data"} tone="primary"   icon={Activity} />
+                <MetricChip label="Expectancy"     value={expectancyMetricValue}  sub={expectancyMetricSub} tone="primary"   icon={Activity} />
                 <MetricChip label="Profit Factor"  value={pf != null ? (isFinite(pf) ? pf.toFixed(2) : "∞") : "N/A"} sub={pf != null ? "Σ wins / |Σ losses|" : "Limited Data"}        tone="secondary" icon={ShieldCheck} />
-                <MetricChip label="Max Drawdown"   value={maxDd != null ? `${maxDd.toFixed(1)}R` : "N/A"}            sub={maxDd != null ? "Worst equity dip" : "Limited Data"}            tone="danger"    icon={AlertTriangle} />
+                <MetricChip label="Max Drawdown"   value={maxDdMetricValue}            sub={maxDdMetricSub}            tone="danger"    icon={AlertTriangle} />
             </div>
 
             <div className="px-6 mt-5 grid grid-cols-1 xl:grid-cols-3 gap-4">
                 <NeonPanel
                     className="xl:col-span-3"
                     title="Equity Curve"
-                    action={<Pill tone="primary">CUMULATIVE R</Pill>}
+                    action={<Pill tone="primary">{accountModeEnabled ? "ACCOUNT BALANCE" : "CUMULATIVE R"}</Pill>}
                 >
                     {/* Research filter row */}
                     <div className="flex flex-wrap items-center gap-2 mb-2">
@@ -749,9 +1093,9 @@ export default function RunDetail() {
                             <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Structure</div>
                             <div className="text-right">
                                 {(() => {
-                                    const v = runData?.config?.structure_type;
+                                    const v = structureFilter;
                                     if (!v) return <span className="text-muted-lab">—</span>;
-                                    return <span className="px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-wider border border-[hsl(var(--accent-primary)/0.4)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.08)]">{v}</span>;
+                                    return <span className="px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-wider border border-[hsl(var(--accent-primary)/0.4)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.08)]">{formatStructureFilterValue(v)}</span>;
                                 })()}
                             </div>
                             <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Direction</div>
@@ -782,19 +1126,13 @@ export default function RunDetail() {
                             <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">RR</div>
                             <div className="text-right text-[hsl(var(--accent-primary))] font-semibold">{Number.isFinite(runRr) ? `${runRr.toFixed(1)}×` : "—"}</div>
                             <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Entry Depth</div>
-                            <div className="text-right text-white">
-                                {(() => {
-                                    const d = runData?.config?.ob_entry_depth_pct;
-                                    if (d == null) return "—";
-                                    return Number(d) === 0 ? "Edge" : `${d}%`;
-                                })()}
-                            </div>
+                            <div className="text-right text-white">{formatPercentValue(entryDepthPct)}</div>
                             <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Entry Buffer</div>
-                            <div className="text-right text-white">{run.entryBuffer != null ? `${run.entryBuffer} pip` : "—"}</div>
+                            <div className="text-right text-white">{formatPipValue(entryBufferPips)}</div>
                             <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Stop Buffer</div>
-                            <div className="text-right text-white">{run.stopBuffer != null ? `${run.stopBuffer} pip` : "—"}</div>
+                            <div className="text-right text-white">{formatPipValue(stopBufferPips)}</div>
                             <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Verify Ticks</div>
-                            <div className="text-right text-white">{run.verifyTicks ?? "—"}</div>
+                            <div className="text-right text-white">{formatTickValue(verifyLimitTicks)}</div>
                             <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Execution</div>
                             <div className="text-right text-white">{variantLabel(run.executionMode || runData?.config?.execution_mode)}</div>
                             <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Conflict</div>
@@ -1579,7 +1917,7 @@ function normalizeOutcome(value) {
 }
 
 function numericTradeR(trade) {
-    const raw = trade?.r ?? trade?.pnl_r ?? trade?.pnlR ?? trade?.resultR ?? trade?.news_flatten_r;
+    const raw = trade?.r ?? trade?.net_r ?? trade?.netR ?? trade?.pnl_r ?? trade?.pnlR ?? trade?.resultR ?? trade?.news_flatten_r;
     return parseNumericValue(raw);
 }
 

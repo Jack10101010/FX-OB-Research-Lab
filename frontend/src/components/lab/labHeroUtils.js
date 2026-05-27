@@ -8,6 +8,43 @@ export function isMeaningful(value) {
     return value != null && value !== "" && value !== "—" && value !== "N/A";
 }
 
+function readNumber(...values) {
+    const value = readFirst(...values);
+    if (value == null) return null;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+}
+
+function formatNumber(value) {
+    if (value == null || value === "") return "";
+    const n = Number(value);
+    return Number.isFinite(n) ? String(n) : "";
+}
+
+function formatPercent(value) {
+    const formatted = formatNumber(value);
+    return formatted ? `${formatted}%` : "";
+}
+
+function formatPips(value) {
+    const formatted = formatNumber(value);
+    if (!formatted) return "";
+    return `${formatted} ${Number(formatted) === 1 ? "pip" : "pips"}`;
+}
+
+function formatTicks(value) {
+    const formatted = formatNumber(value);
+    if (!formatted) return "";
+    return `${formatted} ${Number(formatted) === 1 ? "tick" : "ticks"}`;
+}
+
+function formatStructureFilter(value) {
+    const text = String(value || "both").toLowerCase();
+    if (text === "bos") return "BOS";
+    if (text === "choch") return "CHoCH";
+    return "Both";
+}
+
 export function variantLabel(v) {
     return {
         single_position: "Single position",
@@ -144,6 +181,7 @@ export function buildLabHeroContent({
         run?.detectionTf,
         run?.summary?.detectionTf,
         run?.summary?.detection_tf,
+        run?.config?.detection_timeframe,
         run?.config?.detection_tf,
         run?.config?.detectionTf,
         activeSummary?.detectionTf,
@@ -152,6 +190,7 @@ export function buildLabHeroContent({
         run?.executionTf,
         run?.summary?.executionTf,
         run?.summary?.execution_tf,
+        run?.config?.execution_timeframe,
         run?.config?.execution_tf,
         run?.config?.executionTf,
         activeSummary?.executionTf,
@@ -163,6 +202,11 @@ export function buildLabHeroContent({
         run?.config?.rrMultiple,
         activeSummary?.rr,
     );
+    const entryDepthPct = readNumber(run?.config?.ob_entry_depth_pct, run?.config?.obEntryDepthPct, run?.obEntryDepthPct);
+    const entryBufferPips = readNumber(run?.config?.entry_buffer_pips, run?.config?.entry_buffer, run?.config?.entryBuffer, run?.entryBuffer);
+    const stopBufferPips = readNumber(run?.config?.stop_buffer_pips, run?.config?.stop_buffer, run?.config?.stopBuffer, run?.stopBuffer);
+    const verifyLimitTicks = readNumber(run?.config?.verify_limit_ticks, run?.config?.verify_ticks, run?.config?.verifyTicks, run?.verifyTicks);
+    const structureFilter = readFirst(run?.config?.structure_filter, run?.config?.structureFilter, run?.config?.structure_type, run?.structureFilter);
     const heroDateRange = readHeroDateRange(run, activeSummary);
     const dateRange = formatHeroDateRange(heroDateRange);
     const monthSpan = formatHeroMonthSpan(heroDateRange);
@@ -175,6 +219,11 @@ export function buildLabHeroContent({
         detectionTf,
         executionTf && executionTf !== detectionTf ? `Exec ${executionTf}` : null,
         rr != null && rr !== "" ? `RR ${rr}` : null,
+        structureFilter ? `Structure ${formatStructureFilter(structureFilter)}` : null,
+        entryDepthPct != null ? `Entry Depth ${formatPercent(entryDepthPct)}` : null,
+        entryBufferPips != null ? `Entry Buffer ${formatPips(entryBufferPips)}` : null,
+        stopBufferPips != null ? `Stop Buffer ${formatPips(stopBufferPips)}` : null,
+        verifyLimitTicks != null ? `Verify ${formatTicks(verifyLimitTicks)}` : null,
     ];
     if (includeVariant && variant !== undefined) {
         configParts.push(variantLabel(variant));

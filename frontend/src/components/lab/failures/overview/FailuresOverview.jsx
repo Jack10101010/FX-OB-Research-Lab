@@ -1,8 +1,9 @@
 // ── FailuresOverview.jsx ─────────────────────────────────────────────────────
-// Phase 1: KPI strip + session/direction/weekday distributions + severity + insights.
+// Phase 1/3: KPI strip + session/direction/weekday distributions + severity + insights + equity curve.
 
 import React, { useMemo } from "react";
 import { NeonPanel } from "@/components/lab/NeonPanel";
+import { FailuresEquityPanel } from "./FailuresEquityPanel";
 import { MetricChip } from "@/components/lab/MetricChip";
 import { Pill } from "@/components/lab/DataTable";
 import {
@@ -188,6 +189,9 @@ export function FailuresOverview({ losers = [], allLosers = [], allTrades = [], 
                     </div>
                 </NeonPanel>
             </div>
+
+            {/* ── Equity curve ──────────────────────────────────────────────── */}
+            <FailuresEquityPanel allTrades={allTrades} />
 
             {/* ── Insights ──────────────────────────────────────────────────── */}
             {insights.length > 0 && (

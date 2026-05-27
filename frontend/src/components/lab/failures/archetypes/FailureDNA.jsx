@@ -1,11 +1,12 @@
 // ── FailureDNA.jsx ───────────────────────────────────────────────────────────
-// Phase 1: One card per registered archetype — count, avg R, severity, confidence,
-// top session, suggested hypothesis, Promote-to-HypothesisLab action.
+// Phase 1/3: One card per registered archetype — count, avg R, severity, confidence,
+// top session, suggested hypothesis, Promote-to-HypothesisLab action + radar fingerprints.
 
 import React, { useMemo, useState } from "react";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { Pill } from "@/components/lab/DataTable";
 import { Lightbulb, Send, CheckCircle } from "lucide-react";
+import { ArchetypeRadarPanel } from "./ArchetypeRadarPanel";
 import { cn } from "@/lib/utils";
 import {
     ARCHETYPES,
@@ -208,6 +209,9 @@ export function FailureDNA({ losers = [], allLosers = [], config = {} }) {
                         )
                 ))}
             </div>
+
+            {/* ── Archetype fingerprint radars ──────────────────────────────── */}
+            <ArchetypeRadarPanel losers={losers} allLosers={allLosers} />
         </div>
     );
 }

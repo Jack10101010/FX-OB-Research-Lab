@@ -2,26 +2,79 @@
 // - Default module is still imported for legacy constants, but run views no longer fall back to demo data.
 // - `runs` map holds imported FX-OB-Backtester bundles keyed by run id.
 // - `activeRunId` selects which run drives the derived TRADES/CANDLES/OB_BOXES/EQUITY_CURVE.
-// - Persisted to localStorage('fxob_runs') with a 4 MB safety budget; large candles live in IndexedDB.
+// - Persisted as a lightweight localStorage index only; full run bundles stay in memory.
+// - Large candles live in IndexedDB when available and are optional for run-list persistence.
 
 import { useEffect, useState } from "react";
 import * as defaults from "./mock";
 import { saveCandles, loadCandles, deleteCandles } from "./artifactStore";
 import { buildTradesByObId, deriveOBLifecycle } from "./obLifecycle";
+import { ingestRunBundle } from "./importer";
+import { getRunBundleByRunId } from "./sidecarClient";
 
 const LS_KEY = "fxob_runs";
+const LS_RUN_INDEX = "fxob_runs_index_v1";
+const LS_RUN_PREFIX = "fxob_run_v1:";
 const LS_PROJECTS = "fxob_projects";
 const LS_ACTIVE = "fxob_active_run_id";
 const LS_ACTIVE_PROJECT = "fxob_active_project_id";
-const PERSIST_BUDGET_BYTES = 4 * 1024 * 1024;
 
 function loadPersistedRuns() {
+    const indexedRuns = loadIndexedRuns();
+    if (Object.keys(indexedRuns).length) return indexedRuns;
+
     try {
         const raw = localStorage.getItem(LS_KEY);
         if (!raw) return {};
-        return JSON.parse(raw) || {};
+        const legacyRuns = JSON.parse(raw) || {};
+        migrateLegacyRuns(legacyRuns);
+        return legacyRuns;
     } catch {
         return {};
+    }
+}
+
+function safeJsonParse(raw, fallback = null) {
+    try {
+        return raw ? JSON.parse(raw) : fallback;
+    } catch {
+        return fallback;
+    }
+}
+
+function runStorageKey(runId) {
+    return `${LS_RUN_PREFIX}${encodeURIComponent(String(runId))}`;
+}
+
+function loadIndexedRuns() {
+    try {
+        const index = safeJsonParse(localStorage.getItem(LS_RUN_INDEX), null);
+        const entries = Array.isArray(index?.runs) ? index.runs : [];
+        const runs = {};
+        for (const entry of entries) {
+            const run = indexEntryToRun(entry);
+            if (!run?.id) continue;
+            runs[run.id] = run;
+        }
+        if (entries.length) {
+            cleanupLegacyRunKeys();
+            try { localStorage.removeItem(LS_KEY); } catch { /* noop */ }
+        }
+        return runs;
+    } catch {
+        return {};
+    }
+}
+
+function migrateLegacyRuns(legacyRuns) {
+    if (!legacyRuns || typeof legacyRuns !== "object") return;
+    const entries = Object.entries(legacyRuns).map(([id, run]) => buildRunIndexEntry({ ...run, id }));
+    if (!entries.length) return;
+    try {
+        localStorage.setItem(LS_RUN_INDEX, JSON.stringify({ version: 1, updatedAt: new Date().toISOString(), runs: entries }));
+        localStorage.removeItem(LS_KEY);
+    } catch {
+        // Keep the legacy blob as fallback if index migration cannot be written.
     }
 }
 
@@ -44,10 +97,15 @@ let state = {
     selectedTradeVariant: null,
     persistWarning: null,
     candlePersistenceNotice: null,
+    autoReloadStatus: {},
+    autoReloadInProgress: false,
+    autoReloadCompletedAt: null,
+    autoReloadFailedCount: 0,
 };
 
 const listeners = new Set();
 const notify = () => listeners.forEach((l) => l());
+const AUTO_RELOAD_SESSION_ATTEMPTS = new Set();
 
 function normalizeTimestamp(value) {
     if (value == null || value === "") return null;
@@ -107,17 +165,280 @@ function withCandleMeta(bundle, candles) {
     };
 }
 
-function persistableRun(bundle) {
-    if (!bundle?.candles?.length) return bundle;
-    const next = withCandleMeta(bundle, bundle.candles);
+function headlineSummary(run) {
+    const summary = run?.summary || {};
+    const config = run?.config || {};
+    const reloadMeta = reloadMetadataForRun(run);
+    const tradesByVariantCount = Object.values(run?.tradesByVariant || {}).reduce((max, trades) => (
+        Array.isArray(trades) ? Math.max(max, trades.length) : max
+    ), 0);
+    const entryTradesByModeCount = Object.values(run?.entryResults?.tradesByMode || {}).reduce((max, trades) => (
+        Array.isArray(trades) ? Math.max(max, trades.length) : max
+    ), 0);
+    const tradeCount = readFirstMetric(
+        summary.trades,
+        summary.trade_count,
+        summary.tradeCount,
+        summary.validTradeCount,
+        run?.trade_count,
+        run?.tradeCount,
+        run?.validTradeCount,
+        run?.trades?.length,
+        tradesByVariantCount,
+        entryTradesByModeCount,
+    );
+    const maxDd = readFirstMetric(
+        summary.maxDd,
+        summary.maxDD,
+        summary.max_drawdown,
+        summary.maxDrawdown,
+        summary.max_dd,
+        run?.maxDd,
+        run?.maxDD,
+        run?.max_drawdown,
+        run?.maxDrawdown,
+        run?.max_dd,
+    );
     return {
-        ...next,
-        candles: null,
-        summary: {
-            ...next.summary,
-            candles: null,
+        id: run?.id || summary.id,
+        displayName: run?.displayName || run?.name || summary.displayName || summary.name || run?.id || summary.id,
+        name: run?.name || summary.name,
+        importedAt: run?.importedAt || summary.importedAt || "",
+        symbol: summary.symbol || run?.symbol || config.symbol || "",
+        detectionTf: summary.detectionTf || summary.detection_tf || run?.detectionTf || config.detection_timeframe || "",
+        executionTf: summary.executionTf || summary.execution_tf || run?.executionTf || config.execution_timeframe || "",
+        dateRange: summary.dateRange || run?.dateRange || `${summary.date_from || config.start_date || "?"} → ${summary.date_to || config.end_date || "?"}`,
+        rr: summary.rr ?? run?.rr ?? config.rr_multiple ?? "",
+        trades: tradeCount,
+        trade_count: tradeCount,
+        tradeCount,
+        validTradeCount: tradeCount,
+        totalTradeRows: readFirstMetric(summary.totalTradeRows, summary.total_trade_rows, run?.totalTradeRows, run?.trades?.length, tradesByVariantCount),
+        wins: readFirstMetric(summary.wins, summary.win_count, summary.winCount, run?.wins, run?.win_count, run?.winCount),
+        losses: readFirstMetric(summary.losses, summary.loss_count, summary.lossCount, run?.losses, run?.loss_count, run?.lossCount),
+        winRate: readFirstMetric(summary.winRate, summary.win_rate, summary.winRatePct, run?.winRate, run?.win_rate, run?.winRatePct),
+        netR: readFirstMetric(summary.netR, summary.net_r, summary.pnl_r, run?.netR, run?.net_r, run?.pnl_r),
+        maxDd,
+        maxDrawdown: maxDd,
+        validation: summary.validation ?? "",
+        executionMode: summary.executionMode || summary.execution_mode || run?.executionMode || run?.primaryVariant || "",
+        primaryVariant: run?.primaryVariant || summary.primaryVariant || summary.primary_variant || "",
+        originalRunId: run?.originalRunId || summary.originalRunId || "",
+        sidecarJobId: run?.sidecarJobId || summary.sidecarJobId || "",
+        sidecarRunId: reloadMeta.sidecarRunId,
+        outputFolder: reloadMeta.outputFolder,
+        sourceOutputFolder: reloadMeta.sourceOutputFolder,
+        folderName: reloadMeta.folderName,
+        source: run?.source || summary.source || "",
+        projectId: run?.projectId || summary.projectId || null,
+        runRole: run?.runRole || summary.runRole || "",
+        experimentType: run?.experimentType || summary.experimentType || "",
+        hasCandles: run?.hasCandles ?? summary.hasCandles ?? false,
+        candlesStorage: run?.candlesStorage || summary.candlesStorage || "",
+        candlesDroppedFromPersistence: run?.candlesDroppedFromPersistence ?? summary.candlesDroppedFromPersistence ?? false,
+        candlesDroppedForStorage: run?.candlesDroppedForStorage ?? summary.candlesDroppedForStorage ?? false,
+        configSummary: {
+            symbol: config.symbol || summary.symbol || "",
+            detection_timeframe: config.detection_timeframe || summary.detectionTf || summary.detection_tf || "",
+            execution_timeframe: config.execution_timeframe || summary.executionTf || summary.execution_tf || "",
+            start_date: config.start_date || summary.date_from || "",
+            end_date: config.end_date || summary.date_to || "",
+            rr_multiple: config.rr_multiple ?? summary.rr ?? "",
+            stop_buffer_pips: config.stop_buffer_pips ?? summary.stopBuffer ?? "",
+            entry_buffer_pips: config.entry_buffer_pips ?? summary.entryBuffer ?? "",
+            verify_limit_ticks: config.verify_limit_ticks ?? summary.verifyTicks ?? "",
+            ob_entry_depth_pct: config.ob_entry_depth_pct ?? "",
+            structure_filter: config.structure_filter ?? config.structureFilter ?? summary.structure_filter ?? "",
         },
     };
+}
+
+function readFirstMetric(...values) {
+    for (const value of values) {
+        if (value == null || value === "") continue;
+        const number = Number(value);
+        if (Number.isFinite(number)) return number;
+    }
+    return "";
+}
+
+function buildRunIndexEntry(run) {
+    const summary = headlineSummary(run);
+    const reloadMeta = reloadMetadataForRun(run);
+    const reloadAvailable = hasReloadIdentifier(reloadMeta);
+    const hasFullData = Boolean(
+        (Array.isArray(run?.trades) && run.trades.length)
+        || Object.values(run?.tradesByVariant || {}).some((trades) => Array.isArray(trades) && trades.length)
+        || Object.values(run?.entryResults?.tradesByMode || {}).some((trades) => Array.isArray(trades) && trades.length)
+    );
+    return {
+        ...summary,
+        id: run?.id || summary.id,
+        persisted: true,
+        hasFullData: false,
+        storageMode: "index_only",
+        memoryHasFullData: hasFullData,
+        originalRunId: reloadMeta.originalRunId,
+        sidecarJobId: reloadMeta.sidecarJobId,
+        sidecarRunId: reloadMeta.sidecarRunId,
+        run_id: reloadMeta.sidecarRunId,
+        outputFolder: reloadMeta.outputFolder,
+        sourceOutputFolder: reloadMeta.sourceOutputFolder,
+        folderName: reloadMeta.folderName,
+        reloadAvailable,
+        warning: reloadAvailable ? "" : "Full data not in memory. Re-import from sidecar/output folder.",
+    };
+}
+
+function indexEntryToRun(entry) {
+    if (!entry?.id) return null;
+    const reloadMeta = reloadMetadataForRun(entry);
+    const reloadAvailable = hasReloadIdentifier(reloadMeta) || Boolean(entry.reloadAvailable);
+    const config = {
+        ...(entry.configSummary || {}),
+        structure_filter: entry.configSummary?.structure_filter ?? "",
+    };
+    const summary = {
+        id: entry.id,
+        displayName: entry.displayName,
+        name: entry.name,
+        importedAt: entry.importedAt,
+        symbol: entry.symbol,
+        detectionTf: entry.detectionTf,
+        detection_tf: entry.detectionTf,
+        executionTf: entry.executionTf,
+        execution_tf: entry.executionTf,
+        dateRange: entry.dateRange,
+        rr: entry.rr,
+        trades: entry.trades,
+        trade_count: entry.trade_count ?? entry.trades,
+        tradeCount: entry.tradeCount ?? entry.trades,
+        validTradeCount: entry.validTradeCount ?? entry.trades,
+        totalTradeRows: entry.totalTradeRows,
+        wins: entry.wins,
+        losses: entry.losses,
+        winRate: entry.winRate,
+        netR: entry.netR,
+        maxDd: entry.maxDd,
+        maxDrawdown: entry.maxDrawdown,
+        validation: entry.validation,
+        executionMode: entry.executionMode,
+        primaryVariant: entry.primaryVariant,
+        originalRunId: entry.originalRunId,
+        sidecarJobId: entry.sidecarJobId,
+        sidecarRunId: reloadMeta.sidecarRunId,
+        outputFolder: reloadMeta.outputFolder,
+        sourceOutputFolder: reloadMeta.sourceOutputFolder,
+        folderName: reloadMeta.folderName,
+        source: entry.source,
+        projectId: entry.projectId,
+        runRole: entry.runRole,
+        experimentType: entry.experimentType,
+        hasCandles: entry.hasCandles,
+        candlesStorage: entry.candlesStorage,
+    };
+    return {
+        id: entry.id,
+        displayName: entry.displayName,
+        name: entry.name,
+        originalRunId: reloadMeta.originalRunId,
+        importedAt: entry.importedAt,
+        source: entry.source,
+        sidecarJobId: reloadMeta.sidecarJobId,
+        sidecarRunId: reloadMeta.sidecarRunId,
+        outputFolder: reloadMeta.outputFolder,
+        sourceOutputFolder: reloadMeta.sourceOutputFolder,
+        folderName: reloadMeta.folderName,
+        projectId: entry.projectId,
+        runRole: entry.runRole,
+        experimentType: entry.experimentType,
+        primaryVariant: entry.primaryVariant || null,
+        config,
+        summary,
+        trades: [],
+        tradesByVariant: {},
+        primaryVariant: null,
+        tradeMarkers: [],
+        tradeMarkersByVariant: {},
+        equityCurve: [],
+        equityCurveByVariant: {},
+        protectionResults: { summary: {}, tradesByMode: {}, equityCurveByMode: {}, sourceFiles: [], tradesOmittedForStorage: true },
+        entryResults: { summary: {}, tradesByMode: {}, equityCurveByMode: {}, sourceFiles: [], tradesOmittedForStorage: true },
+        newsEvents: [],
+        orderBlocks: [],
+        candles: null,
+        hasCandles: entry.hasCandles,
+        candlesStorage: entry.candlesStorage,
+        hasFullData: false,
+        storageMode: "index_only",
+        reloadAvailable,
+        indexOnly: true,
+        indexWarning: entry.warning || "",
+    };
+}
+
+function reloadMetadataForRun(run) {
+    const summary = run?.summary || {};
+    const outputFolder = readReloadValue(
+        run?.outputFolder,
+        run?.sourceOutputFolder,
+        summary.outputFolder,
+        summary.sourceOutputFolder,
+        run?.folder,
+        summary.folder,
+    );
+    const sourceOutputFolder = readReloadValue(
+        run?.sourceOutputFolder,
+        summary.sourceOutputFolder,
+        run?.outputFolder,
+        summary.outputFolder,
+        run?.folder,
+        summary.folder,
+    );
+    const folderName = readReloadValue(
+        run?.folderName,
+        summary.folderName,
+        outputFolderName(sourceOutputFolder),
+        outputFolderName(outputFolder),
+    );
+    const sidecarRunId = readReloadValue(
+        run?.sidecarRunId,
+        run?.sidecar_run_id,
+        run?.run_id,
+        summary.sidecarRunId,
+        summary.sidecar_run_id,
+        summary.run_id,
+        run?.sidecarJobId,
+        summary.sidecarJobId,
+        folderName,
+    );
+    return {
+        originalRunId: readReloadValue(run?.originalRunId, summary.originalRunId, sidecarRunId),
+        sidecarJobId: readReloadValue(run?.sidecarJobId, summary.sidecarJobId),
+        sidecarRunId,
+        outputFolder,
+        sourceOutputFolder,
+        folderName,
+    };
+}
+
+function readReloadValue(...values) {
+    for (const value of values) {
+        const text = String(value ?? "").trim();
+        if (text) return text;
+    }
+    return "";
+}
+
+function hasReloadIdentifier(meta) {
+    return Boolean(
+        meta?.sidecarRunId
+        || meta?.outputFolder
+        || meta?.sourceOutputFolder
+        || meta?.folderName
+        || meta?.sidecarJobId
+        || meta?.originalRunId
+    );
 }
 
 function computeEquityCurve(trades) {
@@ -201,6 +522,7 @@ function availableVariants(run) {
 
 function runHasPopulatedData(run) {
     if (!run) return false;
+    if (run.indexOnly || run.storageMode === "index_only") return false;
     if (Array.isArray(run.candles) && run.candles.length > 0) return true;
     if (run.hasCandles || run.candlesStorage === "indexeddb" || run.candlesStorage === "session") return true;
     if (Array.isArray(run.trades) && run.trades.length > 0) return true;
@@ -239,6 +561,7 @@ function runIdentitySuffix(bundle, importedAt) {
             bundle?.config?.symbol,
             bundle?.config?.detection_timeframe,
             bundle?.config?.rr_multiple != null ? `rr${bundle.config.rr_multiple}` : "",
+            bundle?.config?.structure_filter ?? bundle?.config?.structureFilter ?? bundle?.summary?.structure_filter,
             bundle?.config?.start_date,
             bundle?.config?.end_date,
             importedAt,
@@ -295,6 +618,7 @@ function normalizeIncomingRunBundle(bundle) {
 
 function ensureActiveRunId() {
     const current = state.activeRunId ? state.runs[state.activeRunId] : null;
+    if (current?.id) return state.activeRunId;
     if (runHasPopulatedData(current)) return state.activeRunId;
     const activeRunId = chooseFallbackRunId();
     if (activeRunId !== state.activeRunId) {
@@ -528,6 +852,17 @@ function buildDerived() {
                 candlesStorage: r.candlesStorage || summary?.candlesStorage,
                 candlesDroppedFromPersistence: r.candlesDroppedFromPersistence ?? summary?.candlesDroppedFromPersistence,
                 candleCount: r.candleCount ?? summary?.candleCount,
+                hasFullData: Boolean(
+                    r.hasFullData
+                    || (Array.isArray(r.trades) && r.trades.length)
+                    || Object.values(r.tradesByVariant || {}).some((trades) => Array.isArray(trades) && trades.length)
+                ),
+                storageMode: r.storageMode || (r.indexOnly ? "index_only" : "memory_full"),
+                reloadAvailable: Boolean(r.reloadAvailable || r.sidecarJobId || summary?.sidecarJobId || r.outputFolder || summary?.outputFolder || r.sourceOutputFolder || summary?.sourceOutputFolder || r.originalRunId || summary?.originalRunId),
+                indexOnly: Boolean(r.indexOnly),
+                indexWarning: r.indexWarning || "",
+                autoReloadStatus: state.autoReloadStatus?.[r.id]?.status || "idle",
+                autoReloadError: state.autoReloadStatus?.[r.id]?.error || "",
                 projectId: r.projectId || summary?.projectId || null,
                 projectName: projectDisplayName(r.projectId || summary?.projectId),
                 runRole: r.runRole || summary?.runRole || "imported",
@@ -572,6 +907,10 @@ function buildDerived() {
         getActiveProject,
         hasImportedRuns: importedList.length > 0,
         importedCount: importedList.length,
+        autoReloadStatus: state.autoReloadStatus,
+        autoReloadInProgress: state.autoReloadInProgress,
+        autoReloadCompletedAt: state.autoReloadCompletedAt,
+        autoReloadFailedCount: state.autoReloadFailedCount,
     };
 }
 
@@ -837,6 +1176,212 @@ export function addRunBundle(bundle) {
     return nextBundle;
 }
 
+export function replaceRunBundleData(runId, bundle) {
+    if (!runId || !bundle) return null;
+    const current = state.runs[runId] || {};
+    const currentReloadMeta = reloadMetadataForRun(current);
+    const bundleReloadMeta = reloadMetadataForRun(bundle);
+    const reloadMeta = {
+        originalRunId: readReloadValue(currentReloadMeta.originalRunId, bundleReloadMeta.originalRunId, bundle.id, runId),
+        sidecarJobId: readReloadValue(currentReloadMeta.sidecarJobId, bundleReloadMeta.sidecarJobId),
+        sidecarRunId: readReloadValue(currentReloadMeta.sidecarRunId, bundleReloadMeta.sidecarRunId, bundle.id),
+        outputFolder: readReloadValue(currentReloadMeta.outputFolder, bundleReloadMeta.outputFolder),
+        sourceOutputFolder: readReloadValue(currentReloadMeta.sourceOutputFolder, bundleReloadMeta.sourceOutputFolder, currentReloadMeta.outputFolder, bundleReloadMeta.outputFolder),
+        folderName: readReloadValue(currentReloadMeta.folderName, bundleReloadMeta.folderName, outputFolderName(bundleReloadMeta.sourceOutputFolder), outputFolderName(bundleReloadMeta.outputFolder)),
+    };
+    const nextBundle = {
+        ...bundle,
+        id: runId,
+        originalRunId: reloadMeta.originalRunId,
+        displayName: current.displayName || bundle.displayName || bundle.name || bundle.summary?.displayName,
+        name: current.name || bundle.name || bundle.summary?.name,
+        importedAt: current.importedAt || bundle.importedAt || new Date().toISOString(),
+        projectId: current.projectId || bundle.projectId || bundle.summary?.projectId,
+        runRole: current.runRole || bundle.runRole || bundle.summary?.runRole,
+        experimentType: current.experimentType || bundle.experimentType || bundle.summary?.experimentType,
+        sidecarJobId: reloadMeta.sidecarJobId,
+        sidecarRunId: reloadMeta.sidecarRunId,
+        outputFolder: reloadMeta.outputFolder,
+        sourceOutputFolder: reloadMeta.sourceOutputFolder,
+        folderName: reloadMeta.folderName,
+        reloadAvailable: hasReloadIdentifier(reloadMeta),
+        hasFullData: true,
+        storageMode: "memory_full",
+        indexOnly: false,
+        summary: {
+            ...bundle.summary,
+            id: runId,
+            originalRunId: reloadMeta.originalRunId,
+            displayName: current.displayName || bundle.displayName || bundle.name || bundle.summary?.displayName,
+            name: current.name || bundle.name || bundle.summary?.name,
+            importedAt: current.importedAt || bundle.importedAt || new Date().toISOString(),
+            projectId: current.projectId || bundle.projectId || bundle.summary?.projectId,
+            runRole: current.runRole || bundle.runRole || bundle.summary?.runRole,
+            experimentType: current.experimentType || bundle.experimentType || bundle.summary?.experimentType,
+            sidecarJobId: reloadMeta.sidecarJobId,
+            sidecarRunId: reloadMeta.sidecarRunId,
+            run_id: reloadMeta.sidecarRunId,
+            outputFolder: reloadMeta.outputFolder,
+            sourceOutputFolder: reloadMeta.sourceOutputFolder,
+            folderName: reloadMeta.folderName,
+        },
+    };
+    state = {
+        ...state,
+        runs: { ...state.runs, [runId]: nextBundle },
+        activeRunId: runId,
+        selectedTradeVariant: nextBundle.primaryVariant || null,
+    };
+    try { localStorage.setItem(LS_ACTIVE, runId); } catch { /* noop */ }
+    persistRuns();
+    notify();
+    return nextBundle;
+}
+
+export async function reloadFullRunFromSidecar(runId) {
+    const current = runId ? state.runs[runId] : null;
+    if (!current) throw new Error("Run is not available in the local index.");
+
+    const identifiers = runReloadIdentifiers(runId, current);
+    if (!identifiers.length) {
+        throw new Error("This run has no sidecar run id or output folder reference.");
+    }
+
+    let payload = null;
+    let lastError = null;
+    let matchedIdentifier = "";
+    for (const identifier of identifiers) {
+        try {
+            payload = await getRunBundleByRunId(identifier, { includeCandles: false });
+            matchedIdentifier = identifier;
+            break;
+        } catch (error) {
+            lastError = error;
+        }
+    }
+    if (!payload) {
+        throw lastError || new Error("Could not reload full run data from sidecar.");
+    }
+
+    const files = (payload.files || []).map((file) => ({
+        name: file.name,
+        text: async () => file.content || "",
+    }));
+    const result = await ingestRunBundle(files);
+    if (!result.ok) {
+        const messages = [
+            ...(result.validationErrors || []).map((error) => error.message || String(error)),
+            ...(result.errors || []).map((error) => error.error || String(error)),
+        ].filter(Boolean);
+        throw new Error(messages[0] || "Run bundle could not be reloaded.");
+    }
+
+    const sourceOutputFolder = current.sourceOutputFolder || current.outputFolder || payload.folder || "";
+    const sidecarRunId = payload.run_id || current.sidecarRunId || current.summary?.sidecarRunId || matchedIdentifier;
+    const sidecarJobId = current.sidecarJobId || payload.job_id || sidecarRunId;
+    const folderName = outputFolderName(sourceOutputFolder || payload.folder);
+    const bundle = {
+        ...result.bundle,
+        source: current.source || result.bundle.source || "sidecar",
+        sidecarJobId,
+        sidecarRunId,
+        outputFolder: current.outputFolder || payload.folder || "",
+        sourceOutputFolder,
+        folderName,
+        summary: {
+            ...result.bundle.summary,
+            source: current.source || result.bundle.source || "sidecar",
+            sidecarJobId,
+            sidecarRunId,
+            run_id: sidecarRunId,
+            outputFolder: current.outputFolder || payload.folder || "",
+            sourceOutputFolder,
+            folderName,
+        },
+    };
+    return replaceRunBundleData(runId, bundle);
+}
+
+export async function autoReloadIndexedRunsFromSidecar() {
+    const candidates = Object.values(state.runs)
+        .filter((run) => {
+            if (!run?.id) return false;
+            if (!run.reloadAvailable) return false;
+            if (AUTO_RELOAD_SESSION_ATTEMPTS.has(run.id)) return false;
+            if (run.hasFullData && run.storageMode === "memory_full") return false;
+            return run.storageMode === "index_only" || run.indexOnly || run.hasFullData === false;
+        })
+        .map((run) => run.id);
+
+    if (!candidates.length) return { total: 0, loaded: 0, failed: 0 };
+
+    candidates.forEach((runId) => {
+        AUTO_RELOAD_SESSION_ATTEMPTS.add(runId);
+    });
+    const previousActiveRunId = state.activeRunId;
+    const previousSelectedTradeVariant = state.selectedTradeVariant;
+    state = {
+        ...state,
+        autoReloadInProgress: true,
+        autoReloadCompletedAt: null,
+        autoReloadFailedCount: 0,
+        autoReloadStatus: {
+            ...state.autoReloadStatus,
+            ...Object.fromEntries(candidates.map((runId) => [runId, { status: "loading", error: "" }])),
+        },
+    };
+    notify();
+
+    let loaded = 0;
+    let failed = 0;
+    let cursor = 0;
+    const workerCount = Math.min(2, candidates.length);
+
+    async function worker() {
+        while (cursor < candidates.length) {
+            const runId = candidates[cursor];
+            cursor += 1;
+            try {
+                await reloadFullRunFromSidecar(runId);
+                loaded += 1;
+                setAutoReloadRunStatus(runId, "loaded", "");
+            } catch (error) {
+                failed += 1;
+                const message = error?.message || "Sidecar unavailable. Start sidecar to reload full run data.";
+                setAutoReloadRunStatus(runId, "failed", message);
+            }
+        }
+    }
+
+    await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
+    const restoredActiveRun = previousActiveRunId ? state.runs[previousActiveRunId] : null;
+    state = {
+        ...state,
+        activeRunId: restoredActiveRun ? previousActiveRunId : state.activeRunId,
+        selectedTradeVariant: restoredActiveRun ? previousSelectedTradeVariant : state.selectedTradeVariant,
+        autoReloadInProgress: false,
+        autoReloadCompletedAt: new Date().toISOString(),
+        autoReloadFailedCount: failed,
+        persistWarning: failed && loaded === 0
+            ? "Sidecar unavailable. Start sidecar to reload full run data."
+            : state.persistWarning,
+    };
+    notify();
+    return { total: candidates.length, loaded, failed };
+}
+
+function setAutoReloadRunStatus(runId, status, error = "") {
+    state = {
+        ...state,
+        autoReloadStatus: {
+            ...state.autoReloadStatus,
+            [runId]: { status, error },
+        },
+    };
+    notify();
+}
+
 export async function rehydrateRunCandles(runId) {
     if (!runId || !state.runs[runId]) return false;
     const record = await loadCandles(runId);
@@ -850,6 +1395,26 @@ export async function rehydrateRunCandles(runId) {
     };
     notify();
     return true;
+}
+
+function runReloadIdentifiers(runId, run) {
+    const meta = reloadMetadataForRun(run);
+    return [
+        meta.sidecarRunId,
+        meta.folderName || outputFolderName(meta.outputFolder),
+        outputFolderName(meta.sourceOutputFolder),
+        meta.sidecarJobId,
+        meta.originalRunId,
+        runId,
+    ].map((value) => String(value || "").trim()).filter(Boolean)
+        .filter((value, index, arr) => arr.indexOf(value) === index);
+}
+
+function outputFolderName(value) {
+    const text = String(value || "").trim();
+    if (!text) return "";
+    const parts = text.split(/[\\/]/).filter(Boolean);
+    return parts[parts.length - 1] || "";
 }
 
 export function updateRunBundle(runId, patch) {
@@ -874,6 +1439,7 @@ export function updateRunBundle(runId, patch) {
 export function deleteRunBundle(id) {
     if (!state.runs[id]) return;
     deleteCandles(id).catch(() => {});
+    try { localStorage.removeItem(runStorageKey(id)); } catch { /* noop */ }
     const next = { ...state.runs };
     delete next[id];
     const nextProjects = Object.fromEntries(Object.entries(state.projects).map(([projectId, project]) => [
@@ -907,6 +1473,7 @@ export function removeRunBundle(id) {
 
 export function clearAllRuns() {
     Object.keys(state.runs).forEach((id) => deleteCandles(id).catch(() => {}));
+    cleanupLegacyRunKeys();
     const nextProjects = Object.fromEntries(Object.entries(state.projects).map(([projectId, project]) => [
         projectId,
         {
@@ -921,6 +1488,7 @@ export function clearAllRuns() {
     state = { ...state, runs: {}, projects: nextProjects, activeRunId: null, selectedTradeVariant: null, persistWarning: null, candlePersistenceNotice: null };
     try {
         localStorage.removeItem(LS_KEY);
+        localStorage.removeItem(LS_RUN_INDEX);
         localStorage.removeItem(LS_ACTIVE);
     } catch { /* noop */ }
     persistProjects();
@@ -947,22 +1515,43 @@ export function useDataset() {
 // ─────────────────────────── Persistence ───────────────────────────
 
 function persistRuns() {
+    const indexEntries = Object.values(state.runs).map((run) => buildRunIndexEntry(run));
+
     try {
-        const runsToPersist = Object.fromEntries(Object.entries(state.runs).map(([id, r]) => [id, persistableRun(r)]));
-        let str = JSON.stringify(runsToPersist);
-        if (str.length > PERSIST_BUDGET_BYTES) {
-            // Still too large — abandon persistence rather than corrupt storage.
-            state = {
-                ...state,
-                persistWarning: `Run bundle exceeds ${(PERSIST_BUDGET_BYTES / 1024 / 1024).toFixed(0)} MB after omitting candles; not persisted to localStorage.`,
-                candlePersistenceNotice: null,
-            };
-            return;
-        }
-        localStorage.setItem(LS_KEY, str);
-        state = { ...state, persistWarning: null, candlePersistenceNotice: null };
+        cleanupLegacyRunKeys();
+        localStorage.setItem(LS_RUN_INDEX, JSON.stringify({
+            version: 1,
+            updatedAt: new Date().toISOString(),
+            runs: indexEntries,
+        }));
+        localStorage.removeItem(LS_KEY);
+        state = {
+            ...state,
+            persistWarning: null,
+            candlePersistenceNotice: indexEntries.length
+                ? "Full run data is kept in memory only. Lightweight run index was saved. Reopen/reload full data after refresh."
+                : null,
+        };
     } catch (e) {
-        state = { ...state, persistWarning: `localStorage write failed: ${e.message || e}` };
+        console.warn(`Failed to persist ${LS_RUN_INDEX}:`, e);
+        state = {
+            ...state,
+            persistWarning: `Run index could not be persisted. Existing persisted runs may still restore, but new index changes may disappear on refresh. localStorage write failed: ${e.message || e}`,
+            candlePersistenceNotice: null,
+        };
+    }
+}
+
+function cleanupLegacyRunKeys() {
+    try {
+        const keys = [];
+        for (let index = 0; index < localStorage.length; index += 1) {
+            const key = localStorage.key(index);
+            if (key && key.startsWith(LS_RUN_PREFIX)) keys.push(key);
+        }
+        keys.forEach((key) => localStorage.removeItem(key));
+    } catch {
+        // Cleanup is best-effort; stale large keys are ignored by the loader.
     }
 }
 

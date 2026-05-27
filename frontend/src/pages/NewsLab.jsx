@@ -4,6 +4,7 @@ import { MetricChip } from "@/components/lab/MetricChip";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
 import { HeroBadge } from "@/components/lab/controls";
 import { LabRunHero } from "@/components/lab/LabRunHero";
+import { RunConfigStrip } from "@/components/lab/RunConfigStrip";
 import { useDataset } from "@/data/store";
 import {
     AlertTriangle, CalendarClock, Clipboard, Download, FileText,
@@ -249,6 +250,8 @@ export default function NewsLab() {
                     </>
                 )}
             />
+
+            <RunConfigStrip run={activeRun} />
 
             <div className="px-6 grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
                 <MetricChip label="Events Loaded" value={fmtMaybeCount(eventSummary.eventsLoaded ?? newsResults?.eventsLoaded)} sub={dateRangeActive ? "filtered range" : "calendar CSV"} tone={hasNewsEvents ? "primary" : "muted"} icon={Newspaper} />
