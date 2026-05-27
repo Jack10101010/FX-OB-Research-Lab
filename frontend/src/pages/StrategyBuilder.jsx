@@ -6,7 +6,7 @@ import { Field, NeonInput, NeonSelect, Segment, NeonToggle, NeonButton } from "@
 import { HelpCircle, Play, Save, FileInput, Copy, ShieldAlert, Trash2, Check, ChevronDown, ChevronUp, FolderPlus } from "lucide-react";
 import { usePresets } from "@/data/presets";
 import { Pill } from "@/components/lab/DataTable";
-import { getSidecarRun, getSidecarRunBundle, startSidecarRun } from "@/data/sidecarClient";
+import { cancelSidecarRun, getSidecarRun, getSidecarRunBundle, startSidecarRun } from "@/data/sidecarClient";
 import { ingestRunBundle } from "@/data/importer";
 import {
     addRunBundle,
@@ -94,6 +94,7 @@ export default function StrategyBuilder() {
     const sessionSelectionWarning = Boolean(cfg.sessionFilter) && allowedSessions.length === 0;
     const sanityConfig = sidecarConfig || lastConfig || {};
     const sanityRun = runJob ? reduceRunSnapshot(runJob, importedRunId) : (lastRun || {});
+    const generatedPlan = useMemo(() => estimateScenarioPlan(sidecarConfig), [sidecarConfig]);
     const runInProgress = ["queued", "running"].includes(runJob?.status);
     const selectedLoadRun = loadRunId ? getRunData(loadRunId) : null;
     const selectedLoadProject = selectedLoadRun?.projectId
@@ -187,6 +188,20 @@ export default function StrategyBuilder() {
         try {
             const started = await startSidecarRun(sidecarConfig);
             setRunJob(started);
+        } catch (error) {
+            setRunError(formatSidecarError(error));
+        } finally {
+            setRunBusy(false);
+        }
+    };
+    const onCancelRun = async () => {
+        const runId = runJob?.run_id || runJob?.job_id;
+        if (!runId) return;
+        setRunBusy(true);
+        setRunError("");
+        try {
+            const cancelled = await cancelSidecarRun(runId);
+            setRunJob(cancelled);
         } catch (error) {
             setRunError(formatSidecarError(error));
         } finally {
@@ -679,6 +694,9 @@ export default function StrategyBuilder() {
                         <StatusMeta k="Detection TF" v={sanityConfig.detection_timeframe || "—"} />
                         <StatusMeta k="Execution TF" v={sanityConfig.execution_timeframe || "—"} />
                         <StatusMeta k="Execution mode" v={formatExecutionMode((sanityConfig.execution_modes || [])[0])} />
+                        <StatusMeta k="Plan passes" v={sanityRun.total_passes ?? generatedPlan.totalPasses ?? "—"} />
+                        <StatusMeta k="Entry passes" v={sanityRun.scenario_plan_summary?.entry ?? generatedPlan.entry ?? "—"} />
+                        <StatusMeta k="Protection passes" v={sanityRun.scenario_plan_summary?.protection ?? generatedPlan.protection ?? "—"} />
                         <StatusMeta k="Entry research exports" v={formatEntryResearchExports(sanityConfig)} />
                         <StatusMeta k="Entry thresholds" v={(sanityConfig.entry_penetration_thresholds || []).join(", ") || "—"} />
                         <StatusMeta k="Entry Depth" v={sanityConfig.ob_entry_depth_pct != null ? `${sanityConfig.ob_entry_depth_pct}%` : "—"} />
@@ -713,7 +731,7 @@ export default function StrategyBuilder() {
                     </div>
                 </NeonPanel>
 
-                <NeonPanel className="lg:col-span-3" title="Local Sidecar Run" action={<Pill tone={runJob?.status === "succeeded" ? "success" : runJob?.status === "failed" || runError ? "warning" : runJob ? "secondary" : "muted"}>{runJob?.status || "READY"}</Pill>}>
+                <NeonPanel className="lg:col-span-3" title="Local Sidecar Run" action={<Pill tone={runError ? "warning" : runStatusTone(runJob)}>{runStatusLabel(runJob)}</Pill>}>
                     <div className="mb-3 flex items-start gap-2 border border-[hsl(var(--warning)/0.35)] bg-[hsl(var(--warning)/0.06)] clip-bevel-sm px-3 py-2">
                         <ShieldAlert className="w-3.5 h-3.5 shrink-0 mt-0.5 text-[hsl(var(--warning))]" />
                         <span className="text-[11px] font-mono uppercase tracking-wider text-[hsl(var(--warning))]">Requires local sidecar running at http://127.0.0.1:8787.</span>
@@ -734,9 +752,31 @@ export default function StrategyBuilder() {
                             )}
                             {runJob && (
                                 <div className="space-y-2">
+                                    <div className={`border ${runStatusNoticeClass(runJob)} clip-bevel-sm px-3 py-2`}>
+                                        <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <div>
+                                                <div className="control-label text-[10px] font-mono uppercase tracking-wider text-muted-lab">Structured run status</div>
+                                                <div className="mt-1 text-[12px] font-mono text-white">
+                                                    {runStatusLabel(runJob)} · {formatRunProgress(runJob)}
+                                                </div>
+                                            </div>
+                                            <Pill tone={runStatusTone(runJob)}>{runStatusLabel(runJob)}</Pill>
+                                        </div>
+                                        <div className="mt-1 text-[11px] text-[hsl(var(--text-2))]">
+                                            {runStatusMessage(runJob)}
+                                        </div>
+                                    </div>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                                         <StatusMeta k="Job ID" v={runJob.job_id} />
+                                        <StatusMeta k="Run ID" v={runJob.run_id || runJob.job_id} />
                                         <StatusMeta k="Status" v={runJob.status} />
+                                        <StatusMeta k="Subprocess" v={runJob.process_alive ? "running" : "stopped"} />
+                                        <StatusMeta k="Progress" v={formatRunProgress(runJob)} />
+                                        <StatusMeta k="Current scenario" v={runJob.current_label || "—"} />
+                                        <StatusMeta k="Scenario kind" v={runJob.current_kind || "—"} />
+                                        <StatusMeta k="Current output" v={runJob.current_output_file || "—"} />
+                                        <StatusMeta k="ETA" v={formatDuration(runJob.eta_seconds)} />
+                                        <StatusMeta k="Avg pass" v={formatDuration(runJob.avg_pass_seconds)} />
                                         <StatusMeta k={runJob.duration_seconds != null ? "Duration" : "Elapsed"} v={`${runJob.duration_seconds ?? runJob.elapsed_seconds ?? "—"}s`} />
                                         <StatusMeta k="Symbol" v={runJob.current_symbol || "—"} />
                                         <StatusMeta k="Execution mode" v={runJob.current_execution_mode || "—"} />
@@ -753,7 +793,19 @@ export default function StrategyBuilder() {
                                         <StatusMeta k="News flatten late" v={runJob.news_flatten_late_count ?? "—"} />
                                         <StatusMeta k="Output folder" v={runJob.output_folder || "—"} />
                                     </div>
-                                    {runJob.status === "succeeded" && (
+                                    {runJob.possibly_stalled && (
+                                        <div className="border border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.07)] clip-bevel-sm px-3 py-2 text-[10.5px] text-[hsl(var(--warning))]">
+                                            No progress update for {formatDuration(runJob.seconds_since_update)}. The run may be stalled.
+                                        </div>
+                                    )}
+                                    {runJob.can_cancel && (
+                                        <div className="flex justify-end">
+                                            <NeonButton icon={Trash2} tone="warning" onClick={onCancelRun} disabled={runBusy}>
+                                                Cancel Run
+                                            </NeonButton>
+                                        </div>
+                                    )}
+                                    {isCompletedRun(runJob) && (
                                         <div className="space-y-2 border border-[hsl(var(--success)/0.35)] bg-[hsl(var(--success)/0.06)] clip-bevel-sm px-3 py-2">
                                             <div className="text-[11px] font-mono text-[hsl(var(--success))]">
                                                 Run completed. Import the completed output folder into Research Lab.
@@ -926,10 +978,27 @@ function reduceRunSnapshot(job, importedRunId = "") {
     if (!job) return {};
     return {
         job_id: job.job_id,
+        run_id: job.run_id,
         status: job.status,
         output_folder: job.output_folder,
         duration_seconds: job.duration_seconds,
         elapsed_seconds: job.elapsed_seconds,
+        progress: job.progress,
+        current_label: job.current_label,
+        current_kind: job.current_kind,
+        current_index: job.current_index,
+        total_passes: job.total_passes,
+        current_threshold_pct: job.current_threshold_pct,
+        current_output_file: job.current_output_file,
+        completed_passes: job.completed_passes,
+        progress_elapsed_seconds: job.progress_elapsed_seconds,
+        eta_seconds: job.eta_seconds,
+        avg_pass_seconds: job.avg_pass_seconds,
+        seconds_since_update: job.seconds_since_update,
+        possibly_stalled: job.possibly_stalled,
+        can_cancel: job.can_cancel,
+        process_alive: job.process_alive,
+        scenario_plan_summary: job.scenario_plan_summary,
         current_symbol: job.current_symbol,
         current_execution_mode: job.current_execution_mode,
         current_protection_mode: job.current_protection_mode,
@@ -949,6 +1018,88 @@ function reduceRunSnapshot(job, importedRunId = "") {
         finished_at: job.finished_at,
         importedRunId: importedRunId || job.importedRunId || "",
     };
+}
+
+function estimateScenarioPlan(config) {
+    const executionModes = Array.isArray(config?.execution_modes) && config.execution_modes.length
+        ? config.execution_modes
+        : ["single_position"];
+    const protectionModes = Array.isArray(config?.protection_modes) && config.protection_modes.length
+        ? config.protection_modes
+        : ["baseline"];
+    const penetrationThresholds = Array.isArray(config?.penetration_thresholds) ? config.penetration_thresholds : [];
+    const closeBuffers = Array.isArray(config?.close_breach_buffers_pips) ? config.close_breach_buffers_pips : [];
+    const entryModels = Array.isArray(config?.entry_models) ? config.entry_models : ["baseline"];
+    const entryThresholds = Array.isArray(config?.entry_penetration_thresholds) ? config.entry_penetration_thresholds : [];
+    let baseline = 0;
+    let protection = 0;
+    for (const mode of protectionModes) {
+        if (mode === "baseline") baseline += 1;
+        else if (mode === "penetration_threshold_exit") protection += Math.max(1, penetrationThresholds.length);
+        else if (mode === "close_confirmed_ob_breach_exit") protection += Math.max(1, closeBuffers.length);
+        else protection += 1;
+    }
+    const entry = entryModels.includes("entry_penetration") ? entryThresholds.length : 0;
+    return {
+        baseline: baseline * executionModes.length,
+        protection: protection * executionModes.length,
+        entry: entry * executionModes.length,
+        totalPasses: (baseline + protection + entry) * executionModes.length,
+    };
+}
+
+function formatRunProgress(job) {
+    if (!job) return "—";
+    const current = job.current_index;
+    const total = job.total_passes;
+    if (current != null && total != null) return `${current} / ${total}`;
+    return "—";
+}
+
+function isCompletedRun(job) {
+    return job?.status === "completed" || job?.status === "succeeded";
+}
+
+function runStatusLabel(job) {
+    const status = String(job?.status || "ready").toLowerCase();
+    if (status === "completed" || status === "succeeded") return "Completed";
+    if (status === "cancelled") return "Cancelled";
+    if (status === "failed") return "Failed";
+    if (status === "running") return "Running";
+    if (status === "queued") return "Queued";
+    return "Ready";
+}
+
+function runStatusTone(job) {
+    const status = String(job?.status || "").toLowerCase();
+    if (status === "completed" || status === "succeeded") return "success";
+    if (status === "failed" || status === "cancelled") return "warning";
+    if (status === "running" || status === "queued") return "secondary";
+    return "muted";
+}
+
+function runStatusNoticeClass(job) {
+    const status = String(job?.status || "").toLowerCase();
+    if (status === "completed" || status === "succeeded") {
+        return "border-[hsl(var(--success)/0.35)] bg-[hsl(var(--success)/0.06)]";
+    }
+    if (status === "failed" || status === "cancelled") {
+        return "border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.07)]";
+    }
+    return "border-[hsl(var(--accent-secondary)/0.28)] bg-[hsl(var(--accent-secondary)/0.06)]";
+}
+
+function runStatusMessage(job) {
+    const status = String(job?.status || "").toLowerCase();
+    if (status === "cancelled") return "Run cancelled. You can start another run.";
+    if (status === "failed") return "Run failed. Review stderr tail for details before rerunning.";
+    if (status === "completed" || status === "succeeded") return "Run completed. Import the completed output folder into Research Lab.";
+    if (status === "queued") return "Run queued. Waiting for the local sidecar runner.";
+    if (status === "running") {
+        const label = job?.current_label ? ` Current scenario: ${job.current_label}.` : "";
+        return `Run is active.${label}`;
+    }
+    return "No local run started yet.";
 }
 
 function copyJsonToClipboard(value, showFlash, label) {
@@ -1004,6 +1155,17 @@ function formatEntryResearchExports(config) {
 
 function formatSeconds(value) {
     return value == null ? "—" : `${value}s`;
+}
+
+function formatDuration(value) {
+    const seconds = Number(value);
+    if (!Number.isFinite(seconds) || seconds < 0) return "—";
+    if (seconds < 60) return `${Math.round(seconds)}s`;
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    if (hours > 0) return `~${hours}h ${remainingMinutes}m`;
+    return `~${minutes}m`;
 }
 
 const LOAD_FIELD_LABELS = {
