@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useLayoutEffect, useState } from "react";
+import React, { useEffect, useMemo, useRef, useLayoutEffect, useState } from "react";
 import { createChart, CrosshairMode, LineStyle } from "lightweight-charts";
 
 // CandleChart — backed by lightweight-charts v4.
@@ -223,6 +223,34 @@ function resolveObVisual(ob) {
     };
 }
 
+// Normalize an OB/trade ID to a comparable numeric key (mirrors StrategyMap's rrLookupKey)
+function obLookupKey(value) {
+    if (value == null || value === "") return null;
+    const text = String(value).trim();
+    const numeric = text.match(/\d+/);
+    return numeric ? String(Number(numeric[0])) : text.toLowerCase();
+}
+
+// Phase 2: turn either a baseline marker ({i, time, price, direction, win, id})
+// or a raw triggered-edge trade ({entry, entryPrice, direction, outcome, ...}) into
+// a uniform shape the chart can render as a clickable dot.
+function resolveTradeMarkerInfo(t) {
+    if (!t) return null;
+    const time = normalizeChartTimestamp(t.time ?? t.entry ?? t.entry_time ?? t.fill_time ?? t.fillTime);
+    const price = Number(t.price ?? t.entryPrice ?? t.entry_price ?? t.actual_entry_price ?? t.planned_entry_price);
+    if (time == null || !isFinite(price)) return null;
+    const dirRaw = String(t.direction || t.side || "").toLowerCase();
+    const isLong = dirRaw.startsWith("l") || dirRaw === "bull" || dirRaw === "buy";
+    let win = typeof t.win === "boolean" ? t.win : null;
+    if (win == null) {
+        const outcome = String(t.outcome || "").toLowerCase();
+        if (outcome === "win" || outcome === "target" || outcome === "tp") win = true;
+        else if (outcome === "loss" || outcome === "stop" || outcome === "sl") win = false;
+    }
+    const id = t.id ?? t.displayTradeId ?? t.tradeId ?? t.trade_id;
+    return { time, price, direction: isLong ? "long" : "short", win, id };
+}
+
 export function CandleChart({
     candles = [],
     obBoxes = [],
@@ -235,6 +263,7 @@ export function CandleChart({
     showWins = true,
     showLosses = true,
     onTradeClick,
+    onSelectTrade,           // (tradeId | null) => void — Phase 2: chart-side activation of the Intrabar Inspector
     selectedTradeId,
     verificationOverlay = null,
     rrTools = [],
@@ -246,6 +275,14 @@ export function CandleChart({
     showObDetectionMarkers = false,
     showObLabels = false,
     showNewsLabels = false,
+    // Triggered-edge lifecycle props
+    triggeredEdgeOverlays = [],
+    showTriggeredEdgeLevels = false,
+    showTriggeredEdgeLifecycle = false,
+    showTriggeredEdgeBadges = true,
+    showCancelledSetups = true,
+    // OB Details callout overlay (compact badge per OB box, off by default)
+    showObDetails = false,
 }) {
     const containerRef = useRef(null);
     const chartRef = useRef(null);
@@ -254,6 +291,40 @@ export function CandleChart({
     const [overlayKey, setOverlayKey] = useState(0); // triggers OB box reposition
     const hasRealCandleTime = candles.some((c) => normalizeChartTimestamp(c.time ?? c.t ?? c.timestamp ?? c.datetime) != null);
     const safeHeight = Number.isFinite(Number(height)) && Number(height) > 0 ? Math.round(Number(height)) : 460;
+
+    // ── Phase 2: trade-selection key + OB→trade lookup ─────────────────────────
+    // selectedKey normalizes selectedTradeId (e.g. "T-007") to the same numeric key
+    // used by obLookupKey, so OBs / badges / dots can compare against it. Pre-built
+    // ob→trade map lets us resolve an OB click to a tradeId even when the OB
+    // wasn't enriched upstream (enrichObsWithTradeLabels usually does this).
+    const selectedKey = obLookupKey(selectedTradeId);
+    const tradeByObKey = useMemo(() => {
+        const map = new Map();
+        for (const t of trades || []) {
+            const k = obLookupKey(t?.obId ?? t?.ob_id);
+            if (k != null && !map.has(k)) map.set(k, t);
+        }
+        return map;
+    }, [trades]);
+    const handleSelectTrade = (tradeId) => {
+        if (!onSelectTrade && !onTradeClick) return;
+        if (onSelectTrade) onSelectTrade(tradeId ?? null);
+        else if (onTradeClick && tradeId == null) onTradeClick(null);
+    };
+    const handleObClick = (ob) => {
+        if (!onSelectTrade) return;
+        const linkedTradeId = ob?.tradeId || ob?.displayTradeId || ob?.linkedTradeId || ob?.trade_id;
+        if (linkedTradeId) { onSelectTrade(linkedTradeId); return; }
+        const k = obLookupKey(ob?.obId || ob?.ob_id || ob?.id);
+        const matchedTrade = k != null ? tradeByObKey.get(k) : null;
+        if (matchedTrade) onSelectTrade(matchedTrade.id ?? matchedTrade.displayTradeId);
+    };
+    const obIsSelectable = (ob) => {
+        if (!onSelectTrade) return false;
+        if (ob?.tradeId || ob?.displayTradeId || ob?.linkedTradeId || ob?.trade_id) return true;
+        const k = obLookupKey(ob?.obId || ob?.ob_id || ob?.id);
+        return !!(k != null && tradeByObKey.get(k));
+    };
 
     const chartBg = "rgba(248, 250, 252, 1)";
     const axis = "rgba(148, 163, 184, 0.86)";
@@ -858,9 +929,236 @@ export function CandleChart({
         });
     })();
 
+    // ── Triggered-edge: dashed horizontal trigger threshold line across OB active span ──
+    const triggeredEdgeLevelShapes = (() => {
+        if (!showTriggeredEdgeLevels || !triggeredEdgeOverlays?.length) return [];
+        const chart = chartRef.current;
+        const series = seriesRef.current;
+        if (!chart || !series) return [];
+        const bounds = containerRef.current?.getBoundingClientRect();
+        const maxWidth = bounds?.width || 0;
+        const maxHeight = bounds?.height || height;
+        const visibleRange = chart.timeScale().getVisibleRange?.();
+        const rangeFrom = normalizeChartTimestamp(visibleRange?.from);
+        const rangeTo = normalizeChartTimestamp(visibleRange?.to);
+        const toVisibleX = (time, boundary) => {
+            const x = chart.timeScale().timeToCoordinate(time);
+            if (x != null) return x;
+            return boundary === "left" ? 0 : maxWidth;
+        };
+        const colorForState = (state) => {
+            if (state === "tagged") {
+                return {
+                    border: "rgba(22, 163, 74, 0.86)",
+                    text: "rgba(21, 128, 61, 0.95)",
+                    bg: "rgba(240, 253, 244, 0.78)",
+                    stateLabel: "Tagged",
+                };
+            }
+            if (state === "cancelled") {
+                return {
+                    border: "rgba(139, 92, 246, 0.80)",
+                    text: "rgba(109, 40, 217, 0.95)",
+                    bg: "rgba(245, 243, 255, 0.78)",
+                    stateLabel: "Cancelled",
+                };
+            }
+            if (state === "muted") {
+                return {
+                    border: "rgba(107, 114, 128, 0.56)",
+                    text: "rgba(75, 85, 99, 0.90)",
+                    bg: "rgba(249, 250, 251, 0.70)",
+                    stateLabel: "Not tagged",
+                };
+            }
+            return {
+                border: "rgba(245, 158, 11, 0.78)",
+                text: "rgba(161, 93, 0, 0.92)",
+                bg: "rgba(255, 251, 235, 0.76)",
+                stateLabel: "Not tagged",
+            };
+        };
+        const out = [];
+        for (const ov of triggeredEdgeOverlays) {
+            if (!showCancelledSetups && ov.cancelledBeforeEntry) continue;
+            if (ov.triggerPrice == null || !isFinite(ov.triggerPrice)) continue;
+            const y = series.priceToCoordinate(ov.triggerPrice);
+            if (y == null) continue;
+            const rawT0 = normalizeChartTimestamp(ov.lineStartTime ?? ov.detectionTime ?? ov.obStartTime);
+            const rawT1 = normalizeChartTimestamp(ov.lineEndTime ?? ov.obEndTime ?? ov.edgeRevisitTime ?? ov.triggerTime);
+            if (rawT0 == null || rawT1 == null) continue;
+            const t0 = hasRealCandleTime ? snapFloor(rawT0) : rawT0;
+            const t1 = hasRealCandleTime ? snapCeil(rawT1) : rawT1;
+            if (t0 == null || t1 == null) continue;
+            const boxStart = Math.min(t0, t1);
+            const boxEnd = Math.max(t0, t1);
+            const drawStart = rangeFrom == null ? boxStart : Math.max(boxStart, rangeFrom);
+            const drawEnd = rangeTo == null ? boxEnd : Math.min(boxEnd, rangeTo);
+            if (drawEnd < drawStart) continue;
+            const x0 = toVisibleX(drawStart, "left");
+            const x1 = toVisibleX(drawEnd, "right");
+            const left = clamp(Math.min(x0, x1), 0, Math.max(0, maxWidth - 1));
+            const right = clamp(Math.max(x0, x1), 0, Math.max(0, maxWidth));
+            const fallbackState = ov.wasCancelled ? "cancelled" : ov.wasTriggered ? "tagged" : "not_tagged";
+            const lineState = !showCancelledSetups && !ov.wasTriggered && !ov.wasCancelled ? "muted" : (ov.triggerLineState || fallbackState);
+            const color = colorForState(lineState);
+            const pctLabel = ov.triggerPenetrationPct != null ? `Trig ${ov.triggerPenetrationPct}%` : "Trigger";
+            out.push({
+                id: `trig-level-${ov.tradeId || ov.obId}`,
+                left,
+                width: Math.max(2, right - left),
+                y: clamp(y, 0, maxHeight),
+                color,
+                label: `${pctLabel} · ${color.stateLabel}`,
+            });
+        }
+        return out;
+    })();
+
+    // ── Triggered-edge: small colored dot markers for each lifecycle event ──
+    const triggeredEdgeLifecycleMarkers = (() => {
+        if (!showTriggeredEdgeLifecycle || !triggeredEdgeOverlays?.length) return [];
+        const chart = chartRef.current;
+        const series = seriesRef.current;
+        if (!chart || !series) return [];
+        const visibleRange = chart.timeScale().getVisibleRange?.();
+        const rangeFrom = normalizeChartTimestamp(visibleRange?.from);
+        const rangeTo = normalizeChartTimestamp(visibleRange?.to);
+        const isVisible = (t) => (rangeFrom == null || t >= rangeFrom) && (rangeTo == null || t <= rangeTo);
+        const bounds = containerRef.current?.getBoundingClientRect();
+        const maxHeight = bounds?.height || height;
+        const out = [];
+        for (const ov of triggeredEdgeOverlays) {
+            if (!showCancelledSetups && (ov.cancelledBeforeEntry || ov.badgeState === "never_trig")) continue;
+            const yTop = ov.obTop != null ? series.priceToCoordinate(ov.obTop) : null;
+            const yBot = ov.obBot != null ? series.priceToCoordinate(ov.obBot) : null;
+            const yMid = yTop != null && yBot != null ? clamp((yTop + yBot) / 2, 0, maxHeight) : null;
+            const events = [
+                ov.tappedTime  && { rawTime: ov.tappedTime,        color: "rgba(99, 102, 241, 0.85)",  label: "TAP"  },
+                ov.triggerTime && { rawTime: ov.triggerTime,        color: "rgba(245, 158, 11, 0.90)",  label: "TRIG" },
+                ov.armedAt     && { rawTime: ov.armedAt,            color: "rgba(234, 179, 8, 0.90)",   label: "ARM"  },
+                ov.edgeRevisitTime && { rawTime: ov.edgeRevisitTime, color: "rgba(6, 182, 212, 0.90)",  label: "REV"  },
+                ov.retraceCancelTime && { rawTime: ov.retraceCancelTime, color: "rgba(220, 38, 38, 0.90)", label: "RETR" },
+            ].filter(Boolean);
+            for (const ev of events) {
+                const parsed = normalizeChartTimestamp(ev.rawTime);
+                if (parsed == null) continue;
+                const snapTime = hasRealCandleTime ? snapFloor(parsed) : parsed;
+                if (snapTime == null || !isVisible(snapTime)) continue;
+                const x = chart.timeScale().timeToCoordinate(snapTime);
+                if (x == null || yMid == null) continue;
+                out.push({
+                    id: `lifecycle-${ov.tradeId || ov.obId}-${ev.label}`,
+                    x,
+                    y: yMid,
+                    color: ev.color,
+                    label: ev.label,
+                });
+            }
+        }
+        return out;
+    })();
+
+    // ── Triggered-edge: badge chips pinned to matching OB box pixel position ──
+    const triggeredEdgeBadgeShapes = (() => {
+        if (!showTriggeredEdgeBadges || !triggeredEdgeOverlays?.length || !overlays?.length) return [];
+        const obPixelMap = new Map();
+        for (const ob of overlays) {
+            const key = obLookupKey(ob.obId || ob.ob_id || ob.id);
+            if (key) obPixelMap.set(key, ob);
+        }
+        // `inval` is kept as the internal badge-state key (maps to
+        // INVALID_CANCELLED outcomes from the backend) but the rendered label
+        // is now PROTECTED — these setups were saved from a bad fill, not
+        // corrupted. Violet palette already wired in BADGE_COLORS below.
+        const BADGE_LABELS = { same: "SAME", next: "NEXT", used_ob: "USED OB", never_trig: "NEVER TRIG", inval: "PROTECTED" };
+        const BADGE_COLORS = {
+            same:       { bg: "rgba(22, 163, 74, 0.88)",   text: "rgba(255,255,255,0.96)" },
+            next:       { bg: "rgba(6, 182, 212, 0.85)",   text: "rgba(255,255,255,0.96)" },
+            used_ob:    { bg: "rgba(217, 119, 6, 0.88)",   text: "rgba(255,255,255,0.96)" },
+            never_trig: { bg: "rgba(107, 114, 128, 0.82)", text: "rgba(255,255,255,0.92)" },
+            inval:      { bg: "rgba(139, 92, 246, 0.82)",   text: "rgba(255,255,255,0.96)" },
+        };
+        return triggeredEdgeOverlays
+            .filter((ov) => {
+                if (!showCancelledSetups && (ov.cancelledBeforeEntry || ov.badgeState === "never_trig")) return false;
+                return ov.badgeState != null;
+            })
+            .map((ov) => {
+                const key = obLookupKey(ov.obId);
+                const obPx = key ? obPixelMap.get(key) : null;
+                if (!obPx) return null;
+                const label = BADGE_LABELS[ov.badgeState];
+                const color = BADGE_COLORS[ov.badgeState];
+                if (!label || !color) return null;
+                return {
+                    id: `trig-badge-${ov.tradeId || ov.obId}`,
+                    left: obPx.left + obPx.width,
+                    top: obPx.top + 2,
+                    label,
+                    color,
+                    tradeId: ov.tradeId,
+                };
+            })
+            .filter(Boolean);
+    })();
+
+    // ── Phase 2: clickable trade-marker dots ──────────────────────────────────
+    // Lightweight DOM dots rendered at each trade's fill candle. Respects the
+    // existing showLongs / showShorts / showWins / showLosses layer toggles.
+    // We render dots (rather than re-enabling native LWC markers) so the chart
+    // can attach click handlers without changing how lightweight-charts works.
+    const tradeMarkerShapes = (() => {
+        const chart = chartRef.current;
+        const series = seriesRef.current;
+        if (!chart || !series || !trades?.length) return [];
+        const bounds = containerRef.current?.getBoundingClientRect();
+        const maxW = bounds?.width || 0;
+        const maxH = bounds?.height || safeHeight;
+        const visibleRange = chart.timeScale().getVisibleRange?.();
+        const rangeFrom = normalizeChartTimestamp(visibleRange?.from);
+        const rangeTo = normalizeChartTimestamp(visibleRange?.to);
+        const out = [];
+        const seenTrades = new Set();
+        for (const raw of trades) {
+            const info = resolveTradeMarkerInfo(raw);
+            if (!info || info.id == null) continue;
+            const dedupKey = String(info.id);
+            if (seenTrades.has(dedupKey)) continue;
+            seenTrades.add(dedupKey);
+            const isLong = info.direction === "long";
+            if (isLong && !showLongs) continue;
+            if (!isLong && !showShorts) continue;
+            if (info.win === true && !showWins) continue;
+            if (info.win === false && !showLosses) continue;
+            const snap = hasRealCandleTime ? snapFloor(info.time) : info.time;
+            if (snap == null) continue;
+            if (rangeFrom != null && snap < rangeFrom) continue;
+            if (rangeTo != null && snap > rangeTo) continue;
+            const x = chart.timeScale().timeToCoordinate(snap);
+            const y = series.priceToCoordinate(info.price);
+            if (x == null || y == null) continue;
+            const selected = selectedKey != null && obLookupKey(info.id) === selectedKey;
+            out.push({
+                id: `trade-dot-${dedupKey}`,
+                tradeId: info.id,
+                x: clamp(x, 0, maxW),
+                y: clamp(y, 0, maxH),
+                direction: info.direction,
+                win: info.win,
+                selected,
+            });
+        }
+        return out;
+    })();
+
     return (
         <div className="relative w-full overflow-hidden" style={{ height: safeHeight }} data-testid="candle-chart">
-            <div ref={containerRef} className="w-full h-full" onClick={onTradeClick ? () => onTradeClick(null) : undefined} />
+            <div
+                ref={containerRef}
+                className="w-full h-full"
+                onClick={(onSelectTrade || onTradeClick) ? () => handleSelectTrade(null) : undefined}
+            />
             {/* Overlay layer for OB rectangles */}
             <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden" data-overlay-version={overlayKey}>
                 {sessionOverlays.map((session) => (
@@ -872,11 +1170,54 @@ export function CandleChart({
                 {newsBoundaryLines.map((line) => (
                     <NewsBoundaryLine key={line.id} line={line} />
                 ))}
-                {overlays.map((o, index) => (
-                    <OrderBlockOverlay key={o.id} ob={o} debugIndex={index} debugOverlays={debugOverlays} showObLabels={showObLabels} />
-                ))}
+                {overlays.map((o, index) => {
+                    const selectable = obIsSelectable(o);
+                    const obKey = obLookupKey(o.tradeId || o.displayTradeId || o.linkedTradeId || o.obId || o.ob_id || o.id);
+                    const selected = !!(selectedKey != null && obKey != null && obKey === selectedKey);
+                    return (
+                        <OrderBlockOverlay
+                            key={o.id}
+                            ob={o}
+                            debugIndex={index}
+                            debugOverlays={debugOverlays}
+                            showObLabels={showObLabels}
+                            showObDetails={showObDetails}
+                            selected={selected}
+                            onClick={selectable ? () => handleObClick(o) : undefined}
+                        />
+                    );
+                })}
                 {obMarkers.map((marker) => (
                     <OrderBlockMarker key={marker.id} marker={marker} />
+                ))}
+                {/* Triggered-edge: trigger level dashed lines */}
+                {triggeredEdgeLevelShapes.map((shape) => (
+                    <TriggeredEdgeLevelLine key={shape.id} shape={shape} />
+                ))}
+                {/* Triggered-edge: lifecycle event dot markers */}
+                {triggeredEdgeLifecycleMarkers.map((m) => (
+                    <TriggeredEdgeLifecycleMarker key={m.id} marker={m} />
+                ))}
+                {/* Triggered-edge: OB badge chips */}
+                {triggeredEdgeBadgeShapes.map((b) => {
+                    const badgeKey = obLookupKey(b.tradeId);
+                    const selected = !!(selectedKey != null && badgeKey != null && badgeKey === selectedKey);
+                    return (
+                        <TriggeredEdgeBadge
+                            key={b.id}
+                            badge={b}
+                            selected={selected}
+                            onClick={(onSelectTrade && b.tradeId) ? () => handleSelectTrade(b.tradeId) : undefined}
+                        />
+                    );
+                })}
+                {/* Phase 2: clickable trade-marker dots */}
+                {tradeMarkerShapes.map((dot) => (
+                    <TradeMarkerDot
+                        key={dot.id}
+                        dot={dot}
+                        onClick={onSelectTrade ? () => handleSelectTrade(dot.tradeId) : undefined}
+                    />
                 ))}
                 {rrToolShapes.map((shape) => (
                     <div
@@ -987,25 +1328,91 @@ function formatDebugTime(value) {
     return new Date(ts * 1000).toISOString().slice(0, 16).replace("T", " ");
 }
 
-function OrderBlockOverlay({ ob, debugIndex = 0, debugOverlays = false, showObLabels = false }) {
+function obDetailsContent(ob) {
+    const rawId = ob.obId || ob.ob_id || ob.id || "";
+    const idNum = String(rawId).match(/\d+/) ? String(Number(String(rawId).match(/\d+/)[0])) : String(rawId);
+    const idText = idNum ? `OB-${idNum}` : "OB";
+    const side = normalizeText(ob.direction || ob.side || ob.obDirection || "");
+    const isBull = side.includes("bull") || side.includes("long");
+    const dirText = isBull ? "BULL" : "BEAR";
+    const outcome = normalizeText(ob.outcome || ob.statusLabel || ob.obFinalStatusLabel || ob.status || ob.obFinalStatus || "");
+    const cancelRaw = String(ob.cancel_reason || ob.cancelReason || "").trim();
+    const cancelNorm = normalizeText(cancelRaw);
+
+    let statusText = "";
+    if (cancelNorm.includes("inval") || cancelNorm.includes("before_entry")) {
+        // Cancel reason "invalidated_before_edge_entry" → entry was protected
+        // by the model before a bad fill. Violet palette / "PROTECTED" label
+        // is applied consistently across the app.
+        statusText = "PROTECTED";
+    } else if (cancelNorm.includes("retrace")) {
+        statusText = "USED OB";
+    } else if (outcome.includes("win") || outcome === "tp") {
+        statusText = "WIN";
+    } else if (outcome.includes("loss") || outcome === "sl") {
+        statusText = "LOSS";
+    } else if (outcome === "be" || outcome.includes("breakeven")) {
+        statusText = "BE";
+    } else if (outcome.includes("never_trig") || outcome.includes("never trig") || cancelNorm.includes("never")) {
+        statusText = "NEVER TRIG";
+    } else if (outcome.includes("invalid")) {
+        // Raw outcome "INVALID" from the backend — same protection event,
+        // surfaced via the outcome column instead of the cancel_reason field.
+        statusText = "PROTECTED";
+    } else if (outcome.includes("news")) {
+        statusText = "NEWS";
+    } else if (outcome.includes("session")) {
+        statusText = "SESSION";
+    } else if (outcome) {
+        statusText = outcome.replace(/_/g, " ").toUpperCase().slice(0, 14);
+    } else {
+        statusText = "OPEN";
+    }
+
+    const rVal = ob.resultR != null && isFinite(Number(ob.resultR)) ? Number(ob.resultR) : null;
+    const rText = rVal != null ? `${rVal >= 0 ? "+" : ""}${rVal.toFixed(1)}R` : null;
+
+    // Cancel-reason readout in the OB tooltip / detail panel. The backend
+    // emits "invalidated_before_edge_entry"; we render the protection-framed
+    // short form so it stays consistent with the chip and badge text.
+    const cancelDisplay = cancelRaw
+        ? cancelRaw.replace(/_/g, " ").replace(/invalidated before edge entry/i, "protected pre-entry").slice(0, 28)
+        : null;
+    const structTag = String(ob.structureTag || ob.structure_tag || ob.structure || ob.tag || "").trim();
+    const structDisplay = structTag ? structTag.replace(/_/g, " ").slice(0, 18) : null;
+
+    return { idText, dirText, statusText, rText, cancelDisplay, structDisplay };
+}
+
+function OrderBlockOverlay({ ob, debugIndex = 0, debugOverlays = false, showObLabels = false, showObDetails = false, selected = false, onClick }) {
     const visual = resolveObVisual(ob);
+    const interactive = !!onClick;
+    const selectionRing = selected
+        ? "0 0 0 2px rgba(56, 189, 248, 0.92), 0 0 6px rgba(56, 189, 248, 0.45)"
+        : "none";
+    const borderColor = selected ? "rgba(14, 116, 144, 0.92)" : visual.border;
 
     return (
         <div
             data-testid={`ob-overlay-${ob.id}`}
+            data-selected={selected ? "true" : "false"}
             className="absolute"
+            onClick={interactive ? (e) => { e.stopPropagation(); onClick(); } : undefined}
+            title={interactive ? "Click to inspect this trade" : undefined}
             style={{
                 left: ob.left,
                 width: ob.width,
                 top: ob.top,
                 height: ob.height,
                 background: visual.fill,
-                border: `1px solid ${visual.border}`,
-                boxShadow: "none",
-                zIndex: 12,
+                border: `${selected ? 2 : 1}px solid ${borderColor}`,
+                boxShadow: selectionRing,
+                zIndex: selected ? 13 : 12,
+                pointerEvents: interactive ? "auto" : "none",
+                cursor: interactive ? "pointer" : "default",
             }}
         >
-            {showObLabels && (
+            {showObLabels && !showObDetails && (
                 <span
                     className="absolute top-0.5 left-1 text-[8.5px] font-mono px-1 leading-[11px]"
                     style={{ color: visual.label, background: "rgba(255, 255, 255, 0.78)" }}
@@ -1013,6 +1420,44 @@ function OrderBlockOverlay({ ob, debugIndex = 0, debugOverlays = false, showObLa
                     {orderBlockLabelText(ob, debugOverlays)}
                 </span>
             )}
+            {showObDetails && (() => {
+                const { idText, dirText, statusText, rText, cancelDisplay, structDisplay } = obDetailsContent(ob);
+                const borderColor = visual.border;
+                const labelColor = visual.label;
+                return (
+                    <div
+                        className="absolute right-0 font-mono pointer-events-none"
+                        style={{
+                            top: ob.height >= 28 ? 2 : -20,
+                            right: 2,
+                            maxWidth: Math.max(ob.width - 4, 100),
+                            background: "rgba(248, 250, 252, 0.93)",
+                            border: `1px solid ${borderColor}`,
+                            borderRadius: 2,
+                            padding: "1px 4px",
+                            zIndex: 20,
+                            whiteSpace: "nowrap",
+                        }}
+                    >
+                        <div
+                            className="text-[8px] font-bold leading-[11px] tracking-wide"
+                            style={{ color: labelColor }}
+                        >
+                            {idText} · {dirText} · {statusText}{rText ? ` · ${rText}` : ""}
+                        </div>
+                        {cancelDisplay && (
+                            <div className="text-[7px] leading-[10px] opacity-80" style={{ color: labelColor }}>
+                                {cancelDisplay}
+                            </div>
+                        )}
+                        {!cancelDisplay && structDisplay && (
+                            <div className="text-[7px] leading-[10px] opacity-70" style={{ color: labelColor }}>
+                                {structDisplay}
+                            </div>
+                        )}
+                    </div>
+                );
+            })()}
             {debugOverlays && debugIndex < 3 && (
                 <span
                     className="absolute left-1/2 top-1/2 text-[10px] font-mono font-bold tracking-wider px-1.5 py-0.5"
@@ -1062,6 +1507,130 @@ function OrderBlockMarker({ marker }) {
         </div>
     );
 }
+
+// ── Triggered-edge overlay components ─────────────────────────────────────────
+
+function TriggeredEdgeLevelLine({ shape }) {
+    return (
+        <div
+            className="absolute pointer-events-none"
+            style={{
+                left: shape.left,
+                top: shape.y,
+                width: shape.width,
+                height: 1,
+                borderTop: `1px dashed ${shape.color?.border || "rgba(245, 158, 11, 0.68)"}`,
+                zIndex: 13,
+            }}
+        >
+            {shape.label && (
+                <span
+                    className="absolute right-0.5 whitespace-nowrap font-mono text-[7px] leading-[8px] px-0.5"
+                    style={{
+                        top: -8,
+                        color: shape.color?.text || "rgba(161, 93, 0, 0.88)",
+                        background: shape.color?.bg || "rgba(255, 255, 255, 0.70)",
+                    }}
+                >
+                    {shape.label}
+                </span>
+            )}
+        </div>
+    );
+}
+
+function TriggeredEdgeLifecycleMarker({ marker }) {
+    return (
+        <div
+            className="absolute pointer-events-none rounded-full"
+            title={marker.label}
+            style={{
+                left: marker.x - 4,
+                top: marker.y - 4,
+                width: 8,
+                height: 8,
+                background: marker.color,
+                zIndex: 15,
+            }}
+        />
+    );
+}
+
+function TriggeredEdgeBadge({ badge, selected = false, onClick }) {
+    const interactive = !!onClick;
+    return (
+        <div
+            className={`absolute ${interactive ? "pointer-events-auto" : "pointer-events-none"}`}
+            data-selected={selected ? "true" : "false"}
+            onClick={interactive ? (e) => { e.stopPropagation(); onClick(); } : undefined}
+            title={interactive ? "Click to inspect this trade" : undefined}
+            style={{
+                left: badge.left,
+                top: badge.top,
+                zIndex: selected ? 17 : 16,
+                transform: "translateX(-100%)",
+                cursor: interactive ? "pointer" : "default",
+            }}
+        >
+            <span
+                className="whitespace-nowrap font-mono leading-[10px] px-1 py-px rounded-sm"
+                style={{
+                    fontSize: "7.5px",
+                    background: badge.color.bg,
+                    color: badge.color.text,
+                    boxShadow: selected
+                        ? "0 0 0 2px rgba(56, 189, 248, 0.92), 0 0 4px rgba(56, 189, 248, 0.5)"
+                        : "none",
+                    outline: "none",
+                }}
+            >
+                {badge.label}
+            </span>
+        </div>
+    );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+
+// Phase 2: clickable trade marker rendered as a small DOM dot. Subtle by default;
+// pops when selected so the user can see which trade owns the Intrabar Inspector.
+function TradeMarkerDot({ dot, onClick }) {
+    const interactive = !!onClick;
+    const baseColor = dot.win === true
+        ? "rgba(22, 163, 74, 0.85)"
+        : dot.win === false
+            ? "rgba(220, 38, 38, 0.85)"
+            : "rgba(107, 114, 128, 0.78)";
+    const size = dot.selected ? 11 : 7;
+    const offset = size / 2;
+    return (
+        <div
+            className={interactive ? "pointer-events-auto" : "pointer-events-none"}
+            data-testid={`trade-marker-${dot.tradeId}`}
+            data-selected={dot.selected ? "true" : "false"}
+            onClick={interactive ? (e) => { e.stopPropagation(); onClick(); } : undefined}
+            title={interactive ? `Trade ${dot.tradeId} — click to inspect` : undefined}
+            style={{
+                position: "absolute",
+                left: dot.x - offset,
+                top: dot.y - offset,
+                width: size,
+                height: size,
+                borderRadius: "50%",
+                background: baseColor,
+                border: `${dot.selected ? 2 : 1}px solid rgba(255,255,255,0.95)`,
+                boxShadow: dot.selected
+                    ? "0 0 0 2px rgba(56, 189, 248, 0.92), 0 0 6px rgba(56, 189, 248, 0.5)"
+                    : "0 0 2px rgba(15, 23, 42, 0.35)",
+                cursor: interactive ? "pointer" : "default",
+                zIndex: dot.selected ? 20 : 18,
+                opacity: dot.selected ? 1 : 0.78,
+            }}
+        />
+    );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 
 function NewsBoundaryLine({ line }) {
     const isStart = line.side === "start";

@@ -10,7 +10,17 @@ import * as defaults from "./mock";
 import { saveCandles, loadCandles, deleteCandles } from "./artifactStore";
 import { buildTradesByObId, deriveOBLifecycle } from "./obLifecycle";
 import { ingestRunBundle } from "./importer";
-import { getRunBundleByRunId } from "./sidecarClient";
+import { getRunBundleByRunId, getRunCandlesByRunId } from "./sidecarClient";
+import { summarizeTradeClassifications } from "./tradeClassification";
+// Phase 2A — shared store-level trade universe resolver. Pages that want a
+// named, scenario-aware trade list (with stats, source filename, warnings,
+// baseline reference) should call `getTradeUniverse(runId, scenarioOverride)`
+// instead of poking at runData.tradesByVariant / entryResults.tradesByMode.
+import {
+    resolveTradeUniverse,
+    resolveBaselineUniverse,
+    describeTradeUniverse,
+} from "./tradeUniverse";
 
 const LS_KEY = "fxob_runs";
 const LS_RUN_INDEX = "fxob_runs_index_v1";
@@ -18,6 +28,7 @@ const LS_RUN_PREFIX = "fxob_run_v1:";
 const LS_PROJECTS = "fxob_projects";
 const LS_ACTIVE = "fxob_active_run_id";
 const LS_ACTIVE_PROJECT = "fxob_active_project_id";
+const LS_SCENARIO = "fxob_scenario_v1";
 
 function loadPersistedRuns() {
     const indexedRuns = loadIndexedRuns();
@@ -88,6 +99,35 @@ function loadPersistedProjects() {
     }
 }
 
+// ── Canonical scenario selection ──────────────────────────────────────────
+// ONE object drives what the Strategy Map is showing. Phase 1: structured
+// state only — no UI changes yet. Downstream consumers still read the legacy
+// activeRunId / selectedTradeVariant fields which remain fully backward-compat.
+const DEFAULT_SCENARIO = {
+    runId: null,            // string | null  — which run bundle
+    family: null,           // 'baseline' | 'triggered_edge' | 'penetration' | null
+    positionVariant: null,  // 'single_position' | 'one_per_direction' | 'allow_multi_position' | null
+    threshold: null,        // number | null  — e.g. 5, 10, 25 (penetration %)
+    fillMode: null,         // 'same' | 'next' | 'both' | null  (triggered_edge only; null = both)
+};
+
+function loadPersistedScenario(fallbackRunId) {
+    try {
+        const saved = safeJsonParse(localStorage.getItem(LS_SCENARIO), null);
+        if (saved && typeof saved === "object") {
+            return {
+                runId: typeof saved.runId === "string" ? saved.runId : (fallbackRunId || null),
+                family: typeof saved.family === "string" ? saved.family : null,
+                positionVariant: typeof saved.positionVariant === "string" ? saved.positionVariant : null,
+                threshold: typeof saved.threshold === "number" ? saved.threshold : null,
+                fillMode: typeof saved.fillMode === "string" ? saved.fillMode : null,
+            };
+        }
+    } catch { /* fall through */ }
+    // No stored scenario — derive minimal defaults from the existing active-run key.
+    return { ...DEFAULT_SCENARIO, runId: fallbackRunId || null };
+}
+
 let state = {
     ...defaults,
     runs: loadPersistedRuns(),
@@ -95,12 +135,15 @@ let state = {
     activeRunId: (() => { try { return localStorage.getItem(LS_ACTIVE) || null; } catch { return null; } })(),
     activeProjectId: (() => { try { return localStorage.getItem(LS_ACTIVE_PROJECT) || null; } catch { return null; } })(),
     selectedTradeVariant: null,
+    // Structured scenario — the canonical answer to "what is the Strategy Map showing?"
+    scenario: loadPersistedScenario((() => { try { return localStorage.getItem(LS_ACTIVE) || null; } catch { return null; } })()),
     persistWarning: null,
     candlePersistenceNotice: null,
     autoReloadStatus: {},
     autoReloadInProgress: false,
     autoReloadCompletedAt: null,
     autoReloadFailedCount: 0,
+    candleLoadStatus: {},
 };
 
 const listeners = new Set();
@@ -626,6 +669,10 @@ function ensureActiveRunId() {
             ...state,
             activeRunId,
             selectedTradeVariant: activeRunId ? selectedVariantFor(state.runs[activeRunId]) : null,
+            scenario: {
+                ...state.scenario,
+                runId: activeRunId || null,
+            },
         };
         try {
             if (activeRunId) localStorage.setItem(LS_ACTIVE, activeRunId);
@@ -657,15 +704,18 @@ function variantDataFor(run) {
 
 function summaryForVariant(summary, trades, variant) {
     if (!summary || !variant) return summary;
-    const wins = (trades || []).filter((t) => t.outcome === "Win").length;
-    const losses = (trades || []).length - wins;
-    const netR = (trades || []).reduce((s, t) => s + (Number(t.r) || 0), 0);
+    const list = trades || [];
+    // Use the canonical classifier so a variant's summary doesn't silently
+    // bucket UNFILLED / INVALID / NEWS_FLATTEN rows into "losses" — see
+    // tradeClassification.js for the categories.
+    const rollup = summarizeTradeClassifications(list);
+    const netR = list.reduce((s, t) => s + (Number(t.r) || 0), 0);
     return {
         ...summary,
-        trades: (trades || []).length,
-        wins,
-        losses,
-        winRate: Number(((trades || []).length ? (wins / (trades || []).length) * 100 : 0).toFixed(1)),
+        trades: list.length,
+        wins: rollup.wins,
+        losses: rollup.losses,
+        winRate: Number((rollup.winRate ?? 0).toFixed(1)),
         netR: Number(netR.toFixed(1)),
         executionMode: variant,
         selectedTradeVariant: variant,
@@ -863,6 +913,10 @@ function buildDerived() {
                 indexWarning: r.indexWarning || "",
                 autoReloadStatus: state.autoReloadStatus?.[r.id]?.status || "idle",
                 autoReloadError: state.autoReloadStatus?.[r.id]?.error || "",
+                candlesLoading: state.candleLoadStatus?.[r.id]?.status === "loading",
+                candlesLoaded: state.candleLoadStatus?.[r.id]?.status === "loaded",
+                candlesError: state.candleLoadStatus?.[r.id]?.error || "",
+                candlesCount: state.candleLoadStatus?.[r.id]?.count ?? r.candleCount ?? summary?.candleCount ?? 0,
                 projectId: r.projectId || summary?.projectId || null,
                 projectName: projectDisplayName(r.projectId || summary?.projectId),
                 runRole: r.runRole || summary?.runRole || "imported",
@@ -898,6 +952,8 @@ function buildDerived() {
         SWEEP_RR: [], // sweep data is not stored in bundles; SweepLab owns its own state
         ACTIVE_TRADE_VARIANT: activeVariantData?.variant || null,
         AVAILABLE_TRADE_VARIANTS: activeVariantData?.variants || [],
+        // Structured scenario — canonical selection driving Strategy Map overlays.
+        SCENARIO: state.scenario,
         ACTIVE_PROJECT: activeProject,
         PROJECTS: projectList(),
         RUNS: importedList,
@@ -911,6 +967,8 @@ function buildDerived() {
         autoReloadInProgress: state.autoReloadInProgress,
         autoReloadCompletedAt: state.autoReloadCompletedAt,
         autoReloadFailedCount: state.autoReloadFailedCount,
+        candleLoadStatus: state.candleLoadStatus,
+        loadCandlesForRun,
     };
 }
 
@@ -924,6 +982,37 @@ export function getRunData(runId) {
     if (!runId) return null;
     return state.runs[runId] || null;
 }
+
+/**
+ * Resolve the active TradeUniverse for a given run, optionally overriding the
+ * scenario. With no arguments this returns the universe for the active run
+ * using the current `state.scenario`. Phase 2A foundation: no page consumes
+ * this yet (Strategy Map continues to use `useResolvedScenario`); the export
+ * exists so subsequent phases can migrate other surfaces (Failures, Hypothesis,
+ * Protection) onto a single named trade universe without further plumbing.
+ *
+ * @param {string|null} [runId]              defaults to active run.
+ * @param {object|null} [scenarioOverride]   overrides `state.scenario` for this call.
+ * @returns {object} TradeUniverse — see `data/tradeUniverse.js` for shape.
+ */
+export function getTradeUniverse(runId = null, scenarioOverride = null) {
+    const effectiveRunId = runId || state.activeRunId || null;
+    const bundle = effectiveRunId ? state.runs[effectiveRunId] || null : null;
+    const scenario = scenarioOverride || state.scenario || null;
+    const fallbackVariant = state.selectedTradeVariant
+        || bundle?.primaryVariant
+        || null;
+    return resolveTradeUniverse({
+        bundle,
+        scenario,
+        fallbackVariant,
+    });
+}
+
+// Re-export the resolver helpers for callers that don't want to import
+// directly from data/tradeUniverse (keeps the store as the single discovery
+// point for trade-data access).
+export { resolveTradeUniverse, resolveBaselineUniverse, describeTradeUniverse };
 
 export function getActiveProject() {
     return state.activeProjectId ? state.projects[state.activeProjectId] || null : null;
@@ -950,11 +1039,22 @@ export function getRunsBackupPayload() {
 export function setActiveRunId(runId) {
     const nextRun = runId ? state.runs[runId] : null;
     const selectedTradeVariant = nextRun?.primaryVariant || null;
-    state = { ...state, activeRunId: runId || null, selectedTradeVariant };
+    state = {
+        ...state,
+        activeRunId: runId || null,
+        selectedTradeVariant,
+        // Keep scenario.runId in sync. Reset family/threshold/fillMode so future
+        // phases can derive clean defaults for the newly selected run.
+        scenario: {
+            ...DEFAULT_SCENARIO,
+            runId: runId || null,
+        },
+    };
     try {
         if (runId) localStorage.setItem(LS_ACTIVE, runId);
         else localStorage.removeItem(LS_ACTIVE);
     } catch { /* noop */ }
+    persistScenario();
     notify();
 }
 
@@ -967,13 +1067,23 @@ export function setActiveProjectId(projectId) {
     const selectedTradeVariant = projectRun
         ? projectRun.primaryVariant || null
         : (activeRunId ? selectedVariantFor(state.runs[activeRunId]) : null);
-    state = { ...state, activeProjectId: nextId, activeRunId, selectedTradeVariant };
+    state = {
+        ...state,
+        activeProjectId: nextId,
+        activeRunId,
+        selectedTradeVariant,
+        scenario: {
+            ...DEFAULT_SCENARIO,
+            runId: activeRunId || null,
+        },
+    };
     try {
         if (nextId) localStorage.setItem(LS_ACTIVE_PROJECT, nextId);
         else localStorage.removeItem(LS_ACTIVE_PROJECT);
         if (activeRunId) localStorage.setItem(LS_ACTIVE, activeRunId);
         else localStorage.removeItem(LS_ACTIVE);
     } catch { /* noop */ }
+    persistScenario();
     notify();
 }
 
@@ -993,8 +1103,13 @@ export function setProjectActiveRun(projectId, runId) {
             ...state,
             activeRunId: runId,
             selectedTradeVariant: nextRun?.primaryVariant || null,
+            scenario: {
+                ...DEFAULT_SCENARIO,
+                runId,
+            },
         };
         try { localStorage.setItem(LS_ACTIVE, runId); } catch { /* noop */ }
+        persistScenario();
     }
     persistProjects();
     notify();
@@ -1131,7 +1246,69 @@ export function setSelectedTradeVariant(variant) {
     const active = state.activeRunId ? state.runs[state.activeRunId] : null;
     const variants = availableVariants(active);
     const selectedTradeVariant = variants.includes(variant) ? variant : selectedVariantFor(active);
-    state = { ...state, selectedTradeVariant };
+    state = {
+        ...state,
+        selectedTradeVariant,
+        scenario: {
+            ...state.scenario,
+            positionVariant: selectedTradeVariant || null,
+        },
+    };
+    persistScenario();
+    notify();
+}
+
+// ── Scenario actions ───────────────────────────────────────────────────────
+// These are the Phase 1 additions for the canonical scenario state.
+// Phase 2+ will wire these to the ScenarioSelector UI component.
+
+/**
+ * Merge a partial patch into the current scenario.
+ * Conservative in Phase 1: no automatic cascade of dependents.
+ * Callers are responsible for providing a coherent patch.
+ *
+ * @param {{ runId?, family?, positionVariant?, threshold?, fillMode? }} patch
+ */
+export function setScenario(patch) {
+    if (!patch || typeof patch !== "object") return;
+    state = {
+        ...state,
+        scenario: {
+            ...state.scenario,
+            ...patch,
+        },
+    };
+    persistScenario();
+    notify();
+}
+
+/**
+ * Switch to a different run. Resets family / positionVariant / threshold /
+ * fillMode to null so Phase 2+ selectors can derive clean defaults for the
+ * newly selected run's bundle.
+ *
+ * Also calls setActiveRunId internally so the rest of the app (which still
+ * reads activeRunId) stays coherent.
+ *
+ * @param {string|null} runId
+ */
+export function setScenarioRun(runId) {
+    const nextRun = runId ? state.runs[runId] : null;
+    const selectedTradeVariant = nextRun?.primaryVariant || null;
+    state = {
+        ...state,
+        activeRunId: runId || null,
+        selectedTradeVariant,
+        scenario: {
+            ...DEFAULT_SCENARIO,
+            runId: runId || null,
+        },
+    };
+    try {
+        if (runId) localStorage.setItem(LS_ACTIVE, runId);
+        else localStorage.removeItem(LS_ACTIVE);
+    } catch { /* noop */ }
+    persistScenario();
     notify();
 }
 
@@ -1146,6 +1323,12 @@ export function addRunBundle(bundle) {
         runs: { ...state.runs, [id]: nextBundle },
         activeRunId: id,  // auto-focus newly imported run
         selectedTradeVariant: normalizedBundle.primaryVariant || null,
+        // New import: reset scenario to clean slate for this run so
+        // future phases can auto-derive family/threshold from the bundle.
+        scenario: {
+            ...DEFAULT_SCENARIO,
+            runId: id,
+        },
     };
     try {
         localStorage.setItem(LS_ACTIVE, id);
@@ -1172,6 +1355,7 @@ export function addRunBundle(bundle) {
         });
     }
     persistRuns();
+    persistScenario();
     notify();
     return nextBundle;
 }
@@ -1208,6 +1392,11 @@ export function replaceRunBundleData(runId, bundle) {
         hasFullData: true,
         storageMode: "memory_full",
         indexOnly: false,
+        // Preserve existing candles when the incoming bundle was fetched without them
+        // (reloadFullRunFromSidecar uses includeCandles: false, so bundle.candles = null).
+        // Without this, the spread `...bundle` above would wipe previously loaded candles.
+        candles: bundle.candles?.length ? bundle.candles : (current.candles ?? null),
+        hasCandles: !!(bundle.candles?.length ? bundle.candles.length : current.candles?.length),
         summary: {
             ...bundle.summary,
             id: runId,
@@ -1231,9 +1420,16 @@ export function replaceRunBundleData(runId, bundle) {
         runs: { ...state.runs, [runId]: nextBundle },
         activeRunId: runId,
         selectedTradeVariant: nextBundle.primaryVariant || null,
+        // Sidecar reload refreshes the bundle; keep scenario.runId in sync but
+        // preserve any family/threshold the user had selected if they match this run.
+        scenario: {
+            ...state.scenario,
+            runId,
+        },
     };
     try { localStorage.setItem(LS_ACTIVE, runId); } catch { /* noop */ }
     persistRuns();
+    persistScenario();
     notify();
     return nextBundle;
 }
@@ -1320,6 +1516,7 @@ export async function autoReloadIndexedRunsFromSidecar() {
     });
     const previousActiveRunId = state.activeRunId;
     const previousSelectedTradeVariant = state.selectedTradeVariant;
+    const previousScenario = state.scenario;
     state = {
         ...state,
         autoReloadInProgress: true,
@@ -1360,6 +1557,9 @@ export async function autoReloadIndexedRunsFromSidecar() {
         ...state,
         activeRunId: restoredActiveRun ? previousActiveRunId : state.activeRunId,
         selectedTradeVariant: restoredActiveRun ? previousSelectedTradeVariant : state.selectedTradeVariant,
+        // Restore scenario to what it was before the batch reload; individual
+        // replaceRunBundleData calls may have shifted it during the parallel workers.
+        scenario: restoredActiveRun ? previousScenario : state.scenario,
         autoReloadInProgress: false,
         autoReloadCompletedAt: new Date().toISOString(),
         autoReloadFailedCount: failed,
@@ -1371,12 +1571,72 @@ export async function autoReloadIndexedRunsFromSidecar() {
     return { total: candidates.length, loaded, failed };
 }
 
+export async function loadCandlesForRun(runId, options = {}) {
+    const current = runId ? state.runs[runId] : null;
+    if (!current) throw new Error("Run is not available in the local index.");
+    if (Array.isArray(current.candles) && current.candles.length) return current.candles;
+
+    const identifiers = runReloadIdentifiers(runId, current);
+    if (!identifiers.length) {
+        throw new Error("This run has no sidecar run id or output folder reference.");
+    }
+
+    setCandleLoadStatus(runId, "loading", "", current.candleCount || 0);
+    let payload = null;
+    let lastError = null;
+    for (const identifier of identifiers) {
+        try {
+            payload = await getRunCandlesByRunId(identifier, options);
+            break;
+        } catch (error) {
+            lastError = error;
+        }
+    }
+    if (!payload) {
+        const message = lastError?.message || "Could not load candle data from sidecar. Make sure sidecar is running and candles.csv exists.";
+        setCandleLoadStatus(runId, "failed", message, 0);
+        throw new Error(message);
+    }
+
+    const candles = Array.isArray(payload.candles) ? payload.candles : [];
+    const nextRun = {
+        ...current,
+        candles,
+        hasCandles: candles.length > 0,
+        candlesStorage: "memory",
+        candleCount: candles.length,
+        summary: {
+            ...current.summary,
+            hasCandles: candles.length > 0,
+            candlesStorage: "memory",
+            candleCount: candles.length,
+        },
+    };
+    state = {
+        ...state,
+        runs: { ...state.runs, [runId]: nextRun },
+    };
+    setCandleLoadStatus(runId, "loaded", "", candles.length);
+    return candles;
+}
+
 function setAutoReloadRunStatus(runId, status, error = "") {
     state = {
         ...state,
         autoReloadStatus: {
             ...state.autoReloadStatus,
             [runId]: { status, error },
+        },
+    };
+    notify();
+}
+
+function setCandleLoadStatus(runId, status, error = "", count = 0) {
+    state = {
+        ...state,
+        candleLoadStatus: {
+            ...state.candleLoadStatus,
+            [runId]: { status, error, count },
         },
     };
     notify();
@@ -1457,13 +1717,19 @@ export function deleteRunBundle(id) {
     const fallbackRun = Object.values(next).sort((a, b) => (b.importedAt || "").localeCompare(a.importedAt || ""))[0];
     const activeRunId = state.activeRunId === id ? (fallbackRun?.id || null) : state.activeRunId;
     const selectedTradeVariant = activeRunId ? selectedVariantFor(next[activeRunId]) : null;
-    state = { ...state, runs: next, projects: nextProjects, activeRunId, selectedTradeVariant };
+    // If the deleted run was selected in the scenario, reset scenario to the
+    // fallback run (same clean-slate approach as setActiveRunId).
+    const nextScenario = state.scenario.runId === id
+        ? { ...DEFAULT_SCENARIO, runId: activeRunId || null }
+        : { ...state.scenario, runId: state.scenario.runId === id ? (activeRunId || null) : state.scenario.runId };
+    state = { ...state, runs: next, projects: nextProjects, activeRunId, selectedTradeVariant, scenario: nextScenario };
     try {
         if (activeRunId) localStorage.setItem(LS_ACTIVE, activeRunId);
         else localStorage.removeItem(LS_ACTIVE);
     } catch { /* noop */ }
     persistRuns();
     persistProjects();
+    persistScenario();
     notify();
 }
 
@@ -1485,11 +1751,12 @@ export function clearAllRuns() {
             updatedAt: new Date().toISOString(),
         },
     ]));
-    state = { ...state, runs: {}, projects: nextProjects, activeRunId: null, selectedTradeVariant: null, persistWarning: null, candlePersistenceNotice: null };
+    state = { ...state, runs: {}, projects: nextProjects, activeRunId: null, selectedTradeVariant: null, scenario: { ...DEFAULT_SCENARIO }, persistWarning: null, candlePersistenceNotice: null };
     try {
         localStorage.removeItem(LS_KEY);
         localStorage.removeItem(LS_RUN_INDEX);
         localStorage.removeItem(LS_ACTIVE);
+        localStorage.removeItem(LS_SCENARIO);
     } catch { /* noop */ }
     persistProjects();
     notify();
@@ -1560,5 +1827,13 @@ function persistProjects() {
         localStorage.setItem(LS_PROJECTS, JSON.stringify(state.projects));
     } catch {
         // Project metadata is intentionally small; if persistence fails, keep session state.
+    }
+}
+
+function persistScenario() {
+    try {
+        localStorage.setItem(LS_SCENARIO, JSON.stringify(state.scenario));
+    } catch {
+        // Scenario is non-critical; session state is authoritative.
     }
 }

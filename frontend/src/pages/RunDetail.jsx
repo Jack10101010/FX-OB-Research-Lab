@@ -15,28 +15,40 @@ import {
     normalizeAccountSettings,
     summarizeAccountEquity,
 } from "@/components/lab/account/accountEquity";
+import {
+    buildFundingChallengeEquityCurve,
+    normalizeFundingChallengeSettings,
+    simulateFundingChallenge,
+} from "@/components/lab/account/fundingChallenge";
 import { FolderKanban, Map as MapIcon, GitCompareArrows, TrendingUp, Hash, Activity, Target, AlertTriangle, ShieldCheck, Edit3 } from "lucide-react";
 import { BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import {
+    isPerformanceTrade,
+    isWinTrade,
+    isLossTrade,
+    displayOutcomeLabel,
+    outcomeToneForTrade,
+} from "@/data/tradeClassification";
+import { TradeSanityStrip } from "@/components/lab/TradeSanityStrip";
 
 const ACCOUNT_SETTINGS_KEY = "fxob_account_view_settings_v1";
+const FUNDING_CHALLENGE_SETTINGS_KEY = "fxob_funding_challenge_settings_v1";
 
+// Performance-trade gate for the KPI strip. Delegates to the canonical
+// classifier in tradeClassification.js — this is the single source of truth.
+// Previously this inlined its own substring-matching logic and silently
+// included outcome="INVALID" rows because it only matched "INVALIDATED".
 function isValidExecutedTrade(trade) {
-    const outcome = String(trade?.outcome || trade?.result || "").toUpperCase().replace(/[^A-Z0-9]+/g, "_");
-    const missedReason = String(trade?.missed_reason || trade?.missedReason || "").trim();
-    const entryTime = trade?.entry || trade?.fill_time || trade?.fillTime || trade?.entry_time || trade?.entryTime;
-    if (!entryTime) return false;
-    if (trade?.missed_trade || trade?.missedTrade || missedReason) return false;
-    if (["SESSION_FILTERED", "NEWS_TOUCH_CANCEL", "NEWS_BLACKOUT", "UNFILLED", "INVALIDATED"].some((key) => outcome.includes(key))) return false;
-    return true;
+    return isPerformanceTrade(trade);
 }
 
+// +1 = win, -1 = loss, 0 = flat / not a performance trade. Delegates to
+// canonical isWin/isLoss/isFlat so this exactly matches the categories the
+// rest of the app uses.
 function tradeResultSign(trade) {
-    const outcome = String(trade?.outcome || trade?.result || "").toUpperCase().replace(/[^A-Z0-9]+/g, "_");
-    if (outcome === "WIN") return 1;
-    if (outcome === "LOSS") return -1;
-    const r = Number(trade?.r ?? trade?.pnl_r ?? trade?.news_flatten_r);
-    if (!isFinite(r) || r === 0) return 0;
-    return r > 0 ? 1 : -1;
+    if (isWinTrade(trade)) return 1;
+    if (isLossTrade(trade)) return -1;
+    return 0;
 }
 
 function formatRunMonthSpan(value) {
@@ -119,6 +131,29 @@ function formatTickValue(value) {
     return `${formatted} ${Number(formatted) === 1 ? "tick" : "ticks"}`;
 }
 
+function formatChallengeStatus(status) {
+    if (status === "passed") return "Passed";
+    if (status === "failed") return "Failed";
+    if (status === "funded") return "Funded";
+    if (status === "not_started") return "Not Started";
+    if (status === "unavailable") return "Unavailable";
+    return "In Progress";
+}
+
+function challengeTone(status) {
+    if (status === "passed" || status === "funded") return "success";
+    if (status === "failed") return "danger";
+    if (status === "not_started" || status === "unavailable") return "muted";
+    return "secondary";
+}
+
+function formatChallengeDate(value) {
+    if (!value) return "—";
+    const date = new Date(`${value}T00:00:00Z`);
+    if (!Number.isFinite(date.getTime())) return value;
+    return `${date.getUTCDate()} ${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][date.getUTCMonth()]} ${String(date.getUTCFullYear()).slice(-2)}`;
+}
+
 function formatStructureFilterValue(value) {
     const text = String(value || "both").toLowerCase();
     if (text === "bos") return "BOS";
@@ -140,6 +175,63 @@ function saveAccountViewSettings(settings) {
     } catch {
         // Account display preferences are optional.
     }
+}
+
+function loadFundingChallengeSettings() {
+    try {
+        return normalizeFundingChallengeSettings(JSON.parse(localStorage.getItem(FUNDING_CHALLENGE_SETTINGS_KEY) || "{}"));
+    } catch {
+        return normalizeFundingChallengeSettings();
+    }
+}
+
+function saveFundingChallengeSettings(settings) {
+    try {
+        localStorage.setItem(FUNDING_CHALLENGE_SETTINGS_KEY, JSON.stringify(normalizeFundingChallengeSettings(settings)));
+    } catch {
+        // Funding overlay preferences are optional.
+    }
+}
+
+function FundingPhaseCard({ title, phase, currency }) {
+    const status = phase?.status || "not_started";
+    return (
+        <div className="border border-[hsl(var(--border-soft)/0.7)] bg-[hsl(var(--panel-2)/0.25)] clip-bevel-sm p-3">
+            <div className="flex items-center justify-between gap-2">
+                <div className="text-[10px] font-mono uppercase tracking-widest text-muted-lab">{title}</div>
+                <Pill tone={challengeTone(status)}>{formatChallengeStatus(status)}</Pill>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+                <div>
+                    <div className="text-[9px] font-mono uppercase tracking-widest text-muted-lab">Trigger</div>
+                    <div className="mt-1 text-[15px] font-semibold tabular-nums text-[hsl(var(--text))]">
+                        {phase?.tradeNumber ? `Trade ${phase.tradeNumber}` : "—"}
+                    </div>
+                </div>
+                <div>
+                    <div className="text-[9px] font-mono uppercase tracking-widest text-muted-lab">Equity</div>
+                    <div className="mt-1 text-[15px] font-semibold tabular-nums text-[hsl(var(--text))]">
+                        {formatAccountValue(phase?.equity, currency)}
+                    </div>
+                </div>
+                <div>
+                    <div className="text-[9px] font-mono uppercase tracking-widest text-muted-lab">Days</div>
+                    <div className="mt-1 text-[13px] tabular-nums text-[hsl(var(--text-2))]">
+                        {phase?.tradingDays ?? 0} {phase?.minTradingDaysMet ? "met" : "pending"}
+                    </div>
+                </div>
+                <div>
+                    <div className="text-[9px] font-mono uppercase tracking-widest text-muted-lab">Date</div>
+                    <div className="mt-1 text-[13px] tabular-nums text-[hsl(var(--text-2))]">
+                        {formatChallengeDate(phase?.date)}
+                    </div>
+                </div>
+            </div>
+            <div className="mt-3 text-[10.5px] leading-relaxed text-muted-lab">
+                Target {formatAccountValue(phase?.targetEquity, currency)} · Max loss floor {formatAccountValue(phase?.lossFloor, currency)}
+            </div>
+        </div>
+    );
 }
 
 export default function RunDetail() {
@@ -197,12 +289,17 @@ export default function RunDetail() {
     const [ledgerDirectionFilter, setLedgerDirectionFilter] = React.useState("All");
     const [ledgerSearch,          setLedgerSearch]          = React.useState("");
     const [accountSettings, setAccountSettings] = React.useState(loadAccountViewSettings);
+    const [fundingSettings, setFundingSettings] = React.useState(loadFundingChallengeSettings);
+    const [fundingChartMode, setFundingChartMode] = React.useState("funding_phase");
     const [reloadBusy, setReloadBusy] = React.useState(false);
     const [reloadError, setReloadError] = React.useState("");
     const autoReloadAttempted = React.useRef(new Set());
     React.useEffect(() => {
         saveAccountViewSettings(accountSettings);
     }, [accountSettings]);
+    React.useEffect(() => {
+        saveFundingChallengeSettings(fundingSettings);
+    }, [fundingSettings]);
     const accountModeEnabled = accountSettings.mode !== "r_only";
     const accountModeOptions = [
         { value: "fixed_dollar", label: "Fixed dollar risk" },
@@ -211,6 +308,9 @@ export default function RunDetail() {
     ];
     const patchAccountSettings = React.useCallback((patch) => {
         setAccountSettings((current) => normalizeAccountSettings({ ...current, ...patch }));
+    }, []);
+    const patchFundingSettings = React.useCallback((patch) => {
+        setFundingSettings((current) => normalizeFundingChallengeSettings({ ...current, ...patch }));
     }, []);
     React.useEffect(() => {
         setDraftName(displayName);
@@ -337,7 +437,15 @@ export default function RunDetail() {
         () => summarizeAccountEquity(validTradesForRun, accountSettings),
         [validTradesForRun, accountSettings],
     );
+    const fundingChallenge = React.useMemo(
+        () => simulateFundingChallenge(validTradesForRun, accountSettings, fundingSettings),
+        [validTradesForRun, accountSettings, fundingSettings],
+    );
     const accountCurrency = accountSettings.currency;
+    const useFundingPhaseChart = fundingSettings.enabled && accountModeEnabled && fundingChartMode === "funding_phase";
+    const fundingPhase1Target = accountSettings.startingBalance * (1 + fundingSettings.phase1TargetPct / 100);
+    const fundingPhase2Target = accountSettings.startingBalance * (1 + fundingSettings.phase2TargetPct / 100);
+    const fundingLossFloor = accountSettings.startingBalance * (1 - fundingSettings.maxOverallLossPct / 100);
     const netMetricValue = accountModeEnabled
         ? formatAccountValue(accountSummary.netPnlAmount, accountCurrency)
         : `${validNetR >= 0 ? "+" : ""}${validNetR.toFixed(1)}R`;
@@ -367,6 +475,28 @@ export default function RunDetail() {
     const tradeSubtext = totalTradeRows && totalTradeRows !== validTradeCount
         ? `${validTradeCount} valid · ${totalTradeRows} rows`
         : `${validTradeCount || Number(run.trades) || 0} valid trades`;
+
+    // ── Scenario-scope chip data ─────────────────────────────────────────────
+    // Make it obvious what universe of trades the KPI strip / equity curve /
+    // ledger are reading. RunDetail today is NOT entry-scenario-aware: it
+    // shows the selected position-variant baseline (single / multi / one-per-
+    // direction). Strategy Map and Entries Lab are the surfaces that drill
+    // into entry-model scenarios (triggered edge / penetration thresholds).
+    // Without this label, the KPI numbers can disagree with Strategy Map and
+    // there is no in-product explanation of why.
+    const variantKeys = Object.keys(runData?.tradesByVariant || {});
+    const entryScenarioKeys = Object.keys(runData?.entryResults?.tradesByMode || {})
+        .filter((k) => k && k !== "baseline" && k !== "entry_baseline");
+    const hasEntryScenarios = entryScenarioKeys.length > 0;
+    const scopeChip = {
+        variantLabel: selectedRunVariant ? variantLabel(selectedRunVariant) : null,
+        variantCount: variantKeys.length,
+        // RunDetail always shows the baseline (no entry-model filter applied),
+        // even when entry-model trade lists are present in the bundle.
+        scenarioLabel: "Baseline (no entry-model overlay)",
+        hasEntryScenarios,
+        isIndexOnly: isIndexOnlyRun,
+    };
     const filteredLedgerRows = React.useMemo(() => {
         const rows = Array.isArray(tradesForRun) ? tradesForRun : [];
         const query = ledgerSearch.trim().toLowerCase();
@@ -441,6 +571,9 @@ export default function RunDetail() {
     // ── Equity chart data: synthetic START at 0R + recomputed from filtered trades ──
     const equityChartData = React.useMemo(() => {
         if (!filteredTradesForEquity.length) return [];
+        if (useFundingPhaseChart) {
+            return buildFundingChallengeEquityCurve(filteredTradesForEquity, accountSettings, fundingSettings);
+        }
         const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
         const accountCurve = accountModeEnabled
             ? buildAccountEquityCurve(filteredTradesForEquity, accountSettings)
@@ -515,7 +648,7 @@ export default function RunDetail() {
             };
         });
         return [startPoint, ...tradePoints];
-    }, [accountModeEnabled, accountSettings, filteredTradesForEquity]);
+    }, [accountModeEnabled, accountSettings, filteredTradesForEquity, fundingSettings, useFundingPhaseChart]);
 
     // ── Per-run analytics — computed from this run's trades, not global store ──
     const MONTHLY = React.useMemo(() => {
@@ -880,6 +1013,46 @@ export default function RunDetail() {
 
             <RunConfigStrip run={runData} />
 
+            {/* Scenario-scope chip — tells the user exactly which universe of
+                trades powers everything on this page (KPI strip, equity curve,
+                R-distribution, ledger, session/time-of-day grids, account
+                equity). See scopeChip derivation above. */}
+            <div className="px-6 mb-3">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border border-[hsl(var(--border-soft)/0.7)] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm px-3 py-1.5 text-[11px]">
+                    {scopeChip.isIndexOnly ? (
+                        <ScopeRow label="Status">
+                            <Pill tone="warning">Index-only metadata</Pill>
+                        </ScopeRow>
+                    ) : (
+                        <>
+                            <ScopeRow label="Universe">
+                                <Pill tone="primary">Baseline reference</Pill>
+                            </ScopeRow>
+                            <ScopeRow label="Variant">
+                                <Pill tone="muted">{scopeChip.variantLabel || "Primary variant"}</Pill>
+                            </ScopeRow>
+                            <ScopeRow label="Scenario-aware">
+                                <Pill tone="muted">No</Pill>
+                            </ScopeRow>
+                            <ScopeRow label="Entry scenarios">
+                                <Pill tone={scopeChip.hasEntryScenarios ? "success" : "muted"}>
+                                    {scopeChip.hasEntryScenarios ? "Available" : "None"}
+                                </Pill>
+                            </ScopeRow>
+                        </>
+                    )}
+                    {!scopeChip.isIndexOnly && scopeChip.hasEntryScenarios && (
+                        <span className="text-[10.5px] text-[hsl(var(--text-2))]">
+                            Run Detail shows the primary/reference trade universe (baseline). Open{" "}
+                            <Link to="/strategy-map" className="text-[hsl(var(--accent-primary))] hover:underline">
+                                Strategy Map
+                            </Link>{" "}
+                            to inspect individual entry-model scenarios.
+                        </span>
+                    )}
+                </div>
+            </div>
+
             {isIndexOnlyRun && (
                 <div className="px-6 mb-4">
                     <div className="flex items-start justify-between gap-3 border border-[hsl(var(--accent-secondary)/0.35)] bg-[hsl(var(--accent-secondary)/0.06)] clip-bevel-sm px-3 py-2">
@@ -980,6 +1153,116 @@ export default function RunDetail() {
                 </div>
             </div>
 
+            <div className="px-6 mb-4">
+                <NeonPanel
+                    dense
+                    title="Funding Challenge Overlay"
+                    action={<Pill tone={fundingSettings.enabled ? "primary" : "muted"}>{fundingSettings.enabled ? "FTMO 2-Step" : "Off"}</Pill>}
+                >
+                    <div className="flex flex-wrap items-end gap-2 mb-3">
+                        <FilterToggle
+                            active={fundingSettings.enabled}
+                            onClick={() => patchFundingSettings({ enabled: !fundingSettings.enabled })}
+                        >
+                            {fundingSettings.enabled ? "Overlay On" : "Overlay Off"}
+                        </FilterToggle>
+                        <label className="min-w-[140px]">
+                            <span className="mb-1 block text-[9px] font-mono uppercase tracking-widest text-muted-lab">Preset</span>
+                            <NeonSelect
+                                value={fundingSettings.preset}
+                                onChange={(value) => patchFundingSettings({ preset: value })}
+                                options={[{ value: "ftmo_2_step", label: "FTMO 2-Step" }]}
+                            />
+                        </label>
+                        {fundingSettings.enabled && (
+                            <>
+                                <label className="w-[110px]">
+                                    <span className="mb-1 block text-[9px] font-mono uppercase tracking-widest text-muted-lab">Phase 1 Target %</span>
+                                    <NeonInput
+                                        type="number"
+                                        value={fundingSettings.phase1TargetPct}
+                                        onChange={(event) => patchFundingSettings({ phase1TargetPct: event.target.value })}
+                                    />
+                                </label>
+                                <label className="w-[110px]">
+                                    <span className="mb-1 block text-[9px] font-mono uppercase tracking-widest text-muted-lab">Phase 2 Target %</span>
+                                    <NeonInput
+                                        type="number"
+                                        value={fundingSettings.phase2TargetPct}
+                                        onChange={(event) => patchFundingSettings({ phase2TargetPct: event.target.value })}
+                                    />
+                                </label>
+                                <label className="w-[120px]">
+                                    <span className="mb-1 block text-[9px] font-mono uppercase tracking-widest text-muted-lab">Max Overall Loss %</span>
+                                    <NeonInput
+                                        type="number"
+                                        value={fundingSettings.maxOverallLossPct}
+                                        onChange={(event) => patchFundingSettings({ maxOverallLossPct: event.target.value })}
+                                    />
+                                </label>
+                                <label className="w-[105px]">
+                                    <span className="mb-1 block text-[9px] font-mono uppercase tracking-widest text-muted-lab">Min Days</span>
+                                    <NeonInput
+                                        type="number"
+                                        value={fundingSettings.minTradingDays}
+                                        onChange={(event) => patchFundingSettings({ minTradingDays: event.target.value })}
+                                    />
+                                </label>
+                                <div className="basis-full text-[10.5px] leading-relaxed text-muted-lab">
+                                    Daily loss rule not simulated yet. Max daily loss is stored as {fundingSettings.maxDailyLossPct}% for the next phase.
+                                </div>
+                            </>
+                        )}
+                    </div>
+                    {fundingSettings.enabled ? (
+                        fundingChallenge.reason === "account_mode_required" ? (
+                            <div className="text-[11px] text-[hsl(var(--warning))]">
+                                Enable Account view to simulate funding targets. R-only mode has no account balance path.
+                            </div>
+                        ) : (
+                            <div>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                    <FundingPhaseCard
+                                        title="Phase 1 Challenge"
+                                        phase={fundingChallenge.phase1}
+                                        currency={accountCurrency}
+                                    />
+                                    <FundingPhaseCard
+                                        title="Phase 2 Verification"
+                                        phase={fundingChallenge.phase2}
+                                        currency={accountCurrency}
+                                    />
+                                    <div className="border border-[hsl(var(--border-soft)/0.7)] bg-[hsl(var(--panel-2)/0.25)] clip-bevel-sm p-3">
+                                        <div className="flex items-center justify-between gap-2">
+                                            <div className="text-[10px] font-mono uppercase tracking-widest text-muted-lab">Funded Start</div>
+                                            <Pill tone={fundingChallenge.status === "funded" ? "success" : "muted"}>
+                                                {formatChallengeStatus(fundingChallenge.status)}
+                                            </Pill>
+                                        </div>
+                                        <div className="mt-3 text-[20px] font-semibold text-[hsl(var(--text))] tabular-nums">
+                                            {fundingChallenge.fundedStart?.tradeNumber ? `Trade ${fundingChallenge.fundedStart.tradeNumber}` : "—"}
+                                        </div>
+                                        <div className="mt-1 text-[11px] text-muted-lab">
+                                            {fundingChallenge.fundedStart?.date ? formatChallengeDate(fundingChallenge.fundedStart.date) : "Requires both phases passed"}
+                                        </div>
+                                        <div className="mt-3 text-[10.5px] leading-relaxed text-muted-lab">
+                                            Funded evaluation starts from fresh starting balance after Verification pass.
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="mt-3 text-[10.5px] leading-relaxed text-muted-lab">
+                                    Phase 2 starts from fresh starting balance after Phase 1 pass. Funded starts fresh after Verification pass. {fundingChallenge.dailyLoss?.label || "Daily loss rule not simulated yet"}.
+                                </div>
+                            </div>
+                        )
+                    ) : (
+                        <div className="text-[11px] text-muted-lab">
+                            Turn on the overlay to test FTMO-style targets against the account equity path.
+                        </div>
+                    )}
+                </NeonPanel>
+            </div>
+
             <div className="kpi-strip">
                 <MetricChip
                     label={accountModeEnabled ? "Net PnL" : "Net R"}
@@ -1042,6 +1325,38 @@ export default function RunDetail() {
                             Equity filters affect chart only
                         </span>
                     </div>
+                    {fundingSettings.enabled && accountModeEnabled && (
+                        <div className="flex flex-wrap items-center gap-2 mb-2 border border-[hsl(var(--border-soft)/0.55)] bg-[hsl(var(--panel-2)/0.25)] clip-bevel-sm px-2 py-1.5">
+                            <span className="text-[9.5px] font-mono uppercase tracking-widest text-muted-lab">Funding Chart</span>
+                            <FilterToggle
+                                active={fundingChartMode === "funding_phase"}
+                                inactiveBorder="mid"
+                                onClick={() => setFundingChartMode("funding_phase")}
+                            >
+                                Funding Phase Equity
+                            </FilterToggle>
+                            <FilterToggle
+                                active={fundingChartMode === "continuous"}
+                                inactiveBorder="mid"
+                                onClick={() => setFundingChartMode("continuous")}
+                            >
+                                Continuous Account Equity
+                            </FilterToggle>
+                            {fundingChartMode === "funding_phase" && (
+                                <div className="flex flex-wrap items-center gap-1.5 ml-auto text-[10px] text-muted-lab">
+                                    <Pill tone="success">Phase 1 Pass</Pill>
+                                    <Pill tone="secondary">Verification Start</Pill>
+                                    <Pill tone="success">Phase 2 Pass</Pill>
+                                    <Pill tone="primary">Funded Start</Pill>
+                                </div>
+                            )}
+                            {fundingChartMode === "funding_phase" && (
+                                <div className="basis-full text-[10px] leading-relaxed text-muted-lab">
+                                    Reference levels: Challenge target {formatAccountValue(fundingPhase1Target, accountCurrency)} · Verification target {formatAccountValue(fundingPhase2Target, accountCurrency)} · Loss floor {formatAccountValue(fundingLossFloor, accountCurrency)}
+                                </div>
+                            )}
+                        </div>
+                    )}
                     {/* Display toggles row */}
                     <div className="flex flex-wrap items-center gap-1.5 mb-3">
                         {[
@@ -1069,7 +1384,7 @@ export default function RunDetail() {
                             height={340}
                             showDots={showDots}
                             showDrawdown={showDrawdown}
-                            showNews={showNews}
+                            showNews={showNews || useFundingPhaseChart}
                         />
                     )}
                 </NeonPanel>
@@ -1337,6 +1652,24 @@ export default function RunDetail() {
                             placeholder="Search trade / OB / result…"
                             value={ledgerSearch}
                             onChange={(e) => setLedgerSearch(e.target.value)}
+                        />
+                    </div>
+                    {/* Sanity strip summarizing whatever the ledger filters currently
+                        show. When filters are off this equals the full primary-variant
+                        roll-up (matches the KPI strip). When filters narrow rows down,
+                        the strip narrows with them — that's the whole point. */}
+                    <div className="mb-3">
+                        <TradeSanityStrip
+                            trades={filteredLedgerRows}
+                            title="Ledger sanity"
+                            subtitle={
+                                ledgerResultFilter !== "All"
+                                || ledgerSessionFilter !== "All"
+                                || ledgerDirectionFilter !== "All"
+                                || ledgerSearch
+                                    ? "Filtered ledger rows"
+                                    : "All performance trades"
+                            }
                         />
                     </div>
                     <DataTable
@@ -1776,6 +2109,19 @@ function variantLabel(v) {
     }[v] || v || "N/A";
 }
 
+// Small label+value cell used inside the scope chip strip. Keeps the strip
+// readable when several labelled facts sit next to each other.
+function ScopeRow({ label, children }) {
+    return (
+        <span className="inline-flex items-center gap-1.5">
+            <span className="text-[9px] font-mono uppercase tracking-widest text-muted-lab">
+                {label}
+            </span>
+            {children}
+        </span>
+    );
+}
+
 function normalizeTimestamp(value) {
     if (value == null || value === "") return null;
     if (typeof value === "number" && isFinite(value)) {
@@ -1960,11 +2306,11 @@ function matchesLedgerResultFilter(row, filter, rrTarget = 3.3) {
     return bucket === filter;
 }
 
+// Canonical Pill tone for the ledger Result column. INVALID_CANCELLED →
+// "secondary" (violet PROTECTED), not "warning", so protected rows no longer
+// look like errors.
 function resultTone(row) {
-    const outcome = normalizeOutcome(row?.outcome);
-    if (outcome === "WIN") return "success";
-    if (outcome === "LOSS") return "danger";
-    return "warning";
+    return outcomeToneForTrade(row);
 }
 
 function sessionFilteredLabel(row) {
@@ -1984,7 +2330,9 @@ function formatOutcome(row) {
     const outcome = row?.outcome;
     const normalized = normalizeOutcome(outcome);
     if (normalized === "SESSION_FILTERED") return sessionFilteredLabel(row);
-    return outcome ? String(outcome).replace(/_/g, " ").toUpperCase() : "—";
+    // displayOutcomeLabel handles INVALID / INVALIDATED → PROTECTED ENTRY
+    // and leaves WIN / LOSS / NEWS_FLATTEN / UNFILLED untouched.
+    return displayOutcomeLabel(outcome, { length: "medium" });
 }
 
 function Stat({ label, value, tone }) {

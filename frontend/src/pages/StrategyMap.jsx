@@ -1,13 +1,24 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { useResolvedScenario } from "./strategyMap/useResolvedScenario";
+import { ScenarioSelector } from "./strategyMap/ScenarioSelector";
 import { LabRunHero } from "@/components/lab/LabRunHero";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { NeonInput, NeonSelect, Segment, NeonButton, FilterToggle } from "@/components/lab/controls";
 import { Pill } from "@/components/lab/DataTable";
 import { CandleChart } from "@/components/lab/CandleChart";
-import { compactTimeframe, formatRunDateRange, getRunDisplayName, rehydrateRunCandles, useDataset } from "@/data/store";
-import { setActiveRunId } from "@/data/store";
+import { IntrabarInspector } from "@/components/lab/IntrabarInspector";
+import { compactTimeframe, formatRunDateRange, getRunDisplayName, loadCandlesForRun, reloadFullRunFromSidecar, rehydrateRunCandles, useDataset } from "@/data/store";
+import { setActiveRunId, setScenario, setSelectedTradeVariant } from "@/data/store";
 import { FolderKanban, Search, AlertTriangle } from "lucide-react";
+import {
+    isWinTrade,
+    isLossTrade,
+    summarizeTradeClassifications,
+    displayOutcomeLabel,
+    displayCancelReason,
+    outcomeToneForTrade,
+} from "@/data/tradeClassification";
 
 const STRATEGY_MAP_UI_KEY = "fxob_strategy_map_ui_v1";
 const DEFAULT_CHART_HEIGHT = 460;
@@ -36,6 +47,13 @@ const DEFAULT_LAYERS = {
     rrTools: false,
     news: false,
     newsLabels: false,
+    // Triggered-edge lifecycle visuals
+    triggeredEdgeLevels: false,
+    triggeredEdgeLifecycle: false,
+    triggeredEdgeBadges: true,
+    cancelledSetups: true,
+    // OB Details callout overlay
+    obDetails: false,
 };
 
 const DEFAULT_UI_SETTINGS = {
@@ -43,6 +61,7 @@ const DEFAULT_UI_SETTINGS = {
     displayTf: "15m",
     zoom: "ALL",
     chartHeight: DEFAULT_CHART_HEIGHT,
+    selectedEntryModelByRun: {},
     showTradeList: true,
     showChartFilters: true,
     showSessionEditor: false,
@@ -80,6 +99,9 @@ function mergeStrategyMapUi(saved = {}) {
         ...DEFAULT_UI_SETTINGS,
         ...saved,
         chartHeight: clampChartHeight(saved?.chartHeight ?? DEFAULT_CHART_HEIGHT),
+        selectedEntryModelByRun: saved?.selectedEntryModelByRun && typeof saved.selectedEntryModelByRun === "object"
+            ? saved.selectedEntryModelByRun
+            : {},
         showTradeList: saved?.showTradeList ?? (typeof window === "undefined" ? true : window.innerWidth >= 1280),
         showChartFilters: saved?.showChartFilters ?? true,
         showSessionEditor: saved?.showSessionEditor ?? false,
@@ -116,12 +138,15 @@ function saveStrategyMapUi(settings) {
 }
 
 export default function StrategyMap() {
-    const { CANDLES, OB_BOXES, OB_BOXES_ENRICHED, TRADE_MARKERS, RUNS, activeRunId, getRunData, ACTIVE_TRADE_VARIANT } = useDataset();
+    const { CANDLES, OB_BOXES, OB_BOXES_ENRICHED, TRADE_MARKERS, RUNS, activeRunId, getRunData, ACTIVE_TRADE_VARIANT, candleLoadStatus, SCENARIO } = useDataset();
     const [initialUi] = useState(loadStrategyMapUi);
     const resizeRef = useRef(null);
+    const candleLoadAttemptedRef = useRef(new Set());
+    const fullRunLoadAttemptedRef = useRef(new Set());
     const [displayTf, setDisplayTf] = useState(initialUi.displayTf);
     const [zoom, setZoom] = useState(initialUi.zoom);
     const [chartHeight, setChartHeight] = useState(initialUi.chartHeight);
+    const [selectedEntryModelByRun, setSelectedEntryModelByRun] = useState(initialUi.selectedEntryModelByRun || {});
     const [showTradeList, setShowTradeList] = useState(initialUi.showTradeList);
     const [showChartFilters, setShowChartFilters] = useState(initialUi.showChartFilters);
     const [showSessionEditor, setShowSessionEditor] = useState(initialUi.showSessionEditor);
@@ -139,6 +164,12 @@ export default function StrategyMap() {
     const [showNewsLabels, setShowNewsLabels] = useState(initialUi.layers.newsLabels);
     const [showSessions, setShowSessions] = useState(initialUi.layers.sessions);
     const [showMarkers, setShowMarkers] = useState(initialUi.layers.markers);
+    // Triggered-edge lifecycle layer toggles
+    const [showTriggeredEdgeLevels, setShowTriggeredEdgeLevels] = useState(initialUi.layers.triggeredEdgeLevels);
+    const [showTriggeredEdgeLifecycle, setShowTriggeredEdgeLifecycle] = useState(initialUi.layers.triggeredEdgeLifecycle);
+    const [showTriggeredEdgeBadges, setShowTriggeredEdgeBadges] = useState(initialUi.layers.triggeredEdgeBadges);
+    const [showCancelledSetups, setShowCancelledSetups] = useState(initialUi.layers.cancelledSetups);
+    const [showObDetails, setShowObDetails] = useState(initialUi.layers.obDetails ?? false);
     const [sessionSettings, setSessionSettings] = useState(initialUi.sessionSettings);
     const [tradeQuery, setTradeQuery] = useState("");
     const [tradeOutcomeFilter, setTradeOutcomeFilter] = useState("All");
@@ -146,6 +177,8 @@ export default function StrategyMap() {
     const [tradeStructureFilter, setTradeStructureFilter] = useState("All");
     const [selectedTradeId, setSelectedTradeId] = useState(null);
     const [showRunInfo, setShowRunInfo] = useState(false);
+    const [fullRunLoading, setFullRunLoading] = useState(false);
+    const [fullRunError, setFullRunError] = useState("");
     const importedRuns = RUNS.filter((r) => r._source === "imported");
     const fallbackRunId = importedRuns.find((r) => (
         r.id && (r.hasCandles || r.candleCount || r.trades || r.ob_count || r.obCount)
@@ -155,10 +188,50 @@ export default function StrategyMap() {
         r.id && r.id !== runId && (r.hasCandles || r.candleCount || r.trades || r.ob_count || r.obCount)
     ))?.id || null;
     const bundle = runId ? getRunData(runId) : null;
+    const activeRunMeta = RUNS.find((r) => r.id === runId) || {};
+    const isViewedActiveRun = Boolean(runId && activeRunId === runId);
+    const runHasOverlayData = Boolean(
+        bundle?.hasFullData
+        || (Array.isArray(bundle?.orderBlocks) && bundle.orderBlocks.length)
+        || (Array.isArray(bundle?.trades) && bundle.trades.length)
+        || Object.values(bundle?.tradesByVariant || {}).some((trades) => Array.isArray(trades) && trades.length)
+    );
+    const canReloadFullRunFromSidecar = Boolean(
+        runId
+        && !runHasOverlayData
+        && (
+            bundle?.reloadAvailable
+            || activeRunMeta?.reloadAvailable
+            || bundle?.sidecarRunId
+            || bundle?.sidecarJobId
+            || bundle?.sourceOutputFolder
+            || bundle?.outputFolder
+            || activeRunMeta?.sourceOutputFolder
+            || activeRunMeta?.outputFolder
+        )
+    );
     const sourceCandles = CANDLES?.length ? CANDLES : (bundle?.candles || []);
     const hasCandles = bundle ? (bundle.hasCandles !== false && !!bundle.candles?.length) : (CANDLES?.length > 0);
     const candlesInIndexedDb = !!bundle?.hasCandles && bundle?.candlesStorage === "indexeddb" && !bundle?.candles?.length;
-    const activeRunMeta = RUNS.find((r) => r.id === runId) || {};
+    const candleStatus = runId ? candleLoadStatus?.[runId] || null : null;
+    const candlesLoading = candleStatus?.status === "loading";
+    const candlesError = candleStatus?.status === "failed" ? candleStatus.error : "";
+    const canLoadCandlesFromSidecar = Boolean(
+        runId
+        && !hasCandles
+        && !fullRunLoading
+        && (!canReloadFullRunFromSidecar || runHasOverlayData || fullRunError)
+        && (
+            bundle?.reloadAvailable
+            || activeRunMeta?.reloadAvailable
+            || bundle?.sidecarRunId
+            || bundle?.sidecarJobId
+            || bundle?.sourceOutputFolder
+            || bundle?.outputFolder
+            || activeRunMeta?.sourceOutputFolder
+            || activeRunMeta?.outputFolder
+        )
+    );
     const summary = bundle?.summary || activeRunMeta || {};
     const projectId = bundle?.projectId || bundle?.summary?.projectId || activeRunMeta?.projectId || activeRunMeta?.summary?.projectId;
     const heroTitle = summary.projectName || bundle?.projectName || activeRunMeta?.projectName || getRunDisplayName(bundle || activeRunMeta || { id: runId });
@@ -184,12 +257,50 @@ export default function StrategyMap() {
         if (candlesAreCoarse || displayTf === "1m") return normalizeDisplayCandles(sourceCandles);
         return resampleCandlesForDisplay(sourceCandles, displayTf === "15m" ? 15 : 5);
     }, [sourceCandles, candlesAreCoarse, displayTf]);
-    const rawChartObBoxes = OB_BOXES_ENRICHED?.length ? OB_BOXES_ENRICHED : OB_BOXES;
-    const activeTrades = useMemo(() => (
-        ACTIVE_TRADE_VARIANT && bundle?.tradesByVariant?.[ACTIVE_TRADE_VARIANT]
-            ? bundle.tradesByVariant[ACTIVE_TRADE_VARIANT]
+    const rawChartObBoxes = isViewedActiveRun && (OB_BOXES_ENRICHED?.length || OB_BOXES?.length)
+        ? (OB_BOXES_ENRICHED?.length ? OB_BOXES_ENRICHED : OB_BOXES)
+        : (bundle?.orderBlocks || []);
+    const selectedVariant = ACTIVE_TRADE_VARIANT && bundle?.tradesByVariant?.[ACTIVE_TRADE_VARIANT]
+        ? ACTIVE_TRADE_VARIANT
+        : bundle?.primaryVariant;
+    const baseVariantTrades = useMemo(() => (
+        selectedVariant && bundle?.tradesByVariant?.[selectedVariant]
+            ? bundle.tradesByVariant[selectedVariant]
             : (bundle?.trades || [])
-    ), [ACTIVE_TRADE_VARIANT, bundle]);
+    ), [bundle, selectedVariant]);
+    const entryModelOptions = useMemo(() => (
+        buildEntryModelOptions(bundle, baseVariantTrades)
+    ), [bundle, baseVariantTrades]);
+    const defaultEntryModel = useMemo(() => (
+        defaultEntryModelSelection(entryModelOptions)
+    ), [entryModelOptions]);
+    const selectedEntryModel = useMemo(() => {
+        const saved = runId ? selectedEntryModelByRun[runId] : "";
+        return entryModelOptions.some((option) => option.value === saved) ? saved : defaultEntryModel;
+    }, [defaultEntryModel, entryModelOptions, runId, selectedEntryModelByRun]);
+    // ------------------------------------------------------------------
+    // Canonical scenario resolver (Phase 2)
+    // All trade/OB/overlay/stats data flows from here.
+    // ------------------------------------------------------------------
+    const resolvedScenario = useResolvedScenario(SCENARIO, bundle, {
+        activeTradeVariant: ACTIVE_TRADE_VARIANT,
+        tradeMarkers: TRADE_MARKERS,
+        obBoxes: rawChartObBoxes,
+        isViewedActiveRun,
+        summary,
+        legacyEntryModelHint: selectedEntryModel,
+        showRrTools,
+    });
+
+    // Resolver aliases — these replace the equivalent useMemo chains below.
+    // CandleChart props and all render code remain unchanged.
+    const activeTrades = resolvedScenario.trades;
+    const chartObBoxes = resolvedScenario.orderBlocks;
+    const chartTradeMarkers = resolvedScenario.tradeMarkers;
+    const rrTools = resolvedScenario.rrTools;
+    const triggeredEdgeOverlays = resolvedScenario.triggeredEdgeOverlays;
+    const runStats = resolvedScenario.stats;
+
     const filteredTrades = useMemo(() => (
         filterStrategyTrades(activeTrades, {
             query: tradeQuery,
@@ -198,18 +309,12 @@ export default function StrategyMap() {
             structure: tradeStructureFilter,
         })
     ), [activeTrades, tradeQuery, tradeOutcomeFilter, tradeDirectionFilter, tradeStructureFilter]);
-    const chartObBoxes = useMemo(() => (
-        enrichObsWithTradeLabels(rawChartObBoxes, activeTrades)
-    ), [rawChartObBoxes, activeTrades]);
-    const rrTools = useMemo(() => (
-        showRrTools ? buildRrToolsFromObs(chartObBoxes, activeTrades) : []
-    ), [showRrTools, chartObBoxes, activeTrades]);
-    const newsEventsAvailable = useMemo(() => buildStrategyMapNewsEvents(bundle, summary, ACTIVE_TRADE_VARIANT), [bundle, summary, ACTIVE_TRADE_VARIANT]);
+    const hasTriggeredEdgeTrades = triggeredEdgeOverlays.length > 0;
+    const newsEventsAvailable = useMemo(() => buildStrategyMapNewsEvents(bundle, summary, selectedVariant), [bundle, summary, selectedVariant]);
     const newsEvents = showNewsEvents ? newsEventsAvailable : [];
     const sessionRanges = useMemo(() => (
         showSessions ? buildSessionRanges(displayCandles, sessionSettings) : []
     ), [displayCandles, sessionSettings, showSessions]);
-    const runStats = useMemo(() => buildRunStats(activeTrades, summary, bundle, ACTIVE_TRADE_VARIANT), [activeTrades, summary, bundle, ACTIVE_TRADE_VARIANT]);
     const sessionStats = useMemo(() => buildSessionStats(activeTrades), [activeTrades]);
     const obStats = useMemo(() => buildObStats(chartObBoxes), [chartObBoxes]);
     const runInfoRows = useMemo(() => buildRunInfoRows({
@@ -227,7 +332,6 @@ export default function StrategyMap() {
             [key]: { ...current[key], ...patch },
         }));
     };
-
     const resetViewSettings = () => {
         const defaults = mergeStrategyMapUi();
         setDisplayTf(defaults.displayTf);
@@ -250,6 +354,12 @@ export default function StrategyMap() {
         setShowRrTools(defaults.layers.rrTools);
         setShowNewsEvents(defaults.layers.news);
         setShowNewsLabels(defaults.layers.newsLabels);
+        setShowTriggeredEdgeLevels(defaults.layers.triggeredEdgeLevels);
+        setShowTriggeredEdgeLifecycle(defaults.layers.triggeredEdgeLifecycle);
+        setShowTriggeredEdgeBadges(defaults.layers.triggeredEdgeBadges);
+        setShowCancelledSetups(defaults.layers.cancelledSetups);
+        setShowObDetails(defaults.layers.obDetails ?? false);
+        setSelectedEntryModelByRun(defaults.selectedEntryModelByRun || {});
         setSessionSettings(defaults.sessionSettings);
         saveStrategyMapUi(defaults);
     };
@@ -264,6 +374,7 @@ export default function StrategyMap() {
             displayTf,
             zoom,
             chartHeight,
+            selectedEntryModelByRun,
             showTradeList,
             showChartFilters,
             showSessionEditor,
@@ -282,6 +393,11 @@ export default function StrategyMap() {
                 rrTools: showRrTools,
                 news: showNewsEvents,
                 newsLabels: showNewsLabels,
+                triggeredEdgeLevels: showTriggeredEdgeLevels,
+                triggeredEdgeLifecycle: showTriggeredEdgeLifecycle,
+                triggeredEdgeBadges: showTriggeredEdgeBadges,
+                cancelledSetups: showCancelledSetups,
+                obDetails: showObDetails,
             },
             sessionSettings,
         });
@@ -289,6 +405,7 @@ export default function StrategyMap() {
         displayTf,
         zoom,
         chartHeight,
+        selectedEntryModelByRun,
         showTradeList,
         showChartFilters,
         showSessionEditor,
@@ -306,6 +423,11 @@ export default function StrategyMap() {
         showRrTools,
         showNewsEvents,
         showNewsLabels,
+        showTriggeredEdgeLevels,
+        showTriggeredEdgeLifecycle,
+        showTriggeredEdgeBadges,
+        showCancelledSetups,
+        showObDetails,
         sessionSettings,
     ]);
 
@@ -323,6 +445,26 @@ export default function StrategyMap() {
         });
         return () => { cancelled = true; };
     }, [runId, candlesInIndexedDb, alternateRunId, bundle]);
+
+    useEffect(() => {
+        if (!canReloadFullRunFromSidecar || fullRunLoadAttemptedRef.current.has(runId)) return;
+        fullRunLoadAttemptedRef.current.add(runId);
+        setFullRunLoading(true);
+        setFullRunError("");
+        reloadFullRunFromSidecar(runId).catch((error) => {
+            setFullRunError(error?.message || "Could not reload full run data from sidecar.");
+        }).finally(() => {
+            setFullRunLoading(false);
+        });
+    }, [canReloadFullRunFromSidecar, runId]);
+
+    useEffect(() => {
+        if (!canLoadCandlesFromSidecar || candleLoadAttemptedRef.current.has(runId)) return;
+        candleLoadAttemptedRef.current.add(runId);
+        loadCandlesForRun(runId).catch(() => {
+            // Store state carries the user-facing error; keep this effect one-shot.
+        });
+    }, [canLoadCandlesFromSidecar, runId]);
 
     useEffect(() => {
         const onMove = (event) => {
@@ -364,6 +506,27 @@ export default function StrategyMap() {
             setSelectedTradeId(null);
         }
     }, [activeTrades, selectedTradeId]);
+
+    // ── Intrabar inspector (Phase 1) — resolve the currently-selected trade
+    // and its matching triggered-edge overlay (if any). Both are passed to
+    // IntrabarInspector so it can render the M1 magnifier for the selection.
+    const selectedTrade = useMemo(() => {
+        if (!selectedTradeId) return null;
+        const key = rrLookupKey(selectedTradeId);
+        return activeTrades.find((t) => (
+            t.id === selectedTradeId
+            || rrLookupKey(t.id) === key
+            || rrLookupKey(t.displayTradeId) === key
+        )) || null;
+    }, [selectedTradeId, activeTrades]);
+    const selectedTriggeredEdge = useMemo(() => {
+        if (!selectedTradeId) return null;
+        const key = rrLookupKey(selectedTradeId);
+        return triggeredEdgeOverlays.find((o) => (
+            o.tradeId === selectedTradeId
+            || rrLookupKey(o.tradeId) === key
+        )) || null;
+    }, [selectedTradeId, triggeredEdgeOverlays]);
 
     return (
         <div className="pb-12">
@@ -425,27 +588,68 @@ export default function StrategyMap() {
                         </div>
                     }
                 >
+                    {(fullRunLoading || fullRunError) && (
+                        <div className="mb-3 flex items-center gap-2 px-3 py-2 border border-[hsl(var(--accent-secondary)/0.35)] bg-[hsl(var(--accent-secondary)/0.06)] clip-bevel-sm">
+                            <AlertTriangle className="w-3.5 h-3.5 text-[hsl(var(--accent-secondary))]" />
+                            <span className="text-[11px] font-mono uppercase tracking-wider text-[hsl(var(--accent-secondary))]">
+                                {fullRunLoading
+                                    ? "Loading overlay data from sidecar..."
+                                    : "Could not load overlay data from sidecar. OBs, trades, RR tools, and news may be unavailable."}
+                            </span>
+                        </div>
+                    )}
                     {!hasCandles && (
                         <div className="mb-3 flex items-center gap-2 px-3 py-2 border border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.07)] clip-bevel-sm" data-testid="map-no-candles-banner">
                             <AlertTriangle className="w-3.5 h-3.5 text-[hsl(var(--warning))]" />
                             <span className="text-[11px] font-mono uppercase tracking-wider text-[hsl(var(--warning))]">
-                                Trade sequence view · no candle data imported
+                                {candlesLoading
+                                    ? "Loading candles from sidecar..."
+                                    : candlesError
+                                        ? "Could not load candle data from sidecar. Make sure sidecar is running and candles.csv exists."
+                                        : "Trade sequence view · no candle data loaded"}
                             </span>
                         </div>
                     )}
+                    <div className="mb-3">
+                        <ScenarioSelector
+                            resolvedScenario={resolvedScenario}
+                            onScenarioChange={(patch) => {
+                                setScenario(patch);
+                                setSelectedTradeId(null);
+                            }}
+                            onVariantChange={(variant) => {
+                                setScenario({ positionVariant: variant });
+                                setSelectedTradeVariant(variant);
+                                setSelectedTradeId(null);
+                            }}
+                        />
+                    </div>
                     {showChartFilters ? (
                         <>
                             <div className="flex items-center gap-2 flex-wrap mb-3">
-                                <Toggle label="Order Blocks" checked={showOB} onChange={setShowOB} dot="primary" />
+                                <Toggle label={`Order Blocks (${chartObBoxes.length})`} checked={showOB} onChange={setShowOB} dot="primary" />
                                 <Toggle label="BOS / CHoCH" checked={showBC} onChange={setShowBC} dot="secondary" />
                                 <Toggle label="Sessions" checked={showSessions} onChange={setShowSessions} dot="primary" />
                                 <Toggle label="OB Origin" checked={showObOriginMarkers} onChange={setShowObOriginMarkers} dot="primary" />
                                 <Toggle label="OB Detection" checked={showObDetectionMarkers} onChange={setShowObDetectionMarkers} dot="warning" />
                                 <Toggle label="OB IDs" checked={showObLabels} onChange={setShowObLabels} dot="secondary" />
-                                <Toggle label="RR Tools" checked={showRrTools} onChange={setShowRrTools} dot="success" />
+                                <Toggle label="OB Details" checked={showObDetails} onChange={setShowObDetails} dot="secondary" />
+                                <Toggle label={`RR Tools${showRrTools ? ` (${rrTools.length})` : ""}`} checked={showRrTools} onChange={setShowRrTools} dot="success" />
                                 <Toggle label={`News (${newsEventsAvailable.length})`} checked={showNewsEvents} onChange={setShowNewsEvents} dot="warning" />
                                 <Toggle label="News Labels" checked={showNewsLabels} onChange={setShowNewsLabels} dot="warning" />
+                                {resolvedScenario.resolvedFamily === "triggered_edge" && hasTriggeredEdgeTrades && (
+                                    <>
+                                        <Toggle label="Trigger Levels" checked={showTriggeredEdgeLevels} onChange={setShowTriggeredEdgeLevels} dot="warning" />
+                                        <Toggle label="Lifecycle" checked={showTriggeredEdgeLifecycle} onChange={setShowTriggeredEdgeLifecycle} dot="primary" />
+                                        <Toggle label="OB Badges" checked={showTriggeredEdgeBadges} onChange={setShowTriggeredEdgeBadges} dot="success" />
+                                        <Toggle label="Cancelled Setups" checked={showCancelledSetups} onChange={setShowCancelledSetups} dot="secondary" />
+                                    </>
+                                )}
                                 <Pill tone="muted">Chart time: UTC</Pill>
+                                <Pill tone="muted">{displayCandles.length} candles</Pill>
+                                <Pill tone="muted">{chartTradeMarkers.length} markers</Pill>
+                                {showOB && !chartObBoxes.length && <Pill tone="warning">No OB data</Pill>}
+                                {showMarkers && !chartTradeMarkers.length && <Pill tone="warning">No trade markers</Pill>}
                                 {candlesAreCoarse && (
                                     <Pill tone="warning">Imported candles are 15m/coarser. 1m/5m views unavailable for this run.</Pill>
                                 )}
@@ -466,28 +670,55 @@ export default function StrategyMap() {
                             )}
                         </div>
                     )}
-                    <CandleChart
-                        key={`${showTradeList ? "with-trades" : "full-width"}-${displayTf}`}
-                        candles={displayCandles}
-                        obBoxes={chartObBoxes}
-                        trades={TRADE_MARKERS}
-                        showOB={showOB}
-                        showLongs={showLongs}
-                        showShorts={showShorts}
-                        showWins={showWins}
-                        showLosses={showLosses}
-                        showBOSCHoCH={showBC}
-                        showObOriginMarkers={showMarkers && showObOriginMarkers}
-                        showObDetectionMarkers={showMarkers && showObDetectionMarkers}
-                        showObLabels={showObLabels}
-                        rrTools={rrTools}
-                        newsEvents={newsEvents}
-                        showNewsLabels={showNewsLabels}
-                        sessionRanges={sessionRanges}
-                        showSessionHighlights={showSessions}
-                        selectedTradeId={selectedTradeId}
-                        height={chartHeight}
-                    />
+                    <div className="relative">
+                        <CandleChart
+                            key={`${showTradeList ? "with-trades" : "full-width"}-${displayTf}`}
+                            candles={displayCandles}
+                            obBoxes={chartObBoxes}
+                            trades={chartTradeMarkers}
+                            showOB={showOB}
+                            showLongs={showLongs}
+                            showShorts={showShorts}
+                            showWins={showWins}
+                            showLosses={showLosses}
+                            showBOSCHoCH={showBC}
+                            showObOriginMarkers={showMarkers && showObOriginMarkers}
+                            showObDetectionMarkers={showMarkers && showObDetectionMarkers}
+                            showObLabels={showObLabels}
+                            rrTools={rrTools}
+                            newsEvents={newsEvents}
+                            showNewsLabels={showNewsLabels}
+                            sessionRanges={sessionRanges}
+                            showSessionHighlights={showSessions}
+                            selectedTradeId={selectedTradeId}
+                            height={chartHeight}
+                            triggeredEdgeOverlays={triggeredEdgeOverlays}
+                            showTriggeredEdgeLevels={showTriggeredEdgeLevels}
+                            showTriggeredEdgeLifecycle={showTriggeredEdgeLifecycle}
+                            showTriggeredEdgeBadges={showTriggeredEdgeBadges}
+                            showCancelledSetups={showCancelledSetups}
+                            showObDetails={showObDetails}
+                            onSelectTrade={(id) => {
+                                if (id == null) { setSelectedTradeId(null); return; }
+                                const incomingKey = rrLookupKey(id);
+                                setSelectedTradeId((current) => {
+                                    if (current === id) return null;
+                                    if (current && rrLookupKey(current) === incomingKey) return null;
+                                    return id;
+                                });
+                            }}
+                        />
+                        {selectedTrade && (
+                            <IntrabarInspector
+                                selectedTrade={selectedTrade}
+                                triggeredEdgeOverlay={selectedTriggeredEdge}
+                                sourceCandles={sourceCandles}
+                                sourceIsFine={!candlesAreCoarse}
+                                medianCandleGapSec={medianCandleGapSec}
+                                onClose={() => setSelectedTradeId(null)}
+                            />
+                        )}
+                    </div>
                     <button
                         type="button"
                         onMouseDown={startChartResize}
@@ -523,6 +754,12 @@ function normalizeTimestampSeconds(value) {
 
 function numericOrNull(value) {
     return value != null && value !== "" && isFinite(Number(value)) ? Number(value) : null;
+}
+
+function truthyFlag(value) {
+    if (value === true) return true;
+    if (value === false || value == null || value === "") return false;
+    return ["true", "1", "yes", "y"].includes(String(value).trim().toLowerCase());
 }
 
 function rrLookupKey(value) {
@@ -583,7 +820,8 @@ function buildRrToolsFromObs(obs = [], trades = []) {
         const normalizedOutcome = normalizeOutcome(outcome);
         const newsAction = normalizeOutcome(trade.news_action ?? trade.newsAction ?? ob.news_action ?? ob.newsAction);
         const isNewsFlatten = normalizedOutcome.includes("news_flatten") || newsAction.includes("flattened_active_trade");
-        const entry = numericOrNull(trade.entryPrice ?? ob.entry ?? ob.entryPrice ?? ob.entry_price ?? ob.actual_entry_price);
+        const entryResolved = resolveTradeEntryPrice(trade, ob);
+        const entry = entryResolved.value;
         const stop = numericOrNull(trade.stop ?? ob.stop ?? ob.sl ?? ob.stopLoss ?? ob.stop_loss);
         const tp = numericOrNull(trade.tp ?? ob.tp ?? ob.takeProfit ?? ob.take_profit);
         const exitTime = isNewsFlatten
@@ -613,11 +851,278 @@ function buildRrToolsFromObs(obs = [], trades = []) {
             statusLabel: ob.statusLabel || ob.obFinalStatusLabel,
             isNewsFlatten,
             entry,
+            entrySource: entryResolved.source,
             stop,
             tp,
             direction: ob.direction || ob.side,
         };
     }).filter(Boolean);
+}
+
+function resolveTradeEntryPrice(trade = {}, ob = {}) {
+    const candidates = [
+        ["actual_entry_price", trade.actual_entry_price ?? trade.actualEntryPrice],
+        ["planned_entry_price", trade.planned_entry_price ?? trade.plannedEntryPrice],
+        ["entry", trade.entryPrice ?? trade.entry_price ?? trade.entry],
+        ["ob_actual_entry_price", ob.actual_entry_price ?? ob.actualEntryPrice],
+        ["ob_planned_entry_price", ob.planned_entry_price ?? ob.plannedEntryPrice],
+        ["ob_entry", ob.entryPrice ?? ob.entry_price ?? ob.entry],
+    ];
+    for (const [source, value] of candidates) {
+        const n = numericOrNull(value);
+        if (n != null) return { value: n, source };
+    }
+    return { value: null, source: "" };
+}
+
+function resolveEntryResults(bundle = {}) {
+    return bundle?.entryResults
+        || bundle?.entry_results
+        || bundle?.summary?.entryResults
+        || bundle?.summary?.entry_results
+        || {};
+}
+
+function entryTradesByMode(bundle = {}) {
+    const results = resolveEntryResults(bundle);
+    const raw = results?.tradesByMode || results?.trades_by_mode || {};
+    const out = {};
+    Object.entries(raw || {}).forEach(([key, value]) => {
+        if (Array.isArray(value)) {
+            out[normalizeEntryModelKey(key)] = value;
+            return;
+        }
+        if (value && typeof value === "object") {
+            Object.entries(value).forEach(([nestedKey, nestedValue]) => {
+                if (Array.isArray(nestedValue)) out[normalizeEntryModelKey(nestedKey)] = nestedValue;
+            });
+        }
+    });
+    return out;
+}
+
+function entrySummaryKeys(bundle = {}) {
+    const results = resolveEntryResults(bundle);
+    const summary = results?.summary || results?.results || results?.rows || [];
+    if (Array.isArray(summary)) {
+        return summary.map((row) => normalizeEntryModelKey(
+            row.entry_model_key || row.entryModelKey || row.model_key || row.modelKey || row.mode || row.key || row.label,
+        )).filter(Boolean);
+    }
+    if (summary && typeof summary === "object") {
+        const keys = [];
+        Object.entries(summary).forEach(([key, value]) => {
+            const normalizedKey = normalizeEntryModelKey(key);
+            if (normalizedKey === "baseline" || normalizedKey.startsWith("entry_")) keys.push(normalizedKey);
+            if (value && typeof value === "object") {
+                const rowKey = normalizeEntryModelKey(value.entry_model_key || value.entryModelKey || value.model_key || value.modelKey || value.mode || value.key);
+                if (rowKey) keys.push(rowKey);
+                Object.keys(value).forEach((nestedKey) => {
+                    const normalizedNested = normalizeEntryModelKey(nestedKey);
+                    if (normalizedNested === "baseline" || normalizedNested.startsWith("entry_")) keys.push(normalizedNested);
+                });
+            }
+        });
+        return [...new Set(keys)].filter(Boolean);
+    }
+    return [];
+}
+
+function buildEntryModelOptions(bundle = {}, baseTrades = []) {
+    const keys = new Set(["baseline"]);
+    Object.keys(entryTradesByMode(bundle)).forEach((key) => keys.add(normalizeEntryModelKey(key)));
+    entrySummaryKeys(bundle).forEach((key) => keys.add(key));
+    for (const trade of baseTrades || []) {
+        const key = normalizeEntryModelKey(trade.entry_model_key || trade.entryModelKey || trade.entry_model || trade.entryModel);
+        if (key) keys.add(key);
+    }
+    const specificKeys = [...keys].filter((key) => key && key !== "baseline");
+    specificKeys.sort((a, b) => entryModelSortRank(a) - entryModelSortRank(b) || formatEntryModelKey(a).localeCompare(formatEntryModelKey(b)));
+    return [
+        { value: "baseline", label: "Baseline" },
+        ...specificKeys.map((key) => ({ value: key, label: formatEntryModelKey(key) })),
+        { value: "__all__", label: "All / Mixed" },
+    ];
+}
+
+function defaultEntryModelSelection(options = []) {
+    const values = options.map((option) => option.value);
+    return values.find((value) => String(value).startsWith("entry_triggered_edge"))
+        || values.find((value) => value !== "baseline" && value !== "__all__")
+        || "baseline";
+}
+
+function uniqueTrades(trades = []) {
+    const seen = new Set();
+    const out = [];
+    for (const trade of trades || []) {
+        const key = [
+            trade.entry_model_key || trade.entryModelKey || "baseline",
+            trade.id || trade.trade_id || trade.tradeId || trade.base_trade_id || trade.baseTradeId || trade.ob_id || trade.obId || out.length,
+        ].join("::");
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(trade);
+    }
+    return out;
+}
+
+function normalizeEntryModelKey(value) {
+    const key = String(value || "").trim();
+    if (!key) return "";
+    if (key === "entry_baseline") return "baseline";
+    return key;
+}
+
+function entryModelSortRank(key) {
+    if (String(key).startsWith("entry_triggered_edge")) return 1;
+    if (String(key).startsWith("entry_penetration")) return 2;
+    return 3;
+}
+
+function formatEntryModelKey(value) {
+    const key = String(value || "").trim();
+    const penetration = key.match(/^entry_penetration_([0-9]+(?:p[0-9]+)?)/i);
+    if (penetration) return `Penetration ${formatModelPct(penetration[1])}`;
+    const triggered = key.match(/^entry_triggered_edge_([0-9]+(?:p[0-9]+)?)(?:_(same|next))?/i);
+    if (triggered) {
+        const mode = triggered[2] === "same" ? "Same" : triggered[2] === "next" ? "Next" : "";
+        return ["Triggered Edge", formatModelPct(triggered[1]), mode].filter(Boolean).join(" · ");
+    }
+    if (key === "entry_baseline" || key === "baseline") return "Baseline";
+    return key.replace(/^entry_/, "").replace(/_/g, " ");
+}
+
+function formatModelPct(value) {
+    const text = String(value || "").replace("p", ".");
+    const n = Number(text);
+    return Number.isFinite(n) ? `${Number.isInteger(n) ? n.toFixed(0) : n}%` : String(value);
+}
+
+
+function buildTriggeredEdgeOverlays(trades = [], obs = []) {
+    if (!trades.length) return [];
+    // Index OBs by normalized numeric key (same as rrLookupKey)
+    const obMap = new Map();
+    (obs || []).forEach((ob) => {
+        const key = rrLookupKey(ob.obId || ob.ob_id || ob.id);
+        if (key) obMap.set(key, ob);
+    });
+    const out = [];
+    for (const trade of trades) {
+        const entryModelKey = String(trade.entry_model_key || trade.entryModelKey || "");
+        if (!entryModelKey.startsWith("entry_triggered_edge")) continue;
+        const obKey = rrLookupKey(trade.obId ?? trade.ob_id);
+        const ob = obKey ? obMap.get(obKey) : null;
+        const top = ob ? numericOrNull(ob.top) : null;
+        const bot = ob ? numericOrNull(ob.bot ?? ob.bottom) : null;
+        const obStartTime = ob ? (ob.time0 ?? ob.startTime ?? ob.start_time ?? null) : null;
+        const obEndTime = ob ? (ob.time1 ?? ob.endTime ?? ob.end_time ?? null) : null;
+        const detectionTime = firstAvailable(
+            trade.detection_time,
+            trade.detectionTime,
+            trade.ob_detection_time,
+            trade.obDetectionTime,
+            ob?.detection_time,
+            ob?.detectionTime,
+            ob?.ob_detection_time,
+            ob?.obDetectionTime,
+            obStartTime,
+        );
+        const rawSide = normalizeOutcome(ob?.direction || ob?.side || ob?.obDirection || trade.direction || trade.side || "");
+        const isBull = rawSide.includes("bull") || rawSide.includes("long");
+        const depth = (top != null && bot != null) ? Math.abs(top - bot) : null;
+        const trigPct = numericOrNull(trade.trigger_penetration_pct ?? trade.triggerPenetrationPct);
+        const entryPct = numericOrNull(trade.entry_level_pct ?? trade.entryLevelPct) ?? 0;
+        let triggerPrice = null;
+        let entryPrice = null;
+        if (depth != null && top != null && bot != null) {
+            triggerPrice = trigPct != null
+                ? (isBull ? top - depth * trigPct / 100 : bot + depth * trigPct / 100)
+                : null;
+            entryPrice = isBull ? top - depth * entryPct / 100 : bot + depth * entryPct / 100;
+        }
+        const triggerTime = trade.trigger_time || trade.triggerTime || null;
+        const tappedTime = trade.tapped_time || trade.tappedTime || null;
+        const armedAt = trade.armed_at || trade.armedAt || null;
+        const edgeRevisitTime = trade.edge_revisit_time || trade.edgeRevisitTime || null;
+        const retraceCancelTime = trade.retrace_cancel_time || trade.retraceCancelTime || null;
+        const exitTime = firstAvailable(trade.exit, trade.exit_time, trade.exitTime, ob?.exitTime, ob?.exit_time);
+        const lineStartTime = firstAvailable(detectionTime, obStartTime);
+        const lineEndTime = firstAvailable(
+            ob?.chartRightTime,
+            ob?.chart_right_time,
+            ob?.time1,
+            ob?.endTime,
+            ob?.end_time,
+            edgeRevisitTime,
+            exitTime,
+            retraceCancelTime,
+            triggerTime,
+            obEndTime,
+        );
+        const cancelReason = trade.cancel_reason || trade.cancelReason || "";
+        const cancelledBeforeEntry = truthyFlag(trade.cancelled_before_entry) || truthyFlag(trade.cancelledBeforeEntry);
+        const filledOnTriggerCandle = truthyFlag(trade.filled_on_trigger_candle) || truthyFlag(trade.filledOnTriggerCandle);
+        const filledOnNextCandle = trade.filled_on_trigger_candle === false || trade.filledOnTriggerCandle === false || String(trade.filled_on_trigger_candle).toLowerCase() === "false" || String(trade.filledOnTriggerCandle).toLowerCase() === "false";
+        const hasTrigger = !!(triggerTime && String(triggerTime).trim());
+        const cancelNorm = normalizeOutcome(cancelReason);
+        const wasCancelled = Boolean(
+            cancelledBeforeEntry
+            || (retraceCancelTime && String(retraceCancelTime).trim())
+            || cancelNorm.includes("cancel")
+            || cancelNorm.includes("inval")
+            || cancelNorm.includes("breach")
+            || cancelNorm.includes("broken")
+        );
+        const triggerLineState = wasCancelled ? "cancelled" : hasTrigger ? "tagged" : "not_tagged";
+        let badgeState = null;
+        if (!hasTrigger) {
+            badgeState = "never_trig";
+        } else if ((retraceCancelTime && String(retraceCancelTime).trim()) || cancelNorm.includes("retrace")) {
+            badgeState = "used_ob";
+        } else if (cancelledBeforeEntry && (cancelNorm.includes("inval") || cancelNorm.includes("breach") || cancelNorm.includes("broken"))) {
+            badgeState = "inval";
+        } else if (filledOnTriggerCandle) {
+            badgeState = "same";
+        } else if (filledOnNextCandle) {
+            badgeState = "next";
+        }
+        out.push({
+            tradeId: trade.displayTradeId || trade.id || null,
+            obId: trade.obId ?? trade.ob_id ?? null,
+            direction: isBull ? "bull" : "bear",
+            entryModelKey,
+            triggerPenetrationPct: trigPct,
+            entryLevelPct: entryPct,
+            triggerTime,
+            detectionTime,
+            lineStartTime,
+            lineEndTime,
+            wasTriggered: hasTrigger,
+            wasCancelled,
+            triggerLineState,
+            tappedTime,
+            armedAt,
+            edgeRevisitTime,
+            retraceCancelTime,
+            triggerToEntryMinutes: numericOrNull(trade.trigger_to_entry_minutes ?? trade.triggerToEntryMinutes),
+            cancelReason,
+            cancelledBeforeEntry,
+            tappedBeforeTrigger: truthyFlag(trade.tapped_before_trigger) || truthyFlag(trade.tappedBeforeTrigger),
+            sameCandleEntryAllowed: truthyFlag(trade.same_candle_entry_allowed) || truthyFlag(trade.sameCandleEntryAllowed),
+            armedOnTriggerCandle: truthyFlag(trade.armed_on_trigger_candle) || truthyFlag(trade.armedOnTriggerCandle),
+            filledOnTriggerCandle,
+            obTop: top,
+            obBot: bot,
+            obStartTime,
+            obEndTime,
+            triggerPrice,
+            entryPrice,
+            badgeState,
+        });
+    }
+    return out;
 }
 
 function buildStrategyMapNewsEvents(bundle, summary, activeVariant) {
@@ -807,23 +1312,35 @@ function tradeR(trade) {
     return numericOrNull(trade?.r ?? trade?.pnl_r ?? trade?.rResult) ?? 0;
 }
 
+// Trade-list pill colors + outcome filter rows delegate to the canonical
+// classifier so the Strategy Map agrees with Run Detail / Entries Lab. Prior
+// behavior was outcome.includes("win") || r > 0 (and the loss mirror); that
+// matched the new canonical wins for the latest run but disagreed on edge
+// cases like outcome="WIN" with stale +R rows, INVALID with r != 0, etc.
 function isWin(trade) {
-    const outcome = normalizeOutcome(trade?.outcome ?? trade?.result);
-    return outcome.includes("win") || outcome === "tp" || tradeR(trade) > 0;
+    return isWinTrade(trade);
 }
 
 function isLoss(trade) {
-    const outcome = normalizeOutcome(trade?.outcome ?? trade?.result);
-    return outcome.includes("loss") || outcome === "sl" || tradeR(trade) < 0;
+    return isLossTrade(trade);
 }
 
 function buildRunStats(trades = [], summary = {}, bundle = {}, activeVariant = null) {
-    const total = Number(summary.trades ?? summary.trade_count ?? trades.length) || trades.length;
-    const wins = Number(summary.wins ?? trades.filter(isWin).length) || 0;
-    const losses = Number(summary.losses ?? trades.filter(isLoss).length) || 0;
-    const netR = numericOrNull(summary.netR ?? summary.net_r) ?? trades.reduce((sum, trade) => sum + tradeR(trade), 0);
-    const winRate = numericOrNull(summary.winRate ?? summary.win_rate) ?? (total ? (wins / total) * 100 : 0);
-    const avgR = total ? netR / total : 0;
+    // Canonical roll-up over the trades actually being displayed. We
+    // intentionally compute from `trades` rather than blindly trusting
+    // summary.wins / summary.losses: those come from the BASELINE primary-
+    // variant CSV via importer.js, but Strategy Map is usually showing a
+    // DIFFERENT scenario (e.g. entry_triggered_edge_25p0_next). Using the
+    // baseline summary against scenario trades is exactly how we ended up
+    // with "10 wins on KPI vs 8 wins on Strategy Map".
+    const rollup = summarizeTradeClassifications(trades);
+    const total = trades.length;
+    const wins = rollup.wins;
+    const losses = rollup.losses;
+    const netR = numericOrNull(summary.netR ?? summary.net_r) ?? rollup.netR;
+    const winRate = rollup.winRate ?? 0;
+    const performanceTrades = rollup.performanceTrades;
+    const avgR = performanceTrades ? netR / performanceTrades : 0;
     return {
         symbol: summary.symbol || bundle?.summary?.symbol || bundle?.config?.symbol || "—",
         detectionTf: summary.detectionTf || summary.detection_tf || bundle?.config?.detection_timeframe || "—",
@@ -837,6 +1354,17 @@ function buildRunStats(trades = [], summary = {}, bundle = {}, activeVariant = n
         avgR,
         expectancy: numericOrNull(summary.expectancyR ?? summary.expectancy_r) ?? avgR,
         maxDd: numericOrNull(summary.maxDrawdownR ?? summary.max_drawdown_r ?? summary.maxDD ?? summary.max_dd),
+        // Surface the rest of the canonical roll-up so the Strategy Map header
+        // can show invalid / unfilled counts without re-computing.
+        flats: rollup.flats,
+        performanceTrades,
+        invalidCancelled: rollup.invalidCancelled,
+        unfilled: rollup.unfilled,
+        sessionFiltered: rollup.sessionFiltered,
+        newsCancelled: rollup.newsCancelled,
+        newsFlattenWins: rollup.newsFlattenWins,
+        newsFlattenLosses: rollup.newsFlattenLosses,
+        newsFlattenFlats: rollup.newsFlattenFlats,
     };
 }
 
@@ -925,8 +1453,11 @@ function buildRunInfoRows({ runId, runMeta = {}, summary = {}, bundle = {}, trad
         ["Execution TF", firstAvailable(config.execution_timeframe, config.executionTf, summary.executionTf, summary.execution_tf)],
         ["Execution Mode", firstAvailable(config.execution_mode, config.executionMode, summary.executionMode)],
         ["Date Range", formatRunDateRange(infoDateStart || infoDateEnd ? `${infoDateStart || ""} → ${infoDateEnd || ""}` : "")],
-        ["Trades", firstAvailable(summary.trades, summary.trade_count, trades.length)],
-        ["Order Blocks", firstAvailable(summary.order_blocks, summary.orderBlockCount, obs.length)],
+        // "Trades" and "Order Blocks" rows removed in Phase 1 — they used to
+        // prefer baseline summary.trades / summary.order_blocks even when the
+        // page was showing a scenario, contradicting the TradeSanityStrip
+        // (which is the canonical scenario row count) and the on-chart
+        // "{chartObBoxes.length} markers" pill (canonical OB count).
         ["RR Multiple", firstAvailable(config.rr_multiple, config.rr, summary.rr_multiple)],
         ["Session Filter", firstAvailable(config.session_filter_enabled, summary.session_filter_enabled)],
         ["Allowed Sessions", firstAvailable(config.allowed_sessions, summary.allowed_sessions)],
@@ -1007,9 +1538,11 @@ function tradeOutcomeValue(trade) {
     return trade?.outcome || trade?.result || "—";
 }
 
+// Delegates to the canonical UI translator so "INVALID" reads as "PROTECTED
+// ENTRY" and "invalidated_before_edge_entry" reads as "Protected before edge
+// entry" everywhere this is rendered (ledger row chips, expanded detail).
 function formatTradeOutcome(value) {
-    if (!value || value === "—") return "—";
-    return String(value).replace(/_/g, " ").toUpperCase();
+    return displayOutcomeLabel(value, { length: "medium" });
 }
 
 function tradeEntryTime(trade) {
@@ -1061,10 +1594,11 @@ function filterStrategyTrades(trades = [], filters = {}) {
     });
 }
 
+// Pill tone from canonical category. INVALID_CANCELLED now lands on the
+// violet "secondary" tone (PROTECTED) instead of the orange warning tone, so
+// protected entries no longer read as "something went wrong".
 function outcomeTone(trade) {
-    if (isWin(trade)) return "success";
-    if (isLoss(trade)) return "danger";
-    return "warning";
+    return outcomeToneForTrade(trade);
 }
 
 function TradeRValue({ value }) {
@@ -1190,6 +1724,13 @@ function StrategyTradeListPanel({
                                         <TradeDetail label="OB ID" value={displayObId(trade)} />
                                         <TradeDetail label="Session" value={displayTradeSession(trade)} />
                                         <TradeDetail label="Outcome" value={formatTradeOutcome(tradeOutcomeValue(trade))} />
+                                        {(trade.cancel_reason || trade.cancelReason) && (
+                                            <TradeDetail
+                                                label="Protection Reason"
+                                                value={displayCancelReason(trade.cancel_reason || trade.cancelReason)}
+                                                wide
+                                            />
+                                        )}
                                         <TradeDetail label="Entry Time" value={formatTradeTime(tradeEntryTime(trade), true)} wide />
                                         <TradeDetail label="Exit Time" value={formatTradeTime(tradeExitTime(trade), true)} wide />
                                         <TradeDetail label="Entry" value={formatTradePrice(tradeEntryPrice(trade))} />
@@ -1346,18 +1887,21 @@ function SessionControl({ id, session, onPatch }) {
 function StrategyMapIntelligencePanel({ runStats, sessionStats, obStats }) {
     return (
         <div className="mt-3 grid grid-cols-1 xl:grid-cols-[1fr_1.25fr_0.9fr] gap-3">
-            <IntelligenceCard title="Run Summary">
+            <IntelligenceCard title="Run Metadata">
+                {/* Phase 1 cleanup: this card is now metadata-only. Stats
+                    (Trades / W-L / WR / Net R / Expectancy / Max DD) live in
+                    the TradeSanityStrip rendered by ScenarioSelector — they're
+                    scenario-aware there, and duplicating them here used to
+                    let baseline summary numbers sit next to scenario numbers
+                    in the same row without distinction. */}
                 <div className="grid grid-cols-2 gap-1.5">
                     <StatChip label="Symbol" value={runStats.symbol} />
                     <StatChip label="Variant" value={variantLabel(runStats.variant)} />
                     <StatChip label="Detection TF" value={runStats.detectionTf} />
                     <StatChip label="Execution TF" value={runStats.executionTf} />
-                    <StatChip label="Trades" value={runStats.total} />
-                    <StatChip label="Wins / Losses" value={`${runStats.wins} / ${runStats.losses}`} />
-                    <StatChip label="WR" value={fmtPct(runStats.winRate)} />
-                    <StatChip label="Net R" value={fmt(runStats.netR, 2)} />
-                    <StatChip label="Expectancy" value={fmt(runStats.expectancy, 3)} />
-                    <StatChip label="Max DD" value={fmt(runStats.maxDd, 2)} />
+                </div>
+                <div className="mt-2 text-[10px] leading-snug text-[hsl(var(--text-3))] font-mono">
+                    Scenario stats (W/L, Net R, WR, PF, DD) sit in the sanity strip above.
                 </div>
             </IntelligenceCard>
             <IntelligenceCard title="Session Breakdown">
