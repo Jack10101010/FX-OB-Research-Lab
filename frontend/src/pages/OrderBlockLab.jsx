@@ -7,6 +7,8 @@ import { LabRunHero } from "@/components/lab/LabRunHero";
 import { RunConfigStrip } from "@/components/lab/RunConfigStrip";
 import { useDataset } from "@/data/store";
 import { setSelectedTradeVariant } from "@/data/store";
+import { useTradeUniverse } from "@/data/useTradeUniverse";
+import { TradeUniverseBadge } from "@/components/lab/TradeUniverseBadge";
 import {
     Activity, AlertTriangle, Boxes, Clipboard, FileText, GitBranch,
     ShieldCheck, TrendingUp, TrendingDown, X, Filter, Layers,
@@ -16,7 +18,6 @@ import {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const LOW_SAMPLE_N = 10;
-const EMPTY_TRADES = [];
 const SESSION_COLUMNS = ["Asia", "London", "London Lull", "New York", "Outside", "Unknown"];
 const DAY_ORDER = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Limited Data"];
 const FILTER_DEFAULTS = { structure: "all", direction: "all", session: "all" };
@@ -74,10 +75,15 @@ const RESEARCH_BACKLOG_ITEMS = [
     },
 ];
 
+// Local OBLabUniverseBadge + OBLabBadgeCell removed in Phase 2F — replaced
+// by the shared @/components/lab/TradeUniverseBadge component.
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function OrderBlockLab() {
-    const { ACTIVE_PROJECT, ACTIVE_RUN, TRADES, ACTIVE_TRADE_VARIANT, AVAILABLE_TRADE_VARIANTS, activeRunId, runs } = useDataset();
+    const { ACTIVE_PROJECT, ACTIVE_RUN, ACTIVE_TRADE_VARIANT, AVAILABLE_TRADE_VARIANTS, activeRunId, runs } = useDataset();
+    const universe = useTradeUniverse();
+    // Phase 2G — universeWarnings filtering moved into TradeUniverseBadge.
 
     // Filter state — persisted to localStorage
     const [filters, setFilters] = React.useState(() => {
@@ -101,7 +107,7 @@ export default function OrderBlockLab() {
         try { localStorage.removeItem("oblab-filters"); } catch {}
     }, []);
 
-    const trades = React.useMemo(() => (Array.isArray(TRADES) ? TRADES : EMPTY_TRADES), [TRADES]);
+    const trades = universe.trades;
     const activeRun = activeRunId ? runs?.[activeRunId] : null;
     const orderBlocks = React.useMemo(() => (Array.isArray(activeRun?.orderBlocks) ? activeRun.orderBlocks : []), [activeRun]);
     const filteredTrades = React.useMemo(() => applyFilters(trades, filters), [trades, filters]);
@@ -150,6 +156,15 @@ export default function OrderBlockLab() {
             />
 
             <RunConfigStrip run={activeRun} />
+
+            {/* Universe / source badge — shared component. Placement preserved.
+                Warnings filtered inside the component (Phase 2G). */}
+            {activeRunId && (
+                <TradeUniverseBadge
+                    universe={universe}
+                    className="px-6 mt-2 mb-3"
+                />
+            )}
 
             {/* ── KPI Chips ─────────────────────────────────────────────── */}
             <div className="kpi-strip">

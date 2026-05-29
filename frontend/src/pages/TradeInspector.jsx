@@ -6,13 +6,30 @@ import { Segment, NeonInput, NeonSelect, NeonButton } from "@/components/lab/con
 import { CandleChart } from "@/components/lab/CandleChart";
 import { getRunDisplayName, rehydrateRunCandles, useDataset } from "@/data/store";
 import { setSelectedTradeVariant } from "@/data/store";
+import { useTradeUniverse } from "@/data/useTradeUniverse";
+import { TradeUniverseBadge } from "@/components/lab/TradeUniverseBadge";
 import { deriveOBRightTime } from "@/data/obLifecycle";
 import { Search, AlertTriangle } from "lucide-react";
 import { ActiveRunContext } from "@/components/lab/ActiveRunContext";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 export default function TradeInspector() {
-    const { CANDLES, TRADES, OB_BOXES, OB_BOXES_ENRICHED, ACTIVE_RUN, activeRunId, getRunData, ACTIVE_TRADE_VARIANT, AVAILABLE_TRADE_VARIANTS } = useDataset();
+    const { CANDLES, OB_BOXES, OB_BOXES_ENRICHED, ACTIVE_RUN, activeRunId, getRunData, ACTIVE_TRADE_VARIANT, AVAILABLE_TRADE_VARIANTS } = useDataset();
+    // Phase 2D — trade source comes from the canonical store-level resolver
+    // via useTradeUniverse(). When the user picks a scenario in Strategy Map
+    // (e.g. Triggered Edge 25% · Next), the inspector's left-panel trade list,
+    // filters, and currently-inspected trade all re-evaluate against that
+    // scenario's trades. Previously this page read baseline-only `TRADES`
+    // from useDataset and so a user inspecting "OB 12" while a triggered-edge
+    // scenario was active would see the baseline outcome (NEWS_FLATTEN), not
+    // the scenario outcome (PROTECTED).
+    //
+    // Non-trade fields (CANDLES, OB_BOXES, ACTIVE_RUN, variant metadata) still
+    // come from useDataset — those are run-level and correctly run-wide.
+    const universe = useTradeUniverse();
+    const trades = universe.trades;
+    // Phase 2G — TradeUniverseBadge filters universe.warnings internally to
+    // the user-facing codes; the per-page filter is no longer needed here.
     const bundle = activeRunId ? getRunData(activeRunId) : null;
     const runLabel = getRunDisplayName(bundle || ACTIVE_RUN);
     const hasCandles = bundle ? !!bundle.candles?.length : false;
@@ -24,13 +41,13 @@ export default function TradeInspector() {
     const [direction, setDirection] = useState("All");
     const [structure, setStructure] = useState("All");
     const [chartTf, setChartTf] = useState("1m");
-    const [selectedId, setSelectedId] = useState(TRADES[0]?.id);
+    const [selectedId, setSelectedId] = useState(trades[0]?.id);
 
     useEffect(() => {
-        if (!TRADES.some((t) => t.id === selectedId)) {
-            setSelectedId(TRADES[0]?.id || null);
+        if (!trades.some((t) => t.id === selectedId)) {
+            setSelectedId(trades[0]?.id || null);
         }
-    }, [TRADES, selectedId]);
+    }, [trades, selectedId]);
 
     useEffect(() => {
         setCandleLoadState("idle");
@@ -58,15 +75,15 @@ export default function TradeInspector() {
             .catch(() => setCandleLoadState("missing"));
     };
 
-    const filtered = useMemo(() => TRADES.filter((t) => {
+    const filtered = useMemo(() => trades.filter((t) => {
         if (q && !tradeSearchText(t).includes(q.toLowerCase())) return false;
         if (outcome !== "All" && t.outcome !== outcome) return false;
         if (direction !== "All" && t.direction !== direction) return false;
         if (structure !== "All" && t.structure !== structure) return false;
         return true;
-    }), [q, outcome, direction, structure, TRADES]);
+    }), [q, outcome, direction, structure, trades]);
 
-    const trade = TRADES.find((t) => t.id === selectedId) || TRADES[0] || null;
+    const trade = trades.find((t) => t.id === selectedId) || trades[0] || null;
     const tradeStatus = getTradeStatus(trade);
     const isFilledTrade = tradeStatus.key === "filled" || tradeStatus.key === "protection_exit";
     const rawCandleGapSec = useMemo(() => medianCandleGapSec(CANDLES), [CANDLES]);
@@ -125,7 +142,7 @@ export default function TradeInspector() {
     const exitCandle = exitMap.i >= 0 ? displayCandles[exitMap.i] : null;
     const mappingQuality = selectedMarker?.mappingQuality || fillMap.quality || "missing";
 
-    if (!activeRunId && !TRADES.length) {
+    if (!activeRunId && !trades.length) {
         return (
             <div className="pb-12">
                 <ActiveRunContext
@@ -153,6 +170,19 @@ export default function TradeInspector() {
                 description={trade ? `${displayTradeId(trade)} · ${trade.direction} · ${trade.structure} · ${trade.session} · ${tradeStatus.label} · ${trade.obWidthPips != null ? `OB width ${trade.obWidthPips} pips` : "OB link unavailable"}` : `${runLabel} · selected variant has no imported trades.`}
                 actions={<VariantSelector variants={AVAILABLE_TRADE_VARIANTS} value={ACTIVE_TRADE_VARIANT} />}
             />
+
+            {/* Universe / source badge — shared component. Tells the user
+                exactly which trade universe powers the list + chart + details
+                below. Without this, a user inspecting a single OB could not
+                tell whether they were looking at the baseline outcome or the
+                triggered-edge scenario outcome. Placement preserved from the
+                Phase 2D local version. Warnings filtered inside the badge. */}
+            {activeRunId && (
+                <TradeUniverseBadge
+                    universe={universe}
+                    className="px-6 mt-2 mb-3"
+                />
+            )}
 
             {!hasCandles && (
                 <div className="px-6 mb-3">
@@ -464,6 +494,9 @@ function VerifierRow({ k, v }) {
         </div>
     );
 }
+
+// Local InspectorUniverseBadge + InspectorBadgeCell removed in Phase 2F —
+// replaced by the shared @/components/lab/TradeUniverseBadge component.
 
 function VariantSelector({ variants, value }) {
     if (!variants?.length) return null;

@@ -5,6 +5,8 @@ import { MetricChip } from "@/components/lab/MetricChip";
 import { ColoredR, Pill } from "@/components/lab/DataTable";
 import { HeroBadge } from "@/components/lab/controls";
 import { useDataset } from "@/data/store";
+import { useTradeUniverse } from "@/data/useTradeUniverse";
+import { TradeUniverseBadge } from "@/components/lab/TradeUniverseBadge";
 import {
     FlaskConical, TrendingUp, TrendingDown, Target, AlertTriangle,
     ChevronDown, ChevronUp, Copy, Check,
@@ -16,7 +18,9 @@ import {
 // mutation. Results are frontend estimates for deciding what deserves a full
 // Python backtest. All frontend estimates are clearly labelled.
 
-const EMPTY_TRADES = [];
+// EMPTY_TRADES removed in Phase 2C — the canonical universe resolver always
+// returns an array (empty when no run is loaded), so the previous fallback
+// `Array.isArray(TRADES) ? TRADES : EMPTY_TRADES` is no longer needed.
 
 const SIM_FILTERS = [
     // SESSION
@@ -86,9 +90,24 @@ const PRESETS = [
 // ── Main Page ───────────────────────────────────────────────────────────────
 
 export default function HypothesisLab() {
-    const { ACTIVE_RUN, TRADES, ACTIVE_TRADE_VARIANT, activeRunId, runs } = useDataset();
-    const trades = React.useMemo(() => (Array.isArray(TRADES) ? TRADES : EMPTY_TRADES), [TRADES]);
+    // Phase 2C — trade source now comes from the canonical store-level
+    // resolver via useTradeUniverse(). When the user picks a scenario in
+    // Strategy Map (e.g. Triggered Edge 25% · Next), every chart and
+    // simulation in Hypothesis Lab re-evaluates against that scenario's
+    // trades. Previously this page silently consumed baseline TRADES and so
+    // produced misleading "what if" analytics on a scenario user.
+    //
+    // The non-trade fields (ACTIVE_RUN, ACTIVE_TRADE_VARIANT, activeRunId,
+    // runs) still come from useDataset because they're metadata, not trade
+    // data — entry/protection result rows are built from the run bundle's
+    // own summary blocks regardless of scenario, and that's correct.
+    const universe = useTradeUniverse();
+    const { ACTIVE_RUN, ACTIVE_TRADE_VARIANT, activeRunId, runs } = useDataset();
+    const trades = universe.trades;
     const activeRun = activeRunId ? runs?.[activeRunId] : null;
+    // Phase 2G — TradeUniverseBadge now filters universe.warnings internally
+    // to the user-facing codes (BOTH_UNAVAILABLE_NO_COMBINED, FILL_MODE_COERCED).
+    // No per-page filtering required.
 
     const [activeFilters, setActiveFilters]   = React.useState(new Set());
     const [selectedEntry, setSelectedEntry]   = React.useState("baseline");
@@ -226,6 +245,18 @@ export default function HypothesisLab() {
                     </div>
                 )}
             />
+
+            {/* Universe / source badge — shared component. Mirrors Failures
+                Lab + Strategy Map so the user can always tell which trade
+                universe powers the simulator below. Hidden when no run is
+                loaded. Placement and spacing preserved from the Phase 2C
+                local version. Warning filtering is internal to the badge. */}
+            {activeRunId && (
+                <TradeUniverseBadge
+                    universe={universe}
+                    className="px-6 mt-3 mb-2"
+                />
+            )}
 
             {/* Baseline KPIs */}
             <div className="px-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -668,6 +699,9 @@ function DeltaVal({ value, isBaseline, suffix }) {
     const formatted = suffix === "R" ? `${n.toFixed(1)}R` : `${n.toFixed(1)}%`;
     return <span className={`font-semibold tabular-nums ${color}`}>{n >= 0 ? "+" : ""}{formatted}</span>;
 }
+
+// Local HypothesisUniverseBadge + HypothesisBadgeCell removed in Phase 2F —
+// replaced by the shared @/components/lab/TradeUniverseBadge component.
 
 // ── Data helpers ────────────────────────────────────────────────────────────
 

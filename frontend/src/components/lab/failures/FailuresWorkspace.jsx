@@ -5,6 +5,8 @@
 
 import React, { useMemo } from "react";
 import { getRunDisplayName, useDataset } from "@/data/store";
+import { useTradeUniverse } from "@/data/useTradeUniverse";
+import { TradeUniverseBadge } from "@/components/lab/TradeUniverseBadge";
 import { LabRunHero } from "@/components/lab/LabRunHero";
 import { RunConfigStrip } from "@/components/lab/RunConfigStrip";
 import { WorkspaceTabBar } from "../entries/shared/WorkspaceTabBar";
@@ -28,8 +30,6 @@ import { filterLosers }  from "./shared/failuresUtils";
 import { classifyAll }   from "./shared/archetypeClassifier";
 import { scoreAll }      from "./shared/severityScorer";
 
-const EMPTY_TRADES = [];
-
 // ── Empty state ───────────────────────────────────────────────────────────────
 
 function NoDataState() {
@@ -51,27 +51,12 @@ function NoDataState() {
 }
 
 // ── Workspace ─────────────────────────────────────────────────────────────────
-
-function resolveActiveTrades(dataset) {
-    if (Array.isArray(dataset?.TRADES)) return dataset.TRADES;
-    if (Array.isArray(dataset?.trades)) return dataset.trades;
-
-    const activeRunId = dataset?.activeRunId;
-    const activeRun = activeRunId ? dataset?.runs?.[activeRunId] : null;
-    const variant = dataset?.ACTIVE_TRADE_VARIANT;
-
-    if (variant && Array.isArray(activeRun?.tradesByVariant?.[variant])) {
-        return activeRun.tradesByVariant[variant];
-    }
-    if (variant && Array.isArray(dataset?.ACTIVE_RUN?.tradesByVariant?.[variant])) {
-        return dataset.ACTIVE_RUN.tradesByVariant[variant];
-    }
-    if (Array.isArray(activeRun?.trades)) return activeRun.trades;
-    if (Array.isArray(dataset?.ACTIVE_RUN?.trades)) return dataset.ACTIVE_RUN.trades;
-    if (Array.isArray(dataset?.activeRun?.trades)) return dataset.activeRun.trades;
-    if (Array.isArray(dataset?.runData?.trades)) return dataset.runData.trades;
-    return EMPTY_TRADES;
-}
+//
+// Trade source: useTradeUniverse() — the canonical scenario-aware resolver
+// from data/useTradeUniverse.js. The legacy `resolveActiveTrades(dataset)`
+// fallback chain (TRADES → runs[active].tradesByVariant → ACTIVE_RUN.… →
+// activeRun.trades → runData.trades) was removed in Phase 2C; it was
+// baseline-only and silently ignored the user's selected scenario.
 
 function resolveActiveConfig(dataset) {
     const activeRun = dataset?.activeRunId ? dataset?.runs?.[dataset.activeRunId] : null;
@@ -92,8 +77,16 @@ function resolveActiveRun(dataset) {
 }
 
 export function FailuresWorkspace() {
+    // Phase 2C — the canonical hook handles store subscription + memoization
+    // in one place; consumers no longer hand-roll
+    // `useMemo(() => getTradeUniverse(), [dataset])`. We still call useDataset
+    // alongside because config / activeRun derive from non-trade fields of the
+    // dataset (the run's config block + the RUNS index).
+    const universe = useTradeUniverse();
     const dataset = useDataset();
-    const trades = useMemo(() => resolveActiveTrades(dataset), [dataset]);
+    const trades = universe.trades;
+    // Phase 2G — universeWarnings filtering moved into TradeUniverseBadge so
+    // the same five-line filter no longer lives in every consumer.
     const config = useMemo(() => resolveActiveConfig(dataset), [dataset]);
     const activeRun = useMemo(() => resolveActiveRun(dataset), [dataset]);
 
@@ -169,6 +162,14 @@ export function FailuresWorkspace() {
 
             <RunConfigStrip run={activeRun} dense />
 
+            {/* Universe / source badge — shared component used across labs.
+                Placement and copy preserved from the Phase 2B local version.
+                Warning filtering happens inside the component (Phase 2G). */}
+            <TradeUniverseBadge
+                universe={universe}
+                className="px-6 mt-2 mb-2"
+            />
+
             {/* Tab rail */}
             <WorkspaceTabBar
                 tabs={FAILURES_TABS}
@@ -209,3 +210,7 @@ export function FailuresWorkspace() {
         </div>
     );
 }
+
+// Local FailuresUniverseBadge + FailuresBadgeCell removed in Phase 2F —
+// replaced by the shared @/components/lab/TradeUniverseBadge component.
+// See the import at the top of this file.

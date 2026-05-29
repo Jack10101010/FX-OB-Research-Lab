@@ -55,14 +55,14 @@ export function LifecyclePanel() {
         return acc;
     }, {});
 
-    const liveCount    = PLANNED_ENTRY_MODES.filter(m => m.status === "live" || m.status === "tested").length;
+    const liveCount    = PLANNED_ENTRY_MODES.filter(m => m.status === "live").length;
     const testingCount = PLANNED_ENTRY_MODES.filter(m => m.status === "testing").length;
 
     return (
-        <NeonPanel title="Entry Model Lifecycle" className="xl:col-span-2"
+        <NeonPanel title="Entry Model Lifecycle" className="xl:col-span-2" dense
             action={
                 <div className="flex gap-1.5">
-                    <Pill tone="success">{liveCount} TESTED</Pill>
+                    <Pill tone="success">{liveCount} LIVE</Pill>
                     {testingCount > 0 && <Pill tone="warning">{testingCount} TESTING</Pill>}
                 </div>
             }
@@ -80,7 +80,7 @@ export function LifecyclePanel() {
 
 export function FutureModelsPanel() {
     return (
-        <NeonPanel title="Future Model Ideas" className="xl:col-span-1"
+        <NeonPanel title="Future Model Ideas" className="xl:col-span-1" dense
             action={<Pill tone="secondary">{LIFECYCLE_IDEAS.length} IDEAS</Pill>}
         >
             <p className="mb-3 text-[10px] font-mono text-muted-lab">Entry lifecycle concepts not yet formalised into testable models.</p>
@@ -105,7 +105,7 @@ export function FutureModelsPanel() {
 
 export function ResearchBacklogPanel() {
     return (
-        <NeonPanel title="Research Backlog" className="xl:col-span-1"
+        <NeonPanel title="Research Backlog" className="xl:col-span-1" dense
             action={<Pill tone="secondary">{ENTRY_BACKLOG.length} ITEMS</Pill>}
         >
             <p className="mb-3 text-[10px] font-mono text-muted-lab">Open research questions and improvement vectors for the next iteration.</p>

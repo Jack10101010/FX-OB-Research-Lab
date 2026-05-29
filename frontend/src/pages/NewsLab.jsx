@@ -6,12 +6,13 @@ import { HeroBadge } from "@/components/lab/controls";
 import { LabRunHero } from "@/components/lab/LabRunHero";
 import { RunConfigStrip } from "@/components/lab/RunConfigStrip";
 import { useDataset } from "@/data/store";
+import { useTradeUniverse } from "@/data/useTradeUniverse";
+import { TradeUniverseBadge } from "@/components/lab/TradeUniverseBadge";
 import {
     AlertTriangle, CalendarClock, Clipboard, Download, FileText,
     Globe2, ListChecks, Newspaper, ShieldAlert,
 } from "lucide-react";
 
-const EMPTY_TRADES = [];
 const EMPTY_EVENTS = [];
 const TABLE_ROW_LIMIT = 500;
 const OVERLAP_PREVIEW_LIMIT = 250;
@@ -45,8 +46,11 @@ const BACKLOG = [
 ];
 
 export default function NewsLab() {
-    const { ACTIVE_PROJECT, ACTIVE_RUN, TRADES, activeRunId, runs } = useDataset();
-    const trades = React.useMemo(() => (Array.isArray(TRADES) ? TRADES : EMPTY_TRADES), [TRADES]);
+    const { ACTIVE_PROJECT, ACTIVE_RUN, activeRunId, runs } = useDataset();
+    const universe = useTradeUniverse();
+    const trades = universe.trades;
+    // Phase 2G — TradeUniverseBadge handles user-facing warning filtering
+    // internally; per-page derivation no longer needed.
     const [currencyFilter, setCurrencyFilter] = React.useState("ALL");
     const [impactFilter, setImpactFilter] = React.useState("ALL");
     const [searchFilter, setSearchFilter] = React.useState("");
@@ -251,6 +255,14 @@ export default function NewsLab() {
                 )}
             />
 
+            {/* Universe / source badge — shared component. Placement preserved.
+                Warnings filtered inside the component (Phase 2G). */}
+            {activeRunId && (
+                <TradeUniverseBadge
+                    universe={universe}
+                    className="px-6 mt-2 mb-3"
+                />
+            )}
             <RunConfigStrip run={activeRun} />
 
             <div className="px-6 grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
@@ -876,6 +888,9 @@ function ResearchBacklog() {
         </NeonPanel>
     );
 }
+
+// Local NewsLabUniverseBadge + NewsLabBadgeCell removed in Phase 2F —
+// replaced by the shared @/components/lab/TradeUniverseBadge component.
 
 function ActionButton({ children, icon: Icon, disabled = false, onClick }) {
     return (
