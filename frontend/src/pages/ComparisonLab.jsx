@@ -5,8 +5,9 @@ import { NeonPanel } from "@/components/lab/NeonPanel";
 import { MetricChip } from "@/components/lab/MetricChip";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
 import { NeonSelect, NeonButton } from "@/components/lab/controls";
-import { getRunDisplayName, compactTimeframe, useDataset, addProjectFinding } from "@/data/store";
+import { getRunDisplayName, compactTimeframe, useDataset, addProjectFinding, getTradeUniverse } from "@/data/store";
 import { useTradeUniverse } from "@/data/useTradeUniverse";
+import { collectAllEntryKeys, buildAvailableOptions } from "@/data/tradeUniverse";
 import { TradeUniverseBadge } from "@/components/lab/TradeUniverseBadge";
 // RB-8d: canonical Results Basis summaries replace the deprecated lib/metrics.
 import { toCanonicalSummaryRow, maxDrawdownFromCurve } from "@/data/resultsBasis";
@@ -117,6 +118,46 @@ function computeExplainableWinner(metricRows) {
     };
 }
 
+// ── 3C local helpers ─────────────────────────────────────────────────────────
+
+/** Rebuild an equity curve from a trade list (cumulative R). */
+function rebuildEquityCurve(trades) {
+    let cum = 0;
+    return (trades || []).map((t, i) => {
+        cum += Number(t.r) || 0;
+        const ts = t.entry || t.fill || t.exit || null;
+        const ref = ts ? new Date(ts) : null;
+        const valid = ref && isFinite(ref.getTime());
+        return {
+            i,
+            netR: Number(cum.toFixed(2)),
+            date: valid ? ref.toISOString().slice(0, 10) : "",
+            label: valid
+                ? ref.toLocaleString("en", { month: "short", year: "2-digit" })
+                : String(i),
+        };
+    });
+}
+
+/** Sum of t.r across a trade list, rounded to 1 dp. */
+function netRFromTrades(trades) {
+    return Number(
+        ((trades || []).reduce((s, t) => s + (Number(t.r) || 0), 0)).toFixed(1),
+    );
+}
+
+/** Human-readable label for a scenario option (family / threshold / fillMode). */
+function scenarioOptionLabel(family, threshold, fillMode) {
+    if (!family || family === "baseline") return "Baseline (default)";
+    const thresh = threshold != null ? ` ${threshold}%` : "";
+    const fill = fillMode === "same" ? " · Same"
+               : fillMode === "next" ? " · Next"
+               : "";
+    if (family === "triggered_edge") return `Triggered Edge${thresh}${fill}`;
+    if (family === "penetration")    return `Penetration${thresh}${fill}`;
+    return `${family}${thresh}${fill}`;
+}
+
 export default function ComparisonLab() {
     const { RUNS, EQUITY_CURVE, TRADES, ACTIVE_RUN, ACTIVE_PROJECT, getRunData } = useDataset();
     // Phase 3B-3 — ComparisonLab is intentionally baseline-only. We resolve
@@ -146,6 +187,113 @@ export default function ComparisonLab() {
     const runs = ids.map((id) => RUNS.find((r) => r.id === id)).filter(Boolean);
     const baseline = runs[0];
 
+    // ── 3C: global scenario selector ─────────────────────────────────────────
+    // null = baseline mode (default). Applies the same scenario to every slot.
+    const [globalScenario, setGlobalScenario] = useState(null);
+    // Reset to baseline whenever the set of compared runs changes.
+    useEffect(() => { setGlobalScenario(null); }, [ids]);
+
+    const effectiveScenario = globalScenario || BASELINE_SCENARIO_OVERRIDE;
+    const isScenarioMode    = Boolean(globalScenario?.family && globalScenario.family !== "baseline");
+
+    // Resolve a TradeUniverse for each slot against the same effective scenario.
+    const slotUniverses = useMemo(
+        () => runs.map((r) => getTradeUniverse(r.id, effectiveScenario)),
+        [runs, effectiveScenario],
+    );
+
+    // 3C-FINALIZE — scenario coverage. In scenario mode a slot is comparable
+    // only when its resolved universe actually carries scenario trades; slots
+    // that fall back to baseline are EXCLUDED from the verdict/deltas so a single
+    // comparison never mixes scenario numbers against baseline-fallback numbers.
+    // Baseline mode: every slot is comparable.
+    const slotHasScenario = (idx) =>
+        isScenarioMode
+        && slotUniverses[idx]?.universeType === "scenario"
+        && (slotUniverses[idx]?.trades?.length || 0) > 0;
+    const slotComparable = (idx) => !isScenarioMode || slotHasScenario(idx);
+    const scenarioCoverage = (() => {
+        if (!isScenarioMode) return { present: runs.length, total: runs.length, missingRunIds: [] };
+        const missingRunIds = runs.filter((_r, idx) => !slotHasScenario(idx)).map((r) => r?.id).filter(Boolean);
+        return { present: runs.length - missingRunIds.length, total: runs.length, missingRunIds };
+    })();
+    const hasPartialScenarioCoverage = isScenarioMode && scenarioCoverage.missingRunIds.length > 0;
+
+    // Union of scenario keys found across all selected runs (for the selector).
+    const allAvailableOptions = useMemo(() => {
+        const allKeys = new Set(["baseline"]);
+        runs.forEach((r) => {
+            const bundle = getRunData(r.id);
+            if (!bundle) return;
+            collectAllEntryKeys(bundle, bundle.trades || []).forEach((k) => allKeys.add(k));
+        });
+        return buildAvailableOptions([...allKeys]);
+    }, [runs, getRunData]);
+
+    // Flat list of string-serialised options for the NeonSelect.
+    const scenarioSelectOptions = useMemo(() => {
+        const opts = [{ value: "", label: "Baseline (default)" }];
+        const {
+            availableFamilies = [],
+            thresholdsByFamily = {},
+            fillModesByFamilyThreshold = {},
+        } = allAvailableOptions;
+        for (const family of availableFamilies.filter((f) => f !== "baseline")) {
+            const thresholds = thresholdsByFamily[family] || [];
+            for (const threshold of thresholds) {
+                const ftKey = `${family}::${threshold}`;
+                const fillModes = fillModesByFamilyThreshold[ftKey] || [];
+                for (const fm of fillModes) {
+                    const fillMode = fm === "both" ? null : fm;
+                    opts.push({
+                        value: JSON.stringify({ family, threshold, fillMode }),
+                        label: scenarioOptionLabel(family, threshold, fillMode),
+                    });
+                }
+            }
+        }
+        return opts;
+    }, [allAvailableOptions]);
+
+    const selectedScenarioValue = globalScenario ? JSON.stringify(globalScenario) : "";
+    const handleScenarioChange  = (v) => {
+        if (!v) { setGlobalScenario(null); return; }
+        try { setGlobalScenario(JSON.parse(v)); } catch { setGlobalScenario(null); }
+    };
+
+    // Best-effort label for the active scenario (used in chips + finding titles).
+    const activeScenarioLabel = isScenarioMode
+        ? (slotUniverses.find((u) => u?.universeType === "scenario" && u.trades.length > 0)?.label
+           || scenarioOptionLabel(globalScenario?.family, globalScenario?.threshold, globalScenario?.fillMode))
+        : "Baseline";
+
+    // ── 3C: per-slot analysis views ──────────────────────────────────────────
+    // Centralises "what trades/curve does this slot analyse?" for all analytics
+    // paths. In scenario mode a slot's analysisTrades = scenarioTrades when the
+    // scenario is present; when the scenario is MISSING it explicitly falls back
+    // to baselineTrades so no analytics path ever sees an empty array due to a
+    // missing scenario. In baseline mode analysisTrades = bundle.trades throughout.
+    const slotViews = useMemo(
+        () => runs.map((r, idx) => {
+            const bundle          = getRunData(r.id);
+            const universe        = slotUniverses[idx];
+            const missingScenario = isScenarioMode
+                && Boolean(universe?.warnings?.some((w) => w.code === "NO_TRADES_FOR_SCENARIO"));
+            const scenarioTrades  = universe?.trades  || [];
+            const baselineTrades  = bundle?.trades    || [];
+            const baselineCurve   = bundle?.equityCurve || [];
+            const analysisTrades  = isScenarioMode && !missingScenario
+                ? scenarioTrades
+                : baselineTrades;
+            const analysisCurve   = isScenarioMode && !missingScenario
+                ? rebuildEquityCurve(scenarioTrades)
+                : baselineCurve;
+            return { bundle, universe, missingScenario, scenarioTrades, baselineTrades, baselineCurve, analysisTrades, analysisCurve };
+        }),
+        [runs, getRunData, slotUniverses, isScenarioMode],
+    );
+
+    // ── RB-8d: Results Basis context. ────────────────────────────────────────
     // RB-8d: Results Basis context. ComparisonLab is baseline-only and Raw R;
     // Current Equity cross-run comparison is a future feature (Phase 3C).
     const lens = useResultsLens();
@@ -166,67 +314,70 @@ export default function ComparisonLab() {
     const realDD_active = maxDrawdownFromCurve(EQUITY_CURVE);
     const runMetrics = (r) => {
         if (!r) return { pf: null, maxDd: null };
-        const bundle = getRunData(r.id);
-        if (bundle?.trades?.length && bundle?.equityCurve?.length) {
+        const slotIdx = runs.indexOf(r);
+        const view    = slotIdx >= 0 ? slotViews[slotIdx] : null;
+        const { analysisTrades = [], analysisCurve = [] } = view || {};
+        if (analysisTrades.length) {
+            // Prefer pre-built curve for DD parity; rebuild only when absent.
+            const curve = analysisCurve.length ? analysisCurve : rebuildEquityCurve(analysisTrades);
             return {
-                pf: finitePF(toCanonicalSummaryRow(bundle.trades, { basis: "raw_r" }).profitFactor),
-                maxDd: maxDrawdownFromCurve(bundle.equityCurve),
+                pf:    finitePF(toCanonicalSummaryRow(analysisTrades, { basis: "raw_r" }).profitFactor),
+                maxDd: maxDrawdownFromCurve(curve),
             };
         }
-        // Fallback: only the active mock run has full data
+        // Fallback: only the active mock run has pre-computed globals.
         if (r.id === ACTIVE_RUN.id) return { pf: realPF_active, maxDd: realDD_active };
         return { pf: null, maxDd: null };
     };
 
-    // Canonical Summary WR (RB-8d): wins/(wins+losses) from each run's trades
-    // when available; falls back to the backend run-summary win rate otherwise.
-    // Net R / Trades remain the run's authoritative headline summary values.
+    // Canonical Summary WR (RB-8d): wins/(wins+losses) from each slot's
+    // analysisTrades (scenario or baseline fallback); falls back to run summary.
     const canonicalWRById = useMemo(() => {
         const map = new Map();
-        runs.forEach((r) => {
+        runs.forEach((r, idx) => {
             if (!r) return;
-            const bundle = getRunData(r.id);
-            const summary = bundle?.trades?.length
-                ? toCanonicalSummaryRow(bundle.trades, { basis: "raw_r" })
+            const { analysisTrades = [] } = slotViews[idx] || {};
+            const summary = analysisTrades.length
+                ? toCanonicalSummaryRow(analysisTrades, { basis: "raw_r" })
                 : toCanonicalSummaryRow(r, { basis: "raw_r" });
             map.set(r.id, summary.winRate != null ? summary.winRate : (Number(r.winRate) || 0));
         });
         return map;
-    }, [runs, getRunData]);
+    }, [runs, slotViews]);
     const wrOf = (r) => (r && canonicalWRById.has(r.id) ? canonicalWRById.get(r.id) : Number(r?.winRate) || 0);
 
-    // Per-run equity — uses each bundle's own equity curve; null for runs without one.
+    // Per-run equity curves from analysisCurve (scenario or baseline fallback).
+    // Longer curve wins skeleton alignment.
     const equityMerged = useMemo(() => {
-        // Use the longest available equity curve as the x-axis skeleton
-        const skeleton = runs.reduce((best, r) => {
-            const bundle = getRunData(r.id);
-            const curve = bundle?.equityCurve || [];
-            return curve.length > (best?.length || 0) ? curve : best;
-        }, EQUITY_CURVE);
+        const curves = runs.map((_r, i) => (slotViews[i]?.analysisCurve || []));
+        // Use the longest available curve as the x-axis skeleton
+        const skeleton = curves.reduce(
+            (best, c) => (c.length > (best?.length || 0) ? c : best),
+            EQUITY_CURVE,
+        );
         if (!skeleton?.length) return [];
         return skeleton.map((p, idx) => {
             const row = { label: p.label, i: p.i };
-            runs.forEach((r, i) => {
-                const bundle = getRunData(r.id);
-                if (bundle?.equityCurve?.length) {
-                    const e = bundle.equityCurve[Math.min(idx, bundle.equityCurve.length - 1)];
+            curves.forEach((curve, i) => {
+                if (curve?.length) {
+                    const e = curve[Math.min(idx, curve.length - 1)];
                     row[`r${i}`] = e ? e.netR : null;
                 } else {
-                    // No real equity data — omit rather than fabricate
+                    // No equity data for this slot — omit rather than fabricate
                     row[`r${i}`] = null;
                 }
             });
             return row;
         });
-    }, [runs, getRunData, EQUITY_CURVE]);
+    }, [runs, EQUITY_CURVE, slotViews]);
 
-    // Per-run monthly — computed from each bundle's trade timestamps
+    // Per-run monthly from analysisTrades (scenario or baseline fallback).
     const monthlyMerged = useMemo(() => {
-        const perRun = runs.map((r) => {
-            const bundle = getRunData(r.id);
-            if (!bundle?.trades?.length) return {};
+        const perRun = runs.map((_r, idx) => {
+            const { analysisTrades = [] } = slotViews[idx] || {};
+            if (!analysisTrades.length) return {};
             const map = {};
-            bundle.trades.forEach((t) => {
+            analysisTrades.forEach((t) => {
                 const date = t.entry ? new Date(t.entry) : null;
                 if (!date || !isFinite(date.getTime())) return;
                 const year = date.getUTCFullYear();
@@ -248,7 +399,7 @@ export default function ComparisonLab() {
             });
             return row;
         });
-    }, [runs, getRunData]);
+    }, [runs, slotViews]);
 
     // KPI matrix rows
     // RB-8d.1 Net R decision: Net R and Trades intentionally stay the run's
@@ -270,18 +421,35 @@ export default function ComparisonLab() {
         { key: "validation",    label: "Validation",       fmt: (v) => v != null ? `${Number(v).toFixed(1)}%` : "—", delta: (v, base) => v != null && base != null ? `${v - base >= 0 ? "+" : ""}${(v - base).toFixed(1)}%` : "—", posIfGreater: true },
     ];
 
-    // COCKPIT-2A — explainable winner from existing per-run values (no new analytics).
+    // COCKPIT-2A — explainable winner from per-run values. In scenario mode,
+    // Net R and Trades come from analysisTrades (scenario or baseline fallback)
+    // so the winner reflects the selected scenario, not the run totals.
     const winnerInfo = computeExplainableWinner(
-        runs.map((r) => ({
-            netR: r?.netR,
-            winRate: wrOf(r),
-            pf: runMetrics(r).pf,
-            maxDd: runMetrics(r).maxDd,
-            validation: r?.validation,
-            trades: r?.trades,
-        })),
+        runs.map((r, idx) => {
+            // Excluded (non-comparable) scenario slots contribute all-null rows so
+            // they win no metric and cannot be crowned via the Net R fallback.
+            if (isScenarioMode && !slotComparable(idx)) {
+                return { netR: null, winRate: null, pf: null, maxDd: null, validation: null, trades: null };
+            }
+            const { analysisTrades = [], missingScenario } = slotViews[idx] || {};
+            // hasTrades: true only when we have actual scenario data (not a fallback).
+            const hasTrades = isScenarioMode && !missingScenario && analysisTrades.length > 0;
+            return {
+                netR:       hasTrades ? netRFromTrades(analysisTrades) : r?.netR,
+                winRate:    wrOf(r),
+                pf:         runMetrics(r).pf,
+                maxDd:      runMetrics(r).maxDd,
+                validation: r?.validation,
+                trades:     hasTrades ? analysisTrades.length : r?.trades,
+            };
+        }),
     );
     const winnerIdx = runs.length > 0 ? winnerInfo.winnerIdx : 0;
+    // Only crown / show a verdict when the winner is a comparable slot and (in
+    // scenario mode) at least one slot actually has scenario data.
+    const showWinner = runs.length > 1
+        && slotComparable(winnerIdx)
+        && (!isScenarioMode || scenarioCoverage.present > 0);
     const winnerOtherLeadText = (() => {
         const groups = {};
         winnerInfo.otherLeads.forEach((o) => { (groups[o.idx] = groups[o.idx] || []).push(o.label); });
@@ -319,10 +487,18 @@ export default function ComparisonLab() {
         if (winnerInfo.smallSample) {
             noteParts.push(`Small sample: winner ${winnerInfo.winnerTrades} trades vs ${winnerInfo.maxTrades} max — directional.`);
         }
+        if (isScenarioMode) {
+            noteParts.push(`Scenario: ${activeScenarioLabel}.`);
+        }
+        if (hasPartialScenarioCoverage) {
+            noteParts.push(`Coverage: ${scenarioCoverage.present}/${scenarioCoverage.total} runs have the scenario; missing runs excluded.`);
+        }
         const entry = addProjectFinding(targetProjectId, buildResearchFindingPayload({
             source: "comparison",
             tag: "Comparison",
-            title: `Comparison · Run ${winnerShort} leads`,
+            title: isScenarioMode
+                ? `Comparison · ${activeScenarioLabel} · Run ${winnerShort} leads`
+                : `Comparison · Run ${winnerShort} leads`,
             note: noteParts.join(" "),
             runId: baselineRun?.id,
             sourceRunId: baselineRun?.id,
@@ -335,6 +511,11 @@ export default function ComparisonLab() {
                 metricsWon: winnerInfo.winnerLabels,
                 smallSample: winnerInfo.smallSample,
                 targetProjectId,
+                scenarioCoverage: {
+                    present: scenarioCoverage.present,
+                    total: scenarioCoverage.total,
+                    missingRunIds: scenarioCoverage.missingRunIds,
+                },
             },
         }));
         if (entry) setComparisonSaved(true);
@@ -382,41 +563,57 @@ export default function ComparisonLab() {
                 }
             />
 
-            {/* Phase 3B-3 — baseline-only universe badge.
-                ComparisonLab compares each run's primary-variant baseline
-                against the others. Scenario-aware comparison is a future
-                feature (Phase 3C) — it requires a global scenario picker,
-                per-row resolution via getTradeUniverse(runId, override),
-                missing-scenario fallback chips, and an extension to the
-                TradeUniverse shape (equity curve). For now the badge mirrors
-                the active run's baseline so the page's design contract is
-                visible. Analytics are unchanged. See Phase 3A audit for the
-                design rationale. */}
+            {/* 3C — universe badge + scenario selector. In baseline mode the badge
+                mirrors the active run's baseline (unchanged from 3B-3). In scenario
+                mode it shows the first slot's resolved universe. Analytics are now
+                fully scenario-aware via slotUniverses (equity, monthly, WR, PF, DD,
+                Net R, Trades). obStats / deltaRows are not present on this page. */}
             <div className="px-6 mt-2 mb-3 flex flex-col gap-1.5">
-                <TradeUniverseBadge universe={baselineUniverse} />
+                <TradeUniverseBadge universe={isScenarioMode ? slotUniverses[0] : baselineUniverse} />
                 <div className="flex flex-wrap items-center gap-2">
                     <span className="text-[9px] font-ui uppercase tracking-widest text-[hsl(var(--text-muted))]">Compare Basis</span>
                     <Pill tone="muted">Raw R</Pill>
                     <span className="text-[10px] text-muted-lab">canonical summaries · WR = wins/(wins+losses)</span>
                     {lens.isCurrentEquity && (
                         <span className="text-[10px] text-[hsl(var(--warning))]">
-                            Current Equity is not yet enabled for Comparison Lab (cross-run CE arrives with Phase 3C).
+                            Current Equity mode is not yet enabled for cross-run comparison.
                         </span>
                     )}
                     {compareGuard.warnings.map((w) => (
                         <span key={w.code} className="text-[10px] text-muted-lab" title={w.code}>{w.message}</span>
                     ))}
                 </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[9px] font-ui uppercase tracking-widest text-[hsl(var(--text-muted))] shrink-0">
+                        Compare Scenario
+                    </span>
+                    <NeonSelect
+                        testId="cmp-scenario-select"
+                        value={selectedScenarioValue}
+                        onChange={handleScenarioChange}
+                        options={scenarioSelectOptions}
+                        className="max-w-[280px]"
+                    />
+                </div>
                 <p className="text-[10.5px] font-ui text-[hsl(var(--text-2))] leading-relaxed">
-                    Comparison Lab currently compares primary-variant baselines. Scenario-aware comparison is a future feature.
+                    {isScenarioMode
+                        ? `Scenario mode · ${activeScenarioLabel} · Raw R`
+                        : "Comparing primary-variant baselines · Raw R"}
                 </p>
+                {hasPartialScenarioCoverage && (
+                    <div className="flex items-start gap-2 border border-[hsl(var(--warning)/0.35)] bg-[hsl(var(--warning)/0.06)] clip-bevel-sm px-2.5 py-1.5" data-testid="cmp-partial-coverage">
+                        <span className="text-[10.5px] leading-relaxed text-[hsl(var(--text-2))]">
+                            Partial coverage — {scenarioCoverage.present} of {scenarioCoverage.total} runs have {activeScenarioLabel}; missing runs are excluded from verdict/deltas.
+                        </span>
+                    </div>
+                )}
             </div>
 
             {/* Run selectors */}
             <div className="px-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
                 {ids.map((id, idx) => {
                     const p = PALETTE[idx % PALETTE.length];
-                    const isWinner = idx === winnerIdx && runs.length > 1;
+                    const isWinner = idx === winnerIdx && showWinner;
                     return (
                         <div key={idx} className={`relative clip-bevel p-[1px] ${isWinner ? "bg-gradient-to-br from-[hsl(var(--accent-primary))] to-[hsl(var(--accent-glow))]" : "bg-[hsl(var(--border-mid))]"}`}>
                             <div className="clip-bevel bg-[hsl(var(--panel))] px-3 py-2.5">
@@ -433,8 +630,28 @@ export default function ComparisonLab() {
                                 <NeonSelect testId={`cmp-run-${idx}`} value={id} onChange={(v) => setAt(idx, v)} options={importedRuns.map((r) => ({ value: r.id, label: getRunDisplayName(r) }))} className="w-full" />
                                 <div className="mt-2 flex items-center justify-between font-ui text-[11px]">
                                     <span className="text-[hsl(var(--text-2))]">{runs[idx]?.symbol} · {compactTimeframe(runs[idx]?.detectionTf)}</span>
-                                    <ColoredR value={runs[idx]?.netR || 0} />
+                                    <ColoredR value={(() => {
+                                        const sv = slotViews[idx];
+                                        return isScenarioMode && !sv?.missingScenario && sv?.analysisTrades?.length
+                                            ? netRFromTrades(sv.analysisTrades)
+                                            : (runs[idx]?.netR || 0);
+                                    })()} />
                                 </div>
+                                {/* 3C: per-slot scenario presence / missing chip */}
+                                {isScenarioMode && (() => {
+                                    const sv = slotViews[idx];
+                                    if (sv?.missingScenario) return (
+                                        <div className="mt-1 text-[10px] font-ui text-[hsl(var(--warning))] leading-snug">
+                                            ⚠ No {activeScenarioLabel} data — showing baseline
+                                        </div>
+                                    );
+                                    if (sv?.universe?.universeType === "scenario" && sv.scenarioTrades.length > 0) return (
+                                        <div className="mt-1">
+                                            <Pill tone="success">{sv.universe.label} · {sv.scenarioTrades.length} trades</Pill>
+                                        </div>
+                                    );
+                                    return null;
+                                })()}
                                 {runs[idx]?.id && (
                                     <Link
                                         to={`/runs/${encodeURIComponent(runs[idx].id)}`}
@@ -453,7 +670,30 @@ export default function ComparisonLab() {
             <div className="px-6 mt-4 grid grid-cols-2 md:grid-cols-4 gap-3">
                 {runs.slice(1).map((r, idx) => {
                     const p = PALETTE[(idx + 1) % PALETTE.length];
-                    const dNet = r.netR - baseline.netR;
+                    const slotIdx = idx + 1;
+                    // In scenario mode, a Δ is only meaningful when BOTH the compared
+                    // slot and the baseline slot have scenario data — otherwise we'd
+                    // subtract a scenario net from a baseline-fallback net.
+                    if (isScenarioMode && (!slotComparable(slotIdx) || !slotComparable(0))) {
+                        return (
+                            <MetricChip
+                                key={idx}
+                                label={`Δ Net R · ${p.short} − A`}
+                                value="—"
+                                sub={`No ${activeScenarioLabel} data for ${!slotComparable(0) ? "Run A" : getRunDisplayName(r)}`}
+                                tone="muted"
+                            />
+                        );
+                    }
+                    const svSlot = slotViews[slotIdx];
+                    const svBase = slotViews[0];
+                    const rNet = isScenarioMode && !svSlot?.missingScenario && svSlot?.analysisTrades?.length
+                        ? netRFromTrades(svSlot.analysisTrades)
+                        : r.netR;
+                    const baseNet = isScenarioMode && !svBase?.missingScenario && svBase?.analysisTrades?.length
+                        ? netRFromTrades(svBase.analysisTrades)
+                        : baseline.netR;
+                    const dNet = rNet - baseNet;
                     return (
                         <MetricChip
                             key={idx}
@@ -538,8 +778,20 @@ export default function ComparisonLab() {
                                                     </td>
                                                 );
                                             }
-                                            const v = def.key === "winRate" ? wrOf(r) : r[def.key];
-                                            const baseVal = def.key === "winRate" ? wrOf(baseline) : baseline[def.key];
+                                            // Scenario mode: Net R and Trades come from analysisTrades
+                                            // (scenario data, or baseline fallback when missing).
+                                            const { analysisTrades: slotAt, missingScenario: slotMs } = slotViews[idx] || {};
+                                            const { analysisTrades: baseAt, missingScenario: baseMs } = slotViews[0] || {};
+                                            const slotHasTrades = isScenarioMode && !slotMs && (slotAt?.length || 0) > 0;
+                                            const baseHasTrades = isScenarioMode && !baseMs && (baseAt?.length || 0) > 0;
+                                            const v = def.key === "winRate" ? wrOf(r)
+                                                : slotHasTrades && def.key === "netR"   ? netRFromTrades(slotAt)
+                                                : slotHasTrades && def.key === "trades" ? slotAt.length
+                                                : r[def.key];
+                                            const baseVal = def.key === "winRate" ? wrOf(baseline)
+                                                : baseHasTrades && def.key === "netR"   ? netRFromTrades(baseAt)
+                                                : baseHasTrades && def.key === "trades" ? baseAt.length
+                                                : baseline[def.key];
                                             const tone = isBaseline || def.posIfGreater == null
                                                 ? "text-white"
                                                 : (def.posIfGreater ? (v > baseVal ? "text-[hsl(var(--success))]" : v < baseVal ? "text-[hsl(var(--danger))]" : "text-white")
@@ -558,7 +810,7 @@ export default function ComparisonLab() {
                             </tbody>
                         </table>
                     </div>
-                    {runs.length > 1 && (
+                    {runs.length > 1 && showWinner && (
                         <div className="mt-3 flex flex-col gap-1">
                             <div className="inline-flex items-center gap-2 px-2.5 py-1 border border-[hsl(var(--accent-primary)/0.5)] clip-bevel-sm bg-[hsl(var(--accent-primary)/0.07)] self-start">
                                 <Trophy className="w-3.5 h-3.5 text-[hsl(var(--accent-primary))]" />
