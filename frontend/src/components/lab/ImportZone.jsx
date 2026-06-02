@@ -111,10 +111,10 @@ export function ImportZone() {
                 <div className="font-display text-[14px] mt-2 text-white">
                     {busy ? "Importing…" : "Drop run files here or click to select a full run folder"}
                 </div>
-                <div className="text-[10.5px] font-mono uppercase tracking-wider text-muted-lab mt-1">
+                <div className="text-[10.5px] font-ui uppercase tracking-wider text-muted-lab mt-1">
                     REQUIRED · config.json · summary.json · order_blocks.csv · trades_*.csv
                 </div>
-                <div className="text-[10px] font-mono uppercase tracking-wider text-muted-lab mt-0.5">
+                <div className="text-[10px] font-ui uppercase tracking-wider text-muted-lab mt-0.5">
                     OPTIONAL · candles.csv · alternative trades variants · folder picker supported
                 </div>
                 <input
@@ -134,7 +134,7 @@ export function ImportZone() {
             {ds.persistWarning && (
                 <div className="flex items-start gap-2 px-3 py-2 border border-[hsl(var(--warning)/0.4)] bg-[hsl(var(--warning)/0.07)] clip-bevel-sm" data-testid="import-persist-warning">
                     <ImageOff className="w-3.5 h-3.5 text-[hsl(var(--warning))] shrink-0 mt-0.5" />
-                    <span className="text-[11px] font-mono text-[hsl(var(--warning))]">{ds.persistWarning}</span>
+                    <span className="text-[11px] font-ui text-[hsl(var(--warning))]">{ds.persistWarning}</span>
                 </div>
             )}
 
@@ -142,19 +142,19 @@ export function ImportZone() {
                 <div className="px-3 py-2 border border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.07)] clip-bevel-sm" data-testid="import-duplicate">
                     <div className="flex items-center gap-2">
                         <AlertCircle className="w-3.5 h-3.5 text-[hsl(var(--warning))]" />
-                        <span className="text-[11px] font-mono uppercase tracking-wider text-[hsl(var(--warning))]">Duplicate run ID</span>
+                        <span className="text-[11px] font-ui uppercase tracking-wider text-[hsl(var(--warning))]">Duplicate run ID</span>
                     </div>
-                    <div className="mt-1.5 text-[11px] font-mono text-[hsl(var(--text-2))]">
+                    <div className="mt-1.5 text-[11px] font-ui text-[hsl(var(--text-2))]">
                         Run <span className="text-white">{pendingDuplicate.bundle.id}</span> already exists.
                     </div>
                     <div className="mt-2 flex flex-wrap gap-1.5">
-                        <button onClick={replaceDuplicate} className="px-2.5 py-1 text-[10.5px] font-mono uppercase tracking-wider border border-[hsl(var(--warning)/0.55)] text-[hsl(var(--warning))] hover:text-white clip-bevel-sm">
+                        <button onClick={replaceDuplicate} className="px-2.5 py-1 text-[10.5px] font-ui uppercase tracking-wider border border-[hsl(var(--warning)/0.55)] text-[hsl(var(--warning))] hover:text-white clip-bevel-sm">
                             Replace
                         </button>
-                        <button onClick={renameDuplicate} className="px-2.5 py-1 text-[10.5px] font-mono uppercase tracking-wider border border-[hsl(var(--accent-primary)/0.55)] text-[hsl(var(--accent-primary))] hover:text-white clip-bevel-sm">
+                        <button onClick={renameDuplicate} className="px-2.5 py-1 text-[10.5px] font-ui uppercase tracking-wider border border-[hsl(var(--accent-primary)/0.55)] text-[hsl(var(--accent-primary))] hover:text-white clip-bevel-sm">
                             Rename
                         </button>
-                        <button onClick={cancelDuplicate} className="px-2.5 py-1 text-[10.5px] font-mono uppercase tracking-wider border border-[hsl(var(--border-mid))] text-muted-lab hover:text-white clip-bevel-sm">
+                        <button onClick={cancelDuplicate} className="px-2.5 py-1 text-[10.5px] font-ui uppercase tracking-wider border border-[hsl(var(--border-mid))] text-muted-lab hover:text-white clip-bevel-sm">
                             Cancel
                         </button>
                     </div>
@@ -166,20 +166,20 @@ export function ImportZone() {
                 <div className="px-3 py-2 border border-[hsl(var(--danger)/0.5)] bg-[hsl(var(--danger)/0.08)] clip-bevel-sm" data-testid="import-error">
                     <div className="flex items-center gap-2">
                         <AlertCircle className="w-3.5 h-3.5 text-[hsl(var(--danger))]" />
-                        <span className="text-[11px] font-mono uppercase tracking-wider text-[hsl(var(--danger))]">{error.title}</span>
+                        <span className="text-[11px] font-ui uppercase tracking-wider text-[hsl(var(--danger))]">{error.title}</span>
                         <button onClick={() => setError(null)} className="ml-auto text-[hsl(var(--danger))] hover:text-white"><X className="w-3.5 h-3.5" /></button>
                     </div>
                     {error.missing && (
-                        <div className="mt-1.5 text-[11px] font-mono text-[hsl(var(--text-2))]">
+                        <div className="mt-1.5 text-[11px] font-ui text-[hsl(var(--text-2))]">
                             Missing required: <span className="text-[hsl(var(--danger))]">{error.missing.join(", ")}</span>
                         </div>
                     )}
                     {error.validationErrors?.length > 0 && (
                         <IssueList issues={error.validationErrors} tone="danger" />
                     )}
-                    {error.message && <div className="mt-1.5 text-[11px] font-mono text-[hsl(var(--text-2))]">{error.message}</div>}
+                    {error.message && <div className="mt-1.5 text-[11px] font-ui text-[hsl(var(--text-2))]">{error.message}</div>}
                     {error.recognized?.length > 0 && (
-                        <div className="mt-1 text-[10.5px] font-mono text-muted-lab">
+                        <div className="mt-1 text-[10.5px] font-ui text-muted-lab">
                             Recognized: {error.recognized.map((r) => KIND_LABEL[r.kind] || r.kind).join(" · ")}
                         </div>
                     )}
@@ -190,7 +190,7 @@ export function ImportZone() {
                 <div className="px-3 py-2 border border-[hsl(var(--warning)/0.4)] bg-[hsl(var(--warning)/0.07)] clip-bevel-sm" data-testid="import-warnings">
                     <div className="flex items-center gap-2">
                         <AlertCircle className="w-3.5 h-3.5 text-[hsl(var(--warning))]" />
-                        <span className="text-[11px] font-mono uppercase tracking-wider text-[hsl(var(--warning))]">Import warnings</span>
+                        <span className="text-[11px] font-ui uppercase tracking-wider text-[hsl(var(--warning))]">Import warnings</span>
                     </div>
                     <IssueList issues={importWarnings} tone="warning" />
                 </div>
@@ -199,15 +199,15 @@ export function ImportZone() {
             {/* Recent import history */}
             {history.length > 0 && (
                 <div className="space-y-1">
-                    <div className="text-[10px] font-mono uppercase tracking-wider text-muted-lab">Recent imports</div>
+                    <div className="text-[10px] font-ui uppercase tracking-wider text-muted-lab">Recent imports</div>
                     {history.map((h, i) => (
                         <div key={i} className="flex items-center gap-2 px-2.5 py-1.5 border border-[hsl(var(--border-soft))] clip-bevel-sm bg-[hsl(var(--panel-2)/0.4)]" data-testid="import-history-item">
                             <CheckCircle2 className="w-3.5 h-3.5 text-[hsl(var(--success))]" />
-                            <span className="font-mono text-[11px] text-white">{h.runId}</span>
-                            <span className="font-mono text-[10px] text-muted-lab">
+                            <span className="font-code text-[11px] text-white">{h.runId}</span>
+                            <span className="font-ui text-[10px] text-muted-lab">
                                 · {h.trades} trades · {h.obs} OBs {h.hasCandles ? `· ${h.candles} candles` : "· no candles"} {h.warnings ? `· ${h.warnings} warnings` : ""}
                             </span>
-                            <span className="ml-auto inline-flex items-center text-[9.5px] font-mono uppercase tracking-wider px-1.5 py-[1px] border border-[hsl(var(--accent-primary)/0.5)] text-[hsl(var(--accent-primary))] clip-bevel-sm">
+                            <span className="ml-auto inline-flex items-center text-[9.5px] font-ui uppercase tracking-wider px-1.5 py-[1px] border border-[hsl(var(--accent-primary)/0.5)] text-[hsl(var(--accent-primary))] clip-bevel-sm">
                                 {h.variant}
                             </span>
                         </div>
@@ -218,21 +218,21 @@ export function ImportZone() {
             {/* Persisted runs list */}
             <div className="mt-3">
                 <div className="flex items-center justify-between mb-1.5">
-                    <div className="text-[10px] font-mono uppercase tracking-wider text-muted-lab">
+                    <div className="text-[10px] font-ui uppercase tracking-wider text-muted-lab">
                         Imported runs ({importedRuns.length})
                     </div>
                     {importedRuns.length > 0 && (
                         <button
                             data-testid="import-clear-all"
                             onClick={() => { if (window.confirm("Remove all imported runs?")) clearAllRuns(); }}
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[10.5px] font-mono uppercase tracking-wider border border-[hsl(var(--border-mid))] hover:border-[hsl(var(--danger))] hover:text-[hsl(var(--danger))] clip-bevel-sm"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[10.5px] font-ui uppercase tracking-wider border border-[hsl(var(--border-mid))] hover:border-[hsl(var(--danger))] hover:text-[hsl(var(--danger))] clip-bevel-sm"
                         >
                             <Trash2 className="w-3 h-3" /> Clear all
                         </button>
                     )}
                 </div>
                 {importedRuns.length === 0 ? (
-                    <div className="px-3 py-2 text-[11px] font-mono text-muted-lab border border-dashed border-[hsl(var(--border-soft))] clip-bevel-sm">
+                    <div className="px-3 py-2 text-[11px] font-ui text-muted-lab border border-dashed border-[hsl(var(--border-soft))] clip-bevel-sm">
                         No imported runs yet — drop a bundle above to begin.
                     </div>
                 ) : (
@@ -245,15 +245,15 @@ export function ImportZone() {
                                     isActive ? "border-[hsl(var(--accent-primary)/0.6)]" : "border-[hsl(var(--border-soft))]",
                                 )}>
                                     <Layers className="w-3.5 h-3.5 text-[hsl(var(--accent-secondary))] shrink-0" />
-                                    <span className="font-mono text-[11px] text-white truncate">{r.id}</span>
-                                    <span className="font-mono text-[10px] text-muted-lab whitespace-nowrap">
+                                    <span className="font-code text-[11px] text-white truncate">{r.id}</span>
+                                    <span className="font-ui text-[10px] text-muted-lab whitespace-nowrap">
                                         · {r.summary.trades} trades · RR {formatRR(r.summary.rr)}
                                     </span>
                                     {r.candlesDroppedForStorage && (
-                                        <span className="font-mono text-[9.5px] text-[hsl(var(--warning))] uppercase tracking-wider">candles · session-only</span>
+                                        <span className="font-ui text-[9.5px] text-[hsl(var(--warning))] uppercase tracking-wider">candles · session-only</span>
                                     )}
                                     {isActive && (
-                                        <span className="inline-flex items-center text-[9.5px] font-mono uppercase tracking-wider px-1.5 py-[1px] border border-[hsl(var(--accent-primary)/0.5)] text-[hsl(var(--accent-primary))] clip-bevel-sm">
+                                        <span className="inline-flex items-center text-[9.5px] font-ui uppercase tracking-wider px-1.5 py-[1px] border border-[hsl(var(--accent-primary)/0.5)] text-[hsl(var(--accent-primary))] clip-bevel-sm">
                                             Active
                                         </span>
                                     )}
@@ -284,12 +284,12 @@ function IssueList({ issues, tone }) {
     return (
         <div className="mt-1.5 space-y-0.5">
             {issues.slice(0, 8).map((issue, i) => (
-                <div key={`${issue.file}-${issue.field}-${i}`} className="text-[10.5px] font-mono text-[hsl(var(--text-2))]">
+                <div key={`${issue.file}-${issue.field}-${i}`} className="text-[10.5px] font-ui text-[hsl(var(--text-2))]">
                     <span className={color}>{issue.file}</span> · {issue.field}: {issue.message}
                 </div>
             ))}
             {issues.length > 8 && (
-                <div className="text-[10.5px] font-mono text-muted-lab">+{issues.length - 8} more</div>
+                <div className="text-[10.5px] font-ui text-muted-lab">+{issues.length - 8} more</div>
             )}
         </div>
     );

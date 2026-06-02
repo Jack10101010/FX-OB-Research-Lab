@@ -1,6 +1,8 @@
 // Run bundle ingestion for FX-OB-Backtester output.
 // A bundle = config.json + summary.json + order_blocks.csv + trades_*.csv (+ optional candles.csv).
 
+import { summarizeTradeClassifications } from "./tradeClassification";
+
 // ─────────────────────── CSV utilities ───────────────────────
 
 export function parseCSV(text) {
@@ -368,10 +370,49 @@ export function parseTradesCSV(text) {
             protection_trigger_time: String(pick(r, "protection_trigger_time") || ""),
             protection_trigger_penetration_pct: numOrNull(pick(r, "protection_trigger_penetration_pct")),
             entry_model: String(pick(r, "entry_model") || ""),
+            entry_model_key: String(pick(r, "entry_model_key", "entryModelKey") || ""),
+            entryFamily: String(pick(r, "entry_family", "entryFamily") || ""),
+            entry_family: String(pick(r, "entry_family", "entryFamily") || ""),
             entry_threshold_pct: numOrNull(pick(r, "entry_threshold_pct")),
             planned_entry_price: numOrNull(pick(r, "planned_entry_price")),
             actual_entry_price: numOrNull(pick(r, "actual_entry_price")),
             entry_model_filled: boolOrNull(pick(r, "entry_model_filled")),
+            trigger_penetration_pct: numOrNull(pick(r, "trigger_penetration_pct", "triggerPenetrationPct")),
+            triggerPenetrationPct: numOrNull(pick(r, "trigger_penetration_pct", "triggerPenetrationPct")),
+            trigger_time: String(pick(r, "trigger_time", "triggerTime") || ""),
+            triggerTime: String(pick(r, "trigger_time", "triggerTime") || ""),
+            trigger_candle_index: numOrNull(pick(r, "trigger_candle_index", "triggerCandleIndex")),
+            triggerCandleIndex: numOrNull(pick(r, "trigger_candle_index", "triggerCandleIndex")),
+            armed_at: String(pick(r, "armed_at", "armedAt") || ""),
+            armedAt: String(pick(r, "armed_at", "armedAt") || ""),
+            armed_on_trigger_candle: boolOrNull(pick(r, "armed_on_trigger_candle", "armedOnTriggerCandle", "armed_same_candle", "armedSameCandle")),
+            armedOnTriggerCandle: boolOrNull(pick(r, "armed_on_trigger_candle", "armedOnTriggerCandle", "armed_same_candle", "armedSameCandle")),
+            armed_same_candle: boolOrNull(pick(r, "armed_same_candle", "armedSameCandle", "armed_on_trigger_candle", "armedOnTriggerCandle")),
+            armedSameCandle: boolOrNull(pick(r, "armed_same_candle", "armedSameCandle", "armed_on_trigger_candle", "armedOnTriggerCandle")),
+            filled_on_trigger_candle: boolOrNull(pick(r, "filled_on_trigger_candle", "filledOnTriggerCandle")),
+            filledOnTriggerCandle: boolOrNull(pick(r, "filled_on_trigger_candle", "filledOnTriggerCandle")),
+            same_candle_entry_allowed: boolOrNull(pick(r, "same_candle_entry_allowed", "sameCandleEntryAllowed")),
+            sameCandleEntryAllowed: boolOrNull(pick(r, "same_candle_entry_allowed", "sameCandleEntryAllowed")),
+            entry_level_pct: numOrNull(pick(r, "entry_level_pct", "entryLevelPct")),
+            entryLevelPct: numOrNull(pick(r, "entry_level_pct", "entryLevelPct")),
+            edge_revisit_time: String(pick(r, "edge_revisit_time", "edgeRevisitTime") || ""),
+            edgeRevisitTime: String(pick(r, "edge_revisit_time", "edgeRevisitTime") || ""),
+            trigger_to_entry_minutes: numOrNull(pick(r, "trigger_to_entry_minutes", "triggerToEntryMinutes")),
+            triggerToEntryMinutes: numOrNull(pick(r, "trigger_to_entry_minutes", "triggerToEntryMinutes")),
+            cancelled_before_entry: boolOrNull(pick(r, "cancelled_before_entry", "cancelledBeforeEntry")),
+            cancelledBeforeEntry: boolOrNull(pick(r, "cancelled_before_entry", "cancelledBeforeEntry")),
+            cancel_reason: String(pick(r, "cancel_reason", "cancelReason") || ""),
+            cancelReason: String(pick(r, "cancel_reason", "cancelReason") || ""),
+            tapped_before_trigger: boolOrNull(pick(r, "tapped_before_trigger", "tappedBeforeTrigger")),
+            tappedBeforeTrigger: boolOrNull(pick(r, "tapped_before_trigger", "tappedBeforeTrigger")),
+            tapped_time: String(pick(r, "tapped_time", "tappedTime") || ""),
+            tappedTime: String(pick(r, "tapped_time", "tappedTime") || ""),
+            tapped_candle_index: numOrNull(pick(r, "tapped_candle_index", "tappedCandleIndex")),
+            tappedCandleIndex: numOrNull(pick(r, "tapped_candle_index", "tappedCandleIndex")),
+            retrace_cancel_time: String(pick(r, "retrace_cancel_time", "retraceCancelTime") || ""),
+            retraceCancelTime: String(pick(r, "retrace_cancel_time", "retraceCancelTime") || ""),
+            retrace_cancel_distance_pips: numOrNull(pick(r, "retrace_cancel_distance_pips", "retraceCancelDistancePips")),
+            retraceCancelDistancePips: numOrNull(pick(r, "retrace_cancel_distance_pips", "retraceCancelDistancePips")),
             missed_trade: boolOrNull(pick(r, "missed_trade")),
             missed_reason: String(pick(r, "missed_reason") || ""),
             missed_session: String(pick(r, "missed_session") || ""),
@@ -650,7 +691,14 @@ function normalizeEntryModeKey(value) {
         .replace(/[^a-z0-9]+/g, "_")
         .replace(/_+/g, "_")
         .replace(/^_+|_+$/g, "");
-    return normalized.replace(/^entry_penetration_(\d+)$/, "entry_penetration_$1p0");
+    return normalized
+        // Penetration: integer threshold → canonical p-form (e.g. 25 → 25p0).
+        .replace(/^entry_penetration_(\d+)$/, "entry_penetration_$1p0")
+        // Triggered Edge: integer threshold → canonical p-form, preserving the
+        // optional _same/_next fill-mode suffix so the resolver's canonical keys
+        // (entry_triggered_edge_25p0[_same|_next]) match. Already-p-form keys
+        // (e.g. 25p0, 25p0_next) don't match \d+ here and pass through unchanged.
+        .replace(/^entry_triggered_edge_(\d+)(_same|_next)?$/, "entry_triggered_edge_$1p0$2");
 }
 
 function newsDateRange(events) {
@@ -1015,8 +1063,16 @@ export async function ingestRunBundle(fileList) {
     const entryResultsSummary = sm.entry_results || sm.entryResults || {};
     const id = String(sm.id || cfg.id || sm.run_id || cfg.run_id || `imported_${Date.now()}`);
     const originalRunId = id;
-    const wins = primaryTrades.filter((t) => t.outcome === "Win").length;
-    const losses = primaryTrades.length - wins;
+    // Canonical roll-up: never count INVALID / UNFILLED / SESSION_FILTERED /
+    // NEWS_TOUCH_CANCEL / NEWS_BLACKOUT rows as losses. The old code was
+    // `losses = primaryTrades.length - wins`, which silently bucketed every
+    // non-Win outcome (including all the excluded setups above) into losses
+    // and produced summary.losses values like 26 on a baseline with only
+    // 18 real losses. That summary then leaked into every page that read
+    // summary.losses / run.losses as a fallback.
+    const primaryRollup = summarizeTradeClassifications(primaryTrades);
+    const wins = primaryRollup.wins;
+    const losses = primaryRollup.losses;
     const netR = primaryTrades.reduce((s, t) => s + (Number(t.r) || 0), 0);
     const integrity = buildIntegrity({ collected, primaryTrades, netR, primaryVariant });
     const sourceFiles = collected.recognized.map((file) => file.name);
@@ -1035,7 +1091,11 @@ export async function ingestRunBundle(fileList) {
         trades:       primaryTrades.length,
         wins,
         losses,
-        winRate:      Number((sm.win_rate ?? sm.winRate ?? (primaryTrades.length ? (wins / primaryTrades.length) * 100 : 0)).toFixed(1)),
+        // Prefer backend summary.win_rate (= wins / (wins+losses+protection_exits)),
+        // which is already canonical. Fallback uses the canonical roll-up
+        // denominator (wins+losses) instead of primaryTrades.length, which
+        // would dilute the rate with UNFILLED / INVALID rows.
+        winRate:      Number((sm.win_rate ?? sm.winRate ?? primaryRollup.winRate ?? 0).toFixed(1)),
         netR:         Number((sm.net_r ?? sm.netR ?? netR).toFixed(1)),
         validation:   Number(sm.validation ?? 100),
         integrity,
