@@ -296,6 +296,9 @@ export default function RunDetail() {
     const [ledgerSessionFilter,   setLedgerSessionFilter]   = React.useState("All");
     const [ledgerDirectionFilter, setLedgerDirectionFilter] = React.useState("All");
     const [ledgerSearch,          setLedgerSearch]          = React.useState("");
+    const [activeResultsTab,      setActiveResultsTab]      = React.useState("config");
+    const [resultsLayoutMode,     setResultsLayoutMode]     = React.useState("tabbed");
+    const [runDetailSettingsOpen, setRunDetailSettingsOpen] = React.useState(false);
     // RB-8a/8b: account config is the single store slice, read via the lens.
     const accountSettings = lens.accountSettings;
     const [fundingSettings, setFundingSettings] = React.useState(loadFundingChallengeSettings);
@@ -1031,6 +1034,20 @@ export default function RunDetail() {
         return insights.slice(0, 3);
     }, [outcomeSummary, R_DIST_V2, directionalOutcomeStats]);
 
+    const resultsTabs = React.useMemo(() => ([
+        { id: "config", label: "Config" },
+        { id: "trades", label: "Trades" },
+        { id: "ob-stats", label: "OB Stats" },
+        { id: "outcomes", label: "Outcomes" },
+        { id: "monthly", label: "Monthly" },
+        { id: "baseline-splits", label: "Baseline Splits" },
+        { id: "entry-timing", label: "Entry Timing" },
+    ]), []);
+    const currentResultsTab = resultsTabs.some((tab) => tab.id === activeResultsTab)
+        ? activeResultsTab
+        : resultsTabs[0].id;
+    const showResultsSection = (tabId) => resultsLayoutMode === "stacked" || currentResultsTab === tabId;
+
     return (
         <div className="pb-12">
             <LabRunHero
@@ -1065,6 +1082,39 @@ export default function RunDetail() {
                         </Link>
                         <Link to="/strategy-map"><NeonButton icon={MapIcon} tone="primary">Open Strategy Map</NeonButton></Link>
                         <Link to="/comparison"><NeonButton icon={GitCompareArrows} tone="ghost">Compare Run</NeonButton></Link>
+                        <div className="relative">
+                            <NeonButton
+                                icon={Edit3}
+                                tone="ghost"
+                                onClick={() => setRunDetailSettingsOpen((value) => !value)}
+                            >
+                                Settings
+                            </NeonButton>
+                            {runDetailSettingsOpen && (
+                                <div className="absolute right-0 top-full z-40 mt-2 w-[280px] border border-[hsl(var(--border-soft)/0.9)] bg-[hsl(var(--panel)/0.98)] shadow-[0_18px_60px_hsl(var(--bg)/0.45)] clip-bevel-sm p-3">
+                                    <div className="text-[10px] font-ui uppercase tracking-widest text-muted-lab">Run Detail Layout</div>
+                                    <div className="mt-3 flex flex-col gap-2">
+                                        <FilterToggle
+                                            active={resultsLayoutMode === "tabbed"}
+                                            inactiveBorder="mid"
+                                            onClick={() => setResultsLayoutMode("tabbed")}
+                                        >
+                                            Tabbed view
+                                        </FilterToggle>
+                                        <FilterToggle
+                                            active={resultsLayoutMode === "stacked"}
+                                            inactiveBorder="mid"
+                                            onClick={() => setResultsLayoutMode("stacked")}
+                                        >
+                                            Stacked view
+                                        </FilterToggle>
+                                    </div>
+                                    <div className="mt-3 text-[10.5px] leading-relaxed text-muted-lab">
+                                        Tabbed view keeps results below the equity curve in one full-width host. Stacked view restores the original long page.
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                     </>
                 )}
             />
@@ -1529,13 +1579,20 @@ export default function RunDetail() {
                     )}
                 </NeonPanel>
 
-                <SessionSplit trades={tradesForRun} />
+                <ResultsTabFrame
+                    mode={resultsLayoutMode}
+                    tabs={resultsTabs}
+                    activeTab={currentResultsTab}
+                    onTabChange={setActiveResultsTab}
+                >
+                {showResultsSection("baseline-splits") && <SessionSplit trades={tradesForRun} />}
 
-                <NeonPanel title="Configuration">
+                {showResultsSection("config") && <NeonPanel className="xl:col-span-3" title="Configuration" action={<Pill tone="muted">Compact</Pill>}>
+                    <div className="space-y-3">
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
                     {/* ── Group A — Market / Detection ─────────────────────── */}
-                    <div className="mb-4">
-                        <div className="text-[9px] font-ui uppercase tracking-widest text-muted-lab mb-2 opacity-60">Market · Detection</div>
-                        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 font-ui text-[11px]">
+                    <ConfigGroup title="Market & Detection" paddingClassName="px-3 pt-3 pb-7">
+                        <div className="grid grid-cols-2 gap-x-3 gap-y-1 font-ui text-[11px]">
                             <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Symbol</div>
                             <div className="text-right text-white font-semibold">{runSymbol}</div>
                             <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Detection TF</div>
@@ -1567,17 +1624,12 @@ export default function RunDetail() {
                                     return <span className={`px-1.5 py-0.5 text-[9px] font-ui uppercase tracking-wider border ${cls}`}>{v}</span>;
                                 })()}
                             </div>
-                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Swing</div>
-                            <div className="text-right text-muted-lab text-[10.5px]">{runData?.config?.swing_length ?? "—"}</div>
-                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">OB Filter</div>
-                            <div className="text-right text-muted-lab text-[10.5px]">{runData?.config?.ob_filter ?? "—"}</div>
                         </div>
-                    </div>
+                    </ConfigGroup>
 
                     {/* ── Group B — Execution / Risk ───────────────────────── */}
-                    <div className="mb-4">
-                        <div className="text-[9px] font-ui uppercase tracking-widest text-muted-lab mb-2 opacity-60">Execution · Risk</div>
-                        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 font-ui text-[11px]">
+                    <ConfigGroup title="Execution & Risk" paddingClassName="px-3 pt-3 pb-[36px]">
+                        <div className="grid grid-cols-2 gap-x-3 gap-y-1 font-ui text-[11px]">
                             <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">RR</div>
                             <div className="text-right text-[hsl(var(--accent-primary))] font-semibold">{Number.isFinite(runRr) ? `${runRr.toFixed(1)}×` : "—"}</div>
                             <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Entry Depth</div>
@@ -1590,16 +1642,12 @@ export default function RunDetail() {
                             <div className="text-right text-white">{formatTickValue(verifyLimitTicks)}</div>
                             <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Execution</div>
                             <div className="text-right text-white">{variantLabel(run.executionMode || runData?.config?.execution_mode)}</div>
-                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Conflict</div>
-                            <div className="text-right text-muted-lab text-[10.5px]">{runData?.config?.position_conflict ?? runData?.config?.conflict ?? "—"}</div>
-                            {(runData?.config?.position_conflict === "block_opposite" || runData?.config?.conflict === "block_opposite") && (
-                                <>
-                                    <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Cancel Action</div>
-                                    <div className="text-right text-muted-lab text-[10.5px]">{runData?.config?.cancel_action ?? "—"}</div>
-                                </>
-                            )}
                         </div>
+                    </ConfigGroup>
                     </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-stretch">
+                    <div className="flex h-full flex-col justify-between gap-3">
 
                     {/* ── Group C — Filters (collapse when all permissive) ──── */}
                     {(() => {
@@ -1613,16 +1661,14 @@ export default function RunDetail() {
                             && (!detectionSession || ["any","Any",""].includes(String(detectionSession).trim()));
                         if (allPermissive) {
                             return (
-                                <div className="mb-4">
-                                    <div className="text-[9px] font-ui uppercase tracking-widest text-muted-lab mb-1 opacity-60">Filters</div>
+                                <ConfigGroup title="Session Filters" paddingClassName="px-3 pt-3 pb-14">
                                     <div className="font-ui text-[10px] text-muted-lab">Session filter: Off · All sessions eligible</div>
-                                </div>
+                                </ConfigGroup>
                             );
                         }
                         return (
-                            <div className="mb-4">
-                                <div className="text-[9px] font-ui uppercase tracking-widest text-muted-lab mb-2 opacity-60">Filters</div>
-                                <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 font-ui text-[11px]">
+                            <ConfigGroup title="Session Filters" paddingClassName="px-3 pt-3 pb-14">
+                                <div className="grid grid-cols-2 gap-x-3 gap-y-1 font-ui text-[11px]">
                                     <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Session Filter</div>
                                     <div className="text-right">
                                         <span className={`px-1.5 py-0.5 text-[9px] font-ui uppercase tracking-wider border ${sfEnabled ? "border-[hsl(var(--accent-primary)/0.4)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.08)]" : "border-[hsl(var(--border-soft))] text-muted-lab"}`}>
@@ -1652,9 +1698,27 @@ export default function RunDetail() {
                                         </>
                                     )}
                                 </div>
-                            </div>
+                            </ConfigGroup>
                         );
                     })()}
+
+                    <ConfigGroup title="Advanced / Misc">
+                        <div className="grid grid-cols-2 gap-x-3 gap-y-1 font-ui text-[11px]">
+                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Swing</div>
+                            <div className="text-right text-muted-lab text-[10.5px]">{runData?.config?.swing_length ?? "—"}</div>
+                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">OB Filter</div>
+                            <div className="text-right text-muted-lab text-[10.5px]">{runData?.config?.ob_filter ?? "—"}</div>
+                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Conflict</div>
+                            <div className="text-right text-muted-lab text-[10.5px]">{runData?.config?.position_conflict ?? runData?.config?.conflict ?? "—"}</div>
+                            {(runData?.config?.position_conflict === "block_opposite" || runData?.config?.conflict === "block_opposite") && (
+                                <>
+                                    <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Cancel Action</div>
+                                    <div className="text-right text-muted-lab text-[10.5px]">{runData?.config?.cancel_action ?? "—"}</div>
+                                </>
+                            )}
+                        </div>
+                    </ConfigGroup>
+                    </div>
 
                     {/* ── Group D — News / Costs (collapse when news off) ───── */}
                     {(() => {
@@ -1666,15 +1730,14 @@ export default function RunDetail() {
                         const hasAnyCost = [spread, slippage, commission].some((v) => v != null && Number(v) !== 0);
                         if (!newsOn) {
                             return (
-                                <div>
-                                    <div className="text-[9px] font-ui uppercase tracking-widest text-muted-lab mb-1 opacity-60">News · Costs</div>
+                                <ConfigGroup title="News & Costs">
                                     <div className="font-ui text-[10px] text-muted-lab">
                                         {"News protection: Off"}
                                         {hasAnyCost
                                             ? ` · Spread ${spread ?? "—"} · Slip ${slippage ?? "—"} · Comm ${commission != null ? `${commission}R` : "—"}`
                                             : " · No cost model applied"}
                                     </div>
-                                </div>
+                                </ConfigGroup>
                             );
                         }
                         const mBefore  = cfg.news_blackout_minutes_before;
@@ -1685,9 +1748,8 @@ export default function RunDetail() {
                         const flatAct  = cfg.news_flatten_active_trades;
                         const flatLead = cfg.news_flatten_minutes_before_blackout;
                         return (
-                            <div>
-                                <div className="text-[9px] font-ui uppercase tracking-widest text-muted-lab mb-2 opacity-60">News · Costs</div>
-                                <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 font-ui text-[11px]">
+                            <ConfigGroup title="News & Costs">
+                                <div className="grid grid-cols-2 gap-x-3 gap-y-1 font-ui text-[11px]">
                                     <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">News Blackout</div>
                                     <div className="text-right">
                                         <span className="px-1.5 py-0.5 text-[9px] font-ui uppercase tracking-wider border border-[hsl(var(--accent-primary)/0.4)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.08)]">✓ On</span>
@@ -1757,12 +1819,14 @@ export default function RunDetail() {
                                         <div className="font-ui text-[10px] text-muted-lab">No cost model applied</div>
                                     )}
                                 </div>
-                            </div>
+                            </ConfigGroup>
                         );
                     })()}
-                </NeonPanel>
+                    </div>
+                    </div>
+                </NeonPanel>}
 
-                <NeonPanel
+                {showResultsSection("trades") && <NeonPanel
                     className="xl:col-span-2"
                     title="Trade Ledger"
                     action={
@@ -1831,9 +1895,9 @@ export default function RunDetail() {
                         ]}
                         rows={filteredLedgerRows}
                     />
-                </NeonPanel>
+                </NeonPanel>}
 
-                <NeonPanel title="Order Block Stats">
+                {showResultsSection("ob-stats") && <NeonPanel title="Order Block Stats">
                     {obStats.total === 0 ? (
                         <div className="py-6 text-center font-ui text-[11px] text-muted-lab">
                             {runData ? "No order block data in this run." : "Import a run to see order block stats."}
@@ -2023,9 +2087,9 @@ export default function RunDetail() {
 
                         </div>
                     )}
-                </NeonPanel>
+                </NeonPanel>}
 
-                <NeonPanel className="xl:col-span-2" title="Outcome Distribution">
+                {showResultsSection("outcomes") && <NeonPanel className="xl:col-span-2" title="Outcome Distribution">
                     {!outcomeSummary || outcomeSummary.total === 0 ? (
                         <div className="py-6 text-center font-ui text-[11px] text-muted-lab">
                             No trade outcome data available.
@@ -2163,9 +2227,9 @@ export default function RunDetail() {
                             </div>
                         </div>
                     )}
-                </NeonPanel>
+                </NeonPanel>}
 
-                <NeonPanel className="xl:col-span-3" title="Monthly Performance (Net R)">
+                {showResultsSection("monthly") && <NeonPanel className="xl:col-span-3" title="Monthly Performance (Net R)">
                     {MONTHLY.length > 0 ? (
                         <div style={{ width: "100%", height: 200 }}>
                             <ResponsiveContainer>
@@ -2185,12 +2249,56 @@ export default function RunDetail() {
                             Monthly chart will populate when trades with entry timestamps are available.
                         </div>
                     )}
-                </NeonPanel>
+                </NeonPanel>}
 
-                <SessionMatrix trades={tradesForRun} />
-                <TimeOfDayHeatmap trades={tradesForRun} />
+                {showResultsSection("entry-timing") && (
+                    <>
+                        <SessionMatrix trades={tradesForRun} />
+                        <TimeOfDayHeatmap trades={tradesForRun} />
+                    </>
+                )}
+                </ResultsTabFrame>
             </div>
         </div>
+    );
+}
+
+function ConfigGroup({ title, children, paddingClassName = "p-3" }) {
+    return (
+        <div className={`clip-bevel-sm border border-[hsl(var(--border-soft)/0.65)] bg-[hsl(var(--panel-2)/0.28)] ${paddingClassName}`}>
+            <div className="mb-2 text-[10px] font-ui uppercase tracking-widest text-[hsl(var(--text-2))]">
+                {title}
+            </div>
+            {children}
+        </div>
+    );
+}
+
+function ResultsTabFrame({ mode, tabs, activeTab, onTabChange, children }) {
+    if (mode === "stacked") return <>{children}</>;
+    const activeLabel = tabs.find((tab) => tab.id === activeTab)?.label || "Results";
+    return (
+        <NeonPanel
+            className="xl:col-span-3"
+            title="Run Results"
+            action={<Pill tone="primary">{activeLabel}</Pill>}
+        >
+            <div className="flex flex-wrap items-center gap-1.5 border-b border-[hsl(var(--border-soft)/0.55)] pb-3">
+                {tabs.map((tab) => (
+                    <FilterToggle
+                        key={tab.id}
+                        active={activeTab === tab.id}
+                        inactiveBorder="mid"
+                        onClick={() => onTabChange(tab.id)}
+                    >
+                        {tab.label}
+                    </FilterToggle>
+                ))}
+            </div>
+            <div className="mt-4 space-y-4">
+                {children}
+            </div>
+        </NeonPanel>
     );
 }
 
