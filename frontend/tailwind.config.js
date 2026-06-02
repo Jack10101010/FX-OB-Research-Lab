@@ -5,8 +5,11 @@ module.exports = {
     theme: {
         extend: {
             fontFamily: {
-                display: ['"Space Grotesk"', 'system-ui', 'sans-serif'],
-                mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+                ui:      ['"IBM Plex Sans"', 'Inter', 'system-ui', 'sans-serif'],
+                display: ['"IBM Plex Sans"', 'Inter', 'system-ui', 'sans-serif'],
+                num:     ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+                mono:    ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+                code:    ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
             },
             fontSize: {
                 tiny: ['10px', { lineHeight: '1.2', letterSpacing: '0.08em' }],

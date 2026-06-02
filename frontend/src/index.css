@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -56,6 +56,11 @@
         --input: var(--border-soft);
         --ring: var(--accent-primary);
         --radius: 0.25rem;
+
+        /* Font family tokens */
+        --font-ui:      'IBM Plex Sans', 'Inter', system-ui, sans-serif;
+        --font-numeric: 'JetBrains Mono', ui-monospace, monospace;
+        --font-mono:    'JetBrains Mono', ui-monospace, monospace;
     }
 
     [data-theme="emerald"] {
@@ -197,7 +202,6 @@
     select,
     textarea,
     button,
-    table,
     pre,
     code,
     kbd,
@@ -219,26 +223,18 @@
 @layer utilities {
     .font-mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
     .font-display { font-family: 'IBM Plex Sans', 'Inter', system-ui, sans-serif; }
+    .font-ui   { font-family: var(--font-ui); }
+    .font-num  {
+        font-family: var(--font-numeric);
+        font-variant-numeric: tabular-nums;
+        font-feature-settings: "tnum" 1;
+    }
+    .font-code { font-family: var(--font-mono); }
     .control-value-font {
         font-family: 'IBM Plex Sans', 'Inter', system-ui, sans-serif;
         font-variant-numeric: normal;
         font-feature-settings: "zero" 0, "ss01" 0, "ss02" 0, "cv01" 0;
     }
-    button.font-mono,
-    button .font-mono,
-    input.font-mono,
-    select.font-mono,
-    textarea.font-mono,
-    table.font-mono,
-    table .font-mono,
-    label.font-mono,
-    label .font-mono,
-    .control-label.font-mono,
-    .panel-title-label.font-mono,
-    .clip-bevel-sm.font-mono {
-        font-family: 'IBM Plex Sans', 'Inter', system-ui, sans-serif;
-    }
-
     .control-label,
     label {
         font-size: 11.5px;

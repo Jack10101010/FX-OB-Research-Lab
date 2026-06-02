@@ -94,3 +94,7 @@ credentials.json
 *.pem
 *.key
 .credentials
+
+# Local audit exports / scratch validation
+RESEARCH_PLATFORM_AUDIT.pdf
+frontend/.sp*.cjs
