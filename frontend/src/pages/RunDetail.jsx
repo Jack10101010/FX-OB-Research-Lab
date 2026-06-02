@@ -32,6 +32,9 @@ import {
     outcomeToneForTrade,
 } from "@/data/tradeClassification";
 import { TradeSanityStrip } from "@/components/lab/TradeSanityStrip";
+// RW-2: scenario-aware result-view selector (display-only; analytics wired in RW-3).
+import { useTradeUniverse } from "@/data/useTradeUniverse";
+import { buildAvailableOptions, collectAllEntryKeys } from "@/data/tradeUniverse";
 
 // RB-8a/8b: account config lives in the global store (state.accountSettings),
 // read/written via useResultsLens (lens.accountSettings / lens.setAccountSettings)
@@ -225,7 +228,7 @@ function FundingPhaseCard({ title, phase, currency }) {
 }
 
 export default function RunDetail() {
-    const { ACTIVE_RUN, TRADES, RUNS, PROJECTS, getRunData, ACTIVE_TRADE_VARIANT, AVAILABLE_TRADE_VARIANTS } = useDataset();
+    const { ACTIVE_RUN, TRADES, RUNS, PROJECTS, getRunData, ACTIVE_TRADE_VARIANT, AVAILABLE_TRADE_VARIANTS, SCENARIO } = useDataset();
     // RB-8b: basis + account config consumed through the canonical lens hook.
     const lens = useResultsLens();
     const params = useParams();
@@ -234,6 +237,56 @@ export default function RunDetail() {
     const run = RUNS.find((r) => r.id === runId) || ACTIVE_RUN;
     // Per-run lookup: imported bundles carry their own trades + equity curve.
     const runData = getRunData(runId);
+
+    // ── Result View state ────────────────────────────────────────────────────
+    // Isolated from the global SCENARIO so a stale Strategy Map selection for
+    // a different run never corrupts Run Workspace. Bootstraps from the global
+    // scenario only when it explicitly targets this run.
+    const [resultView, setResultView] = React.useState(() => {
+        if (SCENARIO?.runId === runId && SCENARIO?.family && SCENARIO.family !== "baseline") {
+            return { family: SCENARIO.family, threshold: SCENARIO.threshold, fillMode: SCENARIO.fillMode };
+        }
+        return { family: "baseline", threshold: null, fillMode: null };
+    });
+    // Reset to baseline whenever the user switches to a different run.
+    React.useEffect(() => {
+        setResultView({ family: "baseline", threshold: null, fillMode: null });
+    }, [runId]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Resolve the selected universe. Drives selector labels, metadata, warnings,
+    // and — via displayTrades — all analytics sections (KPIs, equity, ledger).
+    const universe = useTradeUniverse(runId, resultView);
+    // Build the flat list of selectable Result View options for this bundle.
+    const resultViewOptions = React.useMemo(() => {
+        const allKeys = collectAllEntryKeys(runData || {}, runData?.trades || []);
+        const opts = buildAvailableOptions(allKeys);
+        const views = [{ key: "baseline", label: "Baseline Reference", family: "baseline", threshold: null, fillMode: null }];
+        const { availableFamilies = [], thresholdsByFamily = {}, fillModesByFamilyThreshold = {} } = opts;
+        availableFamilies.filter((f) => f !== "baseline").forEach((family) => {
+            const familyLabel = family === "triggered_edge" ? "Triggered Edge"
+                : family === "penetration" ? "Penetration"
+                : String(family).replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+            (thresholdsByFamily[family] || []).forEach((threshold) => {
+                const ftKey = `${family}::${threshold}`;
+                (fillModesByFamilyThreshold[ftKey] || []).forEach((fillMode) => {
+                    const threshStr = threshold != null ? ` ${threshold}%` : "";
+                    const fillStr = fillMode === "next" ? " · Next"
+                        : fillMode === "same" ? " · Same"
+                        : fillMode === "both" ? " · Both"
+                        : "";
+                    views.push({
+                        key: `${family}_${threshold}_${fillMode ?? "both"}`,
+                        label: `${familyLabel}${threshStr}${fillStr}`,
+                        family,
+                        threshold,
+                        fillMode: fillMode === "both" ? null : (fillMode || null),
+                    });
+                });
+            });
+        });
+        return views;
+    }, [runData]);
+    // ── end Result View state ────────────────────────────────────────────────
+
     const runConfig = runData?.config || run?.config || {};
     const displayName = getRunDisplayName(runData || run);
     const projectId = runData?.projectId || runData?.summary?.projectId || run?.projectId || run?.summary?.projectId;
@@ -356,10 +409,63 @@ export default function RunDetail() {
         ACTIVE_TRADE_VARIANT && runData?.tradesByVariant?.[ACTIVE_TRADE_VARIANT]
             ? ACTIVE_TRADE_VARIANT
             : runData?.primaryVariant;
-    const tradesForRun =
+    // ── RW-3A: legacy resolution path — preserved as the fallback ───────────
+    const legacyTradesForRun =
         (selectedRunVariant && runData?.tradesByVariant?.[selectedRunVariant])
         || runData?.trades
         || (isActiveRun ? TRADES : null);
+
+    // ── RW-3B: route all analytics through the selected result view ───────────
+    // selectedUniverseTrades is whatever the active universe resolved (baseline or
+    // scenario path). When non-empty, tradesForRun points at those trades. When
+    // the universe is empty (scenario unavailable, still resolving, or index-only),
+    // tradesForRun falls back to legacyTradesForRun so the page never goes blank.
+    // obStats / deltaRows stay pinned to runData.trades and runData.orderBlocks —
+    // those are intentionally outside the result-view routing.
+    const selectedUniverseTrades = Array.isArray(universe?.trades) ? universe.trades : [];
+    const hasSelectedUniverseTrades = selectedUniverseTrades.length > 0;
+    const tradesForRun = hasSelectedUniverseTrades ? selectedUniverseTrades : legacyTradesForRun;
+
+    // displayTrades is now a direct alias for tradesForRun. It is kept so that
+    // existing analytics memos (MONTHLY, R_DIST_V2, filteredLedgerRows, etc.)
+    // require no renaming. isScenarioView is kept for the banner / noTrades check.
+    const isScenarioView = Boolean(resultView?.family && resultView.family !== "baseline");
+    const displayTrades = tradesForRun;
+
+    // ── RW-3A: dev-only baseline parity audit ─────────────────────────────────
+    // Compares universe.trades (resolved via resolveBaselineUniverse) against
+    // legacyTradesForRun. A mismatch flags that wiring analytics to universe.trades
+    // on the baseline path would change numbers — RW-3 must not proceed until all
+    // representative runs return { match: true }. Dead-code-eliminated in prod.
+    const baselineParityAudit = React.useMemo(() => {
+        if (process.env.NODE_ENV === "production") return null;
+        const isBaseline = !resultView?.family || resultView.family === "baseline";
+        if (!isBaseline) return null; // only meaningful on the baseline path
+        const legacyCount = Array.isArray(legacyTradesForRun) ? legacyTradesForRun.length : null;
+        const universeCount = Array.isArray(universe?.trades) ? universe.trades.length : null;
+        if (legacyCount === null || universeCount === null) {
+            return { match: false, reason: "one_side_null", legacyCount, universeCount };
+        }
+        return {
+            match: legacyCount === universeCount,
+            reason: legacyCount === universeCount ? "ok" : "count_mismatch",
+            legacyCount,
+            universeCount,
+        };
+    }, [resultView, legacyTradesForRun, universe]);
+
+    React.useEffect(() => {
+        if (process.env.NODE_ENV === "production") return;
+        if (!baselineParityAudit) return;
+        if (!baselineParityAudit.match) {
+            console.warn(
+                "[RW-3A] Baseline parity mismatch",
+                { runId, ...baselineParityAudit },
+            );
+        }
+    }, [baselineParityAudit, runId]);
+    // ── end RW-3A ─────────────────────────────────────────────────────────────
+
     const hasFullRunData = Boolean(
         runData?.hasFullData
         || (Array.isArray(runData?.trades) && runData.trades.length)
@@ -406,10 +512,10 @@ export default function RunDetail() {
         autoReloadAttempted.current.add(runId);
         requestFullRunReload();
     }, [hasFullRunData, isIndexOnlyRun, requestFullRunReload, runData, runId, shouldAutoReloadRun]);
-    const totalTradeRows = tradesForRun?.length || 0;
+    const totalTradeRows = displayTrades?.length || 0;
     const validTradesForRun = React.useMemo(
-        () => (Array.isArray(tradesForRun) ? tradesForRun.filter(isValidExecutedTrade) : []),
-        [tradesForRun],
+        () => (Array.isArray(displayTrades) ? displayTrades.filter(isValidExecutedTrade) : []),
+        [displayTrades],
     );
     const validTradeCount = validTradesForRun.length;
     const validNetR = validTradesForRun.reduce((sum, trade) => {
@@ -518,14 +624,11 @@ export default function RunDetail() {
         ? `${validTradeCount} valid · ${totalTradeRows} rows`
         : `${validTradeCount || Number(run.trades) || 0} valid trades`;
 
-    // ── Scenario-scope chip data ─────────────────────────────────────────────
-    // Make it obvious what universe of trades the KPI strip / equity curve /
-    // ledger are reading. RunDetail today is NOT entry-scenario-aware: it
-    // shows the selected position-variant baseline (single / multi / one-per-
-    // direction). Strategy Map and Entries Lab are the surfaces that drill
-    // into entry-model scenarios (triggered edge / penetration thresholds).
-    // Without this label, the KPI numbers can disagree with Strategy Map and
-    // there is no in-product explanation of why.
+    // ── Scope chip data ──────────────────────────────────────────────────────
+    // Surfaces the active trade universe, variant, Results Basis, and Account
+    // View. The Universe row updates dynamically with the selected Result View
+    // (displayTrades), so the user always knows exactly what trades are driving
+    // the visible KPIs, equity curve, and ledger.
     const variantKeys = Object.keys(runData?.tradesByVariant || {});
     const entryScenarioKeys = Object.keys(runData?.entryResults?.tradesByMode || {})
         .filter((k) => k && k !== "baseline" && k !== "entry_baseline");
@@ -533,9 +636,6 @@ export default function RunDetail() {
     const scopeChip = {
         variantLabel: selectedRunVariant ? variantLabel(selectedRunVariant) : null,
         variantCount: variantKeys.length,
-        // RunDetail always shows the baseline (no entry-model filter applied),
-        // even when entry-model trade lists are present in the bundle.
-        scenarioLabel: "Baseline (no entry-model overlay)",
         hasEntryScenarios,
         isIndexOnly: isIndexOnlyRun,
         // RB-8b.1: surface TWO distinct facts so the user can't conflate them:
@@ -551,7 +651,7 @@ export default function RunDetail() {
             : null,
     };
     const filteredLedgerRows = React.useMemo(() => {
-        const rows = Array.isArray(tradesForRun) ? tradesForRun : [];
+        const rows = Array.isArray(displayTrades) ? displayTrades : [];
         const query = ledgerSearch.trim().toLowerCase();
         return rows.filter((trade) => {
             if (ledgerResultFilter !== "All" && !matchesLedgerResultFilter(trade, ledgerResultFilter, runRr)) return false;
@@ -581,7 +681,7 @@ export default function RunDetail() {
             }
             return true;
         });
-    }, [tradesForRun, ledgerResultFilter, ledgerSessionFilter, ledgerDirectionFilter, ledgerSearch, runRr]);
+    }, [displayTrades, ledgerResultFilter, ledgerSessionFilter, ledgerDirectionFilter, ledgerSearch, runRr]);
 
     // ── Equity research filters: filtered subset of trades for chart ─────────
     const filteredTradesForEquity = React.useMemo(() => {
@@ -713,9 +813,9 @@ export default function RunDetail() {
 
     // ── Per-run analytics — computed from this run's trades, not global store ──
     const MONTHLY = React.useMemo(() => {
-        if (!tradesForRun?.length) return [];
+        if (!displayTrades?.length) return [];
         const map = {};
-        tradesForRun.forEach((t) => {
+        displayTrades.forEach((t) => {
             const date = t.entry ? new Date(t.entry) : null;
             if (!date || !isFinite(date.getTime())) return;
             const year = date.getUTCFullYear();
@@ -728,7 +828,7 @@ export default function RunDetail() {
         return Object.values(map)
             .sort((a, b) => a.key.localeCompare(b.key))
             .map((e) => ({ m: e.m, v: Number(e.v.toFixed(2)) }));
-    }, [tradesForRun]);
+    }, [displayTrades]);
 
     // ── OB stats derived from imported order blocks ──
     const obStats = React.useMemo(() => {
@@ -879,13 +979,13 @@ export default function RunDetail() {
 
     // ── Outcome summary ──────────────────────────────────────────────────────
     const outcomeSummary = React.useMemo(() => {
-        if (!tradesForRun?.length) return null;
+        if (!displayTrades?.length) return null;
         let wins = 0, losses = 0, breakeven = 0, special = 0;
         let sumWin = 0, sumLoss = 0;
         let bestR = -Infinity, worstR = Infinity;
         let newsFlatten = 0, newsTouchCancel = 0, newsBlackout = 0;
         let sessionFiltered = 0, unfilled = 0, missed = 0;
-        tradesForRun.forEach((t) => {
+        displayTrades.forEach((t) => {
             const norm = normalizeOutcome(t?.outcome);
             const r = numericTradeR(t);
             if (norm === "NEWS_FLATTEN") newsFlatten++;
@@ -915,11 +1015,11 @@ export default function RunDetail() {
             worstR: worstR ===  Infinity ? null : worstR,
             newsFlatten, newsTouchCancel, newsBlackout, sessionFiltered, unfilled, missed,
         };
-    }, [tradesForRun]);
+    }, [displayTrades]);
 
     // ── Semantic R distribution ──────────────────────────────────────────────
     const R_DIST_V2 = React.useMemo(() => {
-        if (!tradesForRun?.length) return [];
+        if (!displayTrades?.length) return [];
         const winTarget = Number.isFinite(Number(runRr)) ? Number(runRr) : 3.3;
         const winMidStart = Math.max(2, Math.floor(winTarget - 1));
         const BUCKETS = [
@@ -933,7 +1033,7 @@ export default function RunDetail() {
         ];
         const counts = BUCKETS.map(() => 0);
         let valid = 0;
-        tradesForRun.filter(isValidExecutedTrade).forEach((t) => {
+        displayTrades.filter(isValidExecutedTrade).forEach((t) => {
             const r = numericTradeR(t);
             if (r == null) return;
             valid++;
@@ -949,7 +1049,7 @@ export default function RunDetail() {
             bar:   counts[i] / maxCount,
             color: b.color,
         }));
-    }, [tradesForRun, runRr]);
+    }, [displayTrades, runRr]);
 
     const directionalOutcomeStats = React.useMemo(() => {
         const stats = {
@@ -1132,12 +1232,10 @@ export default function RunDetail() {
                 runs={RUNS}
             />
 
-            {/* Scenario-scope chip — tells the user exactly which universe of
-                trades powers everything on this page (KPI strip, equity curve,
-                R-distribution, ledger, session/time-of-day grids, account
-                equity). See scopeChip derivation above. */}
-            <div className="px-6 mb-3">
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border border-[hsl(var(--border-soft)/0.7)] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm px-3 py-1.5 text-[11px]">
+            {/* Scope chip — surfaces the active variant, Results Basis, and
+                Account View. See scopeChip derivation above. */}
+            <div className="px-6 mb-2">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 py-0.5 text-[10.5px] opacity-75">
                     {scopeChip.isIndexOnly ? (
                         <ScopeRow label="Status">
                             <Pill tone="warning">Index-only metadata</Pill>
@@ -1145,7 +1243,17 @@ export default function RunDetail() {
                     ) : (
                         <>
                             <ScopeRow label="Universe">
-                                <Pill tone="primary">Baseline reference</Pill>
+                                {isScenarioView && universe?.universeType === "scenario" ? (
+                                    <Pill tone="success">
+                                        {resultViewOptions.find(
+                                            (o) => o.family === resultView?.family
+                                                && o.threshold === resultView?.threshold
+                                                && (o.fillMode ?? null) === (resultView?.fillMode ?? null),
+                                        )?.label || "Scenario view"}
+                                    </Pill>
+                                ) : (
+                                    <Pill tone="primary">Baseline reference</Pill>
+                                )}
                             </ScopeRow>
                             <ScopeRow label="Variant">
                                 <Pill tone="muted">{scopeChip.variantLabel || "Primary variant"}</Pill>
@@ -1162,27 +1270,82 @@ export default function RunDetail() {
                                     <span className="text-[10px] text-muted-lab">{scopeChip.accountViewSub}</span>
                                 )}
                             </ScopeRow>
-                            <ScopeRow label="Scenario-aware">
-                                <Pill tone="muted">No</Pill>
-                            </ScopeRow>
-                            <ScopeRow label="Entry scenarios">
-                                <Pill tone={scopeChip.hasEntryScenarios ? "success" : "muted"}>
-                                    {scopeChip.hasEntryScenarios ? "Available" : "None"}
-                                </Pill>
-                            </ScopeRow>
                         </>
-                    )}
-                    {!scopeChip.isIndexOnly && scopeChip.hasEntryScenarios && (
-                        <span className="text-[10.5px] text-[hsl(var(--text-2))]">
-                            Run Detail shows the primary/reference trade universe (baseline). Open{" "}
-                            <Link to="/strategy-map" className="text-[hsl(var(--accent-primary))] hover:underline">
-                                Strategy Map
-                            </Link>{" "}
-                            to inspect individual entry-model scenarios.
-                        </span>
                     )}
                 </div>
             </div>
+
+            {/* Result View selector — lets the user switch between the baseline
+                reference and any entry-model scenario. tradesForRun (and therefore
+                all KPI / equity / monthly / R-dist / ledger / account sections)
+                reflects whichever result view is currently selected. */}
+            {!scopeChip.isIndexOnly && (
+                <ResultViewSelector
+                    options={resultViewOptions}
+                    resultView={resultView}
+                    universe={universe}
+                    baselineParityAudit={baselineParityAudit}
+                    onSelect={(opt) => setResultView({
+                        family: opt.family,
+                        threshold: opt.threshold,
+                        fillMode: opt.fillMode,
+                    })}
+                />
+            )}
+
+            {/* Active Result View banner — only shown when a non-baseline view is
+                selected. Gives the user a persistent reminder that analytics are
+                reflecting a specific scenario, not the baseline. Hidden on baseline. */}
+            {!scopeChip.isIndexOnly && isScenarioView && (
+                <div className="px-6 mb-3">
+                    <div className={[
+                        "flex flex-wrap items-center gap-x-4 gap-y-1 clip-bevel-sm border px-3 py-1.5",
+                        hasSelectedUniverseTrades
+                            ? "border-[hsl(var(--accent-primary)/0.45)] bg-[hsl(var(--accent-primary)/0.07)]"
+                            : "border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.07)]",
+                    ].join(" ")}>
+                        {hasSelectedUniverseTrades ? (
+                            <>
+                                <span className="text-[9px] font-ui uppercase tracking-widest text-[hsl(var(--accent-primary)/0.8)]">
+                                    Viewing
+                                </span>
+                                <span className="font-ui text-[10.5px] font-semibold text-[hsl(var(--accent-primary))]">
+                                    {universe?.label || resultView?.family}
+                                </span>
+                                <span className="inline-flex items-baseline gap-1.5">
+                                    <span className="text-[9px] font-ui uppercase tracking-widest text-muted-lab">Trades</span>
+                                    <span className="font-ui text-[10.5px] font-semibold text-[hsl(var(--text-base))]">
+                                        {selectedUniverseTrades.length}
+                                    </span>
+                                </span>
+                                <span className="inline-flex items-baseline gap-1.5">
+                                    <span className="text-[9px] font-ui uppercase tracking-widest text-muted-lab">Baseline</span>
+                                    <span className="font-ui text-[10.5px] text-[hsl(var(--text-2))]">
+                                        {Array.isArray(legacyTradesForRun) ? legacyTradesForRun.length : 0}
+                                    </span>
+                                </span>
+                                {(universe?.sourceFile) && (
+                                    <span className="inline-flex items-baseline gap-1.5" title={universe.sourceFile}>
+                                        <span className="text-[9px] font-ui uppercase tracking-widest text-muted-lab">Source</span>
+                                        <span className="font-code text-[9.5px] text-muted-lab" style={{ maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                            {universe.sourceFile.length > 48 ? `…${universe.sourceFile.slice(-45)}` : universe.sourceFile}
+                                        </span>
+                                    </span>
+                                )}
+                            </>
+                        ) : (
+                            <>
+                                <span className="text-[9px] font-ui uppercase tracking-widest text-[hsl(var(--warning)/0.8)]">
+                                    Fallback
+                                </span>
+                                <span className="font-ui text-[10.5px] font-semibold text-[hsl(var(--warning))]">
+                                    Scenario unavailable — analytics are showing baseline fallback data.
+                                </span>
+                            </>
+                        )}
+                    </div>
+                </div>
+            )}
 
             {isIndexOnlyRun && (
                 <div className="px-6 mb-4">
@@ -1221,7 +1384,7 @@ export default function RunDetail() {
                             onChange={(value) => {
                                 patchAccountSettings({
                                     mode: value === "account"
-                                        ? (accountSettings.mode === "r_only" ? "fixed_dollar" : accountSettings.mode)
+                                        ? (accountSettings.mode === "r_only" ? "current_equity_pct" : accountSettings.mode)
                                         : "r_only",
                                 });
                             }}
@@ -1237,7 +1400,15 @@ export default function RunDetail() {
                                 <span className="mb-1 block text-[9px] font-ui uppercase tracking-widest text-muted-lab">Account Mode</span>
                                 <NeonSelect
                                     value={accountSettings.mode}
-                                    onChange={(value) => patchAccountSettings({ mode: value })}
+                                    onChange={(value) => {
+                                        // When switching to fixed-dollar mode, default risk amount
+                                        // to 10% of the starting balance as a sensible starting point.
+                                        const patch = { mode: value };
+                                        if (value === "fixed_dollar") {
+                                            patch.fixedRiskAmount = Math.round(accountSettings.startingBalance * 0.1);
+                                        }
+                                        patchAccountSettings(patch);
+                                    }}
                                     options={accountModeOptions}
                                 />
                             </label>
@@ -1585,7 +1756,7 @@ export default function RunDetail() {
                     activeTab={currentResultsTab}
                     onTabChange={setActiveResultsTab}
                 >
-                {showResultsSection("baseline-splits") && <SessionSplit trades={tradesForRun} />}
+                {showResultsSection("baseline-splits") && <SessionSplit trades={displayTrades} />}
 
                 {showResultsSection("config") && <NeonPanel className="xl:col-span-3" title="Configuration" action={<Pill tone="muted">Compact</Pill>}>
                     <div className="space-y-3">
@@ -1832,7 +2003,7 @@ export default function RunDetail() {
                     action={
                         <div className="flex items-center gap-2">
                             {isActiveRun && <VariantSelector variants={AVAILABLE_TRADE_VARIANTS} value={ACTIVE_TRADE_VARIANT} />}
-                            <Pill tone="secondary">{filteredLedgerRows.length} / {(tradesForRun || []).length} SHOWN</Pill>
+                            <Pill tone="secondary">{filteredLedgerRows.length} / {(displayTrades || []).length} SHOWN</Pill>
                         </div>
                     }
                 >
@@ -2253,11 +2424,117 @@ export default function RunDetail() {
 
                 {showResultsSection("entry-timing") && (
                     <>
-                        <SessionMatrix trades={tradesForRun} />
-                        <TimeOfDayHeatmap trades={tradesForRun} />
+                        <SessionMatrix trades={displayTrades} />
+                        <TimeOfDayHeatmap trades={displayTrades} />
                     </>
                 )}
                 </ResultsTabFrame>
+            </div>
+        </div>
+    );
+}
+
+// ── ResultViewSelector ────────────────────────────────────────────────────────
+// Pill-based Result View selector for Run Workspace. Renders nothing when there
+// is only one view (baseline only), so runs with no entry scenarios are
+// unaffected. When a scenario is selected and has trades, the parent component
+// routes all analytics (KPIs, equity, ledger, distributions) through displayTrades
+// (universe.trades) instead of the baseline tradesForRun.
+function ResultViewSelector({ options, resultView, universe, baselineParityAudit, onSelect }) {
+    // No scenarios available — render nothing; page looks exactly as before.
+    if (!options || options.length <= 1) return null;
+
+    const selectedFamily = resultView?.family ?? "baseline";
+    const isScenarioSelected = selectedFamily && selectedFamily !== "baseline";
+    const noTrades = isScenarioSelected && (!universe?.trades || universe.trades.length === 0);
+
+    // Truncate long source filenames so the strip doesn't overflow.
+    const rawSource = universe?.sourceFile || null;
+    const sourceLabel = rawSource
+        ? (rawSource.length > 52 ? `…${rawSource.slice(-49)}` : rawSource)
+        : null;
+
+    const userFacingWarnings = (universe?.warnings || []).filter(
+        (w) => w?.code === "FILL_MODE_COERCED" || w?.code === "BOTH_UNAVAILABLE_NO_COMBINED",
+    );
+
+    return (
+        <div className="px-6 mb-3">
+            <div className="border border-[hsl(var(--border-soft)/0.7)] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm px-3 py-2 flex flex-col gap-1.5">
+
+                {/* Row 1 — label + selectable pills */}
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                    <span className="text-[9px] font-ui uppercase tracking-widest text-muted-lab shrink-0">
+                        Result View
+                    </span>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                        {options.map((opt) => {
+                            const isActive = opt.family === "baseline"
+                                ? (!selectedFamily || selectedFamily === "baseline")
+                                : (resultView?.family === opt.family
+                                    && resultView?.threshold === opt.threshold
+                                    && resultView?.fillMode === opt.fillMode);
+                            return (
+                                <button
+                                    key={opt.key}
+                                    type="button"
+                                    onClick={() => onSelect(opt)}
+                                    className={[
+                                        "px-2.5 py-[3px] text-[10px] font-ui uppercase tracking-wider",
+                                        "border clip-bevel-sm transition-colors select-none whitespace-nowrap",
+                                        isActive
+                                            ? "bg-[hsl(var(--accent-primary)/0.15)] border-[hsl(var(--accent-primary)/0.55)] text-[hsl(var(--accent-primary))]"
+                                            : "bg-transparent border-[hsl(var(--border-soft))] text-[hsl(var(--text-muted))] hover:border-[hsl(var(--accent-primary)/0.4)] hover:text-[hsl(var(--text-base))]",
+                                    ].join(" ")}
+                                >
+                                    {opt.label}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+
+                {/* Compact status line — trades count + scenario type inline */}
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 opacity-55 text-[9.5px] font-ui">
+                    <span className={universe?.universeType === "scenario" ? "text-[hsl(var(--success))]" : ""}>
+                        {universe?.universeType === "scenario" ? "Scenario" : "Baseline"}
+                    </span>
+                    <span>{universe?.trades?.length ?? 0} trades</span>
+                    {sourceLabel && (
+                        <span className="font-code truncate max-w-[260px]" title={rawSource}>{sourceLabel}</span>
+                    )}
+                    {userFacingWarnings.map((w) => (
+                        <span
+                            key={w.code}
+                            className={[
+                                "px-1.5 py-0.5 border clip-bevel-sm opacity-100",
+                                w.code === "FILL_MODE_COERCED"
+                                    ? "border-[hsl(var(--accent-secondary)/0.45)] text-[hsl(var(--accent-secondary))]"
+                                    : "border-[hsl(var(--warning)/0.45)] text-[hsl(var(--warning))]",
+                            ].join(" ")}
+                            title={w.code}
+                        >
+                            {w.message}
+                        </span>
+                    ))}
+                    {/* RW-3A dev-only parity note */}
+                    {process.env.NODE_ENV !== "production" && baselineParityAudit && (
+                        <span className={baselineParityAudit.match ? "" : "text-[hsl(var(--warning))] opacity-100"}>
+                            {baselineParityAudit.match
+                                ? `✓ parity OK (${baselineParityAudit.universeCount})`
+                                : `⚠ parity mismatch ${baselineParityAudit.legacyCount}≠${baselineParityAudit.universeCount}`
+                            }
+                        </span>
+                    )}
+                </div>
+
+                {/* Scenario unavailable — no trades resolved for the selected key */}
+                {noTrades && (
+                    <div className="text-[11px] font-ui text-[hsl(var(--warning))]">
+                        ⚠ Scenario unavailable for this run — analytics are showing baseline fallback data.
+                    </div>
+                )}
+
             </div>
         </div>
     );
