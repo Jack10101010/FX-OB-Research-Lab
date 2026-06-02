@@ -8,6 +8,7 @@ import {
 } from "recharts";
 import { buildAllModelCurves, mergeEquityCurves, buildDrawdownSeries } from "../analytics/equityCurveAnalytics";
 import { useLocalStorageState } from "../shared/useEntryWorkspace";
+import { CHART_NUM_FONT } from "@/lib/chartStyles";
 
 const MODEL_COLORS = [
     "hsl(var(--accent-secondary))",
@@ -63,7 +64,7 @@ export function EquityCurvePanel({ exactRows, tradesByMode, activeVariant }) {
     if (!curves.length) {
         return (
             <NeonPanel title="Equity Curve Comparison" className="xl:col-span-3" action={<Pill tone="warning">AWAITING PER-TRADE DATA</Pill>}>
-                <div className="py-8 text-center text-[11px] font-mono text-muted-lab">
+                <div className="py-8 text-center text-[11px] font-ui text-muted-lab">
                     Requires per-model entry trade exports (<span className="text-[hsl(var(--accent-secondary))]">trades_*__entry_*.csv</span>).
                     Summary entry results are loaded, but trade-level model lists are missing.
                 </div>
@@ -80,7 +81,7 @@ export function EquityCurvePanel({ exactRows, tradesByMode, activeVariant }) {
                     <button
                         type="button"
                         onClick={() => setChartMode(prev => ({ ...prev, equityMode: showDD ? "equity" : "drawdown" }))}
-                        className={cn("px-2.5 py-1 text-[9.5px] font-mono uppercase tracking-wider clip-bevel-sm border transition-colors",
+                        className={cn("px-2.5 py-1 text-[9.5px] font-ui uppercase tracking-wider clip-bevel-sm border transition-colors",
                             showDD ? "border-[hsl(var(--danger)/0.5)] text-[hsl(var(--danger))] bg-[hsl(var(--danger)/0.08)]"
                                    : "border-[hsl(var(--border-soft))] text-muted-lab hover:text-white")}
                     >
@@ -98,7 +99,7 @@ export function EquityCurvePanel({ exactRows, tradesByMode, activeVariant }) {
                         type="button"
                         onClick={() => toggleModel(c.mode)}
                         className={cn(
-                            "flex items-center gap-1.5 px-2.5 py-1 clip-bevel-sm border text-[10px] font-mono uppercase tracking-wider transition-colors",
+                            "flex items-center gap-1.5 px-2.5 py-1 clip-bevel-sm border text-[10px] font-ui uppercase tracking-wider transition-colors",
                             selected.has(c.mode)
                                 ? "border-transparent text-white"
                                 : "border-[hsl(var(--border-soft))] text-muted-lab opacity-50",
@@ -118,10 +119,10 @@ export function EquityCurvePanel({ exactRows, tradesByMode, activeVariant }) {
             <ResponsiveContainer width="100%" height={320}>
                 <LineChart data={merged} margin={{ top: 4, right: 20, bottom: 4, left: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border-soft)/0.3)" />
-                    <XAxis dataKey="i" tick={{ fontSize: 10, fill: "hsl(var(--text-2))", fontFamily: "monospace" }} tickLine={false} />
-                    <YAxis tick={{ fontSize: 10, fill: "hsl(var(--text-2))", fontFamily: "monospace" }} tickLine={false} tickFormatter={v => `${v >= 0 ? "+" : ""}${v.toFixed(0)}R`} />
+                    <XAxis dataKey="i" tick={{ fontSize: 10, fill: "hsl(var(--text-2))", fontFamily: CHART_NUM_FONT }} tickLine={false} />
+                    <YAxis tick={{ fontSize: 10, fill: "hsl(var(--text-2))", fontFamily: CHART_NUM_FONT }} tickLine={false} tickFormatter={v => `${v >= 0 ? "+" : ""}${v.toFixed(0)}R`} />
                     <Tooltip
-                        contentStyle={{ background: "hsl(var(--panel))", border: "1px solid hsl(var(--border-soft))", borderRadius: 0, fontSize: 11, fontFamily: "monospace" }}
+                        contentStyle={{ background: "hsl(var(--panel))", border: "1px solid hsl(var(--border-soft))", borderRadius: 0, fontSize: 11, fontFamily: CHART_NUM_FONT }}
                         formatter={(v, name) => [`${v >= 0 ? "+" : ""}${Number(v).toFixed(1)}R`, name]}
                     />
                     <ReferenceLine y={0} stroke="hsl(var(--border-mid))" strokeDasharray="4 2" />

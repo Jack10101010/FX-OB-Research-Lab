@@ -8,6 +8,7 @@ import {
 } from "recharts";
 import { isFiniteNumber, num } from "../analytics/entryFormatters";
 import { useLocalStorageState } from "../shared/useEntryWorkspace";
+import { CHART_NUM_FONT } from "@/lib/chartStyles";
 
 const METRICS = [
     { key: "expectancy", label: "Expectancy", color: "hsl(var(--accent-primary))",   fmt: v => `${v >= 0 ? "+" : ""}${v.toFixed(3)}R` },
@@ -19,7 +20,7 @@ const CustomTooltip = ({ active, payload, label, metricKey }) => {
     if (!active || !payload?.length) return null;
     const m = METRICS.find(m => m.key === metricKey);
     return (
-        <div className="clip-bevel-sm bg-[hsl(var(--panel))] border border-[hsl(var(--border-soft))] p-2 text-[10px] font-mono">
+        <div className="clip-bevel-sm bg-[hsl(var(--panel))] border border-[hsl(var(--border-soft))] p-2 text-[10px] font-ui">
             <div className="text-muted-lab mb-1">Trades {label}–{Number(label) + (payload[0]?.payload?.window || 20)}</div>
             {payload.map((p, i) => (
                 <div key={i} style={{ color: p.color }}>
@@ -49,7 +50,7 @@ export function RollingMetricsPanel({ rollingData, modelLabel, window: windowSiz
                     : <Pill tone="warning">NO TRADE DATA</Pill>
             }
         >
-            <p className="mb-3 text-[10.5px] font-mono text-muted-lab">
+            <p className="mb-3 text-[10.5px] font-ui text-muted-lab">
                 {modelLabel ? <><span className="text-white">{modelLabel}</span> · </> : ""}
                 Rolling {windowSize}-trade {metric.label.toLowerCase()} over time. A stable, positive plateau confirms robustness.
                 Wide swings signal fragility.
@@ -61,7 +62,7 @@ export function RollingMetricsPanel({ rollingData, modelLabel, window: windowSiz
                     <button key={m.key} type="button"
                         onClick={() => setMetricKey(m.key)}
                         className={cn(
-                            "px-2 py-0.5 text-[9.5px] font-mono border rounded-[1px] transition-colors",
+                            "px-2 py-0.5 text-[9.5px] font-ui border rounded-[1px] transition-colors",
                             metricKey === m.key
                                 ? "text-white border-[hsl(var(--border-mid))] bg-[hsl(var(--panel-2)/0.5)]"
                                 : "text-muted-lab border-[hsl(var(--border-soft)/0.4)] hover:text-white"
@@ -76,10 +77,10 @@ export function RollingMetricsPanel({ rollingData, modelLabel, window: windowSiz
                 <ResponsiveContainer width="100%" height={240}>
                     <LineChart data={rollingData} margin={{ top: 4, right: 16, bottom: 4, left: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border-soft)/0.3)" />
-                        <XAxis dataKey="i" tick={{ fontSize: 9, fill: "hsl(var(--text-2))", fontFamily: "monospace" }} tickLine={false}
+                        <XAxis dataKey="i" tick={{ fontSize: 9, fill: "hsl(var(--text-2))", fontFamily: CHART_NUM_FONT }} tickLine={false}
                             label={{ value: "Trade #", position: "insideBottom", offset: -2, fontSize: 9, fill: "hsl(var(--text-2))" }}
                         />
-                        <YAxis tick={{ fontSize: 9, fill: "hsl(var(--text-2))", fontFamily: "monospace" }} tickLine={false}
+                        <YAxis tick={{ fontSize: 9, fill: "hsl(var(--text-2))", fontFamily: CHART_NUM_FONT }} tickLine={false}
                             tickFormatter={v => metric.fmt(v)}
                         />
                         <ReferenceLine y={0}   stroke="hsl(var(--border-mid))"          strokeDasharray="2 2" />
@@ -91,7 +92,7 @@ export function RollingMetricsPanel({ rollingData, modelLabel, window: windowSiz
                     </LineChart>
                 </ResponsiveContainer>
             ) : (
-                <div className="py-8 text-center text-[10.5px] font-mono text-muted-lab">
+                <div className="py-8 text-center text-[10.5px] font-ui text-muted-lab">
                     Requires per-model entry trade exports (trades_*__entry_*.csv). Summary entry results are loaded, but trade-level model lists are missing.
                 </div>
             )}

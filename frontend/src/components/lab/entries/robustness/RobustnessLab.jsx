@@ -84,19 +84,19 @@ export function RobustnessLab({
                     </div>
                 }
             >
-                <p className="mb-3 text-[10px] font-mono text-muted-lab">
+                <p className="mb-3 text-[10px] font-ui text-muted-lab">
                     Validate that results hold up across time, aren't driven by outliers, and are consistent between in-sample halves.
                     Select a model below to inspect rolling metrics.
                 </p>
 
                 {nonBaselineRows.length > 0 && (
                     <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-[9.5px] font-mono uppercase tracking-wider text-muted-lab">Rolling view:</span>
+                        <span className="text-[9.5px] font-ui uppercase tracking-wider text-muted-lab">Rolling view:</span>
                         {nonBaselineRows.map(row => (
                             <button key={row.mode} type="button"
                                 onClick={() => setSelectedModelKey(row.mode)}
                                 className={cn(
-                                    "px-2.5 py-1 text-[9.5px] font-mono uppercase tracking-wider border rounded-[1px] transition-colors",
+                                    "px-2.5 py-1 text-[9.5px] font-ui uppercase tracking-wider border rounded-[1px] transition-colors",
                                     selected === row.mode
                                         ? "border-[hsl(var(--accent-primary)/0.6)] bg-[hsl(var(--accent-primary)/0.1)] text-white"
                                         : "border-[hsl(var(--border-soft)/0.5)] text-muted-lab hover:text-white"
@@ -124,27 +124,27 @@ export function RobustnessLab({
                         <NeonPanel title="Monthly Stability" className="xl:col-span-1"
                             action={<Pill tone="secondary">{monthly.length} MONTHS</Pill>}
                         >
-                            <p className="mb-2 text-[9.5px] font-mono text-muted-lab">Month-by-month expectancy. Consistent positive months = stable edge.</p>
+                            <p className="mb-2 text-[9.5px] font-ui text-muted-lab">Month-by-month expectancy. Consistent positive months = stable edge.</p>
                             {monthly.length > 0 ? (
                                 <div className="overflow-y-auto max-h-[220px] scrollbar-thin">
-                                    <table className="w-full font-mono text-[10px]">
+                                    <table className="w-full text-[10px]">
                                         <thead>
                                             <tr>
                                                 {["Month", "Trades", "WR", "Expectancy", "Net R"].map(h => (
-                                                    <th key={h} className="text-left text-[8.5px] uppercase tracking-wider text-muted-lab px-2 py-1">{h}</th>
+                                                    <th key={h} className="text-left text-[8.5px] font-ui uppercase tracking-wider text-muted-lab px-2 py-1">{h}</th>
                                                 ))}
                                             </tr>
                                         </thead>
                                         <tbody>
                                             {monthly.map(m => (
                                                 <tr key={m.month} className="border-t border-[hsl(var(--border-soft)/0.2)]">
-                                                    <td className="px-2 py-1 text-[hsl(var(--text-2))]">{m.month}</td>
-                                                    <td className="px-2 py-1 tabular-nums text-white">{m.count}</td>
-                                                    <td className="px-2 py-1 tabular-nums text-white">{m.winRate.toFixed(0)}%</td>
-                                                    <td className={cn("px-2 py-1 tabular-nums", m.expectancy >= 0 ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]")}>
+                                                    <td className="px-2 py-1 font-ui text-[hsl(var(--text-2))]">{m.month}</td>
+                                                    <td className="px-2 py-1 font-num tabular-nums text-white">{m.count}</td>
+                                                    <td className="px-2 py-1 font-num tabular-nums text-white">{m.winRate.toFixed(0)}%</td>
+                                                    <td className={cn("px-2 py-1 font-num tabular-nums", m.expectancy >= 0 ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]")}>
                                                         {m.expectancy >= 0 ? "+" : ""}{m.expectancy.toFixed(3)}R
                                                     </td>
-                                                    <td className={cn("px-2 py-1 tabular-nums", m.netR >= 0 ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]")}>
+                                                    <td className={cn("px-2 py-1 font-num tabular-nums", m.netR >= 0 ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]")}>
                                                         {m.netR >= 0 ? "+" : ""}{m.netR.toFixed(1)}R
                                                     </td>
                                                 </tr>
@@ -153,7 +153,7 @@ export function RobustnessLab({
                                     </table>
                                 </div>
                             ) : (
-                                <div className="py-4 text-[10px] font-mono text-muted-lab">No monthly data (check trade entry timestamps).</div>
+                                <div className="py-4 text-[10px] font-ui text-muted-lab">No monthly data (check trade entry timestamps).</div>
                             )}
                         </NeonPanel>
                     );

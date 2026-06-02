@@ -1,5 +1,4 @@
 import React, { useState } from "react";
-import { NeonPanel } from "@/components/lab/NeonPanel";
 import { Pill }      from "@/components/lab/DataTable";
 import { cn }        from "@/lib/utils";
 import { isFiniteNumber, num, fmtMaybePct, fmtMaybeR } from "../analytics/entryFormatters";
@@ -18,8 +17,8 @@ function MetricPair({ label, value, tone }) {
                 : "text-white";
     return (
         <div className="flex flex-col items-center px-2.5 py-1.5 border border-[hsl(var(--border-soft)/0.4)] bg-[hsl(var(--panel-2)/0.3)] rounded-[1px] min-w-[60px]">
-            <span className={cn("text-[11.5px] font-mono font-semibold tabular-nums", color)}>{value}</span>
-            <span className="text-[8.5px] font-mono text-muted-lab uppercase tracking-wider mt-0.5">{label}</span>
+            <span className={cn("text-[11.5px] font-num font-semibold tabular-nums", color)}>{value}</span>
+            <span className="text-[8.5px] font-ui text-muted-lab uppercase tracking-wider mt-0.5">{label}</span>
         </div>
     );
 }
@@ -51,8 +50,13 @@ export function PromotionCard({ candidate, onDecision, onRemove, onNoteChange })
             {/* Header */}
             <div className="flex items-center gap-2.5 px-3 py-2">
                 <Pill tone={dm.tone}>{dm.label.toUpperCase()}</Pill>
-                <span className="flex-1 text-[11px] font-mono font-semibold text-white">{candidate.label}</span>
-                <span className="text-[9px] font-mono text-muted-lab">{candidate.family}</span>
+                <span className="flex-1 text-[11px] font-ui font-semibold text-white">{candidate.label}</span>
+                <span className="text-[9px] font-ui text-muted-lab">{candidate.family}</span>
+                {candidate.addedAt && (
+                    <span className="text-[9px] font-ui text-muted-lab" title={candidate.addedAt}>
+                        {new Date(candidate.addedAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}
+                    </span>
+                )}
             </div>
 
             {/* Metrics */}
@@ -72,13 +76,13 @@ export function PromotionCard({ candidate, onDecision, onRemove, onNoteChange })
             {/* Note */}
             {candidate.note && !showNote && (
                 <div className="px-3 pb-2">
-                    <p className="text-[9.5px] font-mono text-muted-lab italic">&ldquo;{candidate.note}&rdquo;</p>
+                    <p className="text-[9.5px] font-ui text-muted-lab italic">&ldquo;{candidate.note}&rdquo;</p>
                 </div>
             )}
             {showNote && (
                 <div className="px-3 pb-2 space-y-1.5">
                     <textarea
-                        className="w-full px-2 py-1.5 text-[10px] font-mono bg-[hsl(var(--panel-2)/0.6)] border border-[hsl(var(--border-soft)/0.7)] text-white placeholder:text-muted-lab focus:outline-none rounded-[1px] resize-y min-h-[48px]"
+                        className="w-full px-2 py-1.5 text-[10px] font-ui bg-[hsl(var(--panel-2)/0.6)] border border-[hsl(var(--border-soft)/0.7)] text-white placeholder:text-muted-lab focus:outline-none rounded-[1px] resize-y min-h-[48px]"
                         placeholder="Add a promotion note or rationale…"
                         value={noteText}
                         onChange={e => setNoteText(e.target.value)}
@@ -86,10 +90,10 @@ export function PromotionCard({ candidate, onDecision, onRemove, onNoteChange })
                     />
                     <div className="flex gap-1.5">
                         <button type="button" onClick={saveNote}
-                            className="px-2 py-0.5 text-[9px] font-mono border border-[hsl(var(--accent-primary)/0.5)] text-white hover:bg-[hsl(var(--accent-primary)/0.1)] rounded-[1px]"
+                            className="px-2 py-0.5 text-[9px] font-ui border border-[hsl(var(--accent-primary)/0.5)] text-white hover:bg-[hsl(var(--accent-primary)/0.1)] rounded-[1px]"
                         >Save</button>
                         <button type="button" onClick={() => { setNoteText(candidate.note || ""); setShowNote(false); }}
-                            className="px-2 py-0.5 text-[9px] font-mono border border-[hsl(var(--border-soft)/0.5)] text-muted-lab hover:text-white rounded-[1px]"
+                            className="px-2 py-0.5 text-[9px] font-ui border border-[hsl(var(--border-soft)/0.5)] text-muted-lab hover:text-white rounded-[1px]"
                         >Cancel</button>
                     </div>
                 </div>
@@ -99,9 +103,9 @@ export function PromotionCard({ candidate, onDecision, onRemove, onNoteChange })
             <div className="flex items-center gap-1.5 px-3 pb-2.5 border-t border-[hsl(var(--border-soft)/0.2)] pt-2">
                 {["approved", "watchlist", "rejected"].map(d => (
                     <button key={d} type="button"
-                        onClick={() => onDecision(candidate.mode, d)}
+                        onClick={() => onDecision(candidate.mode, candidate.decision === d ? "pending" : d)}
                         className={cn(
-                            "px-2 py-0.5 text-[9px] font-mono uppercase tracking-wider border rounded-[1px] transition-colors",
+                            "px-2 py-0.5 text-[9px] font-ui uppercase tracking-wider border rounded-[1px] transition-colors",
                             candidate.decision === d
                                 ? d === "approved"  ? "border-[hsl(var(--success)/0.5)]  bg-[hsl(var(--success)/0.12)]  text-[hsl(var(--success))]"
                                 : d === "rejected"  ? "border-[hsl(var(--danger)/0.5)]   bg-[hsl(var(--danger)/0.12)]   text-[hsl(var(--danger))]"
@@ -113,12 +117,12 @@ export function PromotionCard({ candidate, onDecision, onRemove, onNoteChange })
                     </button>
                 ))}
                 <button type="button" onClick={() => setShowNote(s => !s)}
-                    className="ml-1 text-[9px] font-mono text-muted-lab hover:text-white transition-colors"
+                    className="ml-1 text-[9px] font-ui text-muted-lab hover:text-white transition-colors"
                 >
                     {showNote ? "cancel note" : candidate.note ? "edit note" : "+ note"}
                 </button>
                 <button type="button" onClick={() => onRemove(candidate.mode)}
-                    className="ml-auto text-[9px] font-mono text-[hsl(var(--danger)/0.5)] hover:text-[hsl(var(--danger))] transition-colors"
+                    className="ml-auto text-[9px] font-ui text-[hsl(var(--danger)/0.5)] hover:text-[hsl(var(--danger))] transition-colors"
                 >
                     remove
                 </button>

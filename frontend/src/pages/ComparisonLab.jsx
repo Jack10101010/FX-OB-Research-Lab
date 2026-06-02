@@ -6,7 +6,12 @@ import { MetricChip } from "@/components/lab/MetricChip";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
 import { NeonSelect, NeonButton } from "@/components/lab/controls";
 import { getRunDisplayName, compactTimeframe, useDataset } from "@/data/store";
-import { computeProfitFactor, computeMaxDrawdown } from "@/lib/metrics";
+import { useTradeUniverse } from "@/data/useTradeUniverse";
+import { TradeUniverseBadge } from "@/components/lab/TradeUniverseBadge";
+// RB-8d: canonical Results Basis summaries replace the deprecated lib/metrics.
+import { toCanonicalSummaryRow, maxDrawdownFromCurve } from "@/data/resultsBasis";
+import { useResultsLens } from "@/data/useResultsLens";
+import { evaluateCompare } from "@/data/useCompareGuard";
 import { Plus, X, Trophy, Crown } from "lucide-react";
 import {
     AreaChart, Area, BarChart, Bar, ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
@@ -20,8 +25,24 @@ const PALETTE = [
     { line: "hsl(var(--success))",          tone: "success",   short: "E" },
 ];
 
+// Phase 3B-3 — stable scenario override so useTradeUniverse memoizes
+// correctly. ComparisonLab pins to the baseline universe regardless of the
+// user's currently-selected Strategy Map scenario; cross-run comparison is
+// done against each run's primary variant. Scenario-aware comparison is a
+// future feature (Phase 3C) and requires its own UX (global selector,
+// missing-scenario fallbacks, etc.).
+const BASELINE_SCENARIO_OVERRIDE = Object.freeze({ family: "baseline" });
+
 export default function ComparisonLab() {
     const { RUNS, EQUITY_CURVE, TRADES, ACTIVE_RUN, getRunData } = useDataset();
+    // Phase 3B-3 — ComparisonLab is intentionally baseline-only. We resolve
+    // the baseline universe via useTradeUniverse with an explicit override so
+    // the TradeUniverseBadge shows the unprotected reference source even when
+    // the user has a triggered-edge scenario selected in Strategy Map. No
+    // analytics consume this universe — RUNS / bundle.trades / bundle.equityCurve
+    // still drive every comparison panel on the page. The badge exists purely
+    // to make the page's design contract visible.
+    const baselineUniverse = useTradeUniverse(null, BASELINE_SCENARIO_OVERRIDE);
     const importedRuns = RUNS.filter((r) => r._source === "imported");
     const [ids, setIds] = useState(() => importedRuns.slice(0, 2).map((r) => r.id));
 
@@ -41,19 +62,54 @@ export default function ComparisonLab() {
     const runs = ids.map((id) => RUNS.find((r) => r.id === id)).filter(Boolean);
     const baseline = runs[0];
 
-    // Per-run real metrics: prefer imported bundle data; fall back to active-run mock for the active id.
-    const realPF_active = computeProfitFactor(TRADES);
-    const realDD_active = computeMaxDrawdown(EQUITY_CURVE);
+    // RB-8d: Results Basis context. ComparisonLab is baseline-only and Raw R;
+    // Current Equity cross-run comparison is a future feature (Phase 3C).
+    const lens = useResultsLens();
+    const compareGuard = useMemo(
+        () => evaluateCompare(
+            { basis: lens.basis, accountSettings: lens.accountSettings },
+            { basis: lens.basis, accountSettings: lens.accountSettings },
+        ),
+        [lens.basis, lens.accountSettings],
+    );
+
+    // Canonical Profit Factor (RB-8d): from each run's trades via the single
+    // Results Basis calculator. PF is coerced to null when undefined (no losses)
+    // to preserve the legacy "Limited Data" display the old computeProfitFactor
+    // produced. DD stays CURVE-based (maxDrawdownFromCurve) for exact parity.
+    const finitePF = (pf) => (Number.isFinite(pf) ? pf : null);
+    const realPF_active = finitePF(toCanonicalSummaryRow(TRADES, { basis: "raw_r" }).profitFactor);
+    const realDD_active = maxDrawdownFromCurve(EQUITY_CURVE);
     const runMetrics = (r) => {
         if (!r) return { pf: null, maxDd: null };
         const bundle = getRunData(r.id);
         if (bundle?.trades?.length && bundle?.equityCurve?.length) {
-            return { pf: computeProfitFactor(bundle.trades), maxDd: computeMaxDrawdown(bundle.equityCurve) };
+            return {
+                pf: finitePF(toCanonicalSummaryRow(bundle.trades, { basis: "raw_r" }).profitFactor),
+                maxDd: maxDrawdownFromCurve(bundle.equityCurve),
+            };
         }
         // Fallback: only the active mock run has full data
         if (r.id === ACTIVE_RUN.id) return { pf: realPF_active, maxDd: realDD_active };
         return { pf: null, maxDd: null };
     };
+
+    // Canonical Summary WR (RB-8d): wins/(wins+losses) from each run's trades
+    // when available; falls back to the backend run-summary win rate otherwise.
+    // Net R / Trades remain the run's authoritative headline summary values.
+    const canonicalWRById = useMemo(() => {
+        const map = new Map();
+        runs.forEach((r) => {
+            if (!r) return;
+            const bundle = getRunData(r.id);
+            const summary = bundle?.trades?.length
+                ? toCanonicalSummaryRow(bundle.trades, { basis: "raw_r" })
+                : toCanonicalSummaryRow(r, { basis: "raw_r" });
+            map.set(r.id, summary.winRate != null ? summary.winRate : (Number(r.winRate) || 0));
+        });
+        return map;
+    }, [runs, getRunData]);
+    const wrOf = (r) => (r && canonicalWRById.has(r.id) ? canonicalWRById.get(r.id) : Number(r?.winRate) || 0);
 
     // Per-run equity — uses each bundle's own equity curve; null for runs without one.
     const equityMerged = useMemo(() => {
@@ -111,14 +167,23 @@ export default function ComparisonLab() {
     }, [runs, getRunData]);
 
     // KPI matrix rows
+    // RB-8d.1 Net R decision: Net R and Trades intentionally stay the run's
+    // AUTHORITATIVE HEADLINE summary values (r.netR / r.trades) — the same numbers
+    // shown on run cards, Runs, and Projects. The canonical performance-net from
+    // toCanonicalSummaryRow(bundle.trades).netR can differ (it excludes
+    // non-performance rows and uses performance categories; e.g. +39.3R on the
+    // sample baseline) AND would diverge from the Raw-R equity curve and the
+    // monthly chart (both sum raw t.r). Switching is deferred until that parity is
+    // proven across all compared runs and the change is approved. WR is canonical
+    // (wins/(wins+losses)); PF/DD are canonical via resultsBasis.
     const KPI_DEFS = [
         { key: "netR",          label: "Net R",            fmt: (v) => `${v >= 0 ? "+" : ""}${v}R`,         delta: (v, base) => `${v - base >= 0 ? "+" : ""}${(v - base).toFixed(1)}R`,  posIfGreater: true },
         { key: "winRate",       label: "Win Rate",         fmt: (v) => `${v.toFixed(1)}%`,                  delta: (v, base) => `${v - base >= 0 ? "+" : ""}${(v - base).toFixed(1)}%`, posIfGreater: true },
         { key: "trades",        label: "Trades",           fmt: (v) => String(v),                            delta: (v, base) => `${v - base >= 0 ? "+" : ""}${v - base}`,             posIfGreater: null },
         { key: "_pf",           label: "Profit Factor",    posIfGreater: true,    compute: true },
         { key: "_dd",           label: "Max Drawdown",     posIfGreater: true,    compute: true },
-        { key: "reverseCancels",label: "Reverse Cancels",  fmt: (v) => String(v ?? 2),                       delta: (v, base) => `${(v ?? 2) - (base ?? 2) >= 0 ? "+" : ""}${(v ?? 2) - (base ?? 2)}`, posIfGreater: false },
-        { key: "validation",    label: "Validation",       fmt: (v) => `${v.toFixed(1)}%`,                  delta: (v, base) => `${v - base >= 0 ? "+" : ""}${(v - base).toFixed(1)}%`, posIfGreater: true },
+        { key: "reverseCancels",label: "Reverse Cancels",  fmt: (v) => v != null ? String(v) : "—",             delta: (v, base) => v != null && base != null ? `${v - base >= 0 ? "+" : ""}${v - base}` : "—", posIfGreater: false },
+        { key: "validation",    label: "Validation",       fmt: (v) => v != null ? `${Number(v).toFixed(1)}%` : "—", delta: (v, base) => v != null && base != null ? `${v - base >= 0 ? "+" : ""}${(v - base).toFixed(1)}%` : "—", posIfGreater: true },
     ];
 
     const winnerIdx = runs.length > 0 ? runs.reduce((best, r, i, all) => (r.netR > all[best].netR ? i : best), 0) : 0;
@@ -134,7 +199,7 @@ export default function ComparisonLab() {
                     actions={<Link to="/runs"><NeonButton tone="ghost">Browse Runs</NeonButton></Link>}
                 />
                 <div className="px-6 py-20 flex flex-col items-center text-center gap-4">
-                    <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-lab">
+                    <div className="font-ui text-[10px] uppercase tracking-[0.14em] text-muted-lab">
                         {importedRuns.length === 0 ? "No Imported Runs" : "Need At Least 2 Runs"}
                     </div>
                     <p className="text-[13px] text-[hsl(var(--text-2))] max-w-[480px] leading-relaxed">
@@ -165,6 +230,36 @@ export default function ComparisonLab() {
                 }
             />
 
+            {/* Phase 3B-3 — baseline-only universe badge.
+                ComparisonLab compares each run's primary-variant baseline
+                against the others. Scenario-aware comparison is a future
+                feature (Phase 3C) — it requires a global scenario picker,
+                per-row resolution via getTradeUniverse(runId, override),
+                missing-scenario fallback chips, and an extension to the
+                TradeUniverse shape (equity curve). For now the badge mirrors
+                the active run's baseline so the page's design contract is
+                visible. Analytics are unchanged. See Phase 3A audit for the
+                design rationale. */}
+            <div className="px-6 mt-2 mb-3 flex flex-col gap-1.5">
+                <TradeUniverseBadge universe={baselineUniverse} />
+                <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[9px] font-ui uppercase tracking-widest text-[hsl(var(--text-muted))]">Compare Basis</span>
+                    <Pill tone="muted">Raw R</Pill>
+                    <span className="text-[10px] text-muted-lab">canonical summaries · WR = wins/(wins+losses)</span>
+                    {lens.isCurrentEquity && (
+                        <span className="text-[10px] text-[hsl(var(--warning))]">
+                            Current Equity is not yet enabled for Comparison Lab (cross-run CE arrives with Phase 3C).
+                        </span>
+                    )}
+                    {compareGuard.warnings.map((w) => (
+                        <span key={w.code} className="text-[10px] text-muted-lab" title={w.code}>{w.message}</span>
+                    ))}
+                </div>
+                <p className="text-[10.5px] font-ui text-[hsl(var(--text-2))] leading-relaxed">
+                    Comparison Lab currently compares primary-variant baselines. Scenario-aware comparison is a future feature.
+                </p>
+            </div>
+
             {/* Run selectors */}
             <div className="px-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
                 {ids.map((id, idx) => {
@@ -175,7 +270,7 @@ export default function ComparisonLab() {
                             <div className="clip-bevel bg-[hsl(var(--panel))] px-3 py-2.5">
                                 <div className="flex items-center gap-2 mb-1.5">
                                     <span className="w-2.5 h-2.5" style={{ background: p.line, boxShadow: `0 0 8px ${p.line}` }} />
-                                    <span className="text-[10px] font-mono uppercase tracking-[0.22em] text-muted-lab">Run {p.short}{idx === 0 ? " · Baseline" : ""}</span>
+                                    <span className="text-[10px] font-ui uppercase tracking-[0.14em] text-muted-lab">Run {p.short}{idx === 0 ? " · Baseline" : ""}</span>
                                     {isWinner && <Crown className="w-3.5 h-3.5 text-[hsl(var(--accent-primary))] ml-auto" />}
                                     {ids.length > 2 && (
                                         <button onClick={() => removeAt(idx)} data-testid={`cmp-remove-${idx}`} className="ml-auto text-muted-lab hover:text-[hsl(var(--danger))]">
@@ -184,10 +279,18 @@ export default function ComparisonLab() {
                                     )}
                                 </div>
                                 <NeonSelect testId={`cmp-run-${idx}`} value={id} onChange={(v) => setAt(idx, v)} options={importedRuns.map((r) => ({ value: r.id, label: getRunDisplayName(r) }))} className="w-full" />
-                                <div className="mt-2 flex items-center justify-between font-mono text-[11px]">
+                                <div className="mt-2 flex items-center justify-between font-ui text-[11px]">
                                     <span className="text-[hsl(var(--text-2))]">{runs[idx]?.symbol} · {compactTimeframe(runs[idx]?.detectionTf)}</span>
                                     <ColoredR value={runs[idx]?.netR || 0} />
                                 </div>
+                                {runs[idx]?.id && (
+                                    <Link
+                                        to={`/runs/${encodeURIComponent(runs[idx].id)}`}
+                                        className="mt-1.5 inline-block text-[9.5px] font-ui uppercase tracking-wider text-[hsl(var(--accent-primary))] hover:text-white"
+                                    >
+                                        Open →
+                                    </Link>
+                                )}
                             </div>
                         </div>
                     );
@@ -238,12 +341,12 @@ export default function ComparisonLab() {
 
                 <NeonPanel title="KPI Matrix" action={<Pill tone="primary">{runs.length} RUNS</Pill>}>
                     <div className="overflow-x-auto scrollbar-thin">
-                        <table className="w-full font-mono text-[11.5px]" data-testid="cmp-kpi-table">
+                        <table className="w-full text-[11.5px]" data-testid="cmp-kpi-table">
                             <thead>
-                                <tr className="text-[10px] font-mono uppercase tracking-[0.18em] text-muted-lab">
-                                    <th className="text-left py-2 pr-2">Metric</th>
+                                <tr className="text-[10px] font-ui uppercase tracking-[0.18em] text-muted-lab">
+                                    <th className="text-left py-2 pr-2 font-ui">Metric</th>
                                     {runs.map((_, idx) => (
-                                        <th key={idx} className="text-right py-2 px-2">{PALETTE[idx % PALETTE.length].short}</th>
+                                        <th key={idx} className="text-right py-2 px-2 font-ui">{PALETTE[idx % PALETTE.length].short}</th>
                                     ))}
                                 </tr>
                                 <tr><td colSpan={runs.length + 1} className="p-0 h-px bg-[hsl(var(--border-soft))]" /></tr>
@@ -251,7 +354,7 @@ export default function ComparisonLab() {
                             <tbody>
                                 {KPI_DEFS.map((def) => (
                                     <tr key={def.key} className="border-b border-[hsl(var(--border-soft)/0.4)]">
-                                        <td className="text-muted-lab py-1.5 pr-2 uppercase text-[10px] tracking-wider">{def.label}</td>
+                                        <td className="text-muted-lab py-1.5 pr-2 uppercase text-[10px] tracking-wider font-ui">{def.label}</td>
                                         {runs.map((r, idx) => {
                                             const isBaseline = idx === 0;
                                             // Real-PF / Real-DD computed only when full data available
@@ -275,7 +378,7 @@ export default function ComparisonLab() {
                                                         : (v < base ? "text-[hsl(var(--success))]" : v > base ? "text-[hsl(var(--danger))]" : "text-white"));
                                                 const dtxt = base != null ? `${v - base >= 0 ? "+" : ""}${(v - base).toFixed(2)}${def.key === "_dd" ? "R" : ""}` : "—";
                                                 return (
-                                                    <td key={idx} className={`text-right py-1.5 px-2 ${tone}`}>
+                                                    <td key={idx} className={`text-right py-1.5 px-2 font-num tabular-nums ${tone}`}>
                                                         {display}
                                                         {!isBaseline && base != null && (
                                                             <div className="text-[9.5px] text-muted-lab leading-none">{dtxt}</div>
@@ -283,14 +386,14 @@ export default function ComparisonLab() {
                                                     </td>
                                                 );
                                             }
-                                            const v = r[def.key];
-                                            const baseVal = baseline[def.key];
+                                            const v = def.key === "winRate" ? wrOf(r) : r[def.key];
+                                            const baseVal = def.key === "winRate" ? wrOf(baseline) : baseline[def.key];
                                             const tone = isBaseline || def.posIfGreater == null
                                                 ? "text-white"
                                                 : (def.posIfGreater ? (v > baseVal ? "text-[hsl(var(--success))]" : v < baseVal ? "text-[hsl(var(--danger))]" : "text-white")
                                                                     : (v < baseVal ? "text-[hsl(var(--success))]" : v > baseVal ? "text-[hsl(var(--danger))]" : "text-white"));
                                             return (
-                                                <td key={idx} className={`text-right py-1.5 px-2 ${tone}`}>
+                                                <td key={idx} className={`text-right py-1.5 px-2 font-num tabular-nums ${tone}`}>
                                                     {def.fmt(v)}
                                                     {!isBaseline && (
                                                         <div className="text-[9.5px] text-muted-lab leading-none">{def.delta(v, baseVal)}</div>
@@ -306,7 +409,7 @@ export default function ComparisonLab() {
                     {runs.length > 1 && (
                         <div className="mt-3 inline-flex items-center gap-2 px-2.5 py-1 border border-[hsl(var(--accent-primary)/0.5)] clip-bevel-sm bg-[hsl(var(--accent-primary)/0.07)]">
                             <Trophy className="w-3.5 h-3.5 text-[hsl(var(--accent-primary))]" />
-                            <span className="text-[11px] font-mono uppercase tracking-wider text-white">Winner · Run {PALETTE[winnerIdx % PALETTE.length].short}</span>
+                            <span className="text-[11px] font-ui uppercase tracking-wider text-white">Winner · Run {PALETTE[winnerIdx % PALETTE.length].short}</span>
                         </div>
                     )}
                 </NeonPanel>
@@ -327,7 +430,7 @@ export default function ComparisonLab() {
                     </div>
                 </NeonPanel>
 
-                <ParetoFrontier runs={runs} runMetrics={runMetrics} />
+                <ParetoFrontier runs={runs} runMetrics={runMetrics} wrOf={wrOf} />
             </div>
         </div>
     );
@@ -335,11 +438,13 @@ export default function ComparisonLab() {
 
 function Legend({ runs }) {
     return (
-        <div className="flex items-center gap-3 text-[10.5px] font-mono flex-wrap">
+        <div className="flex items-center gap-3 text-[10.5px] font-ui flex-wrap">
             {runs.map((r, idx) => (
                 <span key={idx} className="inline-flex items-center gap-1.5">
                     <span className="w-2 h-2" style={{ background: PALETTE[idx % PALETTE.length].line }} />
-                    <span className="text-[hsl(var(--text-2))]">{PALETTE[idx % PALETTE.length].short}: {getRunDisplayName(r)}</span>
+                    <Link to={`/runs/${encodeURIComponent(r.id)}`} className="text-[hsl(var(--text-2))] hover:text-white">
+                        {PALETTE[idx % PALETTE.length].short}: {getRunDisplayName(r)}
+                    </Link>
                 </span>
             ))}
         </div>
@@ -351,7 +456,7 @@ function Legend({ runs }) {
 // runs already selected in Comparison Lab. A run is Pareto-efficient when no
 // other run has Net R >= and absolute Max Drawdown <=, while being strictly
 // better in at least one of the two. Uses runMetrics() for per-run drawdown.
-function ParetoFrontier({ runs, runMetrics }) {
+function ParetoFrontier({ runs, runMetrics, wrOf }) {
     const isNum = (v) => Number.isFinite(Number(v));
     const r1 = (v) => Number(v).toFixed(1);
 
@@ -360,6 +465,9 @@ function ParetoFrontier({ runs, runMetrics }) {
         const netR = isNum(r?.netR) ? Number(r.netR) : null;
         const ddRaw = isNum(m.maxDd) ? Number(m.maxDd) : null;
         const ddAbs = ddRaw != null ? Math.abs(ddRaw) : null;
+        // RB-8d.1: WR label uses the same canonical WR (wins/(wins+losses)) as
+        // the KPI matrix, not the backend run-summary win rate.
+        const wr = wrOf ? wrOf(r) : (isNum(r?.winRate) ? Number(r.winRate) : null);
         return {
             id: r?.id,
             displayName: getRunDisplayName(r),
@@ -368,13 +476,13 @@ function ParetoFrontier({ runs, runMetrics }) {
             rr: isNum(r?.rr) ? Number(r.rr) : null,
             netR,
             ddAbs,
-            winRate: isNum(r?.winRate) ? Number(r.winRate) : null,
+            winRate: isNum(wr) ? Number(wr) : null,
             trades: isNum(r?.trades) ? Number(r.trades) : null,
             // Pre-formatted, NaN-safe display strings
             rrLabel: isNum(r?.rr) ? r1(r.rr) : "—",
             netRLabel: netR != null ? `${netR >= 0 ? "+" : ""}${r1(netR)}R` : "Limited Data",
             ddLabel: ddAbs != null ? `${r1(ddAbs)}R` : "Limited Data",
-            wrLabel: isNum(r?.winRate) ? `${r1(r.winRate)}%` : "—",
+            wrLabel: isNum(wr) ? `${r1(wr)}%` : "—",
             tradesLabel: isNum(r?.trades) ? String(Number(r.trades)) : "—",
         };
     });
@@ -396,7 +504,7 @@ function ParetoFrontier({ runs, runMetrics }) {
         return (
             <NeonPanel className="xl:col-span-3" title="Pareto Frontier · Net R vs Drawdown">
                 <div className="flex flex-col items-center text-center gap-2 py-10" data-testid="pareto-limited">
-                    <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-lab">Limited Data</span>
+                    <span className="font-ui text-[10px] uppercase tracking-[0.14em] text-muted-lab">Limited Data</span>
                     <p className="text-[12.5px] text-muted-lab max-w-md">
                         Import or select at least 2 runs with Net R and Max Drawdown to view the Pareto frontier.
                     </p>
@@ -472,7 +580,7 @@ function ParetoTooltip({ active, payload }) {
     const p = payload[0]?.payload;
     if (!p) return null;
     return (
-        <div className="clip-bevel-sm bg-[hsl(var(--panel-2))] border border-[hsl(var(--accent-primary)/0.4)] px-3 py-2 font-mono text-[11px]">
+        <div className="clip-bevel-sm bg-[hsl(var(--panel-2))] border border-[hsl(var(--accent-primary)/0.4)] px-3 py-2 font-ui text-[11px]">
             <div className="flex items-center gap-2">
                 <span className="w-2 h-2" style={{ background: p.pareto ? "hsl(var(--accent-primary))" : "hsl(var(--muted))" }} />
                 <span className="text-white">{p.displayName}</span>

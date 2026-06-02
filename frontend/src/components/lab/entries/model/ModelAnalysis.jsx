@@ -12,7 +12,75 @@ import { DominanceMatrix }        from "./DominanceMatrix";
 import { TimingHeatmapPanel, ToxicityHeatmapPanel } from "./HeatmapPanels";
 import { TradeDiffExplorer }      from "./TradeDiffExplorer";
 import { LifecyclePanel, FutureModelsPanel, ResearchBacklogPanel } from "./LifecycleBacklogPanels";
+import { TriggeredEdgeFunnelPanel } from "./TriggeredEdgeFunnelPanel";
+import { SameNextCandlePanel }    from "./SameNextCandlePanel";
+import { CancelReasonPanel }      from "./CancelReasonPanel";
 import { buildAllModelCurves }    from "../analytics/equityCurveAnalytics";
+import { PROFILE_KEYS }           from "../analytics/entryRegistry";
+
+// ── TierDivider ───────────────────────────────────────────────────────────────
+// Lightweight horizontal rule with centered label. Signals a shift in analytical
+// depth — subtle enough not to add visual noise but clear enough to aid scanning.
+
+function TierDivider({ label, sub }) {
+    return (
+        <div className="flex items-center gap-4 py-1">
+            <div className="flex-1 border-t border-[hsl(var(--border-soft)/0.28)]" />
+            <div className="flex flex-col items-center gap-px">
+                <span className="text-[8px] font-ui uppercase tracking-[0.38em] text-muted-lab opacity-50 px-2">
+                    {label}
+                </span>
+                {sub && (
+                    <span className="text-[7px] font-ui text-muted-lab opacity-30 tracking-wider px-2">
+                        {sub}
+                    </span>
+                )}
+            </div>
+            <div className="flex-1 border-t border-[hsl(var(--border-soft)/0.28)]" />
+        </div>
+    );
+}
+
+// ── ResearchShell ─────────────────────────────────────────────────────────────
+// Container for the Advanced Research tier. Open by default, collapsible.
+// Dashed border + reduced fill signal "lab / draft / exploratory" rather than
+// primary decision surfaces. Lowers cognitive pressure without hiding content.
+
+function ResearchShell({ children }) {
+    const [open, setOpen] = React.useState(true);
+    return (
+        <div>
+            {/* Section header / toggle */}
+            <button
+                type="button"
+                onClick={() => setOpen(o => !o)}
+                className="w-full flex items-center gap-4 group mb-4 outline-none"
+            >
+                <div className="flex-1 border-t border-dashed border-[hsl(var(--border-soft)/0.35)]" />
+                <div className="flex items-center gap-2.5 px-5 py-2.5 border border-dashed border-[hsl(var(--border-soft)/0.45)] bg-[hsl(var(--panel)/0.5)] group-hover:bg-[hsl(var(--panel-2)/0.6)] transition-colors">
+                    <div className="text-left">
+                        <div className="text-[9px] font-ui uppercase tracking-[0.3em] text-muted-lab group-hover:text-white transition-colors">
+                            Advanced Research
+                        </div>
+                        <div className="text-[7.5px] font-ui text-muted-lab opacity-40 tracking-wider mt-0.5">
+                            deep analysis · lab notes · experimental
+                        </div>
+                    </div>
+                    <span className="text-[11px] text-muted-lab opacity-60 ml-1.5 group-hover:opacity-90 transition-opacity">
+                        {open ? "▾" : "▸"}
+                    </span>
+                </div>
+                <div className="flex-1 border-t border-dashed border-[hsl(var(--border-soft)/0.35)]" />
+            </button>
+
+            {open && (
+                <div className="border border-dashed border-[hsl(var(--border-soft)/0.28)] bg-[hsl(var(--panel)/0.18)] px-4 pt-4 pb-2 space-y-4">
+                    {children}
+                </div>
+            )}
+        </div>
+    );
+}
 
 export function ModelAnalysis({
     trades,
@@ -35,8 +103,29 @@ export function ModelAnalysis({
         return buildAllModelCurves(exactRows, tradesByMode, activeVariant);
     }, [exactRows, tradesByMode, activeVariant]);
 
-    // Resolve which model's trades to pass for per-model panels
-    const nonBaselineRows = (exactRows || []).filter(r => r.exact && !r.isBaseline);
+    // Phase 2: Lifecycle row — controls Tier 1.5 visibility.
+    //
+    // Three-way selection rule:
+    //   (a) selectedModelKey set + row IS lifecycle  → return that row (panels show, scoped to selection)
+    //   (b) selectedModelKey set + row NOT lifecycle → return null    (panels hidden — no context bleed)
+    //   (c) no selectedModelKey                      → return first lifecycle row if any (default context)
+    //
+    // This prevents Baseline / Penetration selections from bleeding into the lifecycle panels.
+    const lifecycleRow = useMemo(() => {
+        const rows = exactRows || [];
+        const isLifecycle = r =>
+            r.exact && (
+                r.metricsProfile === PROFILE_KEYS.TRIGGERED_EDGE ||
+                r.requiresLifecycleFunnel === true
+            );
+        if (selectedModelKey) {
+            // Case (a) / (b): honour the explicit selection — no fallback.
+            const selectedRow = rows.find(r => r.mode === selectedModelKey);
+            return selectedRow && isLifecycle(selectedRow) ? selectedRow : null;
+        }
+        // Case (c): nothing selected — use first lifecycle row as default context.
+        return rows.find(isLifecycle) || null;
+    }, [exactRows, selectedModelKey]);
 
     return (
         <div className="space-y-4">
@@ -48,7 +137,11 @@ export function ModelAnalysis({
                 setSelectedModelKey={setSelectedModelKey}
             />
 
-            {/* ── Tier 1: Core results ─────────────────────────────────── */}
+            {/* ════════════════════════════════════════════════════════════
+                CORE MODEL RESULTS
+                Primary decision surface: exact simulation results + lifecycle.
+                ════════════════════════════════════════════════════════════ */}
+
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
                 <ExactResultsPanel
                     exactRows={exactRows || []}
@@ -59,7 +152,31 @@ export function ModelAnalysis({
                 />
             </div>
 
-            {/* ── Tier 2: Equity + Trade-off ───────────────────────────── */}
+            {/* Lifecycle funnel panels — triggered-edge only.
+                Non-triggered datasets see nothing here — no empty space. */}
+            {lifecycleRow && (
+                <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+                    <TriggeredEdgeFunnelPanel row={lifecycleRow} />
+                    <SameNextCandlePanel
+                        row={lifecycleRow}
+                        exactRows={exactRows || []}
+                    />
+                    <CancelReasonPanel row={lifecycleRow} />
+                </div>
+            )}
+
+            {/* ── Section divider ───────────────────────────────────────── */}
+            <TierDivider
+                label="Decision Analytics"
+                sub="Equity · Direction · Session · MAE / MFE"
+            />
+
+            {/* ════════════════════════════════════════════════════════════
+                DECISION ANALYTICS
+                Performance breakdown, directional edge, session patterns.
+                ════════════════════════════════════════════════════════════ */}
+
+            {/* Equity curve + Trade-off */}
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
                 <EquityCurvePanel
                     exactRows={exactRows || []}
@@ -75,7 +192,7 @@ export function ModelAnalysis({
                 />
             </div>
 
-            {/* ── Tier 3: MAE/MFE + Direction + Session ────────────────── */}
+            {/* MAE/MFE + Direction asymmetry + Session matrix */}
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
                 <MaeAnalyticsPanel
                     exactRows={exactRows || []}
@@ -96,43 +213,52 @@ export function ModelAnalysis({
                 />
             </div>
 
-            {/* ── Tier 4: Sensitivity + Pareto ─────────────────────────── */}
+            {/* Sensitivity + Pareto */}
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
                 <SensitivityPanel exactRows={exactRows || []} />
                 <ParetoPanel      exactRows={exactRows || []} />
             </div>
 
-            {/* ── Tier 5: Dominance matrix ──────────────────────────────── */}
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-                <DominanceMatrix exactRows={exactRows || []} />
-            </div>
+            {/* ════════════════════════════════════════════════════════════
+                ADVANCED RESEARCH
+                Deeper comparison tools, model lifecycle, backlog.
+                Visually recessed — still accessible, lower cognitive pressure.
+                ════════════════════════════════════════════════════════════ */}
+            <ResearchShell>
 
-            {/* ── Tier 6: Timing heatmaps ───────────────────────────────── */}
-            {analytics?.timingGrid && (
+                {/* Dominance matrix */}
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-                    <TimingHeatmapPanel   grid={analytics.timingGrid} />
-                    <ToxicityHeatmapPanel grid={analytics.toxicityGrid} />
+                    <DominanceMatrix exactRows={exactRows || []} />
                 </div>
-            )}
 
-            {/* ── Tier 7: Trade diff explorer ──────────────────────────── */}
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-                <TradeDiffExplorer
-                    exactRows={exactRows || []}
-                    rawTrades={rawTrades || []}
-                    tradesByMode={tradesByMode}
-                    activeVariant={activeVariant}
-                    selectedModelKey={selectedModelKey}
-                    setSelectedModelKey={setSelectedModelKey}
-                />
-            </div>
+                {/* Timing / toxicity heatmaps (conditional) */}
+                {analytics?.timingGrid && (
+                    <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+                        <TimingHeatmapPanel   grid={analytics.timingGrid} />
+                        <ToxicityHeatmapPanel grid={analytics.toxicityGrid} />
+                    </div>
+                )}
 
-            {/* ── Tier 8: Lifecycle + Backlog ───────────────────────────── */}
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-                <LifecyclePanel />
-                <FutureModelsPanel />
-                <ResearchBacklogPanel />
-            </div>
+                {/* Trade diff explorer */}
+                <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+                    <TradeDiffExplorer
+                        exactRows={exactRows || []}
+                        rawTrades={rawTrades || []}
+                        tradesByMode={tradesByMode}
+                        activeVariant={activeVariant}
+                        selectedModelKey={selectedModelKey}
+                        setSelectedModelKey={setSelectedModelKey}
+                    />
+                </div>
+
+                {/* Entry model lifecycle + future ideas + research backlog */}
+                <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+                    <LifecyclePanel />
+                    <FutureModelsPanel />
+                    <ResearchBacklogPanel />
+                </div>
+
+            </ResearchShell>
 
         </div>
     );

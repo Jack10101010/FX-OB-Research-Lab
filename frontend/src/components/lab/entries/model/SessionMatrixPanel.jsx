@@ -45,7 +45,7 @@ export function SessionMatrixPanel({ exactRows, tradesByMode, activeVariant, tra
                     {METRICS.map(m => (
                         <button key={m.key} type="button"
                             onClick={() => setMetric(m.key)}
-                            className={cn("px-2.5 py-0.5 text-[9.5px] font-mono uppercase tracking-wider clip-bevel-sm border transition-colors",
+                            className={cn("px-2.5 py-0.5 text-[9.5px] font-ui uppercase tracking-wider clip-bevel-sm border transition-colors",
                                 metric === m.key
                                     ? "border-[hsl(var(--accent-primary)/0.6)] bg-[hsl(var(--accent-primary)/0.12)] text-white"
                                     : "border-[hsl(var(--border-soft))] text-muted-lab hover:text-white")}
@@ -57,25 +57,25 @@ export function SessionMatrixPanel({ exactRows, tradesByMode, activeVariant, tra
             }
         >
             {hasModelRows && !hasModelTradeData && (
-                <div className="mb-3 text-[10.5px] font-mono text-[hsl(var(--warning))] leading-relaxed">
+                <div className="mb-3 text-[10.5px] font-ui text-[hsl(var(--warning))] leading-relaxed">
                     Requires per-model entry trade exports (<span className="text-white">trades_*__entry_*.csv</span>).
                     Summary entry results are loaded, but trade-level model lists are missing.
                 </div>
             )}
             <div className="overflow-x-auto scrollbar-thin">
-                <table className="w-full min-w-[640px] font-mono text-[11px] border-separate border-spacing-1">
+                <table className="w-full min-w-[640px] text-[11px] border-separate border-spacing-1">
                     <thead>
                         <tr>
-                            <th className="text-left text-[9.5px] uppercase tracking-wider text-muted-lab px-2 py-1">Model</th>
+                            <th className="text-left text-[9.5px] font-ui uppercase tracking-wider text-muted-lab px-2 py-1">Model</th>
                             {SESSION_COLS.map(s => (
-                                <th key={s} className="text-center text-[9.5px] uppercase tracking-wider text-muted-lab px-1 py-1">{s}</th>
+                                <th key={s} className="text-center text-[9.5px] font-ui uppercase tracking-wider text-muted-lab px-1 py-1">{s}</th>
                             ))}
                         </tr>
                     </thead>
                     <tbody>
                         {matrix.map(row => (
                             <tr key={row.mode}>
-                                <td className="px-2 py-1 text-[11px] font-mono truncate max-w-[180px]">
+                                <td className="px-2 py-1 text-[11px] font-ui truncate max-w-[180px]">
                                     <span className={row.isBaseline ? "text-[hsl(var(--accent-secondary))]" : "text-white"}>{row.label}</span>
                                 </td>
                                 {SESSION_COLS.map(s => {
@@ -90,7 +90,7 @@ export function SessionMatrixPanel({ exactRows, tradesByMode, activeVariant, tra
                                     const fmt   = METRICS.find(m => m.key === metric)?.fmt || fmtMaybePct;
                                     return (
                                         <td key={s}>
-                                            <div className="px-2 py-1 text-center text-white clip-bevel-sm tabular-nums" style={{ background: bg }}>
+                                            <div className="px-2 py-1 text-center text-white clip-bevel-sm font-num tabular-nums" style={{ background: bg }}>
                                                 {fmt(val)}
                                                 {sr.count > 0 && <div className="text-[8px] opacity-60 mt-0.5">{sr.count}T</div>}
                                             </div>

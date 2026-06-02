@@ -49,7 +49,7 @@ export function ExperimentCompare({ activeRun, activeVariant }) {
                     </div>
                 }
             >
-                <p className="mb-3 text-[10px] font-mono text-muted-lab">
+                <p className="mb-3 text-[10px] font-ui text-muted-lab">
                     Compare entry model performance across multiple runs — different date ranges, symbols, or parameter sets.
                     Select up to 4 runs. Deltas are computed relative to your chosen base.
                 </p>

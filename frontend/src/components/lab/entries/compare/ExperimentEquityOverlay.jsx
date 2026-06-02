@@ -10,6 +10,7 @@ import { getRunDisplayName } from "@/data/store";
 import { num, isFiniteNumber } from "../analytics/entryFormatters";
 import { SLOT_COLORS, SLOT_LABELS } from "./RunSelectorBar";
 import { useLocalStorageState } from "../shared/useEntryWorkspace";
+import { CHART_NUM_FONT, CHART_UI_FONT } from "@/lib/chartStyles";
 
 function buildRunCurve(run, activeVariant, mode) {
     const tradesByMode = run?.entryResults?.tradesByMode || run?.entryResults?.trades_by_mode;
@@ -58,7 +59,7 @@ function mergeRunCurves(curves) {
 const CustomTooltip = ({ active, payload, label, selectedRuns }) => {
     if (!active || !payload?.length) return null;
     return (
-        <div className="clip-bevel-sm bg-[hsl(var(--panel))] border border-[hsl(var(--border-soft))] p-2 text-[10px] font-mono min-w-[120px]">
+        <div className="clip-bevel-sm bg-[hsl(var(--panel))] border border-[hsl(var(--border-soft))] p-2 text-[10px] font-ui min-w-[120px]">
             <div className="text-muted-lab mb-1">Trade #{label}</div>
             {payload.map((p, i) => (
                 <div key={i} className="flex justify-between gap-3" style={{ color: p.color }}>
@@ -98,7 +99,7 @@ export function ExperimentEquityOverlay({ selectedRuns, activeVariant }) {
             <NeonPanel title="Equity Overlay (Cross-Run)" className="xl:col-span-3"
                 action={<Pill tone="warning">SELECT ≥2 RUNS</Pill>}
             >
-                <div className="py-8 text-center text-[11px] font-mono text-muted-lab">
+                <div className="py-8 text-center text-[11px] font-ui text-muted-lab">
                     Select runs above to overlay equity curves.
                 </div>
             </NeonPanel>
@@ -111,7 +112,7 @@ export function ExperimentEquityOverlay({ selectedRuns, activeVariant }) {
         <NeonPanel title="Equity Overlay (Cross-Run)" className="xl:col-span-3"
             action={<Pill tone={hasData ? "success" : "warning"}>{hasData ? `${merged.length} TRADES` : "NO TRADE DATA"}</Pill>}
         >
-            <p className="mb-3 text-[10px] font-mono text-muted-lab">
+            <p className="mb-3 text-[10px] font-ui text-muted-lab">
                 Compare how the same model performs across different runs / date ranges.
                 {!hasData && " Requires per-model entry trade exports (trades_*__entry_*.csv). Summary entry results may be loaded, but trade-level model lists are missing."}
             </p>
@@ -119,12 +120,12 @@ export function ExperimentEquityOverlay({ selectedRuns, activeVariant }) {
             {/* Mode selector */}
             {availableModes.length > 0 && (
                 <div className="flex flex-wrap items-center gap-2 mb-3">
-                    <span className="text-[9.5px] font-mono uppercase tracking-wider text-muted-lab">Model:</span>
+                    <span className="text-[9.5px] font-ui uppercase tracking-wider text-muted-lab">Model:</span>
                     {[null, ...availableModes.slice(0, 8)].map((m, i) => (
                         <button key={i} type="button"
                             onClick={() => setMode(m)}
                             className={cn(
-                                "px-2 py-0.5 text-[9.5px] font-mono border rounded-[1px] transition-colors",
+                                "px-2 py-0.5 text-[9.5px] font-ui border rounded-[1px] transition-colors",
                                 mode === m
                                     ? "border-[hsl(var(--accent-primary)/0.6)] bg-[hsl(var(--accent-primary)/0.1)] text-white"
                                     : "border-[hsl(var(--border-soft))] text-muted-lab hover:text-white"
@@ -140,8 +141,8 @@ export function ExperimentEquityOverlay({ selectedRuns, activeVariant }) {
                 <ResponsiveContainer width="100%" height={280}>
                     <LineChart data={merged} margin={{ top: 4, right: 16, bottom: 4, left: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border-soft)/0.3)" />
-                        <XAxis dataKey="i" tick={{ fontSize: 9, fill: "hsl(var(--text-2))", fontFamily: "monospace" }} tickLine={false} label={{ value: "Trade #", position: "insideBottom", offset: -2, fontSize: 9, fill: "hsl(var(--text-2))" }} />
-                        <YAxis tick={{ fontSize: 9, fill: "hsl(var(--text-2))", fontFamily: "monospace" }} tickLine={false} tickFormatter={v => `${v >= 0 ? "+" : ""}${v.toFixed(0)}R`} />
+                        <XAxis dataKey="i" tick={{ fontSize: 9, fill: "hsl(var(--text-2))", fontFamily: CHART_NUM_FONT }} tickLine={false} label={{ value: "Trade #", position: "insideBottom", offset: -2, fontSize: 9, fill: "hsl(var(--text-2))" }} />
+                        <YAxis tick={{ fontSize: 9, fill: "hsl(var(--text-2))", fontFamily: CHART_NUM_FONT }} tickLine={false} tickFormatter={v => `${v >= 0 ? "+" : ""}${v.toFixed(0)}R`} />
                         <ReferenceLine y={0} stroke="hsl(var(--border-mid))" strokeDasharray="2 2" />
                         <Tooltip content={<CustomTooltip selectedRuns={selectedRuns} />} />
                         {selectedRuns.map((run, i) => (
@@ -155,11 +156,11 @@ export function ExperimentEquityOverlay({ selectedRuns, activeVariant }) {
                                 connectNulls
                             />
                         ))}
-                        <Legend wrapperStyle={{ fontSize: 9, fontFamily: "monospace" }} />
+                        <Legend wrapperStyle={{ fontSize: 9, fontFamily: CHART_UI_FONT }} />
                     </LineChart>
                 </ResponsiveContainer>
             ) : (
-                <div className="py-8 text-center text-[10.5px] font-mono text-[hsl(var(--warning))]">
+                <div className="py-8 text-center text-[10.5px] font-ui text-[hsl(var(--warning))]">
                     Requires per-model entry trade exports (trades_*__entry_*.csv). Summary entry results are loaded when available, but trade-level model lists are missing.
                 </div>
             )}

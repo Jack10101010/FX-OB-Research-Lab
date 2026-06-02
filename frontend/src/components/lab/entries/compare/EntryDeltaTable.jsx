@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo } from "react";
+import { Link } from "react-router-dom";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { Pill }      from "@/components/lab/DataTable";
 import { cn }        from "@/lib/utils";
@@ -7,6 +8,9 @@ import { buildEntryResultRows }   from "../analytics/entryAnalytics";
 import { getRunDisplayName }      from "@/data/store";
 import { SLOT_COLORS, SLOT_LABELS } from "./RunSelectorBar";
 import { useLocalStorageState } from "../shared/useEntryWorkspace";
+// RB-8c: Layer-1 compare reference — basis context + shared compare guard.
+import { useResultsLens } from "@/data/useResultsLens";
+import { evaluateCompare } from "@/data/useCompareGuard";
 
 const DIMS = [
     { key: "netR",         label: "Net R",   fmt: v => { const n = num(v); return `${n >= 0 ? "+" : ""}${n.toFixed(1)}R`; }, higherBetter: true },
@@ -58,12 +62,26 @@ export function EntryDeltaTable({ selectedRuns }) {
 
     const baseRun = runRows[baseIdx];
 
+    // RB-8c: cross-run delta rows are backend-summary derived (no underlying
+    // trades), so this table is inherently Raw R — Current Equity contribution
+    // cannot be computed here. The shared compare guard formalizes that and the
+    // PF-safety rule; we surface its basis + warnings honestly.
+    const lens = useResultsLens();
+    const compareGuard = useMemo(
+        () => evaluateCompare(
+            { basis: lens.basis, accountSettings: lens.accountSettings },
+            { basis: lens.basis, accountSettings: lens.accountSettings },
+        ),
+        [lens.basis, lens.accountSettings],
+    );
+    const ceRequestedButUnsupported = lens.isCurrentEquity;
+
     if (selectedRuns.length < 2) {
         return (
             <NeonPanel title="Cross-Run Delta Table" className="xl:col-span-3"
                 action={<Pill tone="warning">SELECT ≥2 RUNS</Pill>}
             >
-                <div className="py-6 text-center text-[11px] font-mono text-muted-lab">
+                <div className="py-6 text-center text-[11px] font-ui text-muted-lab">
                     Select at least two runs above to compare entry model metrics.
                 </div>
             </NeonPanel>
@@ -76,34 +94,59 @@ export function EntryDeltaTable({ selectedRuns }) {
         >
             {/* Base run selector */}
             <div className="flex items-center gap-2 mb-3 flex-wrap">
-                <span className="text-[9.5px] font-mono uppercase tracking-wider text-muted-lab">Deltas vs:</span>
+                <span className="text-[9.5px] font-ui uppercase tracking-wider text-muted-lab">Deltas vs:</span>
                 {selectedRuns.map((run, i) => (
-                    <button key={run.id} type="button"
-                        onClick={() => setBaseIdx(i)}
-                        className={cn(
-                            "flex items-center gap-1.5 px-2 py-1 text-[10px] font-mono border rounded-[1px] transition-colors",
-                            baseIdx === i
-                                ? "border-[hsl(var(--border-mid))] bg-[hsl(var(--panel-2)/0.5)] text-white"
-                                : "border-[hsl(var(--border-soft)/0.5)] text-muted-lab hover:text-white"
-                        )}
-                    >
-                        <span className="w-2 h-2 rounded-full" style={{ background: SLOT_COLORS[i] }} />
-                        {SLOT_LABELS[i]}: {getRunDisplayName(run)}
-                    </button>
+                    <div key={run.id} className="flex items-center gap-1">
+                        <button type="button"
+                            onClick={() => setBaseIdx(i)}
+                            className={cn(
+                                "flex items-center gap-1.5 px-2 py-1 text-[10px] font-ui border rounded-[1px] transition-colors",
+                                baseIdx === i
+                                    ? "border-[hsl(var(--border-mid))] bg-[hsl(var(--panel-2)/0.5)] text-white"
+                                    : "border-[hsl(var(--border-soft)/0.5)] text-muted-lab hover:text-white"
+                            )}
+                        >
+                            <span className="w-2 h-2 rounded-full" style={{ background: SLOT_COLORS[i] }} />
+                            {SLOT_LABELS[i]}: {getRunDisplayName(run)}
+                        </button>
+                        <Link
+                            to={`/runs/${encodeURIComponent(run.id)}`}
+                            className="text-[9.5px] font-ui text-muted-lab hover:text-white transition-colors"
+                            title="Open run detail"
+                        >→</Link>
+                    </div>
                 ))}
             </div>
 
+            {/* RB-8c basis context — cross-run summary deltas are Raw R only. */}
+            <div className="flex flex-wrap items-center gap-2 mb-2">
+                <span className="text-[9px] font-ui uppercase tracking-widest text-[hsl(var(--text-muted))]">Compare Basis</span>
+                <Pill tone="muted">Raw R</Pill>
+                <span className="text-[10px] text-muted-lab">cross-run summary deltas · WR = wins/(wins+losses)</span>
+                {ceRequestedButUnsupported && (
+                    <span className="text-[10px] text-[hsl(var(--warning))]">
+                        Current Equity is unsupported here — these rows are backend summaries with no underlying trades.
+                    </span>
+                )}
+            </div>
+
             <div className="overflow-x-auto scrollbar-thin">
-                <table className="w-full font-mono text-[10px] border-separate border-spacing-0.5 min-w-[640px]">
+                <table className="w-full text-[10px] border-separate border-spacing-0.5 min-w-[640px]">
                     <thead>
                         <tr>
-                            <th className="text-left text-[9.5px] uppercase tracking-wider text-muted-lab px-2 py-1.5 whitespace-nowrap">Model</th>
+                            <th className="text-left text-[9.5px] font-ui uppercase tracking-wider text-muted-lab px-2 py-1.5 whitespace-nowrap">Model</th>
                             {selectedRuns.map((run, i) => (
                                 <th key={run.id} colSpan={i === baseIdx ? DIMS.length : DIMS.length + 1}
-                                    className="text-center text-[9px] uppercase tracking-wider px-1 py-1.5 whitespace-nowrap"
+                                    className="text-center text-[9px] font-ui uppercase tracking-wider px-1 py-1.5 whitespace-nowrap"
                                     style={{ color: SLOT_COLORS[i] }}
                                 >
-                                    {SLOT_LABELS[i]} — {getRunDisplayName(run)}
+                                    <Link
+                                        to={`/runs/${encodeURIComponent(run.id)}`}
+                                        className="hover:underline"
+                                        style={{ color: "inherit" }}
+                                    >
+                                        {SLOT_LABELS[i]} — {getRunDisplayName(run)}
+                                    </Link>
                                 </th>
                             ))}
                         </tr>
@@ -113,14 +156,14 @@ export function EntryDeltaTable({ selectedRuns }) {
                                 <React.Fragment key={run.id}>
                                     {DIMS.map(d => (
                                         <th key={d.key}
-                                            className="text-center text-[8.5px] uppercase tracking-wider text-muted-lab px-1.5 py-1 whitespace-nowrap cursor-pointer hover:text-white"
+                                            className="text-center text-[8.5px] font-ui uppercase tracking-wider text-muted-lab px-1.5 py-1 whitespace-nowrap cursor-pointer hover:text-white"
                                             onClick={() => setSortDim(d.key)}
                                         >
                                             {d.label}{sortDim === d.key ? " ▾" : ""}
                                         </th>
                                     ))}
                                     {i !== baseIdx && (
-                                        <th className="text-center text-[8.5px] uppercase tracking-wider text-muted-lab px-1.5 py-1 whitespace-nowrap">
+                                        <th className="text-center text-[8.5px] font-ui uppercase tracking-wider text-muted-lab px-1.5 py-1 whitespace-nowrap">
                                             Δ {DIMS.find(d => d.key === sortDim)?.label}
                                         </th>
                                     )}
@@ -133,14 +176,14 @@ export function EntryDeltaTable({ selectedRuns }) {
                             const baseRow = baseRun?.rowMap[mode];
                             return (
                                 <tr key={mode} className="hover:bg-[hsl(var(--panel-2)/0.3)]">
-                                    <td className="px-2 py-1 whitespace-nowrap text-[hsl(var(--text-2))]">{mode}</td>
+                                    <td className="px-2 py-1 font-code whitespace-nowrap text-[hsl(var(--text-2))]">{mode}</td>
                                     {runRows.map(({ run, rowMap }, i) => {
                                         const row = rowMap[mode];
                                         const isBase = i === baseIdx;
                                         return (
                                             <React.Fragment key={run.id}>
                                                 {DIMS.map(dim => (
-                                                    <td key={dim.key} className="text-center px-1.5 py-1 tabular-nums text-[hsl(var(--text-2))]">
+                                                    <td key={dim.key} className="text-center px-1.5 py-1 font-num tabular-nums text-[hsl(var(--text-2))]">
                                                         {row && isFiniteNumber(row[dim.key]) ? dim.fmt(row[dim.key]) : "—"}
                                                     </td>
                                                 ))}
@@ -150,7 +193,7 @@ export function EntryDeltaTable({ selectedRuns }) {
                                                     const cVal  = row    && isFiniteNumber(row[sortDim])     ? num(row[sortDim])     : null;
                                                     const delta = bVal != null && cVal != null ? cVal - bVal : null;
                                                     return (
-                                                        <td className={cn("text-center px-1.5 py-1 tabular-nums font-semibold", deltaStyle(delta, dim?.higherBetter))}>
+                                                        <td className={cn("text-center px-1.5 py-1 font-num tabular-nums font-semibold", deltaStyle(delta, dim?.higherBetter))}>
                                                             {delta != null ? fmtDelta(delta, dim) : "—"}
                                                         </td>
                                                     );

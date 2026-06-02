@@ -18,11 +18,12 @@ const DEFAULT_FILTERS = {
 };
 
 const DEFAULT_COLS = {
-    avgMAE:      false,
-    avgMFE:      false,
-    avgTimeToTP: false,
-    avgTimeToSL: false,
-    profitFactor: true,
+    avgMAE:        false,
+    avgMFE:        false,
+    avgTimeToTP:   false,
+    avgTimeToSL:   false,
+    profitFactor:  true,
+    triggeredEdge: false,
 };
 
 export const TABS = [

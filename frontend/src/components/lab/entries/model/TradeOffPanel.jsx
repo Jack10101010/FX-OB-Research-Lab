@@ -41,7 +41,7 @@ export function TradeOffPanel({ exactRows, rawTrades, tradesByMode, activeVarian
             action={<Pill tone={hasData ? "success" : "warning"}>{hasData ? "EXACT" : "NEEDS ENTRY CSVS"}</Pill>}
         >
             {!hasData && (
-                <div className="mb-3 text-[10.5px] font-mono text-[hsl(var(--warning))] leading-relaxed">
+                <div className="mb-3 text-[10.5px] font-ui text-[hsl(var(--warning))] leading-relaxed">
                     Requires per-model entry trade exports (<span className="text-white">trades_*__entry_*.csv</span>).
                     Summary entry results are loaded, but trade-level model lists are missing.
                     Ratio = % losers avoided ÷ % winners missed — &gt;1× is beneficial.

@@ -277,7 +277,7 @@ export default function HypothesisLab() {
                     collapsed={collapsed.summary}
                     onToggle={() => toggleSection("summary")}
                 >
-                    <div className="text-[10.5px] font-mono text-[hsl(var(--warning))] mb-3 flex items-center gap-1.5">
+                    <div className="text-[10.5px] font-ui text-[hsl(var(--warning))] mb-3 flex items-center gap-1.5">
                         <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                         Frontend estimates derived from imported trades — not candle-level simulations.
                     </div>
@@ -297,20 +297,20 @@ export default function HypothesisLab() {
                     collapsed={collapsed.simulator}
                     onToggle={() => toggleSection("simulator")}
                 >
-                    <p className="text-[10.5px] font-mono text-muted-lab mb-4">
+                    <p className="text-[10.5px] font-ui text-muted-lab mb-4">
                         Toggle exclusion filters, then select entry / protection models. Entry and protection model selectors show exact imported metrics when available. All other results are frontend estimates.
                     </p>
 
                     {/* Presets */}
                     <div className="mb-4">
-                        <div className="text-[9.5px] font-mono uppercase tracking-[0.18em] text-muted-lab mb-1.5">Quick Presets</div>
+                        <div className="text-[9.5px] font-ui uppercase tracking-[0.18em] text-muted-lab mb-1.5">Quick Presets</div>
                         <div className="flex flex-wrap gap-1.5">
                             {PRESETS.map((p) => (
                                 <button
                                     key={p.label}
                                     onClick={() => applyPreset(p)}
                                     className={[
-                                        "text-[11px] font-mono px-2.5 py-1 clip-bevel-sm border transition-colors",
+                                        "text-[11px] font-ui px-2.5 py-1 clip-bevel-sm border transition-colors",
                                         p.clear
                                             ? "border-[hsl(var(--border-mid))] text-muted-lab hover:text-white hover:border-[hsl(var(--border-soft))]"
                                             : "border-[hsl(var(--accent-primary)/0.5)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.08)] hover:bg-[hsl(var(--accent-primary)/0.16)]",
@@ -378,7 +378,7 @@ export default function HypothesisLab() {
                         <button
                             type="button"
                             onClick={exportHypothesesCsv}
-                            className="px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider border border-[hsl(var(--accent-secondary)/0.55)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.06)] hover:bg-[hsl(var(--accent-secondary)/0.12)] clip-bevel-sm"
+                            className="px-2.5 py-1 text-[10px] font-ui uppercase tracking-wider border border-[hsl(var(--accent-secondary)/0.55)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.06)] hover:bg-[hsl(var(--accent-secondary)/0.12)] clip-bevel-sm"
                         >
                             Export Hypotheses CSV
                         </button>
@@ -404,7 +404,7 @@ export default function HypothesisLab() {
                     collapsed={collapsed.promote}
                     onToggle={() => toggleSection("promote")}
                 >
-                    <div className="text-[11px] font-mono text-muted-lab mb-3 flex items-start gap-1.5">
+                    <div className="text-[11px] font-ui text-muted-lab mb-3 flex items-start gap-1.5">
                         <Zap className="w-3.5 h-3.5 mt-0.5 shrink-0 text-[hsl(var(--accent-secondary))]" />
                         Creates a copyable hypothesis/config idea for the Python backtester. It does not run the engine.
                         This is a frontend estimate — use it to decide what deserves an exact Python test.
@@ -412,14 +412,14 @@ export default function HypothesisLab() {
                     <div className="flex items-center gap-2 mb-2">
                         <button
                             onClick={handleCopy}
-                            className="flex items-center gap-1.5 text-[11.5px] font-mono px-3 py-1.5 clip-bevel-sm border border-[hsl(var(--accent-secondary)/0.6)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.08)] hover:bg-[hsl(var(--accent-secondary)/0.16)] transition-colors"
+                            className="flex items-center gap-1.5 text-[11.5px] font-ui px-3 py-1.5 clip-bevel-sm border border-[hsl(var(--accent-secondary)/0.6)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.08)] hover:bg-[hsl(var(--accent-secondary)/0.16)] transition-colors"
                         >
                             {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                             {copied ? "Copied!" : "Copy to Clipboard"}
                         </button>
-                        <span className="text-[10.5px] font-mono text-muted-lab">Hypothesis JSON payload</span>
+                        <span className="text-[10.5px] font-ui text-muted-lab">Hypothesis JSON payload</span>
                     </div>
-                    <pre className="text-[10.5px] font-mono text-[hsl(var(--text-2))] bg-[hsl(var(--panel-2)/0.5)] border border-[hsl(var(--border-soft))] clip-bevel-sm p-3 overflow-x-auto scrollbar-thin max-h-[240px]">
+                    <pre className="text-[10.5px] font-code text-[hsl(var(--text-2))] bg-[hsl(var(--panel-2)/0.5)] border border-[hsl(var(--border-soft))] clip-bevel-sm p-3 overflow-x-auto scrollbar-thin max-h-[240px]">
                         {promotePayload}
                     </pre>
                 </Section>
@@ -454,14 +454,14 @@ function Section({ title, action, collapsed, onToggle, children }) {
 function InsightGroup({ title, items }) {
     return (
         <div className="border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] clip-bevel-sm p-3">
-            <div className="text-[9.5px] font-mono uppercase tracking-[0.18em] text-[hsl(var(--accent-secondary))] mb-2">{title}</div>
+            <div className="text-[9.5px] font-ui uppercase tracking-[0.18em] text-[hsl(var(--accent-secondary))] mb-2">{title}</div>
             <div className="space-y-1.5">
                 {items.map((item, i) => (
                     <div key={i} className="flex items-start justify-between gap-2">
                         <span className="text-[10px] text-muted-lab leading-tight shrink-0 max-w-[45%]">{item.label}</span>
                         {item.available
-                            ? <span className="text-[10.5px] font-mono text-white text-right leading-tight break-all">{item.value}</span>
-                            : <span className="text-[10px] font-mono text-muted-lab italic">Limited Data</span>}
+                            ? <span className="text-[10.5px] font-ui text-white text-right leading-tight break-all">{item.value}</span>
+                            : <span className="text-[10px] font-ui text-muted-lab italic">Limited Data</span>}
                     </div>
                 ))}
             </div>
@@ -472,7 +472,7 @@ function InsightGroup({ title, items }) {
 function FilterGroup({ group, filters, activeFilters, onToggle }) {
     return (
         <div className="border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm p-3">
-            <div className="text-[9.5px] font-mono uppercase tracking-[0.18em] text-[hsl(var(--accent-primary))] mb-2">{group}</div>
+            <div className="text-[9.5px] font-ui uppercase tracking-[0.18em] text-[hsl(var(--accent-primary))] mb-2">{group}</div>
             <div className="flex flex-wrap gap-1">
                 {filters.map((f) => {
                     const active = activeFilters.has(f.key);
@@ -481,7 +481,7 @@ function FilterGroup({ group, filters, activeFilters, onToggle }) {
                             key={f.key}
                             onClick={() => onToggle(f.key)}
                             className={[
-                                "text-[10px] font-mono px-2 py-0.5 clip-bevel-sm border transition-colors",
+                                "text-[10px] font-ui px-2 py-0.5 clip-bevel-sm border transition-colors",
                                 active
                                     ? "border-[hsl(var(--danger)/0.7)] bg-[hsl(var(--danger)/0.15)] text-[hsl(var(--danger))]"
                                     : "border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:border-[hsl(var(--border-soft))] hover:text-white",
@@ -499,7 +499,7 @@ function FilterGroup({ group, filters, activeFilters, onToggle }) {
 function ModelSelector({ title, options, selected, onSelect, exactRows, override }) {
     return (
         <div className="border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm p-3">
-            <div className="text-[9.5px] font-mono uppercase tracking-[0.18em] text-[hsl(var(--accent-secondary))] mb-2">{title}</div>
+            <div className="text-[9.5px] font-ui uppercase tracking-[0.18em] text-[hsl(var(--accent-secondary))] mb-2">{title}</div>
             <div className="flex flex-wrap gap-1 mb-2.5">
                 {options.map((opt) => {
                     const isActive   = selected === opt.mode;
@@ -510,7 +510,7 @@ function ModelSelector({ title, options, selected, onSelect, exactRows, override
                             onClick={() => onSelect(opt.mode)}
                             title={opt.threshold || ""}
                             className={[
-                                "text-[10px] font-mono px-2 py-0.5 clip-bevel-sm border transition-colors",
+                                "text-[10px] font-ui px-2 py-0.5 clip-bevel-sm border transition-colors",
                                 isActive
                                     ? "border-[hsl(var(--accent-secondary)/0.7)] bg-[hsl(var(--accent-secondary)/0.15)] text-[hsl(var(--accent-secondary))]"
                                     : "border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:text-white",
@@ -522,7 +522,7 @@ function ModelSelector({ title, options, selected, onSelect, exactRows, override
                 })}
             </div>
             {override ? (
-                <div className="text-[10.5px] font-mono space-y-1">
+                <div className="text-[10.5px] font-ui space-y-1">
                     <div className="text-[9px] uppercase tracking-wider text-[hsl(var(--success))] mb-1">Exact imported data</div>
                     <div className="flex gap-3 flex-wrap">
                         {isFiniteNum(override.netR)       && <span className="text-white">Net R: <ColoredR value={override.netR} /></span>}
@@ -532,7 +532,7 @@ function ModelSelector({ title, options, selected, onSelect, exactRows, override
                     </div>
                 </div>
             ) : (
-                <div className="text-[10px] font-mono text-muted-lab italic">
+                <div className="text-[10px] font-ui text-muted-lab italic">
                     {selected === "baseline" ? "Baseline — all trades" : "Limited Data · no exact import for this mode"}
                 </div>
             )}
@@ -543,7 +543,7 @@ function ModelSelector({ title, options, selected, onSelect, exactRows, override
 function SimResultPanel({ baseline, simStats, removedCount, entryOverride, hasActiveFilters, activeFilters, onSave }) {
     if (!hasActiveFilters) {
         return (
-            <div className="border border-dashed border-[hsl(var(--border-mid))] clip-bevel-sm p-4 text-[11px] font-mono text-muted-lab text-center">
+            <div className="border border-dashed border-[hsl(var(--border-mid))] clip-bevel-sm p-4 text-[11px] font-ui text-muted-lab text-center">
                 Activate filters or select a non-baseline model above to see simulation results.
             </div>
         );
@@ -565,13 +565,13 @@ function SimResultPanel({ baseline, simStats, removedCount, entryOverride, hasAc
                 </div>
                 <button
                     onClick={onSave}
-                    className="flex items-center gap-1.5 text-[11px] font-mono px-2.5 py-1 clip-bevel-sm border border-[hsl(var(--success)/0.6)] text-[hsl(var(--success))] bg-[hsl(var(--success)/0.08)] hover:bg-[hsl(var(--success)/0.16)] transition-colors"
+                    className="flex items-center gap-1.5 text-[11px] font-ui px-2.5 py-1 clip-bevel-sm border border-[hsl(var(--success)/0.6)] text-[hsl(var(--success))] bg-[hsl(var(--success)/0.08)] hover:bg-[hsl(var(--success)/0.16)] transition-colors"
                 >
                     <Save className="w-3 h-3" />
                     Save Simulation
                 </button>
             </div>
-            <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-8 gap-3 text-[10.5px] font-mono">
+            <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-8 gap-3 text-[10.5px] font-ui">
                 <StatCell label="Trades"     value={isFiniteNum(stats.trades) ? String(Math.round(stats.trades)) : "—"} />
                 {!stats.exact && <StatCell label="Removed"  value={String(removedCount)} tone="danger" />}
                 <StatCell label="Win Rate"   value={fmtPct(stats.winRate)} />
@@ -582,7 +582,7 @@ function SimResultPanel({ baseline, simStats, removedCount, entryOverride, hasAc
                 {isFiniteNum(deltaWR)   && <StatCell label="Δ WR"    value={`${deltaWR >= 0 ? "+" : ""}${deltaWR.toFixed(1)}%`}    tone={deltaWR   >= 0 ? "success" : "danger"} />}
             </div>
             {activeFilters.size > 0 && (
-                <div className="mt-2 text-[10px] font-mono text-muted-lab leading-relaxed">
+                <div className="mt-2 text-[10px] font-ui text-muted-lab leading-relaxed">
                     <span className="text-[hsl(var(--text-2))]">Active exclusions: </span>
                     {Array.from(activeFilters).map((k) => SIM_FILTERS.find((f) => f.key === k)?.label || k).join(" · ")}
                 </div>
@@ -596,7 +596,7 @@ function StatCell({ label, value, tone }) {
     return (
         <div>
             <div className="text-[9px] uppercase tracking-wider text-muted-lab mb-0.5">{label}</div>
-            <div className={`font-mono tabular-nums ${colorMap[tone] || "text-white"}`}>{value || "—"}</div>
+            <div className={`font-num tabular-nums ${colorMap[tone] || "text-white"}`}>{value || "—"}</div>
         </div>
     );
 }
@@ -621,7 +621,7 @@ function SavedTable({ baseline, currentSimRow, saved, onDelete, onRestore, onSta
 
     return (
         <div className="overflow-x-auto scrollbar-thin">
-            <table className="w-full min-w-[800px] font-mono text-[10.5px] border-separate border-spacing-0">
+            <table className="w-full min-w-[800px] font-ui text-[10.5px] border-separate border-spacing-0">
                 <thead>
                     <tr>
                         {COLS.map((c) => (
@@ -636,7 +636,7 @@ function SavedTable({ baseline, currentSimRow, saved, onDelete, onRestore, onSta
                             <td className="px-3 py-2 whitespace-nowrap">
                                 {row.isSaved && editingName === row.id ? (
                                     <input
-                                        className="bg-[hsl(var(--panel))] border border-[hsl(var(--accent-primary)/0.5)] text-white text-[10.5px] font-mono px-1.5 py-0.5 clip-bevel-sm outline-none w-[160px]"
+                                        className="bg-[hsl(var(--panel))] border border-[hsl(var(--accent-primary)/0.5)] text-white text-[10.5px] font-ui px-1.5 py-0.5 clip-bevel-sm outline-none w-[160px]"
                                         value={editNameValue}
                                         onChange={(e) => setEditNameValue(e.target.value)}
                                         onBlur={() => onCommitRename(row.id)}
@@ -653,18 +653,18 @@ function SavedTable({ baseline, currentSimRow, saved, onDelete, onRestore, onSta
                                 )}
                             </td>
                             {/* Stats */}
-                            <td className="px-3 py-2 tabular-nums text-right">{isFiniteNum(row.trades) ? Math.round(row.trades) : "—"}</td>
-                            <td className="px-3 py-2 tabular-nums text-right text-muted-lab">{isFiniteNum(row.removed) ? row.removed : "—"}</td>
-                            <td className="px-3 py-2 tabular-nums text-right">{fmtPct(row.winRate)}</td>
-                            <td className="px-3 py-2 tabular-nums text-right">
+                            <td className="px-3 py-2 tabular-nums text-right font-num">{isFiniteNum(row.trades) ? Math.round(row.trades) : "—"}</td>
+                            <td className="px-3 py-2 tabular-nums text-right text-muted-lab font-num">{isFiniteNum(row.removed) ? row.removed : "—"}</td>
+                            <td className="px-3 py-2 tabular-nums text-right font-num">{fmtPct(row.winRate)}</td>
+                            <td className="px-3 py-2 tabular-nums text-right font-num">
                                 {isFiniteNum(row.netR) ? <ColoredR value={row.netR} /> : <span className="text-muted-lab">—</span>}
                             </td>
-                            <td className="px-3 py-2 tabular-nums text-right">{fmtExp(row.expectancy)}</td>
-                            <td className="px-3 py-2 tabular-nums text-right text-[hsl(var(--danger))]">{fmtR(row.maxDD)}</td>
-                            <td className="px-3 py-2 tabular-nums text-right">
+                            <td className="px-3 py-2 tabular-nums text-right font-num">{fmtExp(row.expectancy)}</td>
+                            <td className="px-3 py-2 tabular-nums text-right text-[hsl(var(--danger))] font-num">{fmtR(row.maxDD)}</td>
+                            <td className="px-3 py-2 tabular-nums text-right font-num">
                                 <DeltaVal value={row.deltaNetR} isBaseline={row.isBaseline} suffix="R" />
                             </td>
-                            <td className="px-3 py-2 tabular-nums text-right">
+                            <td className="px-3 py-2 tabular-nums text-right font-num">
                                 <DeltaVal value={row.deltaWR} isBaseline={row.isBaseline} suffix="%" />
                             </td>
                             {/* Actions */}
@@ -683,7 +683,7 @@ function SavedTable({ baseline, currentSimRow, saved, onDelete, onRestore, onSta
                 </tbody>
             </table>
             {allRows.length === 1 && (
-                <div className="text-[10.5px] font-mono text-muted-lab text-center py-4">
+                <div className="text-[10.5px] font-ui text-muted-lab text-center py-4">
                     No active simulation. Configure filters above and click Save Simulation.
                 </div>
             )}

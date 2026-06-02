@@ -6,17 +6,17 @@ import { WEEKDAYS, HOURS, pad2 } from "../analytics/entryFormatters";
 function HeatmapGrid({ grid, danger }) {
     return (
         <div className="overflow-x-auto scrollbar-thin">
-            <table className="w-full min-w-[760px] font-mono text-[10px] border-separate border-spacing-1">
+            <table className="w-full min-w-[760px] text-[10px] border-separate border-spacing-1">
                 <thead>
                     <tr>
-                        <th className="text-muted-lab text-left px-2 py-1 text-[9.5px] uppercase tracking-wider">Day / Hr UTC</th>
-                        {HOURS.map(h => <th key={h} className="text-muted-lab px-1 py-1 text-[8.5px] tabular-nums">{pad2(h)}</th>)}
+                        <th className="font-ui text-muted-lab text-left px-2 py-1 text-[9.5px] uppercase tracking-wider">Day / Hr UTC</th>
+                        {HOURS.map(h => <th key={h} className="font-num text-muted-lab px-1 py-1 text-[8.5px] tabular-nums">{pad2(h)}</th>)}
                     </tr>
                 </thead>
                 <tbody>
                     {WEEKDAYS.map((day, di) => (
                         <tr key={day}>
-                            <td className="text-muted-lab px-2 py-1">{day}</td>
+                            <td className="font-ui text-muted-lab px-2 py-1">{day}</td>
                             {HOURS.map(hour => {
                                 const cell = grid.cells[`${di}-${hour}`];
                                 if (!cell) {
@@ -33,8 +33,8 @@ function HeatmapGrid({ grid, danger }) {
                                             style={{ background: bg }}
                                             title={`${day} ${pad2(hour)}:00 UTC — ${cell.count} trades · ${cell.netR >= 0 ? "+" : ""}${cell.netR.toFixed(1)}R`}
                                         >
-                                            <div>{cell.count}</div>
-                                            <div className="text-[7.5px] opacity-70">{cell.netR >= 0 ? "+" : ""}{cell.netR.toFixed(1)}</div>
+                                            <div className="font-num">{cell.count}</div>
+                                            <div className="font-num text-[7.5px] opacity-70">{cell.netR >= 0 ? "+" : ""}{cell.netR.toFixed(1)}</div>
                                         </div>
                                     </td>
                                 );
@@ -52,7 +52,7 @@ export function TimingHeatmapPanel({ grid }) {
         <NeonPanel className="xl:col-span-3" title="Entry Timing Heatmap"
             action={<Pill tone="secondary">{grid.total} TRADES</Pill>}
         >
-            <p className="mb-2 text-[10px] font-mono text-muted-lab">All trades. Green = positive net R in that slot, Red = negative. Count + net R per cell. Hover for detail.</p>
+            <p className="mb-2 text-[10px] font-ui text-muted-lab">All trades. Green = positive net R in that slot, Red = negative. Count + net R per cell. Hover for detail.</p>
             <HeatmapGrid grid={grid} danger={false} />
         </NeonPanel>
     );
@@ -63,7 +63,7 @@ export function ToxicityHeatmapPanel({ grid }) {
         <NeonPanel className="xl:col-span-3" title="Entry Toxicity Map (Losing Trades Only)"
             action={<Pill tone="danger">{grid.total} LOSING TRADES</Pill>}
         >
-            <p className="mb-2 text-[10px] font-mono text-muted-lab">Losing trades only. High-density red cells indicate toxic time windows. Fixed from original: was incorrectly showing all trades.</p>
+            <p className="mb-2 text-[10px] font-ui text-muted-lab">Losing trades only. High-density red cells indicate toxic time windows. Fixed from original: was incorrectly showing all trades.</p>
             <HeatmapGrid grid={grid} danger={true} />
         </NeonPanel>
     );

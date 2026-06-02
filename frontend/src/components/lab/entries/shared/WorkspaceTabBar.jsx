@@ -17,7 +17,7 @@ export function WorkspaceTabBar({ activeTab, onTabChange, hasActiveFilters, tabs
                             type="button"
                             onClick={() => onTabChange(tab.key)}
                             className={cn(
-                                "relative flex items-center gap-1.5 px-4 py-3 text-[11.5px] font-mono uppercase tracking-[0.16em] whitespace-nowrap transition-all duration-150 border-b-2 select-none",
+                                "relative flex items-center gap-1.5 px-4 py-3 text-[11.5px] font-ui uppercase tracking-[0.16em] whitespace-nowrap transition-all duration-150 border-b-2 select-none",
                                 isActive
                                     ? "text-white border-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.06)]"
                                     : "text-[hsl(var(--text-2))] border-transparent hover:text-white hover:border-[hsl(var(--border-mid))] hover:bg-[hsl(var(--panel-2)/0.4)]",
@@ -41,7 +41,7 @@ export function WorkspaceTabBar({ activeTab, onTabChange, hasActiveFilters, tabs
                     );
                 })}
                 {hasActiveFilters && (
-                    <span className="ml-auto self-center mb-1 flex items-center gap-1 px-2 py-0.5 clip-bevel-sm border border-[hsl(var(--warning)/0.5)] bg-[hsl(var(--warning)/0.08)] text-[9.5px] font-mono uppercase tracking-wider text-[hsl(var(--warning))]">
+                    <span className="ml-auto self-center mb-1 flex items-center gap-1 px-2 py-0.5 clip-bevel-sm border border-[hsl(var(--warning)/0.5)] bg-[hsl(var(--warning)/0.08)] text-[9.5px] font-ui uppercase tracking-wider text-[hsl(var(--warning))]">
                         <span className="w-1.5 h-1.5 rounded-full bg-[hsl(var(--warning))] animate-pulse" />
                         Filtered
                     </span>

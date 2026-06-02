@@ -51,7 +51,7 @@ export function RunSelectorBar({ runs = [], selectedRunIds, setSelectedRunIds })
         return (
             <div className="flex items-center gap-2 px-3 py-2 border border-[hsl(var(--border-soft)/0.5)] bg-[hsl(var(--panel-2)/0.3)] rounded-[1px]">
                 <Pill tone="warning">NO RUNS WITH ENTRY DATA</Pill>
-                <span className="text-[10px] font-mono text-muted-lab">Import entry results to compare runs.</span>
+                <span className="text-[10px] font-ui text-muted-lab">Import entry results to compare runs.</span>
             </div>
         );
     }
@@ -60,7 +60,7 @@ export function RunSelectorBar({ runs = [], selectedRunIds, setSelectedRunIds })
         <div className="space-y-2">
             {/* Slot indicators */}
             <div className="flex items-center gap-2 mb-1">
-                <span className="text-[9.5px] font-mono uppercase tracking-wider text-muted-lab">Selected slots:</span>
+                <span className="text-[9.5px] font-ui uppercase tracking-wider text-muted-lab">Selected slots:</span>
                 {SLOT_LABELS.map((slot, i) => {
                     const runId  = selectedRunIds[i];
                     const run    = runId ? availableRuns.find(r => r.id === runId) : null;
@@ -68,7 +68,7 @@ export function RunSelectorBar({ runs = [], selectedRunIds, setSelectedRunIds })
                     return (
                         <div key={slot}
                             className={cn(
-                                "flex items-center gap-1.5 px-2 py-1 text-[10px] font-mono border rounded-[1px] transition-colors",
+                                "flex items-center gap-1.5 px-2 py-1 text-[10px] font-ui border rounded-[1px] transition-colors",
                                 active
                                     ? "border-[hsl(var(--border-mid))] bg-[hsl(var(--panel-2)/0.6)] text-white"
                                     : "border-[hsl(var(--border-soft)/0.4)] text-muted-lab"
@@ -86,7 +86,7 @@ export function RunSelectorBar({ runs = [], selectedRunIds, setSelectedRunIds })
                     <button
                         type="button"
                         onClick={() => setSelectedRunIds([])}
-                        className="ml-2 text-[9.5px] font-mono text-muted-lab hover:text-white transition-colors"
+                        className="ml-2 text-[9.5px] font-ui text-muted-lab hover:text-white transition-colors"
                     >
                         clear all
                     </button>
@@ -109,7 +109,7 @@ export function RunSelectorBar({ runs = [], selectedRunIds, setSelectedRunIds })
                             onClick={() => handleToggle(run.id)}
                             disabled={!active && !canAdd}
                             className={cn(
-                                "flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-mono border rounded-[1px] transition-colors",
+                                "flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-ui border rounded-[1px] transition-colors",
                                 active
                                     ? "border-[hsl(var(--border-mid))] bg-[hsl(var(--panel-2)/0.5)] text-white"
                                     : canAdd

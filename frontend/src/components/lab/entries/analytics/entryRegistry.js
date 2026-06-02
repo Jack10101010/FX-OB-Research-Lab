@@ -14,9 +14,9 @@
 // NOT string matching on mode names. String-match branching is fragile and
 // will break as new families are added.
 //
-// Phase 2 will add: triggerThreshold (numeric), candleMode fields to
-// triggered-edge entries for sensitivity axis analysis.
-// Phase 3 will use validCrossCompareMetrics from ENTRY_FAMILIES.
+// TODO: triggered-edge entries could gain explicit triggerThreshold (numeric)
+// and candleMode ("same"|"next") fields for sensitivity axis analysis. For
+// now parse them from the mode key string when needed.
 
 // ── Family type enum ─────────────────────────────────────────────────────────
 // Used for machine-readable family classification. Add new types here before
@@ -54,7 +54,6 @@ export const METRICS_PROFILES = {
         showFillRate:             false,
         fillRateIsCrossComparable: false,
         showDeltaVsBaseline:      false,
-        showTriggerFunnel:        false,
         fillLabel:                "Edge Touch",
         // Cross-family comparison: only these metrics are valid denominators
         validCrossCompareMetrics: ["netR", "expectancy", "maxDD", "profitFactor"],
@@ -63,7 +62,6 @@ export const METRICS_PROFILES = {
         showFillRate:             true,
         fillRateIsCrossComparable: false, // fill@ level ≠ baseline fill% ≠ triggered fill%
         showDeltaVsBaseline:      true,
-        showTriggerFunnel:        false,
         fillLabel:                "Fill @ Level",
         validCrossCompareMetrics: ["netR", "expectancy", "maxDD", "profitFactor"],
     },
@@ -71,7 +69,6 @@ export const METRICS_PROFILES = {
         showFillRate:             true,   // shown as "end-to-end" funnel efficiency
         fillRateIsCrossComparable: false, // end-to-end fill% ≠ penetration fill%
         showDeltaVsBaseline:      true,
-        showTriggerFunnel:        true,   // triggers FunnelPanel in Phase 2
         fillLabel:                "End-to-End Fill",
         validCrossCompareMetrics: ["netR", "expectancy", "maxDD", "profitFactor"],
     },
@@ -79,7 +76,6 @@ export const METRICS_PROFILES = {
         showFillRate:             true,
         fillRateIsCrossComparable: false,
         showDeltaVsBaseline:      true,
-        showTriggerFunnel:        false,
         fillLabel:                "Confirmed Fill",
         validCrossCompareMetrics: ["netR", "expectancy", "maxDD", "profitFactor"],
     },
@@ -91,8 +87,8 @@ export const METRICS_PROFILES = {
 //   metricsProfile          → PROFILE_KEYS enum value
 //   fillLabel               → short label for "fill rate" in this family
 //   fillDescription         → long human-readable fill denominator description
-//   requiresLifecycleFunnel → Phase 2: whether to mount FunnelPanel for this family
-//   validCrossCompareMetrics → Phase 3: which metrics are safe for cross-family comparison
+//   requiresLifecycleFunnel → whether to mount the lifecycle funnel panel for this family
+//   validCrossCompareMetrics → which metrics are safe for cross-family comparison
 
 export const ENTRY_FAMILIES = [
     {
@@ -207,15 +203,13 @@ export const FAMILY_TONE = {
 };
 
 // ── Planned entry modes ───────────────────────────────────────────────────────
-// V2 CHANGE: Each entry now carries full semantic metadata. The new fields
+// Each entry carries full semantic metadata. The fields
 // (familyType, metricsProfile, fillDescription, requiresLifecycleFunnel,
 // supportedDimensions) flow automatically to row objects via entryAnalytics
 // buildEntryResultRows → spread { ...planned, ... }.
 //
-// IMPORTANT — Phase 2 extension point:
-// Triggered-edge entries will gain triggerThreshold (numeric) and candleMode
-// ("same"|"next") fields for sensitivity axis analysis. Do not parse them
-// out of the threshold string in components — wait for the explicit fields.
+// For triggered-edge entries, triggerThreshold and candleMode ("same"|"next")
+// can be parsed from the mode key string when needed.
 
 export const PLANNED_ENTRY_MODES = [
     {
@@ -312,7 +306,7 @@ export const PLANNED_ENTRY_MODES = [
         label:     "Trigger 10% → Edge entry · same candle",
         family:    "Triggered Edge",
         threshold: "10% same",
-        status:    "planned",
+        status:    "live",
         familyType:              FAMILY_TYPES.LIFECYCLE_TRIGGER,
         metricsProfile:          PROFILE_KEYS.TRIGGERED_EDGE,
         fillDescription:         "Setups that triggered at 10% and filled at edge (same candle)",
@@ -324,7 +318,7 @@ export const PLANNED_ENTRY_MODES = [
         label:     "Trigger 10% → Edge entry · next candle",
         family:    "Triggered Edge",
         threshold: "10% next",
-        status:    "planned",
+        status:    "live",
         familyType:              FAMILY_TYPES.LIFECYCLE_TRIGGER,
         metricsProfile:          PROFILE_KEYS.TRIGGERED_EDGE,
         fillDescription:         "Setups that triggered at 10% and filled at edge (next candle)",
@@ -336,7 +330,7 @@ export const PLANNED_ENTRY_MODES = [
         label:     "Trigger 50% → Edge entry · same candle",
         family:    "Triggered Edge",
         threshold: "50% same",
-        status:    "planned",
+        status:    "live",
         familyType:              FAMILY_TYPES.LIFECYCLE_TRIGGER,
         metricsProfile:          PROFILE_KEYS.TRIGGERED_EDGE,
         fillDescription:         "Setups that triggered at 50% and filled at edge (same candle)",
@@ -348,7 +342,7 @@ export const PLANNED_ENTRY_MODES = [
         label:     "Trigger 50% → Edge entry · next candle",
         family:    "Triggered Edge",
         threshold: "50% next",
-        status:    "planned",
+        status:    "live",
         familyType:              FAMILY_TYPES.LIFECYCLE_TRIGGER,
         metricsProfile:          PROFILE_KEYS.TRIGGERED_EDGE,
         fillDescription:         "Setups that triggered at 50% and filled at edge (next candle)",
@@ -360,7 +354,7 @@ export const PLANNED_ENTRY_MODES = [
         label:     "Trigger 75% → Edge entry · same candle",
         family:    "Triggered Edge",
         threshold: "75% same",
-        status:    "planned",
+        status:    "live",
         familyType:              FAMILY_TYPES.LIFECYCLE_TRIGGER,
         metricsProfile:          PROFILE_KEYS.TRIGGERED_EDGE,
         fillDescription:         "Setups that triggered at 75% and filled at edge (same candle)",
@@ -372,7 +366,7 @@ export const PLANNED_ENTRY_MODES = [
         label:     "Trigger 75% → Edge entry · next candle",
         family:    "Triggered Edge",
         threshold: "75% next",
-        status:    "planned",
+        status:    "live",
         familyType:              FAMILY_TYPES.LIFECYCLE_TRIGGER,
         metricsProfile:          PROFILE_KEYS.TRIGGERED_EDGE,
         fillDescription:         "Setups that triggered at 75% and filled at edge (next candle)",

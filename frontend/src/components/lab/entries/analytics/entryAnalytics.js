@@ -1,11 +1,26 @@
 // ── entryAnalytics.js ────────────────────────────────────────────────────────
 // Pure analytics functions for the Entries Research Workspace.
 // No React, no side-effects. Safe inside useMemo.
-// BUG FIXES applied vs original EntriesLab.jsx:
-//   1. Toxicity grid now uses only LOSING trades (was: all trades)
-//   2. Session bucket fillPct no longer hardcoded to 100%
+//
+// Highlights are per-family (markHighlights), not cross-family global bests.
+// isBestNetR / isBestExpectancy / isLowestDD / isBestPF are scoped per-family.
+// isBestFillPct is intentionally NOT aliased globally — fill% semantics differ
+// across families and must never be compared directly.
+// Backward-compat aliases (isBestNetR = isBestNetRInFamily, etc.) remain for
+// existing consumers.
+//
+// metricsProfile / requiresLifecycleFunnel registry fields are used for
+// family-specific branching wherever possible. startsWith fallbacks are
+// retained as defensive guards for old imported runs without metricsProfile.
+//
+// Notable correctness points:
+//   • Toxicity grid uses only LOSING trades
+//   • Session bucket fillPct no longer hardcoded to 100%
+//   • bestByLowest() uses > — maxDD is stored as a negative R value; the
+//     least-negative value (smallest absolute drawdown) is selected by >.
+//   • cancelled_before_entry rows excluded from fills/performance metrics
 
-import { PLANNED_ENTRY_MODES } from "./entryRegistry";
+import { PLANNED_ENTRY_MODES, sampleConfidence, MIN_DIRECTION_N } from "./entryRegistry";
 import {
     isFiniteNumber, num, round1, normalizeMode, normalizePct,
     firstNumber, parseDate, sessionOf, dayIndex, SESSIONS,
@@ -32,6 +47,10 @@ export function maxDrawdown(trades) {
 }
 
 // ── Baseline row ──────────────────────────────────────────────────────────────
+// NOTE: baseline fill% is NOT a meaningful metric (always 100% by definition).
+// The row shape deliberately omits fillPct from performance consideration.
+// Components should check row.metricsProfile === PROFILE_KEYS.STANDARD to
+// suppress fill rate display for baseline rows.
 
 export function baselineEntryRow(trades) {
     const list  = Array.isArray(trades) ? trades : [];
@@ -42,8 +61,12 @@ export function baselineEntryRow(trades) {
         mode: "baseline", label: "Baseline · Edge Touch", threshold: "Edge",
         family: "Baseline",
         eligible: list.length, trades: list.length, fills: list.length,
+        // fillPct intentionally 100 — not a useful metric, never compare cross-family.
+        // Components should use row.metricsProfile to decide whether to show it.
         fillPct:    list.length ? 100 : 0,
-        winRate:    list.length ? (wins / list.length) * 100 : 0,
+        // RB-8c: canonical Summary WR = wins / (wins + losses) (frozen RB-3.2).
+        winRate:    (wins + losses) ? (wins / (wins + losses)) * 100 : 0,
+        winRateSource: "canonical",
         netR:       round1(netR),
         expectancy: list.length ? netR / list.length : 0,
         maxDD:      maxDrawdown(list),
@@ -58,7 +81,11 @@ export function baselineEntryRow(trades) {
 // ── From-summary row ─────────────────────────────────────────────────────────
 
 export function entryRowFromSummary(planned, src, baseline, trades) {
+    // V2: use requiresLifecycleFunnel from registry rather than startsWith string match.
+    // This correctly handles any future lifecycle family, not just triggered-edge.
+    const isLifecycle = planned.requiresLifecycleFunnel === true;
     const stats   = trades?.length ? entryStatsFromTrades(trades) : {};
+    const funnel  = isLifecycle && trades?.length ? buildTriggeredEdgeFunnel(trades) : null;
     const netR    = firstNumber(src, "net_r", "netR", "net", "net_r_total") ?? stats.netR;
     const eligible = firstNumber(src, "eligible_setups", "eligible", "setups", "trades", "trade_count", "total_trades") ?? stats.eligible;
     const fills   = firstNumber(src, "fills", "filled", "filled_trades", "fill_count") ?? stats.fills;
@@ -68,22 +95,29 @@ export function entryRowFromSummary(planned, src, baseline, trades) {
     const fillPct = normalizePct(firstNumber(src, "fill_pct", "fill_rate", "fill_percent"))
         ?? (isFiniteNumber(eligible) && Number(eligible) > 0 && isFiniteNumber(fills)
             ? (Number(fills) / Number(eligible)) * 100 : stats.fillPct);
-    const winRate = normalizePct(firstNumber(src, "win_rate", "wr"))
-        ?? (Number(wins || 0) + Number(losses || 0)
-            ? (Number(wins || 0) / (Number(wins || 0) + Number(losses || 0))) * 100 : stats.winRate);
+    // RB-8c: canonical Summary WR. Prefer wins/(wins+losses) (frozen RB-3.2)
+    // whenever wins/losses are known; fall back to the backend win_rate only
+    // when they are absent (honest backend-derived value).
+    const decidedWL = Number(wins || 0) + Number(losses || 0);
+    const winRate = decidedWL > 0
+        ? (Number(wins || 0) / decidedWL) * 100
+        : (normalizePct(firstNumber(src, "win_rate", "wr")) ?? stats.winRate);
+    const winRateSource = decidedWL > 0 ? "canonical" : "backend";
     const expectancy = firstNumber(src, "expectancy", "avg_r", "expectancy_r")
         ?? (isFiniteNumber(netR) && isFiniteNumber(fills) && Number(fills) > 0
             ? Number(netR) / Number(fills) : stats.expectancy);
     const rawMaxDD = firstNumber(src, "max_dd", "max_drawdown", "max_drawdown_r") ?? stats.maxDD;
-    // Build profit factor from trades if available, else null
     const pf = trades?.length ? calcProfitFactor(trades) : null;
+
     return {
+        // planned fields spread first — this brings familyType, metricsProfile,
+        // fillDescription, requiresLifecycleFunnel, supportedDimensions to the row.
         ...planned,
         exact: true, isBaseline: false,
         threshold: isFiniteNumber(threshold)
             ? `${Number(threshold).toFixed(Number(threshold) % 1 ? 1 : 0)}%`
             : threshold,
-        eligible, trades: eligible, fills, fillPct, wins, losses, winRate,
+        eligible, trades: eligible, fills, fillPct, wins, losses, winRate, winRateSource,
         netR, expectancy,
         maxDD: rawMaxDD,
         profitFactor: pf,
@@ -92,12 +126,26 @@ export function entryRowFromSummary(planned, src, baseline, trades) {
         avgTimeToTP: src.avg_time_to_tp || src.avgTimeToTP || null,
         avgTimeToSL: src.avg_time_to_sl || src.avgTimeToSL || null,
         deltaVsBaseline: isFiniteNumber(netR) ? round1(Number(netR) - baseline.netR) : null,
+        // ── Lifecycle funnel (null for non-lifecycle families) ────────────────
+        // Consumed by TriggeredEdgeFunnelPanel via row.requiresLifecycleFunnel.
+        triggeredEdgeFunnel:  funnel,
+        triggerRate:          funnel?.triggerRate          ?? null,
+        fillAfterTriggerRate: funnel?.fillAfterTriggerRate ?? null,
+        retraceCancelCount:   funnel?.retraceCancelCount   ?? null,
+        sameCandleCount:      funnel?.sameCandle           ?? null,
+        nextCandleCount:      funnel?.nextCandle           ?? null,
+        avgTriggerToEntry:    funnel?.avgTriggerToEntry    ?? null,
     };
 }
 
 export function entryStatsFromTrades(trades) {
     const list   = Array.isArray(trades) ? trades : [];
-    const filled = list.filter(t => t.entry_model_filled === true || (t.missed_trade !== true && !!t.entry));
+    // cancelled_before_entry rows are excluded from performance metrics — they
+    // represent setups that were never filled and must not affect win/loss/R stats.
+    const filled = list.filter(t =>
+        t.cancelled_before_entry !== true &&
+        (t.entry_model_filled === true || (t.missed_trade !== true && !!t.entry))
+    );
     const wins   = filled.filter(t => rOf(t) > 0).length;
     const losses = filled.filter(t => rOf(t) < 0).length;
     const netR   = filled.reduce((s, t) => s + rOf(t), 0);
@@ -111,6 +159,92 @@ export function entryStatsFromTrades(trades) {
         expectancy:  filled.length ? netR / filled.length : 0,
         maxDD:       maxDrawdown(list),
         profitFactor: calcProfitFactor(filled),
+    };
+}
+
+// ── Triggered-edge lifecycle funnel ──────────────────────────────────────────
+// Returns a funnel object describing each stage of the triggered-edge lifecycle.
+// All funnel fields are purely additive/counting — performance metrics (R, WR)
+// are intentionally excluded here and remain on the parent entry row.
+// Returns null when trades list is empty.
+//
+// This function is the data source for TriggeredEdgeFunnelPanel.
+// Keep all stage counts on the returned object.
+
+export function buildTriggeredEdgeFunnel(trades) {
+    const list = Array.isArray(trades) ? trades : [];
+    if (!list.length) return null;
+
+    const tapped = list.filter(t =>
+        t.tapped_before_trigger === true ||
+        (t.tapped_time && t.tapped_time !== "") ||
+        (t.tappedTime && t.tappedTime !== "")
+    );
+
+    const triggered = list.filter(t =>
+        (t.trigger_time && t.trigger_time !== "") ||
+        (t.triggerTime && t.triggerTime !== "")
+    );
+
+    const armed = list.filter(t =>
+        (t.armed_at && t.armed_at !== "") ||
+        (t.armedAt && t.armedAt !== "")
+    );
+
+    const filled = list.filter(t =>
+        t.cancelled_before_entry !== true &&
+        (t.entry_model_filled === true || (t.missed_trade !== true && !!t.entry))
+    );
+
+    const cancelledAfterTrigger = list.filter(t =>
+        t.cancelled_before_entry === true &&
+        ((t.trigger_time && t.trigger_time !== "") || (t.triggerTime && t.triggerTime !== ""))
+    );
+
+    const retraceCancel = list.filter(t =>
+        (t.retrace_cancel_time && t.retrace_cancel_time !== "") ||
+        (t.retraceCancelTime && t.retraceCancelTime !== "")
+    );
+
+    const neverTriggered = list.filter(t =>
+        (!t.trigger_time || t.trigger_time === "") &&
+        (!t.triggerTime  || t.triggerTime  === "")
+    );
+
+    const sameCandle = filled.filter(t =>
+        t.filled_on_trigger_candle === true ||
+        t.filledOnTriggerCandle   === true
+    );
+    const nextCandle = filled.filter(t =>
+        t.filled_on_trigger_candle === false ||
+        t.filledOnTriggerCandle   === false
+    );
+
+    const triggerToEntryValues = filled
+        .map(t => {
+            const v = t.trigger_to_entry_minutes ?? t.triggerToEntryMinutes;
+            return v != null && Number.isFinite(Number(v)) ? Number(v) : null;
+        })
+        .filter(v => v !== null);
+    const avgTriggerToEntry = triggerToEntryValues.length
+        ? round1(triggerToEntryValues.reduce((s, v) => s + v, 0) / triggerToEntryValues.length)
+        : null;
+
+    return {
+        eligible:              list.length,
+        tappedCount:           tapped.length,
+        triggeredCount:        triggered.length,
+        armedCount:            armed.length,
+        filledCount:           filled.length,
+        triggerRate:           list.length      ? (triggered.length / list.length)      * 100 : 0,
+        fillAfterTriggerRate:  triggered.length ? (filled.length    / triggered.length) * 100 : 0,
+        cancelledAfterTrigger: cancelledAfterTrigger.length,
+        retraceCancelCount:    retraceCancel.length,
+        neverTriggeredCount:   neverTriggered.length,
+        sameCandle:            sameCandle.length,
+        nextCandle:            nextCandle.length,
+        avgTriggerToEntry,
+        // TODO: add neverTappedCount, invalidatedCount when the exporter exposes them.
     };
 }
 
@@ -167,33 +301,89 @@ export function buildEntryResultRows(run, trades, selectedVariant) {
     return rows;
 }
 
-export function buildExactSummary(rows) {
-    const tested     = rows.filter(r => r.exact && !r.isBaseline);
-    const candidates = tested.length ? tested : rows.filter(r => r.exact);
-    return {
-        bestModel:  bestBy(candidates, "netR"),
-        bestDelta:  bestBy(candidates, "deltaVsBaseline"),
-        bestFill:   bestBy(candidates, "fillPct"),
-        lowestDD:   bestByLowest(candidates, "maxDD"),
-        bestPF:     bestBy(candidates, "profitFactor"),
-    };
-}
-
 // ── Highlights ────────────────────────────────────────────────────────────────
+// Highlights are per-family, not cross-family global bests. Flags set:
+//
+//   isBestNetRInFamily       — best Net R within the model's family
+//   isBestExpectancyInFamily — best Expectancy within the model's family
+//   isLowestDDInFamily       — lowest drawdown within the model's family
+//   isBestFillPctInFamily    — best fill% within the model's family ONLY
+//                              (fill% means different things per family —
+//                               it is NEVER tagged globally)
+//   isBestPFInFamily         — best Profit Factor within the model's family
+//   isGlobalBestNetR         — single overall Net R winner across all families
+//                              (used by the cross-family comparison card)
+//
+// Backward-compat aliases for existing consumers:
+//   isBestNetR       = isBestNetRInFamily   (row highlighter in ExactResultsPanel)
+//   isBestExpectancy = isBestExpectancyInFamily
+//   isLowestDD       = isLowestDDInFamily
+//   isBestPF         = isBestPFInFamily
+//   isBestFillPct    — INTENTIONALLY NOT aliased. Cross-family fill% comparison
+//                      is misleading. ExactResultsPanel uses isBestFillPctInFamily.
+//
+// Families with only 1 model (e.g., Baseline) do not receive best-in-family
+// highlight tags — a winner of 1 is not a meaningful winner.
 
 export function markHighlights(rows) {
+    // Clear all highlight flags first to avoid stale state between re-renders
+    rows.forEach(r => {
+        delete r.isBestNetR;
+        delete r.isBestExpectancy;
+        delete r.isLowestDD;
+        delete r.isBestFillPct;      // deprecated — do not re-set globally
+        delete r.isBestPF;
+        delete r.isBestNetRInFamily;
+        delete r.isBestExpectancyInFamily;
+        delete r.isLowestDDInFamily;
+        delete r.isBestFillPctInFamily;
+        delete r.isBestPFInFamily;
+        delete r.isGlobalBestNetR;
+    });
+
+    // Tested rows (non-baseline) are the candidate set
     const tested = rows.filter(r => r.exact && !r.isBaseline);
     const exact  = tested.length ? tested : rows.filter(r => r.exact);
-    const bNet   = bestBy(exact, "netR");
-    const bExp   = bestBy(exact, "expectancy");
-    const loDD   = bestByLowest(exact, "maxDD");
-    const bFill  = bestBy(exact, "fillPct");
-    const bPF    = bestBy(exact, "profitFactor");
-    if (bNet)  bNet.isBestNetR       = true;
-    if (bExp)  bExp.isBestExpectancy = true;
-    if (loDD)  loDD.isLowestDD       = true;
-    if (bFill) bFill.isBestFillPct   = true;
-    if (bPF)   bPF.isBestPF          = true;
+
+    // ── Global best Net R (single cross-family winner) ────────────────────────
+    // Consumed by the cross-family comparison card. NOT shown in RowTags.
+    const gNet = bestBy(exact, "netR");
+    if (gNet) gNet.isGlobalBestNetR = true;
+
+    // ── Per-family highlights ─────────────────────────────────────────────────
+    const families = [...new Set(exact.map(r => r.family).filter(Boolean))];
+
+    families.forEach(family => {
+        const familyRows = exact.filter(r => r.family === family);
+
+        // Only meaningful when there are ≥ 2 models in the family.
+        // A single-model family is always the "winner" — that tag provides no signal.
+        if (familyRows.length < 2) return;
+
+        const bNet  = bestBy(familyRows, "netR");
+        const bExp  = bestBy(familyRows, "expectancy");
+        const loDD  = bestByLowest(familyRows, "maxDD");
+        const bPF   = bestBy(familyRows, "profitFactor");
+        // Fill rate is only compared within a family (same denominator semantics)
+        const bFill = bestBy(familyRows, "fillPct");
+
+        if (bNet)  bNet.isBestNetRInFamily        = true;
+        if (bExp)  bExp.isBestExpectancyInFamily   = true;
+        if (loDD)  loDD.isLowestDDInFamily         = true;
+        if (bPF)   bPF.isBestPFInFamily            = true;
+        if (bFill) bFill.isBestFillPctInFamily     = true;
+    });
+
+    // ── Backward compat aliases ───────────────────────────────────────────────
+    // Consumers that read isBestNetR / isBestExpectancy / isLowestDD / isBestPF
+    // will continue to work. isBestFillPct is intentionally NOT aliased.
+    exact.forEach(r => {
+        if (r.isBestNetRInFamily)        r.isBestNetR       = true;
+        if (r.isBestExpectancyInFamily)  r.isBestExpectancy = true;
+        if (r.isLowestDDInFamily)        r.isLowestDD       = true;
+        if (r.isBestPFInFamily)          r.isBestPF         = true;
+        // NOTE: isBestFillPct NOT aliased. See header comment above.
+    });
 }
 
 export function bestBy(rows, key) {
@@ -208,9 +398,245 @@ export function bestByLowest(rows, key) {
     , null);
 }
 
+// ── Summary ───────────────────────────────────────────────────────────────────
+// V2 CHANGE: now returns perFamily in addition to global summary.
+// Global bestFill is marked deprecated — use perFamily[familyKey].bestFillPct.
+
+export function buildExactSummary(rows) {
+    const tested     = rows.filter(r => r.exact && !r.isBaseline);
+    const candidates = tested.length ? tested : rows.filter(r => r.exact);
+
+    // ── Global (backward compat) ──────────────────────────────────────────────
+    const global = {
+        bestModel:  bestBy(candidates, "netR"),
+        bestDelta:  bestBy(candidates, "deltaVsBaseline"),
+        // DEPRECATED: bestFill is cross-family and misleading. Use perFamily[k].bestFillPct.
+        bestFill:   null,
+        lowestDD:   bestByLowest(candidates, "maxDD"),
+        bestPF:     bestBy(candidates, "profitFactor"),
+    };
+
+    // ── Per-family ────────────────────────────────────────────────────────────
+    const families = [...new Set(candidates.map(r => r.family).filter(Boolean))];
+    const perFamily = {};
+    families.forEach(family => {
+        const fr = candidates.filter(r => r.family === family);
+        perFamily[family] = {
+            bestNetR:    bestBy(fr, "netR"),
+            bestExp:     bestBy(fr, "expectancy"),
+            lowestDD:    bestByLowest(fr, "maxDD"),
+            bestFillPct: bestBy(fr, "fillPct"),   // within-family fill is meaningful
+            bestPF:      bestBy(fr, "profitFactor"),
+            modelCount:  fr.length,
+        };
+    });
+
+    return { ...global, perFamily };
+}
+
+// ── Direction synthesis ───────────────────────────────────────────────────────
+// Returns per-direction analysis across all models with trade data.
+// Used by DirectionPanel for best-model cards and asymmetry warnings.
+//
+// bestModelByDirection feeds buildMixedDirectionSimulation (see below).
+// Keep bestLongModel / bestShortModel on the returned object.
+
+export function bestModelByDirection(exactRows, tradesByMode, activeVariant = "single_position") {
+    const rows = (exactRows || []).filter(r => r.exact && !r.isBaseline);
+
+    const results = rows.map(row => {
+        const modeKey = String(row.mode || "")
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "_")
+            .replace(/^_+|_+$/g, "");
+        const modeTrades =
+            tradesByMode?.[`${activeVariant}__${modeKey}`] ||
+            tradesByMode?.[modeKey] ||
+            null;
+        if (!modeTrades?.length) return null;
+
+        const split  = buildDirectionSplit(modeTrades);
+        const longN  = split.longs.count;
+        const shortN = split.shorts.count;
+        const wrDelta = (isFiniteNumber(split.longs.winRate) && isFiniteNumber(split.shorts.winRate))
+            ? split.longs.winRate - split.shorts.winRate
+            : null;
+
+        return {
+            row,
+            longNetR:         split.longs.netR,
+            longExp:          split.longs.expectancy,
+            longWR:           split.longs.winRate,
+            longN,
+            shortNetR:        split.shorts.netR,
+            shortExp:         split.shorts.expectancy,
+            shortWR:          split.shorts.winRate,
+            shortN,
+            wrDelta,
+            longConfidence:   sampleConfidence(longN),
+            shortConfidence:  sampleConfidence(shortN),
+            isDirectionallyAsymmetric: wrDelta != null && Math.abs(wrDelta) > 20,
+        };
+    }).filter(Boolean);
+
+    if (!results.length) {
+        return { bestLongModel: null, bestShortModel: null, bestBalancedModel: null, rows: [], minDirN: MIN_DIRECTION_N };
+    }
+
+    // Best long: highest long expectancy among models with sufficient long-side N
+    const longCandidates  = results.filter(r => r.longN  >= MIN_DIRECTION_N);
+    const shortCandidates = results.filter(r => r.shortN >= MIN_DIRECTION_N);
+
+    const bestLongModel  = longCandidates.reduce(
+        (best, r) => !best || r.longExp  > best.longExp  ? r : best, null);
+    const bestShortModel = shortCandidates.reduce(
+        (best, r) => !best || r.shortExp > best.shortExp ? r : best, null);
+
+    // Balanced: lowest abs(wrDelta) among models with sufficient N on both sides.
+    // Useful when you want one model for both directions.
+    const bothSideCandidates = results.filter(
+        r => r.longN >= MIN_DIRECTION_N && r.shortN >= MIN_DIRECTION_N && r.wrDelta != null);
+    const bestBalancedModel = bothSideCandidates.reduce(
+        (best, r) => !best || Math.abs(r.wrDelta) < Math.abs(best.wrDelta) ? r : best, null);
+
+    return {
+        bestLongModel,
+        bestShortModel,
+        bestBalancedModel,
+        rows: results,
+        minDirN: MIN_DIRECTION_N,
+    };
+}
+
+// ── Mixed-direction simulation ────────────────────────────────────────────────
+//
+// buildMixedDirectionSimulation — exploratory / in-sample research tool.
+//
+// Asks: "What would the combined performance look like if I routed long setups
+// through Model A and short setups through Model B?"
+//
+// Mechanics:
+//   1. Resolve tradesByMode for each model using the same key pattern as
+//      bestModelByDirection (activeVariant__normalizedKey || normalizedKey).
+//   2. Filter filled trades only (cancelled_before_entry excluded).
+//   3. Isolate longs from longModel, shorts from shortModel.
+//   4. Tag each trade with _simSide: "long" | "short" (spread copy, no mutation).
+//   5. Merge + sort by entry/exit timestamp for a realistic equity curve.
+//   6. Compute combined stats: winRate, netR, expectancy, maxDD, profitFactor.
+//
+// Returns null stats when totalN === 0 (nothing to show).
+// Low-N warning threshold provided as lowN flag (< MIN_DIRECTION_N per side).
+//
+export function buildMixedDirectionSimulation({
+    longModelKey,
+    shortModelKey,
+    tradesByMode,
+    activeVariant = "single_position",
+}) {
+    // ── Helper: resolve trades for a model key ────────────────────────────────
+    function resolveModelTrades(modeKey) {
+        if (!modeKey || !tradesByMode) return [];
+        const norm = String(modeKey)
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "_")
+            .replace(/^_+|_+$/g, "");
+        return (
+            tradesByMode[`${activeVariant}__${norm}`] ||
+            tradesByMode[norm] ||
+            []
+        );
+    }
+
+    // ── Helper: isFilled predicate (canonical) ────────────────────────────────
+    function isFilled(t) {
+        return (
+            t.cancelled_before_entry !== true &&
+            (t.entry_model_filled === true || (t.missed_trade !== true && !!t.entry))
+        );
+    }
+
+    // ── Get raw trades per model ──────────────────────────────────────────────
+    const longAllTrades  = resolveModelTrades(longModelKey);
+    const shortAllTrades = resolveModelTrades(shortModelKey);
+
+    // ── Filter to filled only ─────────────────────────────────────────────────
+    const longFilled  = longAllTrades.filter(isFilled);
+    const shortFilled = shortAllTrades.filter(isFilled);
+
+    // ── Direction predicates (canonical) ─────────────────────────────────────
+    const isLong  = t => (t.direction || t.bias || "").toLowerCase().includes("long")
+                      || (t.direction || "").toLowerCase() === "buy";
+    const isShort = t => (t.direction || t.bias || "").toLowerCase().includes("short")
+                      || (t.direction || "").toLowerCase() === "sell";
+
+    // ── Isolate direction-specific filled trades ──────────────────────────────
+    const longTrades  = longFilled.filter(isLong).map(t => ({ ...t, _simSide: "long" }));
+    const shortTrades = shortFilled.filter(isShort).map(t => ({ ...t, _simSide: "short" }));
+
+    const longN  = longTrades.length;
+    const shortN = shortTrades.length;
+
+    // ── Compute per-side Net R ────────────────────────────────────────────────
+    const longNetR  = round1(longTrades.reduce((s, t)  => s + rOf(t), 0));
+    const shortNetR = round1(shortTrades.reduce((s, t) => s + rOf(t), 0));
+
+    // ── Merge and sort by entry/exit timestamp ────────────────────────────────
+    const merged = [...longTrades, ...shortTrades].sort((a, b) => {
+        const da = parseDate(a.entry || a.exit || "");
+        const db = parseDate(b.entry || b.exit || "");
+        if (da && db) return da - db;
+        if (da) return -1;
+        if (db) return 1;
+        return 0;
+    });
+
+    const totalN = merged.length;
+
+    if (totalN === 0) {
+        return {
+            longModelKey,
+            shortModelKey,
+            longN: 0,
+            shortN: 0,
+            longNetR: 0,
+            shortNetR: 0,
+            totalN: 0,
+            lowN: true,
+            stats: null,
+        };
+    }
+
+    // ── Combined stats ────────────────────────────────────────────────────────
+    const wins   = merged.filter(t => rOf(t) > 0).length;
+    const losses = merged.filter(t => rOf(t) < 0).length;
+    const netR   = round1(merged.reduce((s, t) => s + rOf(t), 0));
+
+    const stats = {
+        wins,
+        losses,
+        winRate:      round1((wins / totalN) * 100),
+        netR,
+        expectancy:   totalN ? netR / totalN : 0,
+        maxDD:        maxDrawdown(merged),
+        profitFactor: calcProfitFactor(merged),
+    };
+
+    return {
+        longModelKey,
+        shortModelKey,
+        longN,
+        shortN,
+        longNetR,
+        shortNetR,
+        totalN,
+        lowN: longN < MIN_DIRECTION_N || shortN < MIN_DIRECTION_N,
+        stats,
+    };
+}
+
 // ── Bucket / session helpers ─────────────────────────────────────────────────
 
-// BUG FIX: `fills` param added — session buckets no longer hardcode fillPct=100
+// BUG FIX retained: `fills` param — session buckets no longer hardcode fillPct=100
 export function bucket(label, rows, fills = rows) {
     const wins = rows.filter(t => rOf(t) > 0).length;
     const netR = rows.reduce((s, t) => s + rOf(t), 0);
@@ -259,7 +685,7 @@ export function buildHourGrid(trades) {
     return { cells, total, maxAbs };
 }
 
-// BUG FIX: Toxicity grid takes only losing trades
+// BUG FIX retained: toxicity grid takes only losing trades
 export function buildToxicityGrid(trades) {
     return buildHourGrid((trades || []).filter(t => rOf(t) < 0));
 }
@@ -272,7 +698,6 @@ export function buildTradeOffStats(baselineTrades, modelTrades) {
 
     if (!baselineList.length) return null;
 
-    // Match by trade id or entry timestamp
     const modelIds = new Set(modelList.map(t => tradeKey(t)));
 
     const baselineWins   = baselineList.filter(t => rOf(t) > 0);
@@ -288,7 +713,7 @@ export function buildTradeOffStats(baselineTrades, modelTrades) {
     const capturedWinnerR = capturedWinners.reduce((s, t) => s + rOf(t), 0);
     const takenLoserR     = Math.abs(takenLosers.reduce((s, t) => s + rOf(t), 0));
 
-    const missedWinnerPct  = baselineWins.length   ? (missedWinners.length / baselineWins.length) * 100   : 0;
+    const missedWinnerPct  = baselineWins.length   ? (missedWinners.length / baselineWins.length)   * 100 : 0;
     const avoidedLoserPct  = baselineLosses.length ? (avoidedLosers.length / baselineLosses.length) * 100 : 0;
     const tradeOffRatio    = missedWinnerPct > 0 ? round1(avoidedLoserPct / missedWinnerPct) : null;
 
@@ -344,14 +769,24 @@ function bucketDir(label, rows) {
     };
 }
 
-// ── Analytics bundle (used by Model Analysis tab) ───────────────────────────
+// ── Analytics bundle ──────────────────────────────────────────────────────────
+// Uses metricsProfile field lookups instead of mode-string matching.
+// FunnelPanel data is attached directly on each entry row via buildTriggeredEdgeFunnel.
 
 export function buildEntryAnalytics(trades, exactRows) {
     const list          = Array.isArray(trades) ? trades : [];
     const wins          = list.filter(t => rOf(t) > 0).length;
     const losses        = list.filter(t => rOf(t) < 0).length;
-    const exactEntryRows       = exactRows.filter(r => r.exact);
-    const penetrationExactRows = exactRows.filter(r => r.exact && String(r.mode).startsWith("entry_penetration"));
+    const exactEntryRows = exactRows.filter(r => r.exact);
+
+    // V2: use metricsProfile from the row (which comes from PLANNED_ENTRY_MODES spread)
+    // instead of startsWith string matching. Falls back to string check for rows
+    // without metricsProfile (legacy/malformed data).
+    const penetrationExactRows = exactEntryRows.filter(r =>
+        r.metricsProfile === "penetration" ||
+        // Legacy fallback — rows pre-dating V2 registry fields
+        (!r.metricsProfile && String(r.mode).startsWith("entry_penetration"))
+    );
 
     return {
         wins, losses,
@@ -359,18 +794,35 @@ export function buildEntryAnalytics(trades, exactRows) {
         penetrationRows:  penetrationExactRows,
         sessionRows:      sessionRows(list),
         hourGrid:         buildHourGrid(list),
-        toxicityGrid:     buildToxicityGrid(list),   // BUG FIX applied
+        toxicityGrid:     buildToxicityGrid(list),   // BUG FIX retained
         matrixRows:       buildMatrixRows(exactRows, wins, losses),
         directionSplit:   buildDirectionSplit(list),
+        // FunnelPanel data lives on each entry row (row.triggeredEdgeFunnel), not in this bundle.
     };
 }
 
 function buildMatrixRows(exactRows, wins, losses) {
-    const baseline    = exactRows.find(r => r.isBaseline) || {};
-    const penetration = exactRows.filter(r => r.exact && String(r.mode).startsWith("entry_penetration"));
+    const baseline = exactRows.find(r => r.isBaseline) || {};
+
+    // V2: use metricsProfile for family filtering — no startsWith string matching.
+    // Includes legacy fallback for rows without the new registry fields.
+    const penetration = exactRows.filter(r =>
+        r.exact && (
+            r.metricsProfile === "penetration" ||
+            (!r.metricsProfile && String(r.mode).startsWith("entry_penetration"))
+        )
+    );
+    const triggeredEdge = exactRows.filter(r =>
+        r.exact && (
+            r.requiresLifecycleFunnel === true ||
+            (!r.metricsProfile && String(r.mode).startsWith("entry_triggered_edge"))
+        )
+    );
+
     return [
         { label: "Baseline", fills: baseline.fills, wins, losses, winRate: baseline.winRate, netR: baseline.netR, status: "Exact", exact: true },
         ...penetration.map(r => ({ label: r.label, fills: r.fills, wins: r.wins, losses: r.losses, winRate: r.winRate, netR: r.netR, status: "Exact", exact: true })),
+        ...triggeredEdge.map(r => ({ label: r.label, fills: r.fills, wins: r.wins, losses: r.losses, winRate: r.winRate, netR: r.netR, status: "Exact", exact: true })),
         { label: "Confirmation", fills: null, wins: null, losses: null, winRate: null, netR: null, status: "Awaiting exporter", exact: false },
         { label: "Lifecycle Cancel", fills: null, wins: null, losses: null, winRate: null, netR: null, status: "Architecture only", exact: false },
     ];
@@ -379,8 +831,15 @@ function buildMatrixRows(exactRows, wins, losses) {
 // ── CSV export ────────────────────────────────────────────────────────────────
 
 export function entryResultsToCsv(exactRows) {
-    const fields = ["mode","label","family","threshold","eligible","fills","fillPct","wins","losses","winRate","netR","expectancy","maxDD","profitFactor","avgMAE","avgMFE","avgTimeToTP","avgTimeToSL","deltaVsBaseline"];
-    const rows   = exactRows.map(r => fields.map(f => r[f] ?? "").join(","));
+    const fields = [
+        "mode","label","family","threshold","eligible","fills","fillPct",
+        "wins","losses","winRate","netR","expectancy","maxDD","profitFactor",
+        "avgMAE","avgMFE","avgTimeToTP","avgTimeToSL","deltaVsBaseline",
+        // triggered-edge funnel fields (empty for non-lifecycle models)
+        "triggerRate","fillAfterTriggerRate","retraceCancelCount",
+        "sameCandleCount","nextCandleCount","avgTriggerToEntry",
+    ];
+    const rows = exactRows.map(r => fields.map(f => r[f] ?? "").join(","));
     return [fields.join(","), ...rows].join("\n");
 }
 

@@ -24,7 +24,7 @@ function FamilySection({ familyKey, models }) {
         <div className="mb-4">
             <div className="flex items-center gap-2 mb-1.5">
                 <Pill tone={tone}>{familyKey.toUpperCase()}</Pill>
-                <span className="text-[9.5px] font-mono text-muted-lab">{count} model{count !== 1 ? "s" : ""}</span>
+                <span className="text-[9.5px] font-ui text-muted-lab">{count} model{count !== 1 ? "s" : ""}</span>
             </div>
             <div className="grid gap-1">
                 {models.map(m => {
@@ -33,14 +33,14 @@ function FamilySection({ familyKey, models }) {
                         <div key={m.mode}
                             className="flex items-center gap-3 px-3 py-1.5 rounded-[1px] border border-[hsl(var(--border-soft)/0.5)] bg-[hsl(var(--panel-2)/0.3)]"
                         >
-                            <span className={cn("px-1.5 py-0.5 text-[8.5px] font-mono uppercase tracking-wider border rounded-[1px]", style.cls)}>
+                            <span className={cn("px-1.5 py-0.5 text-[8.5px] font-ui uppercase tracking-wider border rounded-[1px]", style.cls)}>
                                 {style.label}
                             </span>
-                            <span className="text-[10.5px] font-mono text-white flex-1">{m.label}</span>
+                            <span className="text-[10.5px] font-ui text-white flex-1">{m.label}</span>
                             {m.threshold != null && (
-                                <span className="text-[9.5px] font-mono text-muted-lab">thr {m.threshold}</span>
+                                <span className="text-[9.5px] font-ui text-muted-lab">thr {m.threshold}</span>
                             )}
-                            <span className="text-[9px] font-mono text-muted-lab opacity-60">{m.mode}</span>
+                            <span className="text-[9px] font-code text-muted-lab opacity-60">{m.mode}</span>
                         </div>
                     );
                 })}
@@ -67,7 +67,7 @@ export function LifecyclePanel() {
                 </div>
             }
         >
-            <p className="mb-3 text-[10px] font-mono text-muted-lab">All planned entry models by family. Status reflects current research stage.</p>
+            <p className="mb-3 text-[10px] font-ui text-muted-lab">All planned entry models by family. Status reflects current research stage.</p>
             {ENTRY_FAMILIES.map(f => byFamily[f.key]?.length > 0
                 ? <FamilySection key={f.key} familyKey={f.key} models={byFamily[f.key]} />
                 : null
@@ -83,16 +83,16 @@ export function FutureModelsPanel() {
         <NeonPanel title="Future Model Ideas" className="xl:col-span-1" dense
             action={<Pill tone="secondary">{LIFECYCLE_IDEAS.length} IDEAS</Pill>}
         >
-            <p className="mb-3 text-[10px] font-mono text-muted-lab">Entry lifecycle concepts not yet formalised into testable models.</p>
+            <p className="mb-3 text-[10px] font-ui text-muted-lab">Entry lifecycle concepts not yet formalised into testable models.</p>
             <div className="flex flex-col gap-1.5">
                 {LIFECYCLE_IDEAS.map((idea, i) => (
                     <div key={i} className="px-2.5 py-2 border border-[hsl(var(--border-soft)/0.4)] bg-[hsl(var(--panel-2)/0.25)] rounded-[1px]">
-                        <div className="text-[10.5px] font-mono text-white">{idea.title}</div>
+                        <div className="text-[10.5px] font-ui text-white">{idea.title}</div>
                         {idea.body && (
-                            <div className="mt-0.5 text-[9.5px] font-mono text-muted-lab">{idea.body}</div>
+                            <div className="mt-0.5 text-[9.5px] font-ui text-muted-lab">{idea.body}</div>
                         )}
                         {idea.status && (
-                            <div className="mt-0.5 text-[8.5px] font-mono text-muted-lab opacity-60 uppercase tracking-wider">{idea.status}</div>
+                            <div className="mt-0.5 text-[8.5px] font-ui text-muted-lab opacity-60 uppercase tracking-wider">{idea.status}</div>
                         )}
                     </div>
                 ))}
@@ -108,17 +108,17 @@ export function ResearchBacklogPanel() {
         <NeonPanel title="Research Backlog" className="xl:col-span-1" dense
             action={<Pill tone="secondary">{ENTRY_BACKLOG.length} ITEMS</Pill>}
         >
-            <p className="mb-3 text-[10px] font-mono text-muted-lab">Open research questions and improvement vectors for the next iteration.</p>
+            <p className="mb-3 text-[10px] font-ui text-muted-lab">Open research questions and improvement vectors for the next iteration.</p>
             <div className="flex flex-col gap-1">
                 {ENTRY_BACKLOG.map((item, i) => (
                     <div key={i} className="flex items-start gap-2.5 px-2.5 py-2 border border-[hsl(var(--border-soft)/0.4)] bg-[hsl(var(--panel-2)/0.25)] rounded-[1px]">
                         <div>
-                            <div className="text-[10.5px] font-mono text-white leading-snug">{item.title}</div>
+                            <div className="text-[10.5px] font-ui text-white leading-snug">{item.title}</div>
                             {item.status && (
-                                <div className="mt-0.5 text-[9px] font-mono text-muted-lab opacity-60 uppercase tracking-wider">{item.status}</div>
+                                <div className="mt-0.5 text-[9px] font-ui text-muted-lab opacity-60 uppercase tracking-wider">{item.status}</div>
                             )}
                             {item.body && (
-                                <div className="mt-0.5 text-[9px] font-mono text-muted-lab">{item.body}</div>
+                                <div className="mt-0.5 text-[9px] font-ui text-muted-lab">{item.body}</div>
                             )}
                         </div>
                     </div>

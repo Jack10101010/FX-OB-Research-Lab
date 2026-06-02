@@ -125,7 +125,7 @@ export function PromotionDesk({ exactRows }) {
                     </div>
                 }
             >
-                <p className="mb-3 text-[10px] font-mono text-muted-lab">
+                <p className="mb-3 text-[10px] font-ui text-muted-lab">
                     Curate a shortlist of entry models ready for promotion to live trading.
                     Add candidates from your current run's results, record decisions, and export the final list.
                 </p>
@@ -133,12 +133,12 @@ export function PromotionDesk({ exactRows }) {
                 {/* Add candidates */}
                 {candidateRows.length > 0 && (
                     <div className="mb-4">
-                        <span className="text-[9.5px] font-mono uppercase tracking-wider text-muted-lab mb-1.5 block">Add to shortlist:</span>
+                        <span className="text-[9.5px] font-ui uppercase tracking-wider text-muted-lab mb-1.5 block">Add to shortlist:</span>
                         <div className="flex flex-wrap gap-1.5">
                             {candidateRows.map(row => (
                                 <button key={row.mode} type="button"
                                     onClick={() => handleAdd(row.mode)}
-                                    className="flex items-center gap-1.5 px-2.5 py-1 text-[9.5px] font-mono border border-[hsl(var(--border-soft)/0.5)] text-muted-lab hover:text-white hover:border-[hsl(var(--border-mid))] transition-colors rounded-[1px]"
+                                    className="flex items-center gap-1.5 px-2.5 py-1 text-[9.5px] font-ui border border-[hsl(var(--border-soft)/0.5)] text-muted-lab hover:text-white hover:border-[hsl(var(--border-mid))] transition-colors rounded-[1px]"
                                 >
                                     <span>+</span>
                                     <span>{row.label}</span>
@@ -159,7 +159,7 @@ export function PromotionDesk({ exactRows }) {
                         <button key={o.key} type="button"
                             onClick={() => setFilter(o.key)}
                             className={cn(
-                                "px-2.5 py-1 text-[9.5px] font-mono uppercase tracking-wider border rounded-[1px] transition-colors",
+                                "px-2.5 py-1 text-[9.5px] font-ui uppercase tracking-wider border rounded-[1px] transition-colors",
                                 filter === o.key
                                     ? "border-[hsl(var(--accent-primary)/0.5)] bg-[hsl(var(--accent-primary)/0.1)] text-white"
                                     : "border-[hsl(var(--border-soft)/0.4)] text-muted-lab hover:text-white"
@@ -170,23 +170,25 @@ export function PromotionDesk({ exactRows }) {
                     ))}
 
                     <div className="ml-auto flex items-center gap-2">
-                        <span className="text-[9px] font-mono text-muted-lab">Sort:</span>
+                        <span className="text-[9px] font-ui text-muted-lab">Sort:</span>
                         {[["netR", "Net R"], ["expectancy", "Exp"], ["fillPct", "Fill %"]].map(([k, l]) => (
                             <button key={k} type="button"
                                 onClick={() => setSortKey(k)}
                                 className={cn(
-                                    "text-[9.5px] font-mono transition-colors",
+                                    "text-[9.5px] font-ui transition-colors",
                                     sortKey === k ? "text-white" : "text-muted-lab hover:text-white"
                                 )}
                             >
                                 {l}
                             </button>
                         ))}
-                        <button type="button" onClick={handleExport}
-                            className="ml-2 px-2.5 py-1 text-[9.5px] font-mono uppercase tracking-wider border border-[hsl(var(--border-soft)/0.5)] text-muted-lab hover:text-white transition-colors rounded-[1px]"
-                        >
-                            Export CSV
-                        </button>
+                        {shortlist.length > 0 && (
+                            <button type="button" onClick={handleExport}
+                                className="ml-2 px-2.5 py-1 text-[9.5px] font-ui uppercase tracking-wider border border-[hsl(var(--border-soft)/0.5)] text-muted-lab hover:text-white transition-colors rounded-[1px]"
+                            >
+                                Export CSV
+                            </button>
+                        )}
                     </div>
                 </div>
             </NeonPanel>
@@ -194,10 +196,12 @@ export function PromotionDesk({ exactRows }) {
             {/* Cards */}
             {sorted.length === 0 ? (
                 <NeonPanel className="xl:col-span-3">
-                    <div className="py-8 text-center text-[11px] font-mono text-muted-lab">
-                        {shortlist.length === 0
-                            ? "No models in shortlist yet. Add candidates using the buttons above."
-                            : "No models match the current filter."}
+                    <div className="py-8 text-center text-[11px] font-ui text-muted-lab">
+                        {shortlist.length === 0 && candidateRows.length === 0
+                            ? "No entry model data for this run. Import entry results first, then add candidates here."
+                            : shortlist.length === 0
+                                ? "No models in shortlist yet. Add candidates using the buttons above."
+                                : "No models match the current filter."}
                     </div>
                 </NeonPanel>
             ) : (

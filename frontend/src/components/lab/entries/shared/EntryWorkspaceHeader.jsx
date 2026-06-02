@@ -34,6 +34,16 @@ export function EntryWorkspaceHeader({ trades, activeVariant, exactRows }) {
                 className="mt-4 mb-0"
                 actions={(
                     <>
+                        {!activeRunId && (
+                            <Link to="/runs">
+                                <NeonButton tone="ghost">Select a Run →</NeonButton>
+                            </Link>
+                        )}
+                        {activeRunId && (
+                            <Link to={`/runs/${encodeURIComponent(activeRunId)}`}>
+                                <NeonButton tone="ghost">Run Detail</NeonButton>
+                            </Link>
+                        )}
                         {projectId && (
                             <Link to={`/projects/${encodeURIComponent(projectId)}`}>
                                 <NeonButton tone="ghost">Open Project</NeonButton>

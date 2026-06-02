@@ -58,23 +58,23 @@ function HypothesisForm({ initial, onSave, onCancel }) {
         });
     }
 
-    const inputCls = "w-full px-2.5 py-1.5 text-[10.5px] font-mono bg-[hsl(var(--panel-2)/0.6)] border border-[hsl(var(--border-soft)/0.8)] text-white placeholder:text-muted-lab focus:outline-none focus:border-[hsl(var(--accent-primary)/0.5)] rounded-[1px]";
+    const inputCls = "w-full px-2.5 py-1.5 text-[10.5px] font-ui bg-[hsl(var(--panel-2)/0.6)] border border-[hsl(var(--border-soft)/0.8)] text-white placeholder:text-muted-lab focus:outline-none focus:border-[hsl(var(--accent-primary)/0.5)] rounded-[1px]";
 
     return (
         <form onSubmit={handleSubmit} className="space-y-2.5 p-3 border border-[hsl(var(--border-soft)/0.5)] bg-[hsl(var(--panel-2)/0.3)] rounded-[1px]">
             <div>
-                <label className="block text-[9.5px] font-mono uppercase tracking-wider text-muted-lab mb-1">Hypothesis Title *</label>
+                <label className="block text-[9.5px] font-ui uppercase tracking-wider text-muted-lab mb-1">Hypothesis Title *</label>
                 <input className={inputCls} placeholder="e.g. Reducing penetration threshold to 15% improves fill quality" value={title} onChange={e => setTitle(e.target.value)} />
             </div>
             <div className="grid grid-cols-2 gap-2">
                 <div>
-                    <label className="block text-[9.5px] font-mono uppercase tracking-wider text-muted-lab mb-1">Status</label>
+                    <label className="block text-[9.5px] font-ui uppercase tracking-wider text-muted-lab mb-1">Status</label>
                     <select className={inputCls} value={status} onChange={e => setStatus(e.target.value)}>
                         {STATUS_ORDER.map(s => <option key={s} value={s}>{STATUS_META[s].label}</option>)}
                     </select>
                 </div>
                 <div>
-                    <label className="block text-[9.5px] font-mono uppercase tracking-wider text-muted-lab mb-1">Linked Model</label>
+                    <label className="block text-[9.5px] font-ui uppercase tracking-wider text-muted-lab mb-1">Linked Model</label>
                     <select className={inputCls} value={linkedMode} onChange={e => setLinkedMode(e.target.value)}>
                         <option value="">None</option>
                         {PLANNED_ENTRY_MODES.map(m => <option key={m.mode} value={m.mode}>{m.label}</option>)}
@@ -82,25 +82,25 @@ function HypothesisForm({ initial, onSave, onCancel }) {
                 </div>
             </div>
             <div>
-                <label className="block text-[9.5px] font-mono uppercase tracking-wider text-muted-lab mb-1">Description</label>
+                <label className="block text-[9.5px] font-ui uppercase tracking-wider text-muted-lab mb-1">Description</label>
                 <textarea className={cn(inputCls, "resize-y min-h-[56px]")} placeholder="What are you testing? What data supports this?" value={description} onChange={e => setDescription(e.target.value)} rows={3} />
             </div>
             <div>
-                <label className="block text-[9.5px] font-mono uppercase tracking-wider text-muted-lab mb-1">Rationale / Expected Outcome</label>
+                <label className="block text-[9.5px] font-ui uppercase tracking-wider text-muted-lab mb-1">Rationale / Expected Outcome</label>
                 <textarea className={cn(inputCls, "resize-y min-h-[40px]")} placeholder="Why do you expect this to work?" value={rationale} onChange={e => setRationale(e.target.value)} rows={2} />
             </div>
             <div>
-                <label className="block text-[9.5px] font-mono uppercase tracking-wider text-muted-lab mb-1">Tags (comma-separated)</label>
+                <label className="block text-[9.5px] font-ui uppercase tracking-wider text-muted-lab mb-1">Tags (comma-separated)</label>
                 <input className={inputCls} placeholder="penetration, session, asia, reclaim" value={tags} onChange={e => setTags(e.target.value)} />
             </div>
             <div className="flex items-center gap-2 pt-1">
                 <button type="submit"
-                    className="px-3 py-1.5 text-[10px] font-mono uppercase tracking-wider border border-[hsl(var(--accent-primary)/0.5)] bg-[hsl(var(--accent-primary)/0.12)] text-white hover:bg-[hsl(var(--accent-primary)/0.2)] transition-colors rounded-[1px]"
+                    className="px-3 py-1.5 text-[10px] font-ui uppercase tracking-wider border border-[hsl(var(--accent-primary)/0.5)] bg-[hsl(var(--accent-primary)/0.12)] text-white hover:bg-[hsl(var(--accent-primary)/0.2)] transition-colors rounded-[1px]"
                 >
                     {initial ? "Update" : "Add Hypothesis"}
                 </button>
                 <button type="button" onClick={onCancel}
-                    className="px-3 py-1.5 text-[10px] font-mono uppercase tracking-wider border border-[hsl(var(--border-soft)/0.5)] text-muted-lab hover:text-white transition-colors rounded-[1px]"
+                    className="px-3 py-1.5 text-[10px] font-ui uppercase tracking-wider border border-[hsl(var(--border-soft)/0.5)] text-muted-lab hover:text-white transition-colors rounded-[1px]"
                 >
                     Cancel
                 </button>
@@ -124,52 +124,52 @@ function HypothesisCard({ hyp, onEdit, onDelete, onStatusChange }) {
             {/* Header row */}
             <div className="flex items-center gap-2 px-3 py-2 cursor-pointer" onClick={() => setExpanded(e => !e)}>
                 <Pill tone={sm.tone}>{sm.label.toUpperCase()}</Pill>
-                <span className="flex-1 text-[10.5px] font-mono text-white leading-snug">{hyp.title}</span>
-                {model && <span className="text-[9px] font-mono text-muted-lab shrink-0">{model.label}</span>}
+                <span className="flex-1 text-[10.5px] font-ui text-white leading-snug">{hyp.title}</span>
+                {model && <span className="text-[9px] font-ui text-muted-lab shrink-0">{model.label}</span>}
                 {hyp.tags?.length > 0 && (
                     <div className="hidden md:flex gap-1">
                         {hyp.tags.slice(0, 3).map(t => (
-                            <span key={t} className="px-1 py-0.5 text-[8px] font-mono border border-[hsl(var(--border-soft)/0.5)] text-muted-lab rounded-[1px]">{t}</span>
+                            <span key={t} className="px-1 py-0.5 text-[8px] font-ui border border-[hsl(var(--border-soft)/0.5)] text-muted-lab rounded-[1px]">{t}</span>
                         ))}
                     </div>
                 )}
-                <span className="text-[9px] font-mono text-muted-lab shrink-0">{hyp.createdAt?.slice(0, 10)}</span>
-                <span className="text-[9px] font-mono text-muted-lab ml-1">{expanded ? "▲" : "▼"}</span>
+                <span className="text-[9px] font-ui text-muted-lab shrink-0">{hyp.createdAt?.slice(0, 10)}</span>
+                <span className="text-[9px] font-ui text-muted-lab ml-1">{expanded ? "▲" : "▼"}</span>
             </div>
 
             {/* Expanded detail */}
             {expanded && (
                 <div className="px-3 pb-3 pt-1 border-t border-[hsl(var(--border-soft)/0.3)] space-y-2">
                     {hyp.description && (
-                        <p className="text-[10px] font-mono text-[hsl(var(--text-2))] leading-relaxed">{hyp.description}</p>
+                        <p className="text-[10px] font-ui text-[hsl(var(--text-2))] leading-relaxed">{hyp.description}</p>
                     )}
                     {hyp.rationale && (
                         <div>
-                            <span className="text-[9px] font-mono uppercase tracking-wider text-muted-lab">Expected outcome: </span>
-                            <span className="text-[10px] font-mono text-[hsl(var(--text-2))]">{hyp.rationale}</span>
+                            <span className="text-[9px] font-ui uppercase tracking-wider text-muted-lab">Expected outcome: </span>
+                            <span className="text-[10px] font-ui text-[hsl(var(--text-2))]">{hyp.rationale}</span>
                         </div>
                     )}
                     {hyp.updatedAt && hyp.updatedAt !== hyp.createdAt && (
-                        <div className="text-[9px] font-mono text-muted-lab">Updated {hyp.updatedAt?.slice(0, 10)}</div>
+                        <div className="text-[9px] font-ui text-muted-lab">Updated {hyp.updatedAt?.slice(0, 10)}</div>
                     )}
 
                     {/* Status transitions */}
                     <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                        <span className="text-[9px] font-mono text-muted-lab uppercase tracking-wider">Move to:</span>
+                        <span className="text-[9px] font-ui text-muted-lab uppercase tracking-wider">Move to:</span>
                         {STATUS_ORDER.filter(s => s !== hyp.status).map(s => (
                             <button key={s} type="button"
                                 onClick={() => onStatusChange(hyp.id, s)}
-                                className="px-2 py-0.5 text-[9px] font-mono border border-[hsl(var(--border-soft)/0.5)] text-muted-lab hover:text-white hover:border-[hsl(var(--border-mid))] transition-colors rounded-[1px]"
+                                className="px-2 py-0.5 text-[9px] font-ui border border-[hsl(var(--border-soft)/0.5)] text-muted-lab hover:text-white hover:border-[hsl(var(--border-mid))] transition-colors rounded-[1px]"
                             >
                                 {STATUS_META[s].label}
                             </button>
                         ))}
                         <span className="ml-auto flex gap-1.5">
                             <button type="button" onClick={() => onEdit(hyp)}
-                                className="text-[9.5px] font-mono text-muted-lab hover:text-white transition-colors"
+                                className="text-[9.5px] font-ui text-muted-lab hover:text-white transition-colors"
                             >edit</button>
                             <button type="button" onClick={() => onDelete(hyp.id)}
-                                className="text-[9.5px] font-mono text-[hsl(var(--danger)/0.6)] hover:text-[hsl(var(--danger))] transition-colors"
+                                className="text-[9.5px] font-ui text-[hsl(var(--danger)/0.6)] hover:text-[hsl(var(--danger))] transition-colors"
                             >delete</button>
                         </span>
                     </div>
@@ -260,7 +260,7 @@ export function EntryHypothesisLab() {
                     </div>
                 }
             >
-                <p className="mb-3 text-[10px] font-mono text-muted-lab">
+                <p className="mb-3 text-[10px] font-ui text-muted-lab">
                     Track entry-specific hypotheses through their lifecycle. Link to a model, tag for discovery, and progress through stages as evidence accumulates.
                 </p>
 
@@ -271,7 +271,7 @@ export function EntryHypothesisLab() {
                         <button key={k} type="button"
                             onClick={() => setFilterStatus(k)}
                             className={cn(
-                                "px-2 py-1 text-[9.5px] font-mono uppercase tracking-wider border rounded-[1px] transition-colors",
+                                "px-2 py-1 text-[9.5px] font-ui uppercase tracking-wider border rounded-[1px] transition-colors",
                                 filterStatus === k
                                     ? "border-[hsl(var(--accent-primary)/0.5)] bg-[hsl(var(--accent-primary)/0.1)] text-white"
                                     : "border-[hsl(var(--border-soft)/0.4)] text-muted-lab hover:text-white"
@@ -283,21 +283,23 @@ export function EntryHypothesisLab() {
 
                     {/* Search */}
                     <input
-                        className="ml-auto px-2.5 py-1 text-[10px] font-mono bg-[hsl(var(--panel-2)/0.5)] border border-[hsl(var(--border-soft)/0.6)] text-white placeholder:text-muted-lab focus:outline-none focus:border-[hsl(var(--accent-primary)/0.4)] rounded-[1px] w-40"
+                        className="ml-auto px-2.5 py-1 text-[10px] font-ui bg-[hsl(var(--panel-2)/0.5)] border border-[hsl(var(--border-soft)/0.6)] text-white placeholder:text-muted-lab focus:outline-none focus:border-[hsl(var(--accent-primary)/0.4)] rounded-[1px] w-40"
                         placeholder="search…"
                         value={search}
                         onChange={e => setSearch(e.target.value)}
                     />
 
                     {/* Actions */}
-                    <button type="button" onClick={handleExport}
-                        className="px-2.5 py-1 text-[9.5px] font-mono uppercase tracking-wider border border-[hsl(var(--border-soft)/0.5)] text-muted-lab hover:text-white transition-colors rounded-[1px]"
-                    >
-                        Export CSV
-                    </button>
+                    {hypotheses.length > 0 && (
+                        <button type="button" onClick={handleExport}
+                            className="px-2.5 py-1 text-[9.5px] font-ui uppercase tracking-wider border border-[hsl(var(--border-soft)/0.5)] text-muted-lab hover:text-white transition-colors rounded-[1px]"
+                        >
+                            Export CSV
+                        </button>
+                    )}
                     <button type="button"
                         onClick={() => { setEditing(null); setShowForm(s => !s); }}
-                        className="px-2.5 py-1 text-[9.5px] font-mono uppercase tracking-wider border border-[hsl(var(--accent-primary)/0.5)] bg-[hsl(var(--accent-primary)/0.1)] text-white hover:bg-[hsl(var(--accent-primary)/0.2)] transition-colors rounded-[1px]"
+                        className="px-2.5 py-1 text-[9.5px] font-ui uppercase tracking-wider border border-[hsl(var(--accent-primary)/0.5)] bg-[hsl(var(--accent-primary)/0.1)] text-white hover:bg-[hsl(var(--accent-primary)/0.2)] transition-colors rounded-[1px]"
                     >
                         + New Hypothesis
                     </button>
@@ -314,7 +316,7 @@ export function EntryHypothesisLab() {
 
                 {/* Hypothesis list */}
                 {filtered.length === 0 ? (
-                    <div className="py-8 text-center text-[11px] font-mono text-muted-lab">
+                    <div className="py-8 text-center text-[11px] font-ui text-muted-lab">
                         {hypotheses.length === 0
                             ? "No hypotheses yet. Add one to start tracking your entry research."
                             : "No hypotheses match the current filter."}
