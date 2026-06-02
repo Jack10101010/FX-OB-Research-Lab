@@ -1,11 +1,11 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { LabRunHero } from "@/components/lab/LabRunHero";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
 import { Field, NeonSelect, NeonInput } from "@/components/lab/controls";
-import { useDataset, updateRunBundle, deleteRunBundle, clearAllRuns, getRunsBackupPayload, getRunDisplayName, compactTimeframe, formatRunDateRange, reloadFullRunFromSidecar, autoReloadIndexedRunsFromSidecar } from "@/data/store";
-import { Check, Download, Edit3, RefreshCw, ShieldAlert, Trash2, X } from "lucide-react";
+import { useDataset, updateRunBundle, deleteRunBundle, clearAllRuns, getRunsBackupPayload, importRunsBackup, getRunDisplayName, compactTimeframe, formatRunDateRange, reloadFullRunFromSidecar, autoReloadIndexedRunsFromSidecar } from "@/data/store";
+import { Check, Download, Edit3, RefreshCw, ShieldAlert, Trash2, Upload, X } from "lucide-react";
 
 const RUN_SORT_OPTIONS = [
     { value: "created_asc", label: "Created ↑ oldest first" },
@@ -40,8 +40,37 @@ export default function Runs() {
     const [editName, setEditName] = useState("");
     const [reloadBusyId, setReloadBusyId] = useState("");
     const [reloadError, setReloadError] = useState("");
+    const restoreInputRef = useRef(null);
+    const [restoreMsg, setRestoreMsg] = useState(null); // { tone, text }
 
     const runStoreId = (run) => run?._bundleId || run?.id;
+
+    const handleRestoreFile = (event) => {
+        const file = event.target.files?.[0];
+        event.target.value = "";
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+            let payload;
+            try {
+                payload = JSON.parse(String(reader.result || ""));
+            } catch {
+                setRestoreMsg({ tone: "error", text: "Invalid file: not valid JSON." });
+                return;
+            }
+            const result = importRunsBackup(payload);
+            if (!result.ok) {
+                setRestoreMsg({ tone: "error", text: result.error || "Restore failed." });
+                return;
+            }
+            const parts = [`Imported ${result.imported} run${result.imported === 1 ? "" : "s"}`];
+            if (result.skipped) parts.push(`${result.skipped} skipped`);
+            if (result.projectsImported) parts.push(`${result.projectsImported} project${result.projectsImported === 1 ? "" : "s"}`);
+            setRestoreMsg({ tone: result.imported ? "success" : "warning", text: `${parts.join(" · ")}.` });
+        };
+        reader.onerror = () => setRestoreMsg({ tone: "error", text: "Could not read the selected file." });
+        reader.readAsText(file);
+    };
 
     useEffect(() => {
         autoReloadIndexedRunsFromSidecar().catch((error) => {
@@ -118,10 +147,26 @@ export default function Runs() {
         }
     };
 
+    // Dynamic filter options derived from actual RUNS data.
+    const symbolOptions = useMemo(() => {
+        const unique = [...new Set((RUNS || []).map((r) => r.symbol).filter(Boolean))].sort();
+        return ["All", ...unique];
+    }, [RUNS]);
+
+    const tfOptions = useMemo(() => {
+        const unique = [...new Set((RUNS || []).map((r) => compactTimeframe(r.detectionTf)).filter(Boolean))].sort();
+        return ["All", ...unique];
+    }, [RUNS]);
+
+    const modeOptions = useMemo(() => {
+        const unique = [...new Set((RUNS || []).map((r) => r.executionMode).filter(Boolean))].sort();
+        return ["All", ...unique];
+    }, [RUNS]);
+
     const filtered = useMemo(() => {
         const arr = RUNS.map((run, index) => ({ run: enrichRunMetrics(run, getRunData), index })).filter(({ run: r }) => {
             if (symbol !== "All" && r.symbol !== symbol) return false;
-            if (tf !== "All" && r.detectionTf !== tf) return false;
+            if (tf !== "All" && compactTimeframe(r.detectionTf) !== tf) return false;
             if (mode !== "All" && r.executionMode !== mode) return false;
             if (project === "Unassigned" && r.projectId) return false;
             if (project !== "All" && project !== "Unassigned" && r.projectId !== project) return false;
@@ -141,9 +186,9 @@ export default function Runs() {
             />
 
             <div className="px-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3 mb-4">
-                <Field label="Symbol"><NeonSelect testId="runs-symbol" value={symbol} onChange={setSymbol} options={["All", "EURUSD", "GBPUSD", "USDJPY", "XAUUSD", "AUDUSD"]} /></Field>
-                <Field label="Timeframe"><NeonSelect value={tf} onChange={setTf} options={["All", "M5", "M15", "M30", "H1"]} /></Field>
-                <Field label="Execution Mode"><NeonSelect value={mode} onChange={setMode} options={["All", "single_position", "one_per_direction", "allow_multi_position"]} /></Field>
+                <Field label="Symbol"><NeonSelect testId="runs-symbol" value={symbol} onChange={setSymbol} options={symbolOptions} /></Field>
+                <Field label="Timeframe"><NeonSelect value={tf} onChange={setTf} options={tfOptions} /></Field>
+                <Field label="Execution Mode"><NeonSelect value={mode} onChange={setMode} options={modeOptions} /></Field>
                 <Field label="Project">
                     <NeonSelect
                         value={project}
@@ -174,16 +219,32 @@ export default function Runs() {
                         type="button"
                         onClick={downloadRunsBackup}
                         disabled={!importedCount}
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[10.5px] font-mono uppercase tracking-wider border border-[hsl(var(--accent-secondary)/0.45)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.06)] hover:bg-[hsl(var(--accent-secondary)/0.12)] disabled:opacity-50 disabled:cursor-not-allowed clip-bevel-sm"
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[10.5px] font-ui uppercase tracking-wider border border-[hsl(var(--accent-secondary)/0.45)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.06)] hover:bg-[hsl(var(--accent-secondary)/0.12)] disabled:opacity-50 disabled:cursor-not-allowed clip-bevel-sm"
                     >
                         <Download className="w-3 h-3" />
                         Export Backup
                     </button>
                     <button
                         type="button"
+                        onClick={() => restoreInputRef.current?.click()}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[10.5px] font-ui uppercase tracking-wider border border-[hsl(var(--accent-primary)/0.45)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.06)] hover:bg-[hsl(var(--accent-primary)/0.12)] clip-bevel-sm"
+                    >
+                        <Upload className="w-3 h-3" />
+                        Restore Backup
+                    </button>
+                    <input
+                        ref={restoreInputRef}
+                        type="file"
+                        accept="application/json,.json"
+                        onChange={handleRestoreFile}
+                        className="hidden"
+                        data-testid="runs-restore-backup-input"
+                    />
+                    <button
+                        type="button"
                         onClick={deleteImportedRuns}
                         disabled={!importedCount}
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[10.5px] font-mono uppercase tracking-wider border border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:border-[hsl(var(--danger)/0.55)] hover:text-[hsl(var(--danger))] disabled:opacity-40 disabled:cursor-not-allowed clip-bevel-sm"
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[10.5px] font-ui uppercase tracking-wider border border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:border-[hsl(var(--danger)/0.55)] hover:text-[hsl(var(--danger))] disabled:opacity-40 disabled:cursor-not-allowed clip-bevel-sm"
                     >
                         Delete Imported
                     </button>
@@ -191,12 +252,28 @@ export default function Runs() {
                         type="button"
                         onClick={deleteAllRuns}
                         disabled={!importedCount}
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[10.5px] font-mono uppercase tracking-wider border border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:border-[hsl(var(--danger)/0.55)] hover:text-[hsl(var(--danger))] disabled:opacity-40 disabled:cursor-not-allowed clip-bevel-sm"
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[10.5px] font-ui uppercase tracking-wider border border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:border-[hsl(var(--danger)/0.55)] hover:text-[hsl(var(--danger))] disabled:opacity-40 disabled:cursor-not-allowed clip-bevel-sm"
                     >
                         Delete All Runs
                     </button>
                 </div>
             </div>
+
+            {restoreMsg && (
+                <div className="px-6 mb-3">
+                    <div
+                        className={`text-[11px] leading-relaxed font-ui clip-bevel-sm px-3 py-2 border ${
+                            restoreMsg.tone === "error"
+                                ? "border-[hsl(var(--danger)/0.4)] bg-[hsl(var(--danger)/0.06)] text-[hsl(var(--danger))]"
+                                : restoreMsg.tone === "warning"
+                                    ? "border-[hsl(var(--warning)/0.4)] bg-[hsl(var(--warning)/0.06)] text-[hsl(var(--warning))]"
+                                    : "border-[hsl(var(--accent-primary)/0.4)] bg-[hsl(var(--accent-primary)/0.06)] text-[hsl(var(--accent-primary))]"
+                        }`}
+                    >
+                        {restoreMsg.text}
+                    </div>
+                </div>
+            )}
 
             {persistWarning && (
                 <div className="px-6 mb-3">
@@ -284,7 +361,7 @@ export default function Runs() {
                     />
                     {!filtered.length && (
                         <div className="py-10 text-center">
-                            <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-lab">No Real Runs</div>
+                            <div className="font-ui text-[10px] uppercase tracking-[0.14em] text-muted-lab">No Real Runs</div>
                             <div className="mt-2 text-[12px] text-[hsl(var(--text-2))]">
                                 Import a completed run or launch one from Strategy Builder to populate this table.
                             </div>
@@ -468,7 +545,9 @@ function RunNameCell({ run, editingId, editName, setEditName, startRename, delet
     return (
         <span className="group/name inline-flex items-center gap-1.5" title={identityTitle}>
             <Link to={`/runs/${encodeURIComponent(storeId)}`} className="text-[hsl(var(--accent-primary))] hover:text-white">{label}</Link>
-            {run.hasFullData ? <Pill tone="success">Memory full data</Pill> : <Pill tone="warning">Index only</Pill>}
+            {run.hasFullData
+                ? <Pill tone="success">{run.storageMode === "indexeddb_full" ? "IndexedDB full data" : "Memory full data"}</Pill>
+                : <Pill tone="warning">Index only</Pill>}
             {run.autoReloadStatus === "loading" && <Pill tone="secondary">Auto-loading</Pill>}
             {run.autoReloadStatus === "failed" && <Pill tone="warning">Auto-load failed</Pill>}
             {run.reloadAvailable && run.autoReloadStatus !== "loading" && run.autoReloadStatus !== "failed" && <Pill tone="secondary">Auto-load on open</Pill>}
@@ -517,7 +596,7 @@ function ProjectLabel({ run }) {
     return (
         <span className="inline-flex items-center gap-1.5">
             <Pill tone="secondary">{run.projectName || "Project"}</Pill>
-            {run.runRole && <span className="text-[9.5px] font-mono uppercase tracking-wider text-muted-lab">{run.runRole}</span>}
+            {run.runRole && <span className="text-[9.5px] font-ui uppercase tracking-wider text-muted-lab">{run.runRole}</span>}
         </span>
     );
 }

@@ -12,7 +12,6 @@ import {
     Download,
     FileText,
     GitCompareArrows,
-    Lightbulb,
     Map as MapIcon,
     PencilLine,
     Play,
@@ -23,6 +22,7 @@ import {
 } from "lucide-react";
 import { getSidecarRun, getSidecarRunBundle, startSidecarRun } from "@/data/sidecarClient";
 import { ingestRunBundle } from "@/data/importer";
+import { getNextStep, classifyFindingSource, FINDING_SOURCE_FILTERS as FINDING_FILTERS } from "@/data/projectWorkflow";
 import {
     addRunBundle,
     assignRunToProject,
@@ -87,6 +87,7 @@ export default function ProjectDetail() {
     const [findingTitle, setFindingTitle] = useState("");
     const [findingNote, setFindingNote] = useState("");
     const [findingType, setFindingType] = useState("finding");
+    const [findingFilter, setFindingFilter] = useState("all");
     const [rrValuesText, setRrValuesText] = useState("2, 2.5, 3, 3.3, 3.5, 4");
     const [sweepRun, setSweepRun] = useState(null);
 
@@ -108,6 +109,18 @@ export default function ProjectDetail() {
     const final = runById(projectRuns, project.finalRunId);
 
     const setActive = () => setActiveProjectId(project.id);
+    const exportFinalConfig = () => {
+        const finalData = getRunData(project.finalRunId);
+        const config = finalData?.config;
+        if (!config || !Object.keys(config).length) return;
+        const blob = new Blob([JSON.stringify(config, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${(project.name || "project").replace(/\s+/g, "_")}_final_config.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
     const openSweepPlan = (type = "RR Sweep") => {
         setSweepType(type);
         setSweepSourceRunId(project.baselineRunId || projectRuns[0]?.id || "");
@@ -368,7 +381,6 @@ export default function ProjectDetail() {
                         </NeonButton>
                         <Link to="/strategy" onClick={setActive}><NeonButton icon={Play} tone="primary">Open Builder</NeonButton></Link>
                         <Link to="/runs"><NeonButton tone="ghost">Open Runs</NeonButton></Link>
-                        <NeonButton icon={GitCompareArrows} tone="ghost" disabled>Compare Project Runs Later</NeonButton>
                     </>
                 }
             />
@@ -381,8 +393,7 @@ export default function ProjectDetail() {
                 <Link to="/comparison">
                     <NeonButton icon={GitCompareArrows} tone="ghost">Compare Project Runs</NeonButton>
                 </Link>
-                <NeonButton icon={Lightbulb} tone="ghost" disabled>Mark Candidate Later</NeonButton>
-                <NeonButton icon={Download} tone="ghost" disabled={!project.finalRunId}>Export Final Config</NeonButton>
+                <NeonButton icon={Download} tone="ghost" disabled={!project.finalRunId} onClick={exportFinalConfig}>Export Final Config</NeonButton>
             </div>
 
             <div className="px-6 grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -395,7 +406,7 @@ export default function ProjectDetail() {
             <div className="px-6 mt-5 grid grid-cols-1 xl:grid-cols-3 gap-4">
                 <NeonPanel title="Next Step" action={<Pill tone="primary">Workflow</Pill>}>
                     <div className="border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm p-4">
-                        <div className="text-[9.5px] font-mono uppercase tracking-[0.22em] text-muted-lab">Recommended</div>
+                        <div className="text-[9.5px] font-ui uppercase tracking-[0.14em] text-muted-lab">Recommended</div>
                         <div className="mt-1 font-display text-[18px] text-white">{nextStep.title}</div>
                         <p className="mt-1 text-[12px] leading-relaxed text-[hsl(var(--text-2))]">{nextStep.copy}</p>
                         <div className="mt-3">
@@ -447,7 +458,7 @@ export default function ProjectDetail() {
                         testId="project-runs-table"
                         rowKey="id"
                         columns={[
-                            { key: "displayName", label: "Run", render: (run) => <span className="text-[hsl(var(--accent-primary))]">{getRunDisplayName(run)}</span> },
+                            { key: "displayName", label: "Run", render: (run) => <Link to={`/runs/${encodeURIComponent(run.id)}`} className="text-[hsl(var(--accent-primary))] hover:text-white">{getRunDisplayName(run)}</Link> },
                             { key: "runRole", label: "Role", render: (run) => <Pill tone={roleTone(roleFor(run))}>{roleLabel(roleFor(run))}</Pill> },
                             { key: "experimentType", label: "Experiment", render: (run) => run.experimentType || "manual" },
                             { key: "netR", label: "Net R", align: "right", render: (run) => <ColoredR value={run.netR || 0} /> },
@@ -459,7 +470,7 @@ export default function ProjectDetail() {
                     />
                     {!projectRuns.length && (
                         <div className="py-10 text-center">
-                            <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-lab">No Linked Runs</div>
+                            <div className="font-ui text-[10px] uppercase tracking-[0.14em] text-muted-lab">No Linked Runs</div>
                             <div className="mt-2 text-[12px] text-[hsl(var(--text-2))]">Create/import a baseline run from Strategy Builder.</div>
                         </div>
                     )}
@@ -484,7 +495,7 @@ export default function ProjectDetail() {
                         ))}
                         {!timelineItems(project, projectRuns).length && (
                             <div className="py-10 text-center border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.24)] clip-bevel-sm">
-                                <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-lab">No Timeline Items</div>
+                                <div className="font-ui text-[10px] uppercase tracking-[0.14em] text-muted-lab">No Timeline Items</div>
                                 <div className="mt-2 text-[12px] text-[hsl(var(--text-2))]">Create a baseline run or add a sweep plan to start the project timeline.</div>
                             </div>
                         )}
@@ -494,7 +505,7 @@ export default function ProjectDetail() {
                 <NeonPanel className="xl:col-span-3" title="Research Findings" action={<Pill tone="primary">{(project.findings || []).length} NOTES</Pill>}>
                     <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
                         <div className="border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.28)] clip-bevel-sm p-3">
-                            <div className="text-[9.5px] font-mono uppercase tracking-[0.22em] text-title-lab mb-3">Add Finding</div>
+                            <div className="text-[9.5px] font-ui uppercase tracking-[0.14em] text-title-lab mb-3">Add Finding</div>
                             <div className="space-y-3">
                                 <Field label="Type">
                                     <NeonSelect
@@ -521,15 +532,38 @@ export default function ProjectDetail() {
                                 <NeonButton icon={FileText} tone="secondary" onClick={() => addFinding()}>Save Finding</NeonButton>
                             </div>
                         </div>
-                        <div className="xl:col-span-2 space-y-2 max-h-[360px] overflow-auto scrollbar-thin pr-1">
-                            {(project.findings || []).length ? (project.findings || []).map((finding) => (
-                                <FindingItem key={finding.id || `${finding.createdAt}-${finding.title}`} finding={finding} runs={projectRuns} />
-                            )) : (
-                                <div className="py-10 text-center border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.24)] clip-bevel-sm">
-                                    <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-lab">No Findings Yet</div>
-                                    <div className="mt-2 text-[12px] text-[hsl(var(--text-2))]">Capture sweep plans, open questions, and research decisions here.</div>
-                                </div>
-                            )}
+                        <div className="xl:col-span-2 flex flex-col gap-2">
+                            <FindingsFilterBar
+                                findings={project.findings || []}
+                                value={findingFilter}
+                                onChange={setFindingFilter}
+                            />
+                            <div className="space-y-2 max-h-[360px] overflow-auto scrollbar-thin pr-1">
+                                {(() => {
+                                    const all = project.findings || [];
+                                    const filtered = findingFilter === "all"
+                                        ? all
+                                        : all.filter((f) => classifyFindingSource(f) === findingFilter);
+                                    if (!all.length) {
+                                        return (
+                                            <div className="py-10 text-center border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.24)] clip-bevel-sm">
+                                                <div className="font-ui text-[10px] uppercase tracking-[0.14em] text-muted-lab">No Findings Yet</div>
+                                                <div className="mt-2 text-[12px] text-[hsl(var(--text-2))]">Capture sweep plans, open questions, and research decisions here.</div>
+                                            </div>
+                                        );
+                                    }
+                                    if (!filtered.length) {
+                                        return (
+                                            <div className="py-8 text-center border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.24)] clip-bevel-sm">
+                                                <div className="text-[12px] text-[hsl(var(--text-2))]">No findings for this source yet.</div>
+                                            </div>
+                                        );
+                                    }
+                                    return filtered.map((finding) => (
+                                        <FindingItem key={finding.id || `${finding.createdAt}-${finding.title}`} finding={finding} runs={projectRuns} />
+                                    ));
+                                })()}
+                            </div>
                         </div>
                     </div>
                 </NeonPanel>
@@ -541,7 +575,7 @@ export default function ProjectDetail() {
                         <div className="clip-bevel bg-[hsl(var(--panel))] p-4">
                             <div className="flex items-start justify-between gap-4">
                                 <div>
-                                    <div className="text-[9.5px] font-mono uppercase tracking-[0.22em] text-muted-lab">Planned Experiment</div>
+                                    <div className="text-[9.5px] font-ui uppercase tracking-[0.14em] text-muted-lab">Planned Experiment</div>
                                     <div className="mt-1 font-display text-[20px] text-white">Plan Sweep</div>
                                 </div>
                                 <button
@@ -608,11 +642,17 @@ export default function ProjectDetail() {
 function RunSlot({ title, run, empty }) {
     return (
         <div className="border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm px-3 py-3">
-            <div className="text-[9.5px] font-mono uppercase tracking-[0.22em] text-muted-lab">{title}</div>
+            <div className="text-[9.5px] font-ui uppercase tracking-[0.14em] text-muted-lab">{title}</div>
             {run ? (
                 <>
                     <div className="mt-1 text-[13px] text-white">{getRunDisplayName(run)}</div>
-                    <div className="mt-1 font-mono text-[11px]"><ColoredR value={run.netR || 0} /> · {Number(run.winRate || 0).toFixed(1)}% WR</div>
+                    <div className="mt-1 font-num text-[11px]"><ColoredR value={run.netR || 0} /> · {Number(run.winRate || 0).toFixed(1)}% WR</div>
+                    <Link
+                        to={`/runs/${encodeURIComponent(run.id)}`}
+                        className="mt-2 inline-flex items-center gap-1 text-[10px] font-ui uppercase tracking-wider text-[hsl(var(--accent-primary))] hover:text-white"
+                    >
+                        Open Run →
+                    </Link>
                 </>
             ) : (
                 <div className="mt-2 text-[11.5px] leading-relaxed text-[hsl(var(--text-2))]">{empty}</div>
@@ -632,31 +672,31 @@ function RunActions({ run, projectId, projectActiveRunId, globalActiveRunId }) {
     return (
         <div className="flex items-center justify-end gap-1.5 flex-wrap">
             {isGlobalActive ? (
-                <span className="px-2 py-1 text-[10px] font-mono uppercase tracking-wider border border-[hsl(var(--success)/0.5)] text-[hsl(var(--success))] bg-[hsl(var(--success)/0.06)] clip-bevel-sm">
+                <span className="px-2 py-1 text-[10px] font-ui uppercase tracking-wider border border-[hsl(var(--success)/0.5)] text-[hsl(var(--success))] bg-[hsl(var(--success)/0.06)] clip-bevel-sm">
                     Active Run
                 </span>
             ) : (
                 <button
                     type="button"
                     onClick={setAsProjectActive}
-                    className="px-2 py-1 text-[10px] font-mono uppercase tracking-wider border border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:text-[hsl(var(--accent-primary))] hover:border-[hsl(var(--accent-primary)/0.5)] clip-bevel-sm"
+                    className="px-2 py-1 text-[10px] font-ui uppercase tracking-wider border border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:text-[hsl(var(--accent-primary))] hover:border-[hsl(var(--accent-primary)/0.5)] clip-bevel-sm"
                     title={isProjectActive ? "Currently the project's active run" : "Set as the active run for this project"}
                 >
                     {isProjectActive ? "Project Active" : "Set Active Run"}
                 </button>
             )}
             <Link to={`/runs/${encodeURIComponent(run.id)}`}>
-                <button type="button" className="px-2 py-1 text-[10px] font-mono uppercase tracking-wider border border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:text-white hover:border-[hsl(var(--accent-secondary))] clip-bevel-sm">
+                <button type="button" className="px-2 py-1 text-[10px] font-ui uppercase tracking-wider border border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:text-white hover:border-[hsl(var(--accent-secondary))] clip-bevel-sm">
                     Detail
                 </button>
             </Link>
             <Link to="/strategy-map" onClick={activateRun}>
-                <button type="button" className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-mono uppercase tracking-wider border border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:text-white hover:border-[hsl(var(--accent-secondary))] clip-bevel-sm">
+                <button type="button" className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-ui uppercase tracking-wider border border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:text-white hover:border-[hsl(var(--accent-secondary))] clip-bevel-sm">
                     <MapIcon className="w-3 h-3" /> Map
                 </button>
             </Link>
             <Link to="/trade-inspector" onClick={activateRun}>
-                <button type="button" className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-mono uppercase tracking-wider border border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:text-white hover:border-[hsl(var(--accent-secondary))] clip-bevel-sm">
+                <button type="button" className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-ui uppercase tracking-wider border border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:text-white hover:border-[hsl(var(--accent-secondary))] clip-bevel-sm">
                     <Crosshair className="w-3 h-3" /> Inspect
                 </button>
             </Link>
@@ -664,28 +704,94 @@ function RunActions({ run, projectId, projectActiveRunId, globalActiveRunId }) {
     );
 }
 
+// WF-9: read-only source filter for the findings list. Counts are derived from
+// the same classifier used to filter, so labels and results always agree.
+function FindingsFilterBar({ findings, value, onChange }) {
+    const counts = React.useMemo(() => {
+        const c = { all: 0, manual: 0, run_workspace: 0, table_compare: 0, edge_explorer: 0 };
+        for (const f of findings || []) {
+            c.all += 1;
+            c[classifyFindingSource(f)] += 1;
+        }
+        return c;
+    }, [findings]);
+
+    return (
+        <div className="flex flex-wrap items-center gap-1.5" data-testid="findings-filter-bar">
+            {FINDING_FILTERS.map((filter) => {
+                const active = value === filter.value;
+                return (
+                    <button
+                        key={filter.value}
+                        type="button"
+                        data-testid={`findings-filter-${filter.value}`}
+                        onClick={() => onChange(filter.value)}
+                        className={`inline-flex items-center gap-1.5 px-2 py-1 text-[10px] font-ui uppercase tracking-wider clip-bevel-sm border transition-colors ${
+                            active
+                                ? "border-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.12)] text-white"
+                                : "border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:text-white hover:border-[hsl(var(--accent-secondary)/0.5)]"
+                        }`}
+                    >
+                        {filter.label}
+                        <span className={active ? "text-[hsl(var(--accent-secondary))]" : "text-muted-lab"}>{counts[filter.value]}</span>
+                    </button>
+                );
+            })}
+        </div>
+    );
+}
+
 function FindingItem({ finding, runs }) {
     const sourceRun = runById(runs, finding.sourceRunId);
+    // WF-8: source-aware context. All fields are optional — older findings (no
+    // source/table/bucket/comparedRunId/meta) fall through to the original layout.
+    const isTableCompare = finding.source === "table_compare";
+    const isEdge = finding.source === "edge_explorer";
+    const meta = finding.meta && typeof finding.meta === "object" ? finding.meta : {};
+    const tableName = finding.table || meta.table || "";
+    const bucketName = finding.bucket || meta.bucket || "";
+    const comparedRunId = finding.comparedRunId || meta.comparedRunId || "";
+    const comparedRun = comparedRunId ? runById(runs, comparedRunId) : null;
+    const comparedLabel = comparedRun ? getRunDisplayName(comparedRun) : (comparedRunId || "");
+    const universeKey = meta.universeKey || "";
+    const basisLabel = meta.basis === "current_equity" ? "Current Equity" : meta.basis === "raw_r" ? "Raw R" : "";
     return (
         <div className="border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.28)] clip-bevel-sm px-3 py-3">
             <div className="flex items-start justify-between gap-3">
                 <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                         <Pill tone={finding.type === "sweep_plan" ? "secondary" : finding.type === "question" ? "warning" : "primary"}>
                             {typeLabel(finding.type)}
                         </Pill>
+                        {isTableCompare && <Pill tone="secondary">Table Compare</Pill>}
+                        {isEdge && <Pill tone="secondary">Edge Explorer</Pill>}
                         <span className="font-display text-[13px] text-white">{finding.title || typeLabel(finding.type)}</span>
                     </div>
                     {finding.note && (
                         <p className="mt-2 text-[12px] leading-relaxed text-[hsl(var(--text-2))] whitespace-pre-wrap">{finding.note}</p>
                     )}
+                    {(isTableCompare || isEdge) && (tableName || bucketName || comparedLabel || universeKey || basisLabel) && (
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                            {tableName && <Pill tone="muted">{tableName}</Pill>}
+                            {bucketName && <Pill tone="muted">Bucket: {bucketName}</Pill>}
+                            {comparedLabel && <Pill tone="muted">vs {comparedLabel}</Pill>}
+                            {isEdge && universeKey && <Pill tone="muted">{universeKey}</Pill>}
+                            {isEdge && basisLabel && <Pill tone="muted">{basisLabel}</Pill>}
+                        </div>
+                    )}
                     {sourceRun && (
-                        <div className="mt-2 text-[10.5px] font-mono text-muted-lab">
-                            Source: {getRunDisplayName(sourceRun)}
+                        <div className="mt-2 text-[10.5px] font-ui text-muted-lab">
+                            Source:{" "}
+                            <Link
+                                to={`/runs/${encodeURIComponent(sourceRun.id)}`}
+                                className="text-[hsl(var(--accent-primary))] hover:text-white"
+                            >
+                                {getRunDisplayName(sourceRun)}
+                            </Link>
                         </div>
                     )}
                 </div>
-                <span className="shrink-0 text-[10px] font-mono text-muted-lab">{formatDateTime(finding.createdAt)}</span>
+                <span className="shrink-0 text-[10px] font-ui text-muted-lab">{formatDateTime(finding.createdAt)}</span>
             </div>
         </div>
     );
@@ -710,22 +816,22 @@ function TimelineItem({ item, projectRuns, getRunData, sweepRun, onRunRrSweep, o
                         <span className="font-display text-[13px] text-white truncate">{item.title}</span>
                         {item.status && <Pill tone={item.status === "completed" ? "success" : item.status === "failed" ? "danger" : item.status === "running" ? "warning" : "muted"}>{item.status}</Pill>}
                     </div>
-                    {parent && <div className="mt-1 text-[10.5px] font-mono text-muted-lab">Child of {getRunDisplayName(parent)}</div>}
+                    {parent && <div className="mt-1 text-[10.5px] font-ui text-muted-lab">Child of {getRunDisplayName(parent)}</div>}
                     {item.note && <div className="mt-1 text-[11.5px] text-[hsl(var(--text-2))] whitespace-pre-wrap">{item.note}</div>}
                     {item.kind === "run" && (
-                        <div className="mt-2 flex flex-wrap items-center gap-3 font-mono text-[11px]">
+                        <div className="mt-2 flex flex-wrap items-center gap-3 font-num text-[11px]">
                             <span><ColoredR value={item.run.netR || 0} /></span>
                             <span className="text-[hsl(var(--text-2))]">{Number(item.run.winRate || 0).toFixed(1)}% WR</span>
                             <span className="text-muted-lab">{item.run.trades || 0} trades</span>
                         </div>
                     )}
                     {isRunning && (
-                        <div className="mt-2 text-[10.5px] font-mono text-[hsl(var(--warning))]">
+                        <div className="mt-2 text-[10.5px] font-ui text-[hsl(var(--warning))]">
                             Running {sweepRun.currentValue ?? "—"} · {sweepRun.completed}/{sweepRun.total} completed
                         </div>
                     )}
                     {sweepRun?.planId === item.id && sweepRun.status === "failed" && sweepRun.error && (
-                        <div className="mt-2 text-[10.5px] font-mono text-[hsl(var(--danger))]">{sweepRun.error}</div>
+                        <div className="mt-2 text-[10.5px] font-ui text-[hsl(var(--danger))]">{sweepRun.error}</div>
                     )}
                     {rrSummary?.rows?.length > 0 && (
                         <SweepSummaryTable
@@ -755,7 +861,7 @@ function TimelineItem({ item, projectRuns, getRunData, sweepRun, onRunRrSweep, o
                             type="button"
                             onClick={() => canRunRr ? onRunRrSweep(item.raw) : onRunProtectionSweep(item.raw)}
                             disabled={sweepRun?.status === "running" || item.status === "running"}
-                            className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-mono uppercase tracking-wider border border-[hsl(var(--accent-primary)/0.5)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.06)] hover:bg-[hsl(var(--accent-primary)/0.12)] disabled:opacity-40 disabled:cursor-not-allowed clip-bevel-sm"
+                            className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-ui uppercase tracking-wider border border-[hsl(var(--accent-primary)/0.5)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.06)] hover:bg-[hsl(var(--accent-primary)/0.12)] disabled:opacity-40 disabled:cursor-not-allowed clip-bevel-sm"
                         >
                             <Play className="w-3 h-3" />
                             Run Sweep
@@ -770,7 +876,7 @@ function TimelineItem({ item, projectRuns, getRunData, sweepRun, onRunRrSweep, o
 function SweepSummaryTable({ mode, rows, bestNetRId, bestExpectancyId, lowestDdId, onMarkCandidate }) {
     return (
         <div className="mt-3 overflow-x-auto scrollbar-thin border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel)/0.45)] clip-bevel-sm">
-            <table className="w-full min-w-[860px] font-mono text-[11px]">
+            <table className="w-full min-w-[860px] font-ui text-[11px]">
                 <thead>
                     <tr className="text-[9.5px] uppercase tracking-[0.18em] text-muted-lab border-b border-[hsl(var(--border-soft))]">
                         <th className="text-left px-2 py-2">{mode === "protection" ? "Protection Mode" : "RR"}</th>
@@ -800,28 +906,28 @@ function SweepSummaryTable({ mode, rows, bestNetRId, bestExpectancyId, lowestDdI
                                     </div>
                                 </td>
                                 {mode === "protection" && <td className="px-2 py-2 text-[hsl(var(--text-2))]">{protectionThresholdLabel(row)}</td>}
-                                <td className="text-right px-2 py-2"><ColoredR value={row.netR} /></td>
-                                <td className="text-right px-2 py-2 text-[hsl(var(--text-2))]">{formatNumber(row.winRate, 1)}%</td>
-                                <td className="text-right px-2 py-2 text-[hsl(var(--text-2))]">{row.trades}</td>
-                                <td className="text-right px-2 py-2 text-[hsl(var(--text-2))]">{row.maxDd == null ? "—" : `${formatNumber(row.maxDd, 1)}R`}</td>
-                                <td className="text-right px-2 py-2 text-[hsl(var(--text-2))]">{row.expectancy == null ? "—" : `${formatNumber(row.expectancy, 3)}R`}</td>
-                                <td className="text-right px-2 py-2 text-[hsl(var(--success))]">{row.validation == null ? "—" : `${formatNumber(row.validation, 1)}%`}</td>
+                                <td className="text-right px-2 py-2 font-num"><ColoredR value={row.netR} /></td>
+                                <td className="text-right px-2 py-2 text-[hsl(var(--text-2))] font-num">{formatNumber(row.winRate, 1)}%</td>
+                                <td className="text-right px-2 py-2 text-[hsl(var(--text-2))] font-num">{row.trades}</td>
+                                <td className="text-right px-2 py-2 text-[hsl(var(--text-2))] font-num">{row.maxDd == null ? "—" : `${formatNumber(row.maxDd, 1)}R`}</td>
+                                <td className="text-right px-2 py-2 text-[hsl(var(--text-2))] font-num">{row.expectancy == null ? "—" : `${formatNumber(row.expectancy, 3)}R`}</td>
+                                <td className="text-right px-2 py-2 text-[hsl(var(--success))] font-num">{row.validation == null ? "—" : `${formatNumber(row.validation, 1)}%`}</td>
                                 <td className="px-2 py-2">
                                     <div className="flex items-center justify-end gap-1.5">
                                         <button
                                             type="button"
                                             onClick={() => onMarkCandidate(row.run)}
-                                            className="px-2 py-1 text-[10px] font-mono uppercase tracking-wider border border-[hsl(var(--warning)/0.5)] text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.06)] hover:bg-[hsl(var(--warning)/0.12)] clip-bevel-sm"
+                                            className="px-2 py-1 text-[10px] font-ui uppercase tracking-wider border border-[hsl(var(--warning)/0.5)] text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.06)] hover:bg-[hsl(var(--warning)/0.12)] clip-bevel-sm"
                                         >
                                             Mark Candidate
                                         </button>
                                         <Link to={`/runs/${encodeURIComponent(row.run.id)}`}>
-                                            <button type="button" className="px-2 py-1 text-[10px] font-mono uppercase tracking-wider border border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:text-white hover:border-[hsl(var(--accent-secondary))] clip-bevel-sm">
+                                            <button type="button" className="px-2 py-1 text-[10px] font-ui uppercase tracking-wider border border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:text-white hover:border-[hsl(var(--accent-secondary))] clip-bevel-sm">
                                                 Detail
                                             </button>
                                         </Link>
                                         <Link to="/comparison">
-                                            <button type="button" className="px-2 py-1 text-[10px] font-mono uppercase tracking-wider border border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:text-white hover:border-[hsl(var(--accent-secondary))] clip-bevel-sm">
+                                            <button type="button" className="px-2 py-1 text-[10px] font-ui uppercase tracking-wider border border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:text-white hover:border-[hsl(var(--accent-secondary))] clip-bevel-sm">
                                                 Compare
                                             </button>
                                         </Link>
@@ -834,34 +940,6 @@ function SweepSummaryTable({ mode, rows, bestNetRId, bestExpectancyId, lowestDdI
             </table>
         </div>
     );
-}
-
-function getNextStep(project, checklist) {
-    if (!project.baselineRunId) {
-        return {
-            title: "Create baseline run",
-            copy: "Start by running or importing the first clean baseline for this project.",
-            action: "Create Baseline Run",
-            to: "/strategy",
-            activateProject: true,
-        };
-    }
-    if (!checklist.inspected) {
-        return { title: "Inspect baseline", copy: "Review the baseline in Run Detail, Strategy Map, and Trade Inspector.", action: "Open Baseline Run", to: `/runs/${encodeURIComponent(project.baselineRunId)}` };
-    }
-    if (!checklist.entryTested) {
-        return { title: "Test entry models", copy: "Plan an entry model sweep before promoting a candidate.", action: "Plan Entry Sweep", sweepType: "Entry Model Sweep" };
-    }
-    if (!checklist.protectionTested) {
-        return { title: "Test protections", copy: "Plan a protection sweep to test failure behavior controls.", action: "Plan Protection Sweep", sweepType: "Protection Sweep" };
-    }
-    if (!project.candidateRunId) {
-        return { title: "Choose candidate", copy: "Select the run that should move forward to validation.", action: "Choose Candidate Later", to: `/projects/${encodeURIComponent(project.id)}` };
-    }
-    if (!checklist.validated) {
-        return { title: "Validate candidate", copy: "Use comparison and walk-forward checks before marking the project validated.", action: "Validate Candidate Later", to: "/comparison" };
-    }
-    return { title: "Export final config", copy: "The project is validated. Preserve the final config for downstream handoff.", action: "Open Builder", to: "/strategy", activateProject: true };
 }
 
 function timelineItems(project, runs) {
@@ -1174,6 +1252,8 @@ function roleTone(role) {
     }[role] || "muted";
 }
 
+// WF-9: classify a finding by capture source for read-only filtering. Old
+// findings (no source) and any unrecognized source fall under "manual".
 function typeLabel(type) {
     return {
         finding: "Finding",

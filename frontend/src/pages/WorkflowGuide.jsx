@@ -101,7 +101,7 @@ export default function WorkflowGuide() {
                 <div className="clip-bevel bg-[hsl(var(--panel)/0.96)] px-5 py-5 md:px-6 md:py-6">
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                         <div>
-                            <div className="inline-flex items-center gap-2 text-[10px] font-mono uppercase tracking-[0.22em] text-[hsl(var(--accent-secondary))]">
+                            <div className="inline-flex items-center gap-2 text-[10px] font-ui uppercase tracking-[0.14em] text-[hsl(var(--accent-secondary))]">
                                 <Beaker className="w-3.5 h-3.5" />
                                 Temporary Internal Page
                             </div>
@@ -263,7 +263,7 @@ function BlueprintPanel({ eyebrow, title, icon: Icon, children }) {
                         <Icon className="w-4 h-4" />
                     </div>
                     <div>
-                        <div className="text-[9.5px] font-mono uppercase tracking-[0.24em] text-muted-lab">{eyebrow}</div>
+                        <div className="text-[9.5px] font-ui uppercase tracking-[0.16em] text-muted-lab">{eyebrow}</div>
                         <h2 className="font-display text-lg text-[hsl(var(--title))]">{title}</h2>
                     </div>
                 </div>
@@ -276,8 +276,8 @@ function BlueprintPanel({ eyebrow, title, icon: Icon, children }) {
 function MiniStat({ label, value }) {
     return (
         <div className="min-w-[96px] clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.7)] px-3 py-2">
-            <div className="text-[9px] font-mono uppercase tracking-[0.2em] text-muted-lab">{label}</div>
-            <div className="mt-1 font-mono text-sm text-[hsl(var(--accent-secondary))]">{value}</div>
+            <div className="text-[9px] font-ui uppercase tracking-[0.2em] text-muted-lab">{label}</div>
+            <div className="mt-1 font-ui text-sm text-[hsl(var(--accent-secondary))]">{value}</div>
         </div>
     );
 }
@@ -285,7 +285,7 @@ function MiniStat({ label, value }) {
 function FlowCard({ index, label }) {
     return (
         <div className="relative clip-bevel-sm border border-[hsl(var(--accent-primary)/0.28)] bg-[hsl(var(--panel-2)/0.72)] px-3 py-3 min-h-[88px] xl:flex-1">
-            <div className="text-[9px] font-mono uppercase tracking-[0.2em] text-muted-lab">Step {String(index).padStart(2, "0")}</div>
+            <div className="text-[9px] font-ui uppercase tracking-[0.2em] text-muted-lab">Step {String(index).padStart(2, "0")}</div>
             <div className="mt-2 text-sm font-semibold uppercase tracking-wide text-[hsl(var(--text-1))]">{label}</div>
         </div>
     );
@@ -294,7 +294,7 @@ function FlowCard({ index, label }) {
 function PhaseCard({ phase, title, copy, examples, checklist, tools, questions, action }) {
     return (
         <div className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.58)] p-4">
-            <div className="text-[9.5px] font-mono uppercase tracking-[0.22em] text-[hsl(var(--accent-secondary))]">{phase}</div>
+            <div className="text-[9.5px] font-ui uppercase tracking-[0.14em] text-[hsl(var(--accent-secondary))]">{phase}</div>
             <h3 className="mt-1 font-display text-base text-[hsl(var(--title))]">{title}</h3>
             {copy && <p className="mt-2 text-sm leading-relaxed text-[hsl(var(--text-2))]">{copy}</p>}
             {examples && <TagList label="Examples" items={examples} />}
@@ -302,7 +302,7 @@ function PhaseCard({ phase, title, copy, examples, checklist, tools, questions, 
             {tools && <TagList label="Tools" items={tools} />}
             {questions && <QuestionList items={questions} />}
             {action && (
-                <button className="mt-4 inline-flex cursor-default items-center gap-2 clip-bevel-sm border border-[hsl(var(--accent-primary)/0.45)] bg-[hsl(var(--accent-primary)/0.08)] px-3 py-2 text-xs font-mono uppercase tracking-[0.14em] text-[hsl(var(--accent-primary))]">
+                <button className="mt-4 inline-flex cursor-default items-center gap-2 clip-bevel-sm border border-[hsl(var(--accent-primary)/0.45)] bg-[hsl(var(--accent-primary)/0.08)] px-3 py-2 text-xs font-ui uppercase tracking-[0.14em] text-[hsl(var(--accent-primary))]">
                     {action}
                     <ArrowRight className="w-3.5 h-3.5" />
                 </button>
@@ -313,7 +313,7 @@ function PhaseCard({ phase, title, copy, examples, checklist, tools, questions, 
 
 function SectionLabel({ icon: Icon, title }) {
     return (
-        <div className="flex items-center gap-2 text-[11px] font-mono uppercase tracking-[0.2em] text-[hsl(var(--accent-secondary))]">
+        <div className="flex items-center gap-2 text-[11px] font-ui uppercase tracking-[0.2em] text-[hsl(var(--accent-secondary))]">
             <Icon className="w-3.5 h-3.5" />
             {title}
         </div>
@@ -342,7 +342,7 @@ function BranchCard({ title, icon: Icon, items }) {
 function HorizontalStep({ index, label }) {
     return (
         <div className="flex items-center gap-3 clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.62)] px-3 py-2">
-            <span className="flex h-6 w-6 items-center justify-center rounded-full border border-[hsl(var(--accent-secondary)/0.5)] text-[10px] font-mono text-[hsl(var(--accent-secondary))]">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full border border-[hsl(var(--accent-secondary)/0.5)] text-[10px] font-ui text-[hsl(var(--accent-secondary))]">
                 {index}
             </span>
             <span className="text-sm text-[hsl(var(--text-1))]">{label}</span>
@@ -367,7 +367,7 @@ function StatusBoard({ title, tone, items }) {
 
     return (
         <div className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.58)] p-4">
-            <div className={`inline-flex clip-bevel-sm border px-2 py-1 text-[10px] font-mono uppercase tracking-[0.18em] ${toneClass}`}>
+            <div className={`inline-flex clip-bevel-sm border px-2 py-1 text-[10px] font-ui uppercase tracking-[0.18em] ${toneClass}`}>
                 {title}
             </div>
             <div className="mt-3 grid gap-2">
@@ -385,7 +385,7 @@ function StatusBoard({ title, tone, items }) {
 function TagList({ label, items }) {
     return (
         <div className="mt-3">
-            <div className="text-[9px] font-mono uppercase tracking-[0.2em] text-muted-lab">{label}</div>
+            <div className="text-[9px] font-ui uppercase tracking-[0.2em] text-muted-lab">{label}</div>
             <div className="mt-2 flex flex-wrap gap-1.5">
                 {items.map((item) => (
                     <span key={item} className="clip-bevel-sm border border-[hsl(var(--border-mid))] bg-[hsl(var(--bg-2)/0.42)] px-2 py-1 text-[11px] text-[hsl(var(--text-2))]">
@@ -413,7 +413,7 @@ function Checklist({ items }) {
 function QuestionList({ items }) {
     return (
         <div className="mt-3">
-            <div className="flex items-center gap-1.5 text-[9px] font-mono uppercase tracking-[0.2em] text-muted-lab">
+            <div className="flex items-center gap-1.5 text-[9px] font-ui uppercase tracking-[0.2em] text-muted-lab">
                 <Search className="w-3 h-3" />
                 Questions
             </div>

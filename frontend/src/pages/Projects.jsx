@@ -69,7 +69,7 @@ export default function Projects() {
                             ["4", "Candidate", "Promote the best run toward validation."],
                         ].map(([step, title, copy]) => (
                             <div key={step} className="border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm px-3 py-3">
-                                <div className="text-[9.5px] font-mono uppercase tracking-[0.22em] text-[hsl(var(--accent-secondary))]">Step {step}</div>
+                                <div className="text-[9.5px] font-ui uppercase tracking-[0.14em] text-[hsl(var(--accent-secondary))]">Step {step}</div>
                                 <div className="mt-1 font-display text-[14px] text-white">{title}</div>
                                 <div className="mt-1 text-[11px] leading-relaxed text-[hsl(var(--text-2))]">{copy}</div>
                             </div>
@@ -104,14 +104,14 @@ export default function Projects() {
                                     <button
                                         type="button"
                                         onClick={() => setActiveProjectId(project.id)}
-                                        className="inline-flex items-center gap-1.5 px-2 py-1 text-[10px] font-mono uppercase tracking-wider border border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:border-[hsl(var(--accent-secondary))] hover:text-white clip-bevel-sm"
+                                        className="inline-flex items-center gap-1.5 px-2 py-1 text-[10px] font-ui uppercase tracking-wider border border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:border-[hsl(var(--accent-secondary))] hover:text-white clip-bevel-sm"
                                     >
                                         <CheckCircle2 className="w-3 h-3" />
                                         Set Active
                                     </button>
                                     <Link
                                         to={`/projects/${encodeURIComponent(project.id)}`}
-                                        className="inline-flex items-center gap-1.5 px-2 py-1 text-[10px] font-mono uppercase tracking-wider border border-[hsl(var(--accent-secondary)/0.45)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.06)] hover:bg-[hsl(var(--accent-secondary)/0.12)] clip-bevel-sm"
+                                        className="inline-flex items-center gap-1.5 px-2 py-1 text-[10px] font-ui uppercase tracking-wider border border-[hsl(var(--accent-secondary)/0.45)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.06)] hover:bg-[hsl(var(--accent-secondary)/0.12)] clip-bevel-sm"
                                     >
                                         <FolderOpen className="w-3 h-3" />
                                         Open Project
@@ -119,7 +119,7 @@ export default function Projects() {
                                     <Link
                                         to="/strategy"
                                         onClick={() => setActiveProjectId(project.id)}
-                                        className="inline-flex items-center gap-1.5 px-2 py-1 text-[10px] font-mono uppercase tracking-wider border border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:border-[hsl(var(--accent-primary)/0.55)] hover:text-[hsl(var(--accent-primary))] clip-bevel-sm"
+                                        className="inline-flex items-center gap-1.5 px-2 py-1 text-[10px] font-ui uppercase tracking-wider border border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:border-[hsl(var(--accent-primary)/0.55)] hover:text-[hsl(var(--accent-primary))] clip-bevel-sm"
                                     >
                                         <Target className="w-3 h-3" />
                                         {project.baselineRunId ? "Open Builder" : "Create Baseline"}
@@ -131,7 +131,7 @@ export default function Projects() {
                     />
                     {!rows.length && (
                         <div className="py-10 text-center">
-                            <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-lab">No Projects Yet</div>
+                            <div className="font-ui text-[10px] uppercase tracking-[0.14em] text-muted-lab">No Projects Yet</div>
                             <div className="mt-2 text-[12px] text-[hsl(var(--text-2))]">Create a research project to start grouping baseline and experiment runs.</div>
                         </div>
                     )}
@@ -148,7 +148,7 @@ function ChecklistProgress({ project }) {
     const done = values.filter(Boolean).length;
     return (
         <span className="inline-flex items-center gap-2">
-            <span className="text-white font-mono text-[11px]">{done}/{total}</span>
+            <span className="text-white font-num text-[11px] tabular-nums">{done}/{total}</span>
             <span className="w-16 h-1.5 bg-[hsl(var(--panel-2))] border border-[hsl(var(--border-soft))]">
                 <span className="block h-full bg-[hsl(var(--accent-primary))]" style={{ width: `${(done / total) * 100}%` }} />
             </span>
