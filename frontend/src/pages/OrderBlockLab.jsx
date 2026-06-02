@@ -6,13 +6,22 @@ import { HeroBadge, NeonSelect, Segment } from "@/components/lab/controls";
 import { LabRunHero } from "@/components/lab/LabRunHero";
 import { RunConfigStrip } from "@/components/lab/RunConfigStrip";
 import { useDataset } from "@/data/store";
-import { setSelectedTradeVariant } from "@/data/store";
+import { setSelectedTradeVariant, getTradeUniverse } from "@/data/store";
 import { useTradeUniverse } from "@/data/useTradeUniverse";
+import { useResultsLens } from "@/data/useResultsLens";
 import { TradeUniverseBadge } from "@/components/lab/TradeUniverseBadge";
+// Phase RB-4 — all OrderBlockLab bucket tables route through the shared
+// basis-aware CanonicalBucketTable (frozen RB-3.2 contract).
+import { CanonicalBucketTable } from "@/components/lab/CanonicalBucketTable";
+// Phase TC-1 — inline Table Compare pilot (Structure Quality only).
+import { TableCompareShell } from "@/components/lab/TableCompareShell";
+// Phase TC-6 — Edge Explorer foundation (drill-through trade table). Pilot: Structure Quality.
+import { EdgeExplorerPanel } from "@/components/lab/EdgeExplorerPanel";
+import { createDrillPayload } from "@/data/drillContract";
 import {
     Activity, AlertTriangle, Boxes, Clipboard, FileText, GitBranch,
-    ShieldCheck, TrendingUp, TrendingDown, X, Filter, Layers,
-    BarChart2, Calendar, Database, Target, Award,
+    TrendingUp, TrendingDown, X, Filter,
+    Database, Target,
 } from "lucide-react";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -21,6 +30,11 @@ const LOW_SAMPLE_N = 10;
 const SESSION_COLUMNS = ["Asia", "London", "London Lull", "New York", "Outside", "Unknown"];
 const DAY_ORDER = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Limited Data"];
 const FILTER_DEFAULTS = { structure: "all", direction: "all", session: "all" };
+
+// Phase TC-1/TC-2 — shared inline-compare metric set for the Tier-1 bucket
+// tables (Structure Quality, Direction, Origin Session). Module-level constant
+// so the prop identity is stable across renders.
+const TC_COMPARE_METRICS = ["netR", "winRate", "expectancy", "profitFactor", "count"];
 
 const OB_FIELDS = [
     { key: "obId",                              label: "OB ID" },
@@ -83,6 +97,7 @@ const RESEARCH_BACKLOG_ITEMS = [
 export default function OrderBlockLab() {
     const { ACTIVE_PROJECT, ACTIVE_RUN, ACTIVE_TRADE_VARIANT, AVAILABLE_TRADE_VARIANTS, activeRunId, runs } = useDataset();
     const universe = useTradeUniverse();
+    const lens = useResultsLens(); // TC-6/EDGE-2 — basis/account context for Edge Explorer drill payloads
     // Phase 2G — universeWarnings filtering moved into TradeUniverseBadge.
 
     // Filter state — persisted to localStorage
@@ -91,7 +106,7 @@ export default function OrderBlockLab() {
         catch { return FILTER_DEFAULTS; }
     });
 
-    const [drillModal, setDrillModal] = React.useState(null); // { title, trades }
+    const [edgeDrill, setEdgeDrill] = React.useState(null);   // Edge Explorer drill payload
     const [reportOpen, setReportOpen] = React.useState(false);
 
     const updateFilter = React.useCallback((key, value) => {
@@ -123,9 +138,49 @@ export default function OrderBlockLab() {
         [ACTIVE_RUN, ACTIVE_TRADE_VARIANT, analytics, filters],
     );
 
-    const handleDrill = React.useCallback((title, row) => {
-        if (row?.tradeRefs?.length) setDrillModal({ title: `${title} · ${row.label}`, trades: row.tradeRefs });
-    }, []);
+    // Edge Explorer drill — builds a
+    // canonical drill payload via the SHARED drillContract (no second drill
+    // system) and enriches each trade with its origin session for display.
+    const handleEdgeDrill = React.useCallback((dimension, row) => {
+        if (!row?.tradeRefs?.length) return;
+        const payload = createDrillPayload({
+            runId: activeRunId,
+            universeKey: universe?.sourceKey,
+            basis: lens.basis,
+            account: lens.accountSettings,
+            bucketKey: row.label,
+            label: `${dimension} · ${row.label}`,
+            // Enrich with the canonical OBL derivations so Edge Explorer's
+            // Origin / Fill / Age columns are accurate (panel reads these fields).
+            tradeRefs: row.tradeRefs.map((t) => ({
+                ...t,
+                originSession: originSessionForTrade(t),
+                fillSession: fillSessionForTrade(t),
+                ageLabel: ageBucket(t),
+            })),
+        });
+        setEdgeDrill(payload);
+    }, [activeRunId, universe, lens.basis, lens.accountSettings]);
+
+    // Phase TC-2 — tiny LOCAL helper (OrderBlockLab-only) that produces the
+    // shared TableCompareShell props for a Tier-1 bucket table. Side B is
+    // resolved under the SAME scenario (getTradeUniverse) and the SAME page
+    // filters as Side A, and rebuilt with the SAME bucketRows builder, so both
+    // sides are identical math. Not a global abstraction — just deduplication.
+    const compareProps = React.useCallback((defKey) => ({
+        currentTrades: filteredTrades,
+        currentUniverse: universe,
+        renderers: OBL_BUCKET_RENDERERS,
+        metrics: TC_COMPARE_METRICS,
+        resolveCompared: (runId) => {
+            const u = getTradeUniverse(runId);
+            return { trades: applyFilters(u?.trades || [], filters), universe: u };
+        },
+        buildRows: (t) => {
+            const def = analytics.bucketDefs?.[defKey];
+            return def ? bucketRows(t, def.labelFn, def.order) : [];
+        },
+    }), [filteredTrades, universe, filters, analytics]);
 
     return (
         <div className="pb-16">
@@ -187,7 +242,7 @@ export default function OrderBlockLab() {
                 {/* ── Research Safety ──────────────────────────────────── */}
                 {analytics.lowSampleBuckets > 0 && (
                     <NeonPanel title="Research Safety" tone="secondary" action={<Pill tone="warning">{analytics.lowSampleBuckets} LOW SAMPLE BUCKETS</Pill>}>
-                        <div className="flex items-start gap-2 text-[11.5px] font-mono text-[hsl(var(--warning))]">
+                        <div className="flex items-start gap-2 text-[11.5px] font-ui text-[hsl(var(--warning))]">
                             <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
                             <span>Every bucket shows sample count. Treat buckets below {LOW_SAMPLE_N} trades as directional only. Click any bucket row to inspect its trade list.</span>
                         </div>
@@ -196,25 +251,92 @@ export default function OrderBlockLab() {
 
                 {/* ── Row 1: Structure · Direction · Origin Session ──────── */}
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-                    <BucketPanel title="Structural Quality · BOS vs CHoCH" rows={analytics.structureRows} onDrill={r => handleDrill("Structure", r)} />
-                    <BucketPanel title="Structural Quality · Long vs Short" rows={analytics.directionRows} onDrill={r => handleDrill("Direction", r)} />
-                    <BucketPanel title="Origin Session Performance" rows={analytics.originSessionRows} onDrill={r => handleDrill("Origin Session", r)} />
+                    <TableCompareShell
+                        testId="oblab-structural-quality-bos-vs-choch"
+                        title="Structural Quality · BOS vs CHoCH"
+                        currentRows={analytics.structureRows}
+                        bucketDef={analytics.bucketDefs.structure}
+                        onDrill={r => handleEdgeDrill("Structure", r)}
+                        {...compareProps("structure")}
+                    />
+                    <TableCompareShell
+                        testId="oblab-structural-quality-long-vs-short"
+                        title="Structural Quality · Long vs Short"
+                        currentRows={analytics.directionRows}
+                        bucketDef={analytics.bucketDefs.direction}
+                        onDrill={r => handleEdgeDrill("Direction", r)}
+                        {...compareProps("direction")}
+                    />
+                    <TableCompareShell
+                        testId="oblab-origin-session-performance"
+                        title="Origin Session Performance"
+                        currentRows={analytics.originSessionRows}
+                        bucketDef={analytics.bucketDefs.originSession}
+                        onDrill={r => handleEdgeDrill("Origin Session", r)}
+                        {...compareProps("originSession")}
+                    />
                 </div>
 
                 {/* ── Full-width bucket panels ───────────────────────────── */}
-                <BucketPanel title="OB Creation Hour Performance" rows={analytics.creationHourRows} onDrill={r => handleDrill("Creation Hour", r)} />
-                <NewsCreatedObPanel analytics={analytics} onDrill={r => handleDrill("News-Created OB Trades", r)} />
+                <CanonicalBucketTable testId="oblab-ob-creation-hour-performance" title="OB Creation Hour Performance" rawRows={analytics.creationHourRows} trades={filteredTrades} def={analytics.bucketDefs.creationHour} renderers={OBL_BUCKET_RENDERERS} onDrill={r => handleEdgeDrill("Creation Hour", r)} />
+                <NewsCreatedObPanel analytics={analytics} onDrill={r => handleEdgeDrill("News-Created OB Trades", r)} />
                 <NewsCreatedObPopulationPanel analysis={obPopulationAnalytics} />
-                <BucketPanel title="OB Width Analysis" rows={analytics.widthRows} onDrill={r => handleDrill("OB Width", r)} />
-                <BucketPanel title="OB Age / Time-to-Fill" rows={analytics.ageRows} compact onDrill={r => handleDrill("OB Age", r)} />
-                <BucketPanel title="Penetration Depth Analysis" rows={analytics.penetrationRows} compact onDrill={r => handleDrill("Penetration Depth", r)} />
-                <BucketPanel title="Day of Week Performance" rows={analytics.dayOfWeekRows} onDrill={r => handleDrill("Day of Week", r)} />
+                <TableCompareShell
+                    testId="oblab-ob-width-analysis"
+                    title="OB Width Analysis"
+                    currentRows={analytics.widthRows}
+                    bucketDef={analytics.bucketDefs.width}
+                    onDrill={r => handleEdgeDrill("OB Width", r)}
+                    {...compareProps("width")}
+                />
+                <TableCompareShell
+                    testId="oblab-ob-age-time-to-fill"
+                    title="OB Age / Time-to-Fill"
+                    currentRows={analytics.ageRows}
+                    bucketDef={analytics.bucketDefs.age}
+                    onDrill={r => handleEdgeDrill("OB Age", r)}
+                    compact
+                    {...compareProps("age")}
+                />
+                <TableCompareShell
+                    testId="oblab-penetration-depth-analysis"
+                    title="Penetration Depth Analysis"
+                    currentRows={analytics.penetrationRows}
+                    bucketDef={analytics.bucketDefs.penetration}
+                    onDrill={r => handleEdgeDrill("Penetration Depth", r)}
+                    compact
+                    {...compareProps("penetration")}
+                />
+                <TableCompareShell
+                    testId="oblab-day-of-week-performance"
+                    title="Day of Week Performance"
+                    currentRows={analytics.dayOfWeekRows}
+                    bucketDef={analytics.bucketDefs.dayOfWeek}
+                    onDrill={r => handleEdgeDrill("Day of Week", r)}
+                    {...compareProps("dayOfWeek")}
+                />
 
                 {/* ── Row: Breach + Stopout + Distance ──────────────────── */}
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-                    <CatastrophicBreachPanel analysis={analytics.catastrophicBreach} onDrill={handleDrill} />
-                    <BucketPanel title="Fast Stopout Analysis" rows={analytics.fastStopoutRows} compact onDrill={r => handleDrill("Fast Stopout", r)} />
-                    <BucketPanel title="Distance Before Fill" rows={analytics.distanceBeforeFillRows} compact onDrill={r => handleDrill("Distance Before Fill", r)} />
+                    <CatastrophicBreachPanel analysis={analytics.catastrophicBreach} onDrill={handleEdgeDrill} />
+                    <TableCompareShell
+                        testId="oblab-fast-stopout-analysis"
+                        title="Fast Stopout Analysis"
+                        currentRows={analytics.fastStopoutRows}
+                        bucketDef={analytics.bucketDefs.fastStopout}
+                        onDrill={r => handleEdgeDrill("Fast Stopout", r)}
+                        compact
+                        {...compareProps("fastStopout")}
+                    />
+                    <TableCompareShell
+                        testId="oblab-distance-before-fill"
+                        title="Distance Before Fill"
+                        currentRows={analytics.distanceBeforeFillRows}
+                        bucketDef={analytics.bucketDefs.distanceBeforeFill}
+                        onDrill={r => handleEdgeDrill("Distance Before Fill", r)}
+                        compact
+                        {...compareProps("distanceBeforeFill")}
+                    />
                 </div>
 
                 {/* ── Session Matrix ────────────────────────────────────── */}
@@ -233,11 +355,10 @@ export default function OrderBlockLab() {
                 <ResearchBacklog />
             </div>
 
-            {drillModal && (
-                <BucketDrillModal
-                    title={drillModal.title}
-                    trades={drillModal.trades}
-                    onClose={() => setDrillModal(null)}
+            {edgeDrill && (
+                <EdgeExplorerPanel
+                    payload={edgeDrill}
+                    onClose={() => setEdgeDrill(null)}
                 />
             )}
             {reportOpen && (
@@ -273,7 +394,7 @@ function FilterBar({ filters, onUpdate, onClear, totalTrades, filteredCount }) {
     return (
         <div className="px-6 mt-4">
             <div className="border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.6)] clip-bevel-sm px-4 py-3 flex flex-wrap items-center gap-4">
-                <div className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-[0.18em] text-[hsl(var(--accent-primary))]">
+                <div className="flex items-center gap-2 text-[10px] font-ui uppercase tracking-[0.18em] text-[hsl(var(--accent-primary))]">
                     <Filter className="w-3.5 h-3.5" />
                     <span>Research Filter</span>
                     {isFiltered && (
@@ -283,22 +404,22 @@ function FilterBar({ filters, onUpdate, onClear, totalTrades, filteredCount }) {
                     )}
                 </div>
                 <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-mono text-muted-lab uppercase tracking-wider">Structure</span>
+                    <span className="text-[10px] font-ui text-muted-lab uppercase tracking-wider">Structure</span>
                     <Segment options={STRUCT_OPTS} value={filters.structure} onChange={v => onUpdate("structure", v)} />
                 </div>
                 <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-mono text-muted-lab uppercase tracking-wider">Direction</span>
+                    <span className="text-[10px] font-ui text-muted-lab uppercase tracking-wider">Direction</span>
                     <Segment options={DIR_OPTS} value={filters.direction} onChange={v => onUpdate("direction", v)} />
                 </div>
                 <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-mono text-muted-lab uppercase tracking-wider">OB Origin</span>
+                    <span className="text-[10px] font-ui text-muted-lab uppercase tracking-wider">OB Origin</span>
                     <Segment options={SESSION_OPTS} value={filters.session} onChange={v => onUpdate("session", v)} />
                 </div>
                 {isFiltered && (
                     <button
                         type="button"
                         onClick={onClear}
-                        className="ml-auto clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.7)] px-2.5 py-1.5 text-[10px] font-mono uppercase tracking-wider text-muted-lab hover:text-white transition-colors inline-flex items-center gap-1.5"
+                        className="ml-auto clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.7)] px-2.5 py-1.5 text-[10px] font-ui uppercase tracking-wider text-muted-lab hover:text-white transition-colors inline-flex items-center gap-1.5"
                     >
                         <X className="w-3 h-3" />
                         Clear
@@ -330,8 +451,8 @@ function InsightCallouts({ insights }) {
                         className="clip-bevel-sm border-l-2 px-3 py-2.5"
                         style={{ borderLeftColor: t.border, borderTop: "1px solid hsl(var(--border-soft))", borderRight: "1px solid hsl(var(--border-soft))", borderBottom: "1px solid hsl(var(--border-soft))", background: t.bg }}
                     >
-                        <div className={`text-[9px] font-mono uppercase tracking-[0.18em] mb-1 ${t.label}`}>{insight.label}</div>
-                        <div className="text-[11.5px] font-mono text-[hsl(var(--text-2))] leading-relaxed">{insight.text}</div>
+                        <div className={`text-[9px] font-ui uppercase tracking-[0.18em] mb-1 ${t.label}`}>{insight.label}</div>
+                        <div className="text-[11.5px] font-ui text-[hsl(var(--text-2))] leading-relaxed">{insight.text}</div>
                     </div>
                 );
             })}
@@ -339,59 +460,23 @@ function InsightCallouts({ insights }) {
     );
 }
 
-// ─── Bucket Panel ─────────────────────────────────────────────────────────────
+// ─── Bucket tables ────────────────────────────────────────────────────────────
+// All OrderBlockLab bucket tables now render through the shared
+// CanonicalBucketTable (Phase RB-4). The former local BucketPanel/BUCKET_COLUMNS
+// were retired in that migration; OBL-specific cell styling lives in
+// OBL_BUCKET_RENDERERS above.
 
-const BUCKET_COLUMNS = (heatmap) => [
-    { key: "label",        label: "Bucket",   sortable: false, render: (r) => <BucketLabel row={r} />, heatmap: false },
-    { key: "count",        label: "N",        align: "right" },
-    { key: "wins",         label: "Wins",     align: "right" },
-    { key: "losses",       label: "Losses",   align: "right" },
-    { key: "winRate",      label: "WR",       align: "right", render: (r) => formatPct(r.winRate) },
-    { key: "netR",         label: "Net R",    align: "right", render: (r) => <ColoredR value={round1(r.netR)} />, heatmap: heatmap },
-    { key: "expectancy",   label: "Exp",      align: "right", render: (r) => <span className={r.expectancy >= 0 ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]"}>{formatSigned(round3(r.expectancy))}R</span>, heatmap: heatmap },
-    { key: "profitFactor", label: "PF",       align: "right", render: (r) => <PFCell value={r.profitFactor} /> },
-    { key: "ci",           label: "95% CI",   align: "right", mono: true, sortable: false, heatmap: false, render: (r) => <CICell lo={r.ciLo} hi={r.ciHi} /> },
-];
-
-function BucketPanel({ title, rows, className = "", compact = false, onDrill }) {
-    const [heatmap, setHeatmap] = React.useState(false);
-
-    const handleRowClick = React.useCallback((row) => {
-        if (onDrill && row?.tradeRefs?.length) onDrill(row);
-    }, [onDrill]);
-
-    return (
-        <NeonPanel
-            collapsible
-            className={className}
-            title={title}
-            action={(
-                <div className="flex items-center gap-2">
-                    <button
-                        type="button"
-                        title={heatmap ? "Disable heatmap" : "Enable heatmap"}
-                        onClick={() => setHeatmap(h => !h)}
-                        className={`clip-bevel-sm border px-2 py-1 text-[10px] inline-flex items-center gap-1 transition-colors ${heatmap ? "border-[hsl(var(--accent-primary)/0.6)] bg-[hsl(var(--accent-primary)/0.15)] text-[hsl(var(--accent-primary))]" : "border-[hsl(var(--border-soft))] text-muted-lab hover:text-white"}`}
-                    >
-                        <Layers className="w-3 h-3" />
-                    </button>
-                    <Pill tone="muted">{rows.filter(r => r.count > 0).length} BUCKETS</Pill>
-                </div>
-            )}
-        >
-            <DataTable
-                testId={`oblab-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
-                maxHeight={compact ? 260 : 320}
-                columns={BUCKET_COLUMNS(heatmap)}
-                rows={rows}
-                onRowClick={onDrill ? handleRowClick : undefined}
-                heatmap={heatmap}
-                defaultSortKey="expectancy"
-                defaultSortDir="desc"
-            />
-        </NeonPanel>
-    );
-}
+// ─── Bucket renderers shared with CanonicalBucketTable (Phase RB-4) ───────────
+// All OrderBlockLab bucket tables render through the shared CanonicalBucketTable
+// (frozen RB-3.2 contract). These OBL-styled cell renderers (tier badge label,
+// PF coloring, CI bracket) are injected so the look is preserved; everything
+// else uses the table's built-in renderers. Raw R metrics are unchanged; only
+// WR is recomputed to the canonical wins/(wins+losses).
+const OBL_BUCKET_RENDERERS = {
+    label: (r) => <BucketLabel row={r} />,
+    pf: (r) => <PFCell value={r.profitFactor} />,
+    ci: (r) => <CICell lo={r.ciLo} hi={r.ciHi} />,
+};
 
 const NEWS_OB_COLUMNS = [
     { key: "label",               label: "Bucket",     sortable: false, render: (r) => <BucketLabel row={r} /> },
@@ -571,7 +656,7 @@ function MiniObMetric({ label, value }) {
     return (
         <div className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel)/0.42)] px-2 py-1.5">
             <div className="text-[9.5px] text-muted-lab">{label}</div>
-            <div className="mt-0.5 font-mono text-[12px] text-white tabular-nums">{value}</div>
+            <div className="mt-0.5 font-num text-[12px] text-white tabular-nums">{value}</div>
         </div>
     );
 }
@@ -598,7 +683,7 @@ function ObLifecycleStrip({ title, row }) {
                         </div>
                         <div className="mt-1 flex items-center justify-between gap-1 text-[9.5px] text-muted-lab">
                             <span className="truncate">{segment.label}</span>
-                            <span className="font-mono text-[hsl(var(--text-2))]">{segment.value}</span>
+                            <span className="font-ui text-[hsl(var(--text-2))]">{segment.value}</span>
                         </div>
                     </div>
                 ))}
@@ -727,20 +812,20 @@ function SessionMatrix({ matrix }) {
             )}
         >
             <div className="relative overflow-x-auto scrollbar-thin" data-testid="oblab-session-matrix">
-                <table className="w-full min-w-[760px] font-mono text-[11px] border-separate border-spacing-1">
+                <table className="w-full min-w-[760px] text-[11px] border-separate border-spacing-1">
                     <thead>
                         <tr>
-                            <th className="text-muted-lab text-left px-2 py-1 text-[10px] uppercase tracking-wider">Origin ↓ / Fill →</th>
+                            <th className="text-muted-lab text-left px-2 py-1 text-[10px] uppercase tracking-wider font-ui">Origin ↓ / Fill →</th>
                             {SESSION_COLUMNS.map(s => (
-                                <th key={s} className="text-muted-lab px-2 py-1 text-[10px] uppercase tracking-wider">{s}</th>
+                                <th key={s} className="text-muted-lab px-2 py-1 text-[10px] uppercase tracking-wider font-ui">{s}</th>
                             ))}
-                            <th className="text-[hsl(var(--accent-secondary)/0.7)] px-2 py-1 text-[10px] uppercase tracking-wider">Total</th>
+                            <th className="text-[hsl(var(--accent-secondary)/0.7)] px-2 py-1 text-[10px] uppercase tracking-wider font-ui">Total</th>
                         </tr>
                     </thead>
                     <tbody>
                         {matrix.rows.map(row => (
                             <tr key={row}>
-                                <td className="text-muted-lab px-2 py-1 whitespace-nowrap">{row}</td>
+                                <td className="text-muted-lab px-2 py-1 whitespace-nowrap font-ui">{row}</td>
                                 {SESSION_COLUMNS.map(col => {
                                     const key = `${row}|||${col}`;
                                     const cell = matrix.cells[key];
@@ -758,7 +843,7 @@ function SessionMatrix({ matrix }) {
                                     return (
                                         <td key={col} className="relative">
                                             <div
-                                                className="clip-bevel-sm px-2 py-1.5 text-center text-white tabular-nums cursor-default transition-opacity"
+                                                className="clip-bevel-sm px-2 py-1.5 text-center text-white tabular-nums font-num cursor-default transition-opacity"
                                                 style={{ background: bg, outline: isHovered ? "1px solid hsl(var(--accent-primary))" : undefined }}
                                                 onMouseEnter={() => setTooltip({ key, cell, row, col })}
                                                 onMouseLeave={() => setTooltip(null)}
@@ -776,7 +861,7 @@ function SessionMatrix({ matrix }) {
                                 {/* Row total */}
                                 {rowTotals[row] ? (
                                     <td>
-                                        <div className="clip-bevel-sm px-2 py-1.5 text-center tabular-nums bg-[hsl(var(--accent-secondary)/0.08)] border border-[hsl(var(--accent-secondary)/0.2)]">
+                                        <div className="clip-bevel-sm px-2 py-1.5 text-center tabular-nums font-num bg-[hsl(var(--accent-secondary)/0.08)] border border-[hsl(var(--accent-secondary)/0.2)]">
                                             <div className="text-[hsl(var(--accent-secondary)/0.9)] font-semibold">{formatMetricVal(rowTotals[row])}</div>
                                             <div className="text-[9px] text-muted-lab">{rowTotals[row].count} total</div>
                                         </div>
@@ -786,11 +871,11 @@ function SessionMatrix({ matrix }) {
                         ))}
                         {/* Column totals row */}
                         <tr>
-                            <td className="text-[hsl(var(--accent-secondary)/0.7)] px-2 py-1 text-[10px] uppercase tracking-wider">Total</td>
+                            <td className="text-[hsl(var(--accent-secondary)/0.7)] px-2 py-1 text-[10px] uppercase tracking-wider font-ui">Total</td>
                             {SESSION_COLUMNS.map(col => (
                                 colTotals[col] ? (
                                     <td key={col}>
-                                        <div className="clip-bevel-sm px-2 py-1.5 text-center tabular-nums bg-[hsl(var(--accent-secondary)/0.08)] border border-[hsl(var(--accent-secondary)/0.2)]">
+                                        <div className="clip-bevel-sm px-2 py-1.5 text-center tabular-nums font-num bg-[hsl(var(--accent-secondary)/0.08)] border border-[hsl(var(--accent-secondary)/0.2)]">
                                             <div className="text-[hsl(var(--accent-secondary)/0.9)] font-semibold">{formatMetricVal(colTotals[col])}</div>
                                             <div className="text-[9px] text-muted-lab">{colTotals[col].count}</div>
                                         </div>
@@ -811,8 +896,8 @@ function MatrixTooltip({ cell, row, col }) {
     const exp = cell.count > 0 ? cell.netR / cell.count : 0;
     return (
         <div className="absolute z-30 bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 bg-[hsl(var(--panel))] border border-[hsl(var(--border-soft))] shadow-xl p-2.5 pointer-events-none clip-bevel-sm">
-            <div className="text-[10px] font-mono text-[hsl(var(--accent-primary))] uppercase tracking-wider mb-1.5">{row} → {col}</div>
-            <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px] font-mono">
+            <div className="text-[10px] font-ui text-[hsl(var(--accent-primary))] uppercase tracking-wider mb-1.5">{row} → {col}</div>
+            <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px] font-ui">
                 <span className="text-muted-lab">Net R</span>   <span className="text-white">{formatR(cell.netR)}</span>
                 <span className="text-muted-lab">Win Rate</span> <span className="text-white">{formatPct(wr)}</span>
                 <span className="text-muted-lab">Exp</span>      <span className="text-white">{formatSigned(round3(exp))}R</span>
@@ -923,13 +1008,13 @@ function TemporalAnalytics({ rollingExpectancy, equityCurves }) {
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                 {hasRolling && (
                     <div>
-                        <div className="text-[10px] font-mono uppercase tracking-[0.18em] text-muted-lab mb-2">Rolling Expectancy · Trailing 20 Trades</div>
+                        <div className="text-[10px] font-ui uppercase tracking-[0.18em] text-muted-lab mb-2">Rolling Expectancy · Trailing 20 Trades</div>
                         <RollingExpectancyChart points={rollingExpectancy} />
                     </div>
                 )}
                 {hasCurves && (
                     <div>
-                        <div className="text-[10px] font-mono uppercase tracking-[0.18em] text-muted-lab mb-2">Cumulative R · BOS vs CHoCH vs All</div>
+                        <div className="text-[10px] font-ui uppercase tracking-[0.18em] text-muted-lab mb-2">Cumulative R · BOS vs CHoCH vs All</div>
                         <EquityCurveChart curves={equityCurves} />
                     </div>
                 )}
@@ -1010,7 +1095,7 @@ function EquityCurveChart({ curves }) {
                 {seriesDefs.map(({ key, color, label }) => curves[key]?.length ? (
                     <div key={key} className="flex items-center gap-1.5">
                         <span className="w-5 h-px inline-block" style={{ background: color, boxShadow: `0 0 4px ${color}` }} />
-                        <span className="text-[10px] font-mono text-muted-lab">{label}</span>
+                        <span className="text-[10px] font-ui text-muted-lab">{label}</span>
                     </div>
                 ) : null)}
             </div>
@@ -1043,7 +1128,7 @@ function FieldCompletenessPanel({ rows, totalTrades }) {
                     return (
                         <div key={row.key} className="flex items-center gap-2.5 py-1.5 px-2 border border-[hsl(var(--border-soft)/0.5)] bg-[hsl(var(--panel-2)/0.4)]">
                             <div className="flex-1 min-w-0">
-                                <div className="text-[11px] font-mono text-[hsl(var(--text-2))] truncate">{row.label}</div>
+                                <div className="text-[11px] font-ui text-[hsl(var(--text-2))] truncate">{row.label}</div>
                                 <div className="mt-1 w-full h-1 bg-[hsl(var(--panel-2))] rounded-full overflow-hidden">
                                     <div
                                         className="h-full rounded-full transition-all"
@@ -1054,7 +1139,7 @@ function FieldCompletenessPanel({ rows, totalTrades }) {
                                     />
                                 </div>
                             </div>
-                            <div className="text-[11px] font-mono tabular-nums text-white shrink-0">{row.pct.toFixed(0)}%</div>
+                            <div className="text-[11px] font-num tabular-nums text-white shrink-0">{row.pct.toFixed(0)}%</div>
                             <Pill tone={st.tone}>{st.label}</Pill>
                         </div>
                     );
@@ -1084,55 +1169,6 @@ function ResearchBacklog() {
     );
 }
 
-// ─── Bucket Drill Modal ───────────────────────────────────────────────────────
-
-function BucketDrillModal({ title, trades, onClose }) {
-    const rows = trades.map(t => ({
-        ...t,
-        ageLabel:      ageBucket(t),
-        originSession: originSessionForTrade(t),
-        fillSession:   fillSessionForTrade(t),
-    }));
-
-    const wins   = rows.filter(t => Number(t.r) > 0).length;
-    const netR   = round1(rows.reduce((s, t) => s + (Number.isFinite(Number(t.r)) ? Number(t.r) : 0), 0));
-    const exp    = rows.length ? round3(netR / rows.length) : 0;
-    const wr     = rows.length ? (wins / rows.length) * 100 : 0;
-
-    return (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center px-4 py-6" role="dialog" aria-modal="true">
-            <div className="w-full max-w-5xl max-h-[88vh] border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel)/0.98)] clip-bevel overflow-hidden shadow-2xl shadow-black/40 flex flex-col">
-                <div className="flex items-center justify-between border-b border-[hsl(var(--border-soft))] px-4 py-3 shrink-0">
-                    <div>
-                        <div className="font-display text-sm text-white uppercase tracking-wider">Bucket Drill-Through</div>
-                        <div className="text-[11px] font-mono text-[hsl(var(--accent-primary))]">{title}</div>
-                    </div>
-                    <div className="flex items-center gap-4">
-                        <div className="flex items-center gap-3 text-[11px] font-mono">
-                            <span className="text-muted-lab">n={rows.length}</span>
-                            <span className="text-white">WR {formatPct(wr)}</span>
-                            <ColoredR value={netR} />
-                            <span className={exp >= 0 ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]"}>{formatSigned(exp)}R exp</span>
-                        </div>
-                        <button type="button" onClick={onClose} className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.7)] px-3 py-2 text-[11px] font-display uppercase tracking-wider text-muted-lab hover:text-white transition-colors inline-flex items-center gap-2">
-                            <X className="w-4 h-4" />
-                            Close
-                        </button>
-                    </div>
-                </div>
-                <div className="overflow-auto flex-1 scrollbar-thin">
-                    <DataTable
-                        testId="oblab-drill-modal"
-                        columns={TRADE_DETAIL_COLS}
-                        rows={rows}
-                        defaultSortKey="r"
-                        defaultSortDir="asc"
-                    />
-                </div>
-            </div>
-        </div>
-    );
-}
 
 // ─── Report Modal ─────────────────────────────────────────────────────────────
 
@@ -1152,7 +1188,7 @@ function ReportModal({ reportText, onClose }) {
                 <div className="flex items-center justify-between border-b border-[hsl(var(--border-soft))] px-4 py-3">
                     <div>
                         <div className="font-display text-sm text-white uppercase tracking-wider">Order Block Lab Report</div>
-                        <div className="text-[11px] font-mono text-muted-lab">Deterministic summary from current analytics</div>
+                        <div className="text-[11px] font-ui text-muted-lab">Deterministic summary from current analytics</div>
                     </div>
                     <div className="flex items-center gap-2">
                         <button type="button" onClick={copyReport} className="clip-bevel-sm border border-[hsl(var(--accent-primary)/0.45)] bg-[hsl(var(--accent-primary)/0.12)] px-3 py-2 text-[11px] font-display uppercase tracking-wider text-[hsl(var(--accent-primary))] hover:bg-[hsl(var(--accent-primary)/0.2)] transition-colors inline-flex items-center gap-2">
@@ -1166,7 +1202,7 @@ function ReportModal({ reportText, onClose }) {
                     </div>
                 </div>
                 <div className="p-4 overflow-auto max-h-[calc(86vh-72px)] scrollbar-thin">
-                    <pre className="whitespace-pre-wrap text-[11.5px] leading-relaxed font-mono text-[hsl(var(--text-2))]">{reportText}</pre>
+                    <pre className="whitespace-pre-wrap text-[11.5px] leading-relaxed font-code text-[hsl(var(--text-2))]">{reportText}</pre>
                 </div>
             </div>
         </div>
@@ -1259,16 +1295,31 @@ function buildOrderBlockAnalytics(trades) {
     const linkedCount   = trades.filter(hasLinkedOb).length;
     const unlinkedCount = trades.length - linkedCount;
 
-    const structureRows          = bucketRows(trades, t => t.structure || "Limited Data", ["BOS", "CHoCH", "Limited Data"]);
-    const directionRows          = bucketRows(trades, t => t.direction || "Limited Data", ["Long", "Short", "Limited Data"]);
-    const originSessionRows      = bucketRows(trades, originSessionForTrade, SESSION_COLUMNS);
-    const creationHourRows       = bucketRows(trades, creationHourLabel);
-    const widthRows              = bucketRows(trades, widthBucket, ["0-2 pips", "2-5 pips", "5-10 pips", "10+ pips", "Limited Data"]);
-    const ageRows                = bucketRows(trades, ageBucket, ["same session / <4h", "4-12h", "12-24h", "1-3d", "3-7d", "7-14d", "14d+", "Limited Data"]);
-    const penetrationRows        = bucketRows(trades, penetrationBucket, ["0–10%", "10–25%", "25–50%", "50–75%", "75–100%", "100%+", "Limited Data"]);
-    const fastStopoutRows        = bucketRows(trades, fastStopoutBucket, ["same candle", "<15m", "15–60m", "1–4h", "4h+", "Limited Data"]);
-    const distanceBeforeFillRows = bucketRows(trades, distanceBeforeFillBucket, ["0–0.5R", "0.5–1R", "1–2R", "2R+", "Limited Data"]);
-    const dayOfWeekRows          = bucketRows(trades, dayOfWeekBucket, DAY_ORDER);
+    // RB-4: each bucket table's grouping + order is defined ONCE here and reused
+    // both to build the Raw R rows and (via `bucketDefs`) to recompute Current
+    // Equity contributions in CanonicalBucketTable. No drift between the two.
+    const bucketDefs = {
+        structure:          { labelFn: t => t.structure || "Limited Data", order: ["BOS", "CHoCH", "Limited Data"] },
+        direction:          { labelFn: t => t.direction || "Limited Data", order: ["Long", "Short", "Limited Data"] },
+        originSession:      { labelFn: originSessionForTrade, order: SESSION_COLUMNS },
+        creationHour:       { labelFn: creationHourLabel, order: null },
+        width:              { labelFn: widthBucket, order: ["0-2 pips", "2-5 pips", "5-10 pips", "10+ pips", "Limited Data"] },
+        age:                { labelFn: ageBucket, order: ["same session / <4h", "4-12h", "12-24h", "1-3d", "3-7d", "7-14d", "14d+", "Limited Data"] },
+        penetration:        { labelFn: penetrationBucket, order: ["0–10%", "10–25%", "25–50%", "50–75%", "75–100%", "100%+", "Limited Data"] },
+        fastStopout:        { labelFn: fastStopoutBucket, order: ["same candle", "<15m", "15–60m", "1–4h", "4h+", "Limited Data"] },
+        distanceBeforeFill: { labelFn: distanceBeforeFillBucket, order: ["0–0.5R", "0.5–1R", "1–2R", "2R+", "Limited Data"] },
+        dayOfWeek:          { labelFn: dayOfWeekBucket, order: DAY_ORDER },
+    };
+    const structureRows          = bucketRows(trades, bucketDefs.structure.labelFn, bucketDefs.structure.order);
+    const directionRows          = bucketRows(trades, bucketDefs.direction.labelFn, bucketDefs.direction.order);
+    const originSessionRows      = bucketRows(trades, bucketDefs.originSession.labelFn, bucketDefs.originSession.order);
+    const creationHourRows       = bucketRows(trades, bucketDefs.creationHour.labelFn);
+    const widthRows              = bucketRows(trades, bucketDefs.width.labelFn, bucketDefs.width.order);
+    const ageRows                = bucketRows(trades, bucketDefs.age.labelFn, bucketDefs.age.order);
+    const penetrationRows        = bucketRows(trades, bucketDefs.penetration.labelFn, bucketDefs.penetration.order);
+    const fastStopoutRows        = bucketRows(trades, bucketDefs.fastStopout.labelFn, bucketDefs.fastStopout.order);
+    const distanceBeforeFillRows = bucketRows(trades, bucketDefs.distanceBeforeFill.labelFn, bucketDefs.distanceBeforeFill.order);
+    const dayOfWeekRows          = bucketRows(trades, bucketDefs.dayOfWeek.labelFn, bucketDefs.dayOfWeek.order);
     const newsFieldAvailable     = trades.some(hasNewsCreatedFields);
     const newsCreatedRows        = bucketRows(trades, newsCreatedBucket, ["Origin inside news window", "Detection inside news window", "Within 5 min of news", "Within 15 min of news", "Within 30 min of news", "Not news-created", "Limited Data"]);
     const newsComparisonRows     = bucketRows(trades, newsCreatedComparisonBucket, ["News-created", "Normal OBs", "Limited Data"]);
@@ -1310,6 +1361,7 @@ function buildOrderBlockAnalytics(trades) {
         newsFieldAvailable, newsCreatedRows, newsComparisonRows, newsComparison, newsCreatedTaggedCount,
         sessionMatrix, fieldCompleteness, rollingExpectancy, equityCurves,
         worstLosses, bestWins,
+        bucketDefs,
     };
 }
 

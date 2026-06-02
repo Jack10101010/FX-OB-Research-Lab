@@ -536,11 +536,22 @@ export default function StrategyMap() {
                 runLine={`Run: ${getRunDisplayName(bundle || activeRunMeta || { id: runId })} · ${heroSymbol} · ${heroTf} · ${heroTrades ?? "—"} trades`}
                 configLine={`${heroSymbol} · ${heroTf} · RR ${Number.isFinite(heroRr) ? heroRr.toFixed(1) : "—"}`}
                 dateRangeLine={heroDateRange || "—"}
-                actions={projectId && (
-                    <Link to={`/projects/${encodeURIComponent(projectId)}`}>
-                        <NeonButton icon={FolderKanban} tone="ghost">Open Project</NeonButton>
-                    </Link>
-                )}
+                actions={
+                    (runId || projectId) ? (
+                        <div className="flex gap-2">
+                            {runId && (
+                                <Link to={`/runs/${encodeURIComponent(runId)}`}>
+                                    <NeonButton tone="ghost">Run Detail</NeonButton>
+                                </Link>
+                            )}
+                            {projectId && (
+                                <Link to={`/projects/${encodeURIComponent(projectId)}`}>
+                                    <NeonButton icon={FolderKanban} tone="ghost">Open Project</NeonButton>
+                                </Link>
+                            )}
+                        </div>
+                    ) : null
+                }
             />
 
             <div className={`px-6 grid grid-cols-1 gap-3 min-w-0 ${showTradeList ? "xl:grid-cols-[240px_minmax(0,1fr)]" : ""}`}>
@@ -569,7 +580,6 @@ export default function StrategyMap() {
                     title="Full Chart View"
                     action={
                         <div className="flex items-center gap-2 flex-wrap justify-end min-w-0">
-                            <NeonSelect testId="map-symbol" value="EURUSD" onChange={() => {}} options={["EURUSD", "GBPUSD", "USDJPY", "XAUUSD"]} />
                             <NeonSelect value={displayTf} onChange={setDisplayTf} options={displayTfOptions} />
                             <NeonSelect value={runId || ""} onChange={(v) => setActiveRunId(v)} options={importedRuns.slice(0, 20).map((r) => ({ value: r.id, label: getRunDisplayName(r) }))} />
                             {!showTradeList && (
@@ -591,7 +601,7 @@ export default function StrategyMap() {
                     {(fullRunLoading || fullRunError) && (
                         <div className="mb-3 flex items-center gap-2 px-3 py-2 border border-[hsl(var(--accent-secondary)/0.35)] bg-[hsl(var(--accent-secondary)/0.06)] clip-bevel-sm">
                             <AlertTriangle className="w-3.5 h-3.5 text-[hsl(var(--accent-secondary))]" />
-                            <span className="text-[11px] font-mono uppercase tracking-wider text-[hsl(var(--accent-secondary))]">
+                            <span className="text-[11px] font-ui uppercase tracking-wider text-[hsl(var(--accent-secondary))]">
                                 {fullRunLoading
                                     ? "Loading overlay data from sidecar..."
                                     : "Could not load overlay data from sidecar. OBs, trades, RR tools, and news may be unavailable."}
@@ -601,7 +611,7 @@ export default function StrategyMap() {
                     {!hasCandles && (
                         <div className="mb-3 flex items-center gap-2 px-3 py-2 border border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.07)] clip-bevel-sm" data-testid="map-no-candles-banner">
                             <AlertTriangle className="w-3.5 h-3.5 text-[hsl(var(--warning))]" />
-                            <span className="text-[11px] font-mono uppercase tracking-wider text-[hsl(var(--warning))]">
+                            <span className="text-[11px] font-ui uppercase tracking-wider text-[hsl(var(--warning))]">
                                 {candlesLoading
                                     ? "Loading candles from sidecar..."
                                     : candlesError
@@ -1619,12 +1629,12 @@ function RunInfoDropdown({ open, onToggle, rows }) {
             <NeonButton tone="ghost" onClick={onToggle}>Run Info</NeonButton>
             {open && (
                 <div className="absolute right-0 top-[calc(100%+8px)] z-40 w-[320px] max-w-[80vw] clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel))] shadow-[0_18px_60px_rgba(0,0,0,0.38)] p-3">
-                    <div className="mb-2 font-mono text-[10px] uppercase tracking-[0.18em] text-[hsl(var(--accent-primary))]">Run Info</div>
+                    <div className="mb-2 font-ui text-[10px] uppercase tracking-[0.18em] text-[hsl(var(--accent-primary))]">Run Info</div>
                     <div className="grid grid-cols-[120px_1fr] gap-x-3 gap-y-1.5">
                         {(rows || []).map(([label, value]) => (
                             <React.Fragment key={label}>
-                                <div className="font-mono text-[9.5px] uppercase tracking-wider text-[hsl(var(--text-3))]">{label}</div>
-                                <div className="font-mono text-[10.5px] text-[hsl(var(--text-1))] min-w-0 break-words">{formatInfoValue(value)}</div>
+                                <div className="font-ui text-[9.5px] uppercase tracking-wider text-[hsl(var(--text-3))]">{label}</div>
+                                <div className="font-ui text-[10.5px] text-[hsl(var(--text-1))] min-w-0 break-words">{formatInfoValue(value)}</div>
                             </React.Fragment>
                         ))}
                     </div>
@@ -1662,7 +1672,7 @@ function StrategyTradeListPanel({
                         <button
                             type="button"
                             onClick={onHide}
-                            className="px-2 py-0.5 clip-bevel-sm border border-[hsl(var(--border-soft))] text-[10px] font-mono uppercase tracking-wider text-[hsl(var(--text-2))] hover:text-[hsl(var(--accent-primary))] hover:border-[hsl(var(--accent-primary)/0.45)]"
+                            className="px-2 py-0.5 clip-bevel-sm border border-[hsl(var(--border-soft))] text-[10px] font-ui uppercase tracking-wider text-[hsl(var(--text-2))] hover:text-[hsl(var(--accent-primary))] hover:border-[hsl(var(--accent-primary)/0.45)]"
                         >
                             Hide
                         </button>
@@ -1705,11 +1715,11 @@ function StrategyTradeListPanel({
                             >
                                 <div className="flex items-center justify-between gap-2">
                                     <div className="min-w-0">
-                                        <div className="font-mono text-[12px] text-[hsl(var(--text-1))] truncate">
+                                        <div className="font-code text-[12px] text-[hsl(var(--text-1))] truncate">
                                             {displayTradeId(trade)}
                                             <span className="ml-1.5 text-[10px] text-[hsl(var(--text-3))]">{displayTradeDirection(trade)}</span>
                                         </div>
-                                        <div className="mt-0.5 font-mono text-[10px] text-[hsl(var(--text-3))] truncate">
+                                        <div className="mt-0.5 font-ui text-[10px] text-[hsl(var(--text-3))] truncate">
                                             {formatTradeTime(tradeEntryTime(trade))} · {displayTradeStructure(trade)}
                                         </div>
                                     </div>
@@ -1743,7 +1753,7 @@ function StrategyTradeListPanel({
                         );
                     })}
                     {filteredTrades.length > visibleTrades.length && (
-                        <div className="pt-1 text-center font-mono text-[10px] uppercase tracking-wider text-[hsl(var(--text-3))]">
+                        <div className="pt-1 text-center font-ui text-[10px] uppercase tracking-wider text-[hsl(var(--text-3))]">
                             Showing first {visibleTrades.length} of {filteredTrades.length}
                         </div>
                     )}
@@ -1757,8 +1767,8 @@ function StrategyTradeListPanel({
 function TradeDetail({ label, value, wide = false }) {
     return (
         <div className={wide ? "col-span-2" : ""}>
-            <div className="font-mono text-[9px] uppercase tracking-wider text-[hsl(var(--text-3))]">{label}</div>
-            <div className="font-mono text-[11px] text-[hsl(var(--text-1))] truncate">{value || "—"}</div>
+            <div className="font-ui text-[9px] uppercase tracking-wider text-[hsl(var(--text-3))]">{label}</div>
+            <div className="font-ui text-[11px] text-[hsl(var(--text-1))] truncate">{value || "—"}</div>
         </div>
     );
 }
@@ -1776,7 +1786,7 @@ function SessionSummary({ sessionSettings, sessionsEnabled, editorOpen, onToggle
     return (
         <div className="mb-3 clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.28)] px-2.5 py-2">
             <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-mono text-[10px] uppercase tracking-wider text-[hsl(var(--text-3))]">
+                <span className="font-ui text-[10px] uppercase tracking-wider text-[hsl(var(--text-3))]">
                     Sessions are visual only · UTC
                 </span>
                 {Object.entries(sessionSettings).map(([key, session]) => {
@@ -1787,7 +1797,7 @@ function SessionSummary({ sessionSettings, sessionsEnabled, editorOpen, onToggle
                             type="button"
                             onClick={() => onPatch(key, { enabled: !session.enabled })}
                             title={sessionsEnabled ? "Toggle session highlight" : "Sessions layer is off"}
-                            className={`font-mono text-[10px] px-1.5 py-0.5 clip-bevel-sm border transition-colors ${
+                            className={`font-ui text-[10px] px-1.5 py-0.5 clip-bevel-sm border transition-colors ${
                                 active
                                     ? "border-[hsl(var(--accent-primary)/0.35)] text-[hsl(var(--text-1))] bg-[hsl(var(--accent-primary)/0.06)]"
                                     : "border-[hsl(var(--border-soft))] text-[hsl(var(--text-3))] opacity-70 hover:opacity-100 hover:border-[hsl(var(--accent-primary)/0.28)]"
@@ -1800,7 +1810,7 @@ function SessionSummary({ sessionSettings, sessionsEnabled, editorOpen, onToggle
                 <button
                     type="button"
                     onClick={onToggleEditor}
-                    className="ml-auto px-2 py-1 clip-bevel-sm border border-[hsl(var(--border-soft))] text-[10px] font-mono uppercase tracking-wider text-[hsl(var(--text-2))] hover:text-[hsl(var(--accent-primary))] hover:border-[hsl(var(--accent-primary)/0.45)]"
+                    className="ml-auto px-2 py-1 clip-bevel-sm border border-[hsl(var(--border-soft))] text-[10px] font-ui uppercase tracking-wider text-[hsl(var(--text-2))] hover:text-[hsl(var(--accent-primary))] hover:border-[hsl(var(--accent-primary)/0.45)]"
                 >
                     {editorOpen ? "Close Sessions" : "Edit Sessions"}
                 </button>
@@ -1855,7 +1865,7 @@ function SessionControl({ id, session, onPatch }) {
             <button
                 type="button"
                 onClick={() => onPatch(id, { enabled: !session.enabled })}
-                className="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider"
+                className="inline-flex items-center gap-1.5 font-ui text-[10px] uppercase tracking-wider"
                 style={{ color: session.enabled ? color.text : "hsl(var(--text-3))" }}
             >
                 <span
@@ -1871,14 +1881,14 @@ function SessionControl({ id, session, onPatch }) {
                 type="time"
                 value={session.start}
                 onChange={(event) => onPatch(id, { start: event.target.value })}
-                className="w-[76px] bg-transparent font-mono text-[10px] text-[hsl(var(--text-1))] outline-none"
+                className="w-[76px] bg-transparent font-ui text-[10px] text-[hsl(var(--text-1))] outline-none"
             />
-            <span className="font-mono text-[10px] text-[hsl(var(--text-3))]">→</span>
+            <span className="font-ui text-[10px] text-[hsl(var(--text-3))]">→</span>
             <input
                 type="time"
                 value={session.end}
                 onChange={(event) => onPatch(id, { end: event.target.value })}
-                className="w-[76px] bg-transparent font-mono text-[10px] text-[hsl(var(--text-1))] outline-none"
+                className="w-[76px] bg-transparent font-ui text-[10px] text-[hsl(var(--text-1))] outline-none"
             />
         </div>
     );
@@ -1900,14 +1910,14 @@ function StrategyMapIntelligencePanel({ runStats, sessionStats, obStats }) {
                     <StatChip label="Detection TF" value={runStats.detectionTf} />
                     <StatChip label="Execution TF" value={runStats.executionTf} />
                 </div>
-                <div className="mt-2 text-[10px] leading-snug text-[hsl(var(--text-3))] font-mono">
+                <div className="mt-2 text-[10px] leading-snug text-[hsl(var(--text-3))] font-ui">
                     Scenario stats (W/L, Net R, WR, PF, DD) sit in the sanity strip above.
                 </div>
             </IntelligenceCard>
             <IntelligenceCard title="Session Breakdown">
                 {sessionStats.length ? (
                     <div className="overflow-x-auto">
-                        <table className="w-full font-mono text-[10.5px]">
+                        <table className="w-full font-ui text-[10.5px]">
                             <thead className="text-[hsl(var(--text-3))] uppercase tracking-wider">
                                 <tr>
                                     <th className="text-left py-1">Session</th>
@@ -1923,19 +1933,19 @@ function StrategyMapIntelligencePanel({ runStats, sessionStats, obStats }) {
                                 {sessionStats.map((row) => (
                                     <tr key={row.session} className="border-t border-[hsl(var(--border-soft))]">
                                         <td className="py-1.5 text-[hsl(var(--text-1))]">{row.session}</td>
-                                        <td className="py-1.5 text-right">{row.trades}</td>
-                                        <td className="py-1.5 text-right text-[hsl(var(--success))]">{row.wins}</td>
-                                        <td className="py-1.5 text-right text-[hsl(var(--danger))]">{row.losses}</td>
-                                        <td className="py-1.5 text-right">{fmtPct(row.winRate)}</td>
-                                        <td className="py-1.5 text-right">{fmt(row.netR, 2)}</td>
-                                        <td className="py-1.5 text-right">{fmt(row.avgR, 3)}</td>
+                                        <td className="py-1.5 text-right font-num">{row.trades}</td>
+                                        <td className="py-1.5 text-right font-num text-[hsl(var(--success))]">{row.wins}</td>
+                                        <td className="py-1.5 text-right font-num text-[hsl(var(--danger))]">{row.losses}</td>
+                                        <td className="py-1.5 text-right font-num">{fmtPct(row.winRate)}</td>
+                                        <td className="py-1.5 text-right font-num">{fmt(row.netR, 2)}</td>
+                                        <td className="py-1.5 text-right font-num">{fmt(row.avgR, 3)}</td>
                                     </tr>
                                 ))}
                             </tbody>
                         </table>
                     </div>
                 ) : (
-                    <div className="text-[11px] text-[hsl(var(--text-3))] font-mono">Session data unavailable for this run.</div>
+                    <div className="text-[11px] text-[hsl(var(--text-3))] font-ui">Session data unavailable for this run.</div>
                 )}
             </IntelligenceCard>
             <IntelligenceCard title="OB Breakdown">
@@ -1949,7 +1959,7 @@ function StrategyMapIntelligencePanel({ runStats, sessionStats, obStats }) {
                     <StatChip label="Invalid" value={obStats.hasLifecycle ? obStats.invalid : "—"} />
                     <StatChip label="Unfilled" value={obStats.hasLifecycle ? obStats.unfilled : "—"} />
                 </div>
-                <div className="mt-2 text-[10px] leading-snug text-[hsl(var(--text-3))] font-mono">
+                <div className="mt-2 text-[10px] leading-snug text-[hsl(var(--text-3))] font-ui">
                     Metrics come from the imported run. Visual session settings do not change strategy results.
                 </div>
             </IntelligenceCard>
@@ -1960,7 +1970,7 @@ function StrategyMapIntelligencePanel({ runStats, sessionStats, obStats }) {
 function IntelligenceCard({ title, children }) {
     return (
         <div className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.35)] p-3">
-            <div className="mb-2 font-mono text-[10.5px] uppercase tracking-[0.18em] text-[hsl(var(--accent-primary))]">{title}</div>
+            <div className="mb-2 font-ui text-[10.5px] uppercase tracking-[0.18em] text-[hsl(var(--accent-primary))]">{title}</div>
             {children}
         </div>
     );
@@ -1969,8 +1979,8 @@ function IntelligenceCard({ title, children }) {
 function StatChip({ label, value }) {
     return (
         <div className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel)/0.45)] px-2 py-1.5">
-            <div className="font-mono text-[9px] uppercase tracking-wider text-[hsl(var(--text-3))]">{label}</div>
-            <div className="mt-0.5 font-mono text-[12px] text-[hsl(var(--text-1))] truncate">{value ?? "—"}</div>
+            <div className="font-ui text-[9px] uppercase tracking-wider text-[hsl(var(--text-3))]">{label}</div>
+            <div className="mt-0.5 font-ui text-[12px] text-[hsl(var(--text-1))] truncate">{value ?? "—"}</div>
         </div>
     );
 }

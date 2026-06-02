@@ -15,8 +15,7 @@
  *
  * Strategy Map's ScenarioSelector still owns its own badge — that one is
  * intentionally specialized (no Rows cell, no warning chip row, uses a short
- * variant label, takes decomposed props from the hook) — and Phase 2F leaves
- * it alone.
+ * variant label, takes decomposed props from the hook) — and remains separate.
  *
  * Props
  *   universe   {object}    A TradeUniverse object from `useTradeUniverse()`.
@@ -29,9 +28,9 @@
  *                          rendered as-is (no further filtering). When NOT
  *                          provided, the component derives the warning list
  *                          from `universe.warnings` and filters it down to
- *                          `showCodes`. Phase 2G moved this filtering into
- *                          the component so the same five-line `useMemo`
- *                          doesn't have to live in every consumer page.
+ *                          `showCodes`. This filtering lives in the component
+ *                          so the same five-line `useMemo` doesn't have to
+ *                          live in every consumer page.
  *
  *   showCodes  {Array<string>}
  *                          OPTIONAL. Set of warning `code` values to surface
@@ -115,7 +114,7 @@ export function TradeUniverseBadge({
                 <BadgeCell label="Rows" value={`${universe.stats?.total ?? 0}`} subtle />
             </div>
             {resolvedWarnings.length > 0 && (
-                <div className="flex flex-wrap items-center gap-2 text-[10px] font-mono">
+                <div className="flex flex-wrap items-center gap-2 text-[10px] font-ui">
                     {resolvedWarnings.map((w) => (
                         <span
                             key={w.code}
@@ -149,11 +148,11 @@ function BadgeCell({ label, value, tone = "default", mono = false, subtle = fals
                     : "text-[hsl(var(--text-base))]";
     return (
         <div className="flex items-baseline gap-1.5" title={title}>
-            <span className="text-[9px] font-mono uppercase tracking-widest text-[hsl(var(--text-muted))]">
+            <span className="text-[9px] font-ui uppercase tracking-widest text-[hsl(var(--text-muted))]">
                 {label}
             </span>
             <span
-                className={`text-[10.5px] font-mono ${subtle ? "" : "font-semibold"} ${valueColor}`}
+                className={`text-[10.5px] ${mono ? "font-code" : "font-ui"} ${subtle ? "" : "font-semibold"} ${valueColor}`}
                 style={mono ? { maxWidth: 380, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } : undefined}
             >
                 {value || "—"}

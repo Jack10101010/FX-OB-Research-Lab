@@ -1,15 +1,11 @@
 /**
- * tradeUniverse — shared store-level trade universe resolver (Phase 2A).
+ * tradeUniverse — shared store-level trade universe resolver.
  *
- * Until now the only resolver that turned a `bundle + scenario` into a
- * concrete trade list lived inside the React hook `useResolvedScenario.js`,
- * which is Strategy Map specific. RunDetail and every other page read raw
- * `runData.tradesByVariant[primary]` directly, so there was no shared,
- * named, scenario-aware "what trades am I currently looking at?" abstraction.
+ * Central abstraction for "given a run bundle + active scenario, which trades
+ * am I currently looking at?" All scenario-aware pages consume this through
+ * the `useTradeUniverse()` hook rather than reading raw variant slices.
  *
- * This module is that abstraction.
- *
- * It exposes:
+ * Exposes:
  *
  *   • resolveTradeUniverse({ bundle, scenario, fallbackVariant, legacyEntryModelHint })
  *       → fully-resolved TradeUniverse object (see shape below).
@@ -20,9 +16,8 @@
  *   • describeTradeUniverse(universe)
  *       → one-line human-readable summary.
  *
- * Plus the pure helpers it uses to parse scenario keys and select trades.
- * `useResolvedScenario.js` is expected to import these helpers and stop
- * carrying private copies (Phase 2A integration).
+ * Plus the pure helpers used to parse scenario keys and select trades;
+ * `useResolvedScenario.js` imports these helpers directly.
  *
  * TradeUniverse shape:
  *
@@ -211,9 +206,8 @@ export function entrySummaryKeys(bundle = {}) {
  * NOTE: This dedup key intentionally includes `entry_model_key` so the
  * "show every scenario stacked" view (canonical key `__all__`) gives each
  * (scenario, OB) row a unique key. It is NOT a dedup for the same-vs-next
- * union — that union has been disabled at the resolver level since Phase 1
- * because same and next carry different `entry_model_key` strings and so
- * never dedup against each other.
+ * union — that union is disabled at the resolver level because same and next
+ * carry different `entry_model_key` strings and never dedup against each other.
  */
 export function uniqueTrades(trades = []) {
     const seen = new Set();
@@ -246,8 +240,8 @@ export function collectAllEntryKeys(bundle = {}, baseTrades = []) {
 /**
  * Build the family → threshold → fillMode option tree from all known keys.
  * "both" is only added when a real bare/combined key exists (no `_same`/`_next`
- * suffix). Previously the resolver added "both" any time same+next coexisted,
- * and then `selectTrades` silently unioned the two CSVs — see Phase 1 audit.
+ * suffix). If only same+next keys exist, "both" is omitted so the UI never
+ * silently unions two separate CSVs.
  */
 export function buildAvailableOptions(allKeys = []) {
     const families = new Set();
@@ -382,11 +376,10 @@ export function resolveHierarchy(scenario, legacyEntryModelHint, allKeys, availa
 /**
  * Pick the concrete trade list for a resolved canonical key.
  *
- * No-fake-Both invariant (Phase 1): when `resolvedFillMode` is null but no
- * real combined CSV exists, this function prefers `_next` then `_same` over
- * unioning. resolveHierarchy is supposed to coerce away from null-fillMode
- * before we get here; the defensive fallback is for callers that bypass
- * `resolveHierarchy`.
+ * No-fake-Both invariant: when `resolvedFillMode` is null but no real combined
+ * CSV exists, this function prefers `_next` then `_same` over unioning.
+ * resolveHierarchy coerces away from null-fillMode before we get here; the
+ * defensive fallback is for callers that bypass `resolveHierarchy`.
  */
 export function selectTrades(canonicalKey, resolvedFillMode, bundle, baseTrades) {
     if (!canonicalKey || canonicalKey === "__all__") {
@@ -514,7 +507,9 @@ function getBaselineEntryTrades(bundle, baseVariantTrades) {
  * @param {object|null} params.bundle              The full run bundle.
  * @param {object|null} [params.scenario]          { family, threshold, fillMode, positionVariant }
  * @param {string|null} [params.fallbackVariant]   Variant to use when scenario.positionVariant is unset.
- * @param {string|null} [params.legacyEntryModelHint]  Old dropdown value (Phase 2 bridge).
+ * @param {string|null} [params.legacyEntryModelHint]  Initial model hint passed by StrategyMap
+ *                                                      when a persisted entry-model selection
+ *                                                      exists but no explicit scenario object yet.
  * @returns {object} TradeUniverse
  */
 export function resolveTradeUniverse(params = {}) {

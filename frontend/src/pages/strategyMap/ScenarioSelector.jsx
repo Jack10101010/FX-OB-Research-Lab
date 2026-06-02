@@ -1,9 +1,8 @@
 /**
- * ScenarioSelector — Phase 4 clean hierarchical scenario picker
+ * ScenarioSelector — hierarchical scenario picker
  *
- * Replaces the raw Entry Model dropdown with:
- *   Family pills  →  Threshold pills  →  Fill Mode pills  →  Variant pills
- *   Viewing label + compact metrics strip
+ * Family pills  →  Threshold pills  →  Fill Mode pills  →  Variant pills
+ * Viewing label + compact metrics strip
  *
  * Props
  * ─────
@@ -23,7 +22,7 @@ import { summarizeTradeSanity } from "@/data/tradeClassification";
 function PillBtn({ active, onClick, children, tone = "primary" }) {
     const base = [
         "px-2.5 py-[3px]",
-        "text-[10px] font-mono uppercase tracking-wider",
+        "text-[10px] font-ui uppercase tracking-wider",
         "border clip-bevel-sm",
         "transition-colors cursor-pointer select-none whitespace-nowrap",
     ].join(" ");
@@ -124,7 +123,7 @@ export function ScenarioSelector({ resolvedScenario, onScenarioChange, onVariant
         availableThresholds,
         availableFillModes,
         availablePositionVariants,
-        // Phase 1 outputs from useResolvedScenario — drive Both gating + universe badge.
+        // Outputs from useResolvedScenario — drive Both gating + universe badge.
         hasCombinedFillMode = false,
         bothUnavailableReason = null,
         fillModeCoerced = false,
@@ -140,9 +139,8 @@ export function ScenarioSelector({ resolvedScenario, onScenarioChange, onVariant
     const viewLabel = buildViewingLabel(resolvedFamily, resolvedThreshold, resolvedFillMode);
 
     const showThreshold = resolvedFamily && resolvedFamily !== "baseline" && availableThresholds.length > 0;
-    // Phase 1 "stop fake Both" — only render fill-mode pills that actually
-    // have backing CSVs. Strip "both" when no combined CSV exists so the user
-    // can't click into a 70-row union of two 35-row files.
+    // Only render fill-mode pills that have backing CSVs. Strip "both" when no
+    // combined CSV exists so the user can't click into a union of same + next rows.
     const displayFillModes = React.useMemo(() => (
         hasCombinedFillMode
             ? availableFillModes
@@ -164,7 +162,7 @@ export function ScenarioSelector({ resolvedScenario, onScenarioChange, onVariant
                 {/* Family */}
                 {availableFamilies.length > 0 && (
                     <div className="flex items-center gap-1.5">
-                        <span className="text-[9px] font-mono uppercase tracking-wider text-[hsl(var(--text-muted))]">
+                        <span className="text-[9px] font-ui uppercase tracking-wider text-[hsl(var(--text-muted))]">
                             Family
                         </span>
                         {availableFamilies.map((f) => (
@@ -187,7 +185,7 @@ export function ScenarioSelector({ resolvedScenario, onScenarioChange, onVariant
                 {/* Threshold */}
                 {showThreshold && (
                     <div className="flex items-center gap-1.5">
-                        <span className="text-[9px] font-mono uppercase tracking-wider text-[hsl(var(--text-muted))]">
+                        <span className="text-[9px] font-ui uppercase tracking-wider text-[hsl(var(--text-muted))]">
                             Threshold
                         </span>
                         {availableThresholds.map((t) => (
@@ -208,7 +206,7 @@ export function ScenarioSelector({ resolvedScenario, onScenarioChange, onVariant
                     we deliberately hide Both rather than silently union them. */}
                 {showFillMode && (
                     <div className="flex items-center gap-1.5">
-                        <span className="text-[9px] font-mono uppercase tracking-wider text-[hsl(var(--text-muted))]">
+                        <span className="text-[9px] font-ui uppercase tracking-wider text-[hsl(var(--text-muted))]">
                             Fill
                         </span>
                         {displayFillModes.map((fm) => (
@@ -229,7 +227,7 @@ export function ScenarioSelector({ resolvedScenario, onScenarioChange, onVariant
                 {/* Position Variant */}
                 {showVariant && (
                     <div className="flex items-center gap-1.5">
-                        <span className="text-[9px] font-mono uppercase tracking-wider text-[hsl(var(--text-muted))]">
+                        <span className="text-[9px] font-ui uppercase tracking-wider text-[hsl(var(--text-muted))]">
                             Variant
                         </span>
                         {availablePositionVariants.map((v) => (
@@ -247,12 +245,12 @@ export function ScenarioSelector({ resolvedScenario, onScenarioChange, onVariant
 
             {/* ── Row 2: viewing label + Both-unavailable note ── */}
             <div className="flex items-center gap-3 flex-wrap">
-                <span className="text-[10px] font-mono text-[hsl(var(--text-muted))] shrink-0">
+                <span className="text-[10px] font-ui text-[hsl(var(--text-muted))] shrink-0">
                     {viewLabel}
                 </span>
                 {bothUnavailableReason && (
                     <span
-                        className="text-[10px] font-mono text-[hsl(var(--accent-secondary))]"
+                        className="text-[10px] font-ui text-[hsl(var(--accent-secondary))]"
                         title="Same and Next were exported as separate CSVs; merging them would double-count each OB."
                     >
                         Both unavailable — {bothUnavailableReason}
@@ -278,7 +276,7 @@ export function ScenarioSelector({ resolvedScenario, onScenarioChange, onVariant
             {/* ── Row 4: canonical sanity strip ──
                 Replaces the old sparse Rows / Fills / WR / Net R / Exp / PF
                 row. Driven by summarizeTradeSanity so the numbers track every
-                other strip in the app (Run Detail ledger, future labs). */}
+                other strip in the app (Run Detail ledger, other labs). */}
             <TradeSanityStrip stats={sanity} showBreakdown={true} />
         </div>
     );
@@ -315,11 +313,11 @@ function BadgeCell({ label, value, tone = "default", mono = false, subtle = fals
                     : "text-[hsl(var(--text-base))]";
     return (
         <div className="flex items-baseline gap-1.5" title={title}>
-            <span className="text-[9px] font-mono uppercase tracking-widest text-[hsl(var(--text-muted))]">
+            <span className="text-[9px] font-ui uppercase tracking-widest text-[hsl(var(--text-muted))]">
                 {label}
             </span>
             <span
-                className={`text-[10.5px] ${mono ? "font-mono" : "font-mono"} ${subtle ? "" : "font-semibold"} ${valueColor}`}
+                className={`text-[10.5px] ${mono ? "font-ui" : "font-ui"} ${subtle ? "" : "font-semibold"} ${valueColor}`}
                 style={mono ? { maxWidth: 380, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } : undefined}
             >
                 {value || "—"}
