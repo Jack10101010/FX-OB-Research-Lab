@@ -26,10 +26,10 @@ export default function MonteCarlo() {
             <div className="px-6 mb-4">
                 <div className="flex items-center gap-2 border border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.07)] clip-bevel-sm px-3 py-2">
                     <AlertTriangle className="w-3.5 h-3.5 text-[hsl(var(--warning))]" />
-                    <span className="text-[11px] font-mono uppercase tracking-wider text-[hsl(var(--warning))]">
+                    <span className="text-[11px] font-ui uppercase tracking-wider text-[hsl(var(--warning))]">
                         Visualization preview · simulator not yet wired
                     </span>
-                    <span className="text-[11px] font-mono text-[hsl(var(--text-2))] hidden md:inline">
+                    <span className="text-[11px] font-ui text-[hsl(var(--text-2))] hidden md:inline">
                         — controls render UI state only; values shown are mock outputs.
                     </span>
                 </div>
@@ -54,7 +54,7 @@ export default function MonteCarlo() {
                         <Row label="Randomize Slippage"         checked={randSlip}   onChange={setRandSlip} />
                     </div>
                     <div className="divider-glow my-3" />
-                    <div className="text-[10.5px] font-mono uppercase tracking-wider text-muted-lab">Placeholder</div>
+                    <div className="text-[10.5px] font-ui uppercase tracking-wider text-muted-lab">Placeholder</div>
                     <div className="text-[11.5px] text-[hsl(var(--text-2))] mt-1 leading-relaxed">
                         Once the Python engine is wired, this panel will dispatch parameterised re-runs and stream percentile bands back to the chart panels.
                     </div>
@@ -99,7 +99,7 @@ export default function MonteCarlo() {
                             </ComposedChart>
                         </ResponsiveContainer>
                     </div>
-                    <div className="mt-2 flex items-center gap-4 font-mono text-[10.5px]">
+                    <div className="mt-2 flex items-center gap-4 font-ui text-[10.5px]">
                         <Legend dot="hsl(var(--accent-primary))"  label="Median outcome" />
                         <Legend dot="hsl(var(--accent-secondary))" label="5th / 95th percentile" />
                         <Legend dot="hsl(var(--danger))"           label="Worst-case path" />
@@ -113,7 +113,7 @@ export default function MonteCarlo() {
 function Row({ label, checked, onChange }) {
     return (
         <div className="flex items-center justify-between border border-[hsl(var(--border-soft))] clip-bevel-sm px-3 py-2">
-            <span className="text-[11.5px] font-mono uppercase tracking-wider text-[hsl(var(--text-2))]">{label}</span>
+            <span className="text-[11.5px] font-ui uppercase tracking-wider text-[hsl(var(--text-2))]">{label}</span>
             <NeonToggle checked={checked} onChange={onChange} />
         </div>
     );

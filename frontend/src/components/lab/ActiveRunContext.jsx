@@ -36,7 +36,7 @@ export function ActiveRunContext({ pageLabel = "Research Lab", compact = false, 
             <div className={`clip-bevel bg-[hsl(var(--panel)/0.96)] ${compact ? "px-4 py-3" : "px-5 py-4"}`}>
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                     <div className="min-w-0">
-                        <div className="text-[10px] font-mono uppercase tracking-[0.24em] text-[hsl(var(--accent-secondary))]">
+                        <div className="text-[10px] font-ui uppercase tracking-[0.16em] text-[hsl(var(--accent-secondary))]">
                             {pageLabel}
                         </div>
                         <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -46,14 +46,14 @@ export function ActiveRunContext({ pageLabel = "Research Lab", compact = false, 
                             {projectId && (
                                 <Link
                                     to={`/projects/${encodeURIComponent(projectId)}`}
-                                    className="inline-flex items-center gap-1.5 px-2 py-1 clip-bevel-sm border border-[hsl(var(--accent-secondary)/0.45)] bg-[hsl(var(--accent-secondary)/0.06)] text-[10px] font-mono uppercase tracking-[0.16em] text-[hsl(var(--accent-secondary))] hover:text-white transition-colors"
+                                    className="inline-flex items-center gap-1.5 px-2 py-1 clip-bevel-sm border border-[hsl(var(--accent-secondary)/0.45)] bg-[hsl(var(--accent-secondary)/0.06)] text-[10px] font-ui uppercase tracking-[0.16em] text-[hsl(var(--accent-secondary))] hover:text-white transition-colors"
                                 >
                                     <FolderOpen className="w-3 h-3" />
                                     Open Project
                                 </Link>
                             )}
                         </div>
-                        <div className="mt-1 text-[12px] font-mono text-[hsl(var(--accent-secondary)/0.86)]">
+                        <div className="mt-1 text-[12px] font-ui text-[hsl(var(--accent-secondary)/0.86)]">
                             {subtitle}
                         </div>
                         {description && (
@@ -123,7 +123,7 @@ function ContextBadge({ tone = "muted", children }) {
         muted: "border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] bg-[hsl(var(--panel-2)/0.45)]",
     }[tone];
     return (
-        <span className={`inline-flex items-center px-2 py-1 clip-bevel-sm border text-[10px] font-mono uppercase tracking-[0.16em] ${toneClass}`}>
+        <span className={`inline-flex items-center px-2 py-1 clip-bevel-sm border text-[10px] font-ui uppercase tracking-[0.16em] ${toneClass}`}>
             {children}
         </span>
     );

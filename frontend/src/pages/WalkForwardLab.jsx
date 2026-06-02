@@ -74,7 +74,7 @@ export default function WalkForwardLab() {
                             <p className="text-[13px] text-muted-lab max-w-md">
                                 Import multiple dated runs/folds to evaluate walk-forward robustness.
                             </p>
-                            <div className="text-[11px] font-mono text-muted-lab">
+                            <div className="text-[11px] font-ui text-muted-lab">
                                 {folds.length} imported run{folds.length === 1 ? "" : "s"} found · need at least 2
                             </div>
                             <Link to="/runs"><NeonButton tone="primary">Browse &amp; Import Runs</NeonButton></Link>
@@ -143,6 +143,17 @@ export default function WalkForwardLab() {
                 actions={browseAction}
             />
 
+            {/* Scope disclaimer — Walk-Forward operates at the run/fold level:
+                each fold is a whole imported run using its primary variant. It
+                is NOT governed by the active Strategy Map universe selection. */}
+            <div className="px-6 mb-3">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border border-[hsl(var(--border-soft)/0.7)] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm px-3 py-1.5 text-[11px]">
+                    <span className="font-ui uppercase tracking-wider text-muted-lab">Scope</span>
+                    <Pill tone="muted">Run-level folds</Pill>
+                    <span className="text-[hsl(var(--text-2))]">Folds use each run's primary variant — not governed by the active Trade Universe.</span>
+                </div>
+            </div>
+
             {/* KPI row */}
             <div className="px-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                 <MetricChip label="Fold Count"      value={String(count)}                sub="OOS folds"                       tone="muted"                          icon={Hash} />
@@ -180,11 +191,11 @@ export default function WalkForwardLab() {
                         <div className="absolute -top-8 -right-8 w-32 h-32 bg-[hsl(var(--accent-primary)/0.12)] rounded-full blur-2xl pointer-events-none" />
                         <div className="flex items-center gap-2">
                             <ShieldCheck className="w-4 h-4 text-[hsl(var(--accent-secondary))]" />
-                            <span className="text-[10px] font-mono uppercase tracking-[0.22em] text-muted-lab">Robustness Verdict</span>
+                            <span className="text-[10px] font-ui uppercase tracking-[0.14em] text-muted-lab">Robustness Verdict</span>
                         </div>
                         <div className={`mt-2 font-display text-[30px] leading-none font-semibold ${vColor}`}>{vFull}</div>
                         <p className="text-[11.5px] text-[hsl(var(--text-2))] mt-3 leading-relaxed">{vText}</p>
-                        <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 font-mono text-[11.5px] mt-3">
+                        <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 font-ui text-[11.5px] mt-3">
                             <VStat k="Folds"      v={String(count)} />
                             <VStat k="Profitable" v={`${pct.toFixed(0)}%`} />
                             <VStat k="Mean Net R" v={signed(mean)} />
@@ -221,7 +232,7 @@ export default function WalkForwardLab() {
                     <DataTable
                         testId="wf-fold-table"
                         columns={[
-                            { key: "_fold",       label: "Fold",      render: (r) => <span className="font-mono text-muted-lab">F{folds.indexOf(r) + 1}</span> },
+                            { key: "_fold",       label: "Fold",      render: (r) => <span className="font-code text-muted-lab">F{folds.indexOf(r) + 1}</span> },
                             { key: "id",          label: "Run ID",    render: (r) => (
                                 <Link to={`/runs/${encodeURIComponent(r.id)}`} className="text-[hsl(var(--accent-primary))] hover:text-white">{r.id}</Link>
                             ) },

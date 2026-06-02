@@ -48,7 +48,7 @@ export default function StrategyLogic() {
             <div className="px-6 grid grid-cols-1 xl:grid-cols-[250px_1fr] gap-4">
                 <aside className="hidden xl:block">
                     <div className="sticky top-4 border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel)/0.65)] clip-bevel-sm p-3">
-                        <div className="text-[10px] font-mono uppercase tracking-[0.22em] text-muted-lab mb-2">Contents</div>
+                        <div className="text-[10px] font-ui uppercase tracking-[0.14em] text-muted-lab mb-2">Contents</div>
                         {[
                             "Big Picture",
                             "Data Flow",
@@ -178,7 +178,7 @@ function Section({ id, title, badge, children }) {
 
 function FlowChip({ children }) {
     return (
-        <span className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.55)] px-3 py-2 text-[11px] font-mono uppercase tracking-[0.12em] text-[hsl(var(--text-2))]">
+        <span className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.55)] px-3 py-2 text-[11px] font-ui uppercase tracking-[0.12em] text-[hsl(var(--text-2))]">
             {children}
         </span>
     );
@@ -227,7 +227,7 @@ function DefinitionGrid({ rows }) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             {rows.map(([term, definition]) => (
                 <div key={term} className="border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.3)] clip-bevel-sm p-3">
-                    <div className="text-[11px] font-mono uppercase tracking-[0.14em] text-[hsl(var(--accent-secondary))]">{term}</div>
+                    <div className="text-[11px] font-ui uppercase tracking-[0.14em] text-[hsl(var(--accent-secondary))]">{term}</div>
                     <div className="mt-1 text-[12.5px] text-[hsl(var(--text-2))]">{definition}</div>
                 </div>
             ))}

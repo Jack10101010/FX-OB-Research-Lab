@@ -32,6 +32,18 @@ export default function SweepLab() {
                 description="Explore the response surface of each strategy parameter. Identify stable, robust, and high-Net-R configurations."
             />
 
+            {/* Scope disclaimer — Sweep Lab varies strategy parameters across
+                re-runs and reads its own sweep outputs (SWEEP_*). It is a
+                different axis from the Trade Universe and is NOT governed by
+                the active Strategy Map universe selection. */}
+            <div className="px-6 mb-3">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border border-[hsl(var(--border-soft)/0.7)] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm px-3 py-1.5 text-[11px]">
+                    <span className="font-ui uppercase tracking-wider text-muted-lab">Scope</span>
+                    <Pill tone="muted">Parameter sweep</Pill>
+                    <span className="text-[hsl(var(--text-2))]">Reads sweep outputs — not governed by the active Trade Universe.</span>
+                </div>
+            </div>
+
             <div className="px-6 mb-4">
                 <Segment testId="sweep-tabs" options={TABS.map((t) => ({ value: t.id, label: t.label }))} value={tab} onChange={setTab} />
             </div>
@@ -180,10 +192,10 @@ function BestConfigCard() {
                 <div className="absolute -top-8 -right-8 w-32 h-32 bg-[hsl(var(--accent-primary)/0.18)] rounded-full blur-2xl pointer-events-none" />
                 <div className="flex items-center gap-2">
                     <Trophy className="w-4 h-4 text-[hsl(var(--accent-primary))]" />
-                    <span className="text-[10px] font-mono uppercase tracking-[0.22em] text-muted-lab">Best Config · RR Sweep</span>
+                    <span className="text-[10px] font-ui uppercase tracking-[0.14em] text-muted-lab">Best Config · RR Sweep</span>
                 </div>
                 <div className="mt-2 font-display text-[40px] leading-none font-semibold text-glow-primary text-[hsl(var(--accent-primary))]">4.0<span className="text-[16px] text-muted-lab ml-1">RR</span></div>
-                <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 font-mono text-[11.5px] mt-3">
+                <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 font-ui text-[11.5px] mt-3">
                     <Stat k="Net R"      v="+55.0R" pos />
                     <Stat k="Win Rate"   v="28.1%" />
                     <Stat k="Trades"     v="135" />
@@ -199,10 +211,10 @@ function WorstConfigCard() {
             <div className="clip-bevel bg-[hsl(var(--panel))] p-4">
                 <div className="flex items-center gap-2">
                     <Skull className="w-4 h-4 text-[hsl(var(--danger))]" />
-                    <span className="text-[10px] font-mono uppercase tracking-[0.22em] text-muted-lab">Worst Config · RR Sweep</span>
+                    <span className="text-[10px] font-ui uppercase tracking-[0.14em] text-muted-lab">Worst Config · RR Sweep</span>
                 </div>
                 <div className="mt-2 font-display text-[34px] leading-none font-semibold text-[hsl(var(--danger))]">2.0<span className="text-[14px] text-muted-lab ml-1">RR</span></div>
-                <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 font-mono text-[11.5px] mt-3">
+                <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 font-ui text-[11.5px] mt-3">
                     <Stat k="Net R"      v="+26.0R" />
                     <Stat k="Win Rate"   v="39.6%" />
                     <Stat k="Trades"     v="139" />
@@ -228,24 +240,24 @@ function Heatmap() {
     const min = Math.min(...cells.map((c) => c.netR));
     return (
         <div className="overflow-x-auto scrollbar-thin">
-            <table className="font-mono text-[11px] border-separate border-spacing-1">
+            <table className="text-[11px] border-separate border-spacing-1">
                 <thead>
                     <tr>
-                        <th className="text-muted-lab text-left px-2 py-1 text-[10px] uppercase tracking-wider">RR / SB</th>
-                        {sbs.map((sb) => <th key={sb} className="text-muted-lab px-2 py-1 text-[10px] uppercase tracking-wider">{sb.toFixed(1)}</th>)}
+                        <th className="text-muted-lab text-left px-2 py-1 text-[10px] uppercase tracking-wider font-ui">RR / SB</th>
+                        {sbs.map((sb) => <th key={sb} className="text-muted-lab px-2 py-1 text-[10px] uppercase tracking-wider font-ui">{sb.toFixed(1)}</th>)}
                     </tr>
                 </thead>
                 <tbody>
                     {rrs.map((rr) => (
                         <tr key={rr}>
-                            <td className="text-muted-lab px-2 py-1">{rr.toFixed(1)}</td>
+                            <td className="text-muted-lab px-2 py-1 font-num tabular-nums">{rr.toFixed(1)}</td>
                             {sbs.map((sb) => {
                                 const c = cells.find((x) => x.rr === rr && x.sb === sb);
                                 const norm = (c.netR - min) / (max - min);
                                 const hue = Math.round(120 * norm); // green → red gradient
                                 return (
                                     <td key={sb}>
-                                        <div className="clip-bevel-sm px-2 py-1 text-center text-white tabular-nums"
+                                        <div className="clip-bevel-sm px-2 py-1 text-center text-white tabular-nums font-num"
                                              style={{ background: `hsla(${hue}, 70%, 35%, 0.55)`, boxShadow: norm > 0.85 ? "0 0 12px -2px hsl(var(--accent-primary))" : undefined }}>
                                             {c.netR.toFixed(1)}R
                                         </div>

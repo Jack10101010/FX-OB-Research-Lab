@@ -84,7 +84,7 @@ export default function ParityDebugger() {
                         selectedTradeId="diff"
                     />
                     {current && (
-                        <div className="mt-3 grid grid-cols-2 gap-2 font-mono text-[11.5px]">
+                        <div className="mt-3 grid grid-cols-2 gap-2 font-ui text-[11.5px]">
                             <Side label="TradingView" data={[
                                 ["Trade", current.tvTrade],
                                 ["Outcome", current.tvOutcome],
@@ -113,7 +113,7 @@ function Side({ label, data, tone }) {
     const border = tone === "secondary" ? "border-[hsl(var(--accent-secondary)/0.4)]" : "border-[hsl(var(--accent-primary)/0.4)]";
     return (
         <div className={`border ${border} clip-bevel-sm p-2.5 bg-[hsl(var(--panel-2)/0.4)]`}>
-            <div className={`text-[10px] font-mono uppercase tracking-wider ${color}`}>{label}</div>
+            <div className={`text-[10px] font-ui uppercase tracking-wider ${color}`}>{label}</div>
             <div className="mt-1 space-y-0.5">
                 {data.map(([k, v]) => (
                     <div key={k} className="flex justify-between gap-2">
@@ -128,7 +128,7 @@ function Side({ label, data, tone }) {
 function Stat({ k, v }) {
     return (
         <div className="border border-[hsl(var(--border-soft))] clip-bevel-sm px-2 py-1.5">
-            <div className="text-[9.5px] font-mono uppercase tracking-wider text-muted-lab">{k}</div>
+            <div className="text-[9.5px] font-ui uppercase tracking-wider text-muted-lab">{k}</div>
             <div className="text-white text-[12px]">{v}</div>
         </div>
     );

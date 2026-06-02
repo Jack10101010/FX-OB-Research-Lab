@@ -134,7 +134,7 @@ export function DataTable({
                                                 cellPad,
                                                 col.align === "right" && "text-right",
                                                 col.align === "center" && "text-center",
-                                                col.mono === true ? "font-mono" : "font-display",
+                                                col.mono === true ? "font-num" : "font-display",
                                                 "align-middle tabular-nums leading-snug whitespace-nowrap text-[hsl(var(--text-2))]",
                                                 selected && "text-[hsl(var(--text))]",
                                             )}
@@ -180,7 +180,7 @@ export function Pill({ children, tone = "muted", className }) {
 export function ColoredR({ value }) {
     const positive = value >= 0;
     return (
-        <span className={cn("font-mono tabular-nums", positive ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]")}>
+        <span className={cn("font-num tabular-nums", positive ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]")}>
             {positive ? "+" : ""}{Number(value).toFixed(1)}R
         </span>
     );

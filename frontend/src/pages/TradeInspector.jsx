@@ -150,7 +150,7 @@ export default function TradeInspector() {
                     description="Select an imported run to inspect individual trades."
                 />
                 <div className="px-6 py-20 flex flex-col items-center text-center gap-4">
-                    <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-lab">No Imported Run</div>
+                    <div className="font-ui text-[10px] uppercase tracking-[0.14em] text-muted-lab">No Imported Run</div>
                     <p className="text-[13px] text-[hsl(var(--text-2))] max-w-[480px] leading-relaxed">
                         Import a run to inspect individual trades, verify candle mapping, and explore order block geometry.
                     </p>
@@ -188,7 +188,7 @@ export default function TradeInspector() {
                 <div className="px-6 mb-3">
                     <div className="flex items-center gap-2 px-3 py-2 border border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.07)] clip-bevel-sm" data-testid="ti-no-candles-banner">
                         <AlertTriangle className="w-3.5 h-3.5 text-[hsl(var(--warning))]" />
-                        <span className="text-[11px] font-mono uppercase tracking-wider text-[hsl(var(--warning))]">
+                        <span className="text-[11px] font-ui uppercase tracking-wider text-[hsl(var(--warning))]">
                             {candlesInIndexedDb
                                 ? (candleLoadState === "loading" ? "Loading candles from browser storage..." : "Candles are stored in browser storage but are not loaded into this session yet.")
                                 : candlesDroppedAfterReload
@@ -207,7 +207,7 @@ export default function TradeInspector() {
                 <div className="px-6 mb-3">
                     <div className="flex items-center gap-2 px-3 py-2 border border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.07)] clip-bevel-sm" data-testid="ti-mapping-warning">
                         <AlertTriangle className="w-3.5 h-3.5 text-[hsl(var(--warning))]" />
-                        <span className="text-[11px] font-mono uppercase tracking-wider text-[hsl(var(--warning))]">
+                        <span className="text-[11px] font-ui uppercase tracking-wider text-[hsl(var(--warning))]">
                             Trade timestamp mapping degraded · using sequence fallback
                         </span>
                     </div>
@@ -228,7 +228,7 @@ export default function TradeInspector() {
                     </div>
                     <div className="max-h-[520px] overflow-y-auto scrollbar-thin pr-1 space-y-1">
                         {!filtered.length && (
-                            <div className="px-2.5 py-2 text-[11px] font-mono text-muted-lab border border-dashed border-[hsl(var(--border-soft))] clip-bevel-sm">
+                            <div className="px-2.5 py-2 text-[11px] font-ui text-muted-lab border border-dashed border-[hsl(var(--border-soft))] clip-bevel-sm">
                                 No trades in selected variant.
                             </div>
                         )}
@@ -244,11 +244,11 @@ export default function TradeInspector() {
                                             : "border-[hsl(var(--border-soft))] hover:border-[hsl(var(--accent-secondary)/0.5)]"
                                     }`}
                                 >
-                                    <div className="flex items-center justify-between font-mono text-[11px]">
+                                    <div className="flex items-center justify-between font-ui text-[11px]">
                                         <span className="text-white">{displayTradeId(t)} {t.direction}</span>
                                         <ColoredR value={t.r} />
                                     </div>
-                                    <div className="flex items-center justify-between font-mono text-[10px] text-muted-lab mt-0.5">
+                                    <div className="flex items-center justify-between font-ui text-[10px] text-muted-lab mt-0.5">
                                         <span>{t.entry.slice(0, 16)}</span>
                                         <Pill tone={t.outcome === "Win" ? "success" : "danger"}>{t.outcome}</Pill>
                                     </div>
@@ -271,7 +271,7 @@ export default function TradeInspector() {
                     {hasCandles && !supportsExecutionTimeframes && (
                         <div className="mb-2 flex items-center gap-2 px-3 py-2 border border-[hsl(var(--warning)/0.4)] bg-[hsl(var(--warning)/0.06)] clip-bevel-sm">
                             <AlertTriangle className="w-3.5 h-3.5 text-[hsl(var(--warning))]" />
-                            <span className="text-[10.5px] font-mono uppercase tracking-wider text-[hsl(var(--warning))]">
+                            <span className="text-[10.5px] font-ui uppercase tracking-wider text-[hsl(var(--warning))]">
                                 Imported candles are 15m/coarser. 1m/5m execution views unavailable for this run.
                             </span>
                         </div>
@@ -289,7 +289,7 @@ export default function TradeInspector() {
                         showObLabels
                         height={400}
                     />
-                    <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-1.5 font-mono text-[9.5px] uppercase tracking-wider text-muted-lab">
+                    <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-1.5 font-ui text-[9.5px] uppercase tracking-wider text-muted-lab">
                         <DebugCell label="Trade" value={trade ? displayTradeId(trade) : "none"} />
                         <DebugCell label="OB" value={trade ? displayObId(trade) : displayObId(selectedOB) || "none"} />
                         <DebugCell label="OB Found" value={selectedOB ? "yes" : "no"} />
@@ -307,7 +307,7 @@ export default function TradeInspector() {
                             <TabsTrigger value="verify">Verifier</TabsTrigger>
                             <TabsTrigger value="notes">Notes</TabsTrigger>
                         </TabsList>
-                        <TabsContent value="overview" className="text-[11.5px] font-mono text-muted-lab pt-3 leading-relaxed">
+                        <TabsContent value="overview" className="text-[11.5px] font-ui text-muted-lab pt-3 leading-relaxed">
                             {trade ? (
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
                                     <Row k="Trade ID" v={displayTradeId(trade)} />
@@ -319,7 +319,7 @@ export default function TradeInspector() {
                                 </div>
                             ) : "No trade selected for this variant."}
                         </TabsContent>
-                        <TabsContent value="ob" className="text-[11.5px] font-mono pt-3">
+                        <TabsContent value="ob" className="text-[11.5px] font-ui pt-3">
                             {trade ? (
                                 hasOrderBlockData(trade) ? <>
                                     <Row k="OB ID" v={displayObId(trade)} />
@@ -332,7 +332,7 @@ export default function TradeInspector() {
                                 </> : <span className="text-muted-lab">No linked order block data.</span>
                             ) : <span className="text-muted-lab">No order block details.</span>}
                         </TabsContent>
-                        <TabsContent value="exec" className="text-[11.5px] font-mono pt-3">
+                        <TabsContent value="exec" className="text-[11.5px] font-ui pt-3">
                             {trade ? <>
                                 <Row k="Entry" v={`${trade.entry} @ ${trade.entryPrice}`} />
                                 <Row k="Stop" v={String(trade.stop)} />
@@ -362,7 +362,7 @@ export default function TradeInspector() {
 
                 {/* RIGHT: details */}
                 <NeonPanel title="Trade Details" dense>
-                    <div className="space-y-1 font-mono text-[11.5px]">
+                    <div className="space-y-1 font-ui text-[11.5px]">
                         {trade ? <>
                             <Row k="Trade ID" v={displayTradeId(trade)} />
                             <Row k="Raw Trade ID" v={rawTradeId(trade)} />
@@ -402,7 +402,7 @@ function VisualVerifier({ trade, status, selectedOB, selectedMarker, fillMap, ex
         ? null
         : "This trade is not treated as a normal filled trade for chart verification.";
     return (
-        <div className="space-y-3 font-mono text-[11.5px]">
+        <div className="space-y-3 font-ui text-[11.5px]">
             <div className="flex flex-wrap items-center gap-2">
                 <Pill tone={status.tone}>{status.label}</Pill>
                 <Pill tone={mappingQuality === "exact" ? "success" : mappingQuality === "nearest_prior" ? "warning" : "danger"}>

@@ -1285,7 +1285,7 @@ export function CandleChart({
 function OverlayDebugPanel({ info }) {
     const first = info.firstOb || {};
     return (
-        <div className="absolute top-2 left-2 z-20 max-w-[360px] pointer-events-none rounded-sm border border-black/15 bg-white/90 px-2 py-1.5 font-mono text-[9px] leading-snug text-slate-800 shadow-sm">
+        <div className="absolute top-2 left-2 z-20 max-w-[360px] pointer-events-none rounded-sm border border-black/15 bg-white/90 px-2 py-1.5 font-code text-[9px] leading-snug text-slate-800 shadow-sm">
             <div>candles: {info.candleCount} · real times: {String(info.hasRealCandleTime)}</div>
             <div>first/last: {formatDebugTime(info.firstCandleTime)} → {formatDebugTime(info.lastCandleTime)}</div>
             <div>OB recv/drawn/skipped: {info.obCount} / {info.obsDrawn} / {info.obsSkipped}</div>
@@ -1414,7 +1414,7 @@ function OrderBlockOverlay({ ob, debugIndex = 0, debugOverlays = false, showObLa
         >
             {showObLabels && !showObDetails && (
                 <span
-                    className="absolute top-0.5 left-1 text-[8.5px] font-mono px-1 leading-[11px]"
+                    className="absolute top-0.5 left-1 text-[8.5px] font-code px-1 leading-[11px]"
                     style={{ color: visual.label, background: "rgba(255, 255, 255, 0.78)" }}
                 >
                     {orderBlockLabelText(ob, debugOverlays)}
@@ -1426,7 +1426,7 @@ function OrderBlockOverlay({ ob, debugIndex = 0, debugOverlays = false, showObLa
                 const labelColor = visual.label;
                 return (
                     <div
-                        className="absolute right-0 font-mono pointer-events-none"
+                        className="absolute right-0 font-code pointer-events-none"
                         style={{
                             top: ob.height >= 28 ? 2 : -20,
                             right: 2,
@@ -1460,7 +1460,7 @@ function OrderBlockOverlay({ ob, debugIndex = 0, debugOverlays = false, showObLa
             })()}
             {debugOverlays && debugIndex < 3 && (
                 <span
-                    className="absolute left-1/2 top-1/2 text-[10px] font-mono font-bold tracking-wider px-1.5 py-0.5"
+                    className="absolute left-1/2 top-1/2 text-[10px] font-code font-bold tracking-wider px-1.5 py-0.5"
                     style={{
                         transform: "translate(-50%, -50%)",
                         color: "#111827",
@@ -1495,7 +1495,7 @@ function OrderBlockMarker({ marker }) {
         >
             {marker.label && (
                 <span
-                    className="absolute left-1 top-0 whitespace-nowrap font-mono text-[8px] leading-[9px] px-0.5"
+                    className="absolute left-1 top-0 whitespace-nowrap font-code text-[8px] leading-[9px] px-0.5"
                     style={{
                         color,
                         background: "rgba(255,255,255,0.7)",
@@ -1525,7 +1525,7 @@ function TriggeredEdgeLevelLine({ shape }) {
         >
             {shape.label && (
                 <span
-                    className="absolute right-0.5 whitespace-nowrap font-mono text-[7px] leading-[8px] px-0.5"
+                    className="absolute right-0.5 whitespace-nowrap font-ui text-[7px] leading-[8px] px-0.5"
                     style={{
                         top: -8,
                         color: shape.color?.text || "rgba(161, 93, 0, 0.88)",
@@ -1573,7 +1573,7 @@ function TriggeredEdgeBadge({ badge, selected = false, onClick }) {
             }}
         >
             <span
-                className="whitespace-nowrap font-mono leading-[10px] px-1 py-px rounded-sm"
+                className="whitespace-nowrap font-ui leading-[10px] px-1 py-px rounded-sm"
                 style={{
                     fontSize: "7.5px",
                     background: badge.color.bg,
@@ -1699,7 +1699,7 @@ function NewsEventLine({ event, showLabel = false }) {
             />
             {showLabel && (
                 <span
-                    className="absolute left-1 whitespace-nowrap rounded-sm font-mono text-[8px] leading-[9px] px-1 py-0.5"
+                    className="absolute left-1 whitespace-nowrap rounded-sm font-ui text-[8px] leading-[9px] px-1 py-0.5"
                     style={{
                         bottom: event.height + 3,
                         color: color.text,

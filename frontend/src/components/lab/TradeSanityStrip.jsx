@@ -85,14 +85,14 @@ function StatTile({ label, value, tone = "base", hint, zero = false, title }) {
             className="flex flex-col gap-[2px] px-2.5 py-1.5 border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel)/0.45)] clip-bevel-sm min-w-[58px]"
             title={title}
         >
-            <span className="font-mono text-[9px] uppercase tracking-wider leading-none text-[hsl(var(--text-muted))]">
+            <span className="font-ui text-[9px] uppercase tracking-wider leading-none text-[hsl(var(--text-muted))]">
                 {label}
             </span>
-            <span className={`font-mono text-[12px] font-semibold tabular-nums leading-tight ${valueClass}`}>
+            <span className={`font-num text-[12px] font-semibold tabular-nums leading-tight ${valueClass}`}>
                 {value}
             </span>
             {hint && (
-                <span className="font-mono text-[9px] leading-none text-[hsl(var(--text-3))]">
+                <span className="font-ui text-[9px] leading-none text-[hsl(var(--text-3))]">
                     {hint}
                 </span>
             )}
@@ -257,12 +257,12 @@ export function TradeSanityStrip({
             {(title || subtitle) && (
                 <div className="flex flex-col gap-[2px] mr-1 pr-2 border-r border-[hsl(var(--border-soft))]">
                     {title && (
-                        <span className="font-mono text-[9.5px] uppercase tracking-widest text-[hsl(var(--accent-primary))]">
+                        <span className="font-ui text-[9.5px] uppercase tracking-widest text-[hsl(var(--accent-primary))]">
                             {title}
                         </span>
                     )}
                     {subtitle && (
-                        <span className="font-mono text-[10px] text-[hsl(var(--text-2))]">
+                        <span className="font-ui text-[10px] text-[hsl(var(--text-2))]">
                             {subtitle}
                         </span>
                     )}

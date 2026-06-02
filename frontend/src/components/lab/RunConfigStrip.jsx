@@ -32,7 +32,7 @@ function ConfigChip({ label, value, diff = false, className }) {
         <div
             className={cn(
                 "inline-flex items-center gap-1 h-[22px] px-2 rounded-[3px]",
-                "border text-[10px] font-mono leading-none shrink-0 transition-colors",
+                "border text-[10px] font-ui leading-none shrink-0 transition-colors",
                 diff
                     ? "border-[hsl(var(--warning)/0.55)] bg-[hsl(var(--warning)/0.08)] text-[hsl(var(--warning))]"
                     : "border-[hsl(210_70%_55%/0.35)] bg-[hsl(210_70%_55%/0.06)] text-[hsl(210_80%_72%)]",
@@ -244,7 +244,7 @@ export function ComparisonConfigStrip({ runs, className }) {
                                 );
                             })}
                             {!chips.length && (
-                                <span className="text-[10px] font-mono text-[hsl(var(--text-3))]">No config available</span>
+                                <span className="text-[10px] font-ui text-[hsl(var(--text-3))]">No config available</span>
                             )}
                         </div>
                     </div>
