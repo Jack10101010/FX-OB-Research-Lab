@@ -1,5 +1,12 @@
 // Real metric calculations derived from full trade/equity data.
 // Returns null when input data is insufficient — DO NOT fabricate.
+//
+// @deprecated (Phase RB-8a) — superseded by data/resultsBasis.js
+//   (summarizeTrades / toCanonicalSummaryRow). This is the last copy of the
+//   legacy roll-up math and is retained ONLY because ComparisonLab still
+//   imports computeProfitFactor / computeMaxDrawdown. Full retirement happens
+//   in RB-8d when ComparisonLab migrates to resultsBasis. Do NOT add new
+//   consumers — use resultsBasis.summarizeTrades instead.
 
 export function computeProfitFactor(trades) {
     if (!Array.isArray(trades) || trades.length === 0) return null;

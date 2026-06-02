@@ -7,11 +7,25 @@
 
 import { useEffect, useState } from "react";
 import * as defaults from "./mock";
-import { saveCandles, loadCandles, deleteCandles } from "./artifactStore";
+import {
+    saveCandles,
+    loadCandles,
+    deleteCandles,
+    saveRunBundle as idbSaveRunBundle,
+    loadRunBundle as idbLoadRunBundle,
+    deleteRunBundle as idbDeleteRunBundle,
+    listRunBundleIds as idbListRunBundleIds,
+    listCandleRunIds as idbListCandleRunIds,
+} from "./artifactStore";
 import { buildTradesByObId, deriveOBLifecycle } from "./obLifecycle";
 import { ingestRunBundle } from "./importer";
 import { getRunBundleByRunId, getRunCandlesByRunId } from "./sidecarClient";
 import { summarizeTradeClassifications } from "./tradeClassification";
+// Phase RB-1 — Results Basis foundation. The store owns the canonical
+// `resultsBasis` + `accountSettings` slices (the "how are trades measured?"
+// axis). Account-config normalization is reused from the existing compounding
+// engine so defaults match RunDetail exactly.
+import { normalizeAccountSettings } from "../components/lab/account/accountEquity";
 // Phase 2A — shared store-level trade universe resolver. Pages that want a
 // named, scenario-aware trade list (with stats, source filename, warnings,
 // baseline reference) should call `getTradeUniverse(runId, scenarioOverride)`
@@ -29,6 +43,12 @@ const LS_PROJECTS = "fxob_projects";
 const LS_ACTIVE = "fxob_active_run_id";
 const LS_ACTIVE_PROJECT = "fxob_active_project_id";
 const LS_SCENARIO = "fxob_scenario_v1";
+// Phase RB-1 — Results Basis + Account Settings persistence.
+const LS_RESULTS_BASIS = "fxob_results_basis_v1";
+const LS_ACCOUNT_SETTINGS = "fxob_account_settings_v1";
+// Legacy RunDetail account-view key. Read once for a non-destructive migration
+// into LS_ACCOUNT_SETTINGS; intentionally NOT deleted in this phase.
+const LS_LEGACY_ACCOUNT_SETTINGS = "fxob_account_view_settings_v1";
 
 function loadPersistedRuns() {
     const indexedRuns = loadIndexedRuns();
@@ -128,6 +148,40 @@ function loadPersistedScenario(fallbackRunId) {
     return { ...DEFAULT_SCENARIO, runId: fallbackRunId || null };
 }
 
+// ── Results Basis + Account Settings (Phase RB-1) ──────────────────────────
+// "Results Basis" answers HOW trades are measured (Raw R vs Current Equity).
+// Defaults to "raw_r" so nothing about visible analytics changes in this phase.
+function loadPersistedResultsBasis() {
+    try {
+        const raw = localStorage.getItem(LS_RESULTS_BASIS);
+        if (raw === "raw_r" || raw === "current_equity") return raw;
+    } catch { /* fall through */ }
+    return "raw_r";
+}
+
+// Account settings default to normalizeAccountSettings() — the SAME defaults
+// RunDetail uses (mode "r_only", $10,000, 1%, USD). Includes a one-time,
+// non-destructive migration from RunDetail's legacy localStorage key.
+function loadPersistedAccountSettings() {
+    try {
+        const existing = localStorage.getItem(LS_ACCOUNT_SETTINGS);
+        if (existing != null) {
+            return normalizeAccountSettings(safeJsonParse(existing, {}));
+        }
+        // Migration: adopt RunDetail's prior account-view settings if present.
+        const legacy = localStorage.getItem(LS_LEGACY_ACCOUNT_SETTINGS);
+        if (legacy != null) {
+            const migrated = normalizeAccountSettings(safeJsonParse(legacy, {}));
+            try {
+                localStorage.setItem(LS_ACCOUNT_SETTINGS, JSON.stringify(migrated));
+            } catch { /* persistence is best-effort */ }
+            // NOTE: legacy key is intentionally left in place this phase.
+            return migrated;
+        }
+    } catch { /* fall through */ }
+    return normalizeAccountSettings();
+}
+
 let state = {
     ...defaults,
     runs: loadPersistedRuns(),
@@ -137,6 +191,10 @@ let state = {
     selectedTradeVariant: null,
     // Structured scenario — the canonical answer to "what is the Strategy Map showing?"
     scenario: loadPersistedScenario((() => { try { return localStorage.getItem(LS_ACTIVE) || null; } catch { return null; } })()),
+    // Results Basis axis (Phase RB-1) — HOW trades are measured. No page reads
+    // these yet; they default to current behavior (Raw R).
+    resultsBasis: loadPersistedResultsBasis(),
+    accountSettings: loadPersistedAccountSettings(),
     persistWarning: null,
     candlePersistenceNotice: null,
     autoReloadStatus: {},
@@ -724,44 +782,6 @@ function summaryForVariant(summary, trades, variant) {
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-// ─────────────────── Real-data analytics helpers ───────────────────
-// These replace mock fallbacks in buildDerived(). They return empty arrays
-// when called with no trades — callers render honest empty states.
-
-function computeMonthly(trades) {
-    if (!trades?.length) return [];
-    const map = {};
-    trades.forEach((t) => {
-        const date = t.entry ? new Date(t.entry) : null;
-        if (!date || !isFinite(date.getTime())) return;
-        const year = date.getUTCFullYear();
-        const month = date.getUTCMonth();
-        const key = `${year}-${String(month + 1).padStart(2, "0")}`;
-        const m = `${MONTHS[month]} '${String(year).slice(-2)}`;
-        if (!map[key]) map[key] = { key, m, v: 0 };
-        map[key].v += Number(t.r) || 0;
-    });
-    return Object.values(map)
-        .sort((a, b) => a.key.localeCompare(b.key))
-        .map((entry) => ({ m: entry.m, v: Number(entry.v.toFixed(2)) }));
-}
-
-function computeRDist(trades) {
-    if (!trades?.length) return [];
-    const bins = {};
-    trades.forEach((t) => {
-        const r = Number(t.r);
-        if (!isFinite(r)) return;
-        const bin = Math.round(r * 2) / 2; // 0.5R buckets
-        const label = `${bin >= 0 ? "+" : ""}${bin.toFixed(1)}R`;
-        if (!bins[label]) bins[label] = { bucket: label, count: 0, _r: bin };
-        bins[label].count += 1;
-    });
-    return Object.values(bins)
-        .sort((a, b) => a._r - b._r)
-        .map(({ bucket, count }) => ({ bucket, count }));
-}
-
 // Safe sentinel used when no run is active — all numeric fields default to 0.
 const EMPTY_RUN = {
     id: null,
@@ -946,14 +966,15 @@ function buildDerived() {
         TRADE_MARKERS: active ? activeVariantData.tradeMarkers : [],
         EQUITY_CURVE:  active ? activeVariantData.equityCurve  : [],
         ACTIVE_RUN:    activeSummary || EMPTY_RUN,
-        // Computed analytics — derived from real trades; empty when no active run
-        MONTHLY:  computeMonthly(activeTrades),
-        R_DIST:   computeRDist(activeTrades),
         SWEEP_RR: [], // sweep data is not stored in bundles; SweepLab owns its own state
         ACTIVE_TRADE_VARIANT: activeVariantData?.variant || null,
         AVAILABLE_TRADE_VARIANTS: activeVariantData?.variants || [],
         // Structured scenario — canonical selection driving Strategy Map overlays.
         SCENARIO: state.scenario,
+        // Results Basis axis (Phase RB-1) — exposed for future consumers; no
+        // page reads these yet, so this is inert.
+        RESULTS_BASIS: state.resultsBasis,
+        ACCOUNT_SETTINGS: state.accountSettings,
         ACTIVE_PROJECT: activeProject,
         PROJECTS: projectList(),
         RUNS: importedList,
@@ -1034,6 +1055,195 @@ export function getRunsBackupPayload() {
         projects: state.projects,
         runs: state.runs,
     };
+}
+
+// ── Storage diagnostics (Phase SP-3, read-only) ─────────────────────────────
+// Synchronous snapshot of what the in-memory store + localStorage manifest hold.
+// Pairs with getIndexedDbDiagnostics() for the async IndexedDB side. Performs no
+// writes or deletes.
+export function getStorageDiagnostics() {
+    const runs = Object.values(state.runs);
+    const perRun = runs.map((r) => {
+        const memoryFull = bundleHasFullData(r);
+        const storageMode = r.storageMode || (memoryFull ? "memory_full" : "index_only");
+        return {
+            id: r.id,
+            displayName: getRunDisplayName(r),
+            memoryFull,
+            storageMode,
+            indexOnly: !memoryFull,
+            reloadAvailable: Boolean(r.reloadAvailable),
+            candlesInMemory: Array.isArray(r.candles) && r.candles.length > 0,
+            hasCandlesMeta: Boolean(r.hasCandles || r.candlesStorage),
+            candlesStorage: r.candlesStorage || "",
+            candleCount: r.candleCount ?? r.summary?.candleCount ?? 0,
+            isActive: r.id === state.activeRunId,
+        };
+    });
+    const activeRun = state.activeRunId ? perRun.find((r) => r.id === state.activeRunId) : null;
+    return {
+        indexCount: runs.length,
+        memoryFullCount: perRun.filter((r) => r.memoryFull).length,
+        indexOnlyCount: perRun.filter((r) => !r.memoryFull).length,
+        hydratedCount: perRun.filter((r) => r.storageMode === "indexeddb_full").length,
+        activeRunId: state.activeRunId,
+        activeRunStorageMode: activeRun?.storageMode || "none",
+        runs: perRun,
+    };
+}
+
+// Async IndexedDB diagnostics — record KEYS/counts only (never loads the heavy
+// candle arrays). Degrades gracefully if IndexedDB is unavailable or errors.
+export async function getIndexedDbDiagnostics() {
+    const [bundleIds, candleIds] = await Promise.all([
+        idbListRunBundleIds().catch(() => null),
+        idbListCandleRunIds().catch(() => null),
+    ]);
+    const available = bundleIds !== null || candleIds !== null;
+    return {
+        available,
+        bundleIds: bundleIds || [],
+        candleIds: candleIds || [],
+        bundleCount: (bundleIds || []).length,
+        candleCount: (candleIds || []).length,
+    };
+}
+
+// ── Backup restore (Phase SP-1) ─────────────────────────────────────────────
+// Companion to getRunsBackupPayload(). Non-destructive by default: merges the
+// backup's runs/projects into the in-memory store WITHOUT wiping existing data,
+// skips id collisions, preserves reload identifiers, and persists the run index
+// + projects afterwards. Does NOT change the index-only persistence model — full
+// run data restored from the backup stays in memory for the session exactly like
+// a fresh import (the lightweight index is what survives a refresh).
+function coerceBackupRuns(runs) {
+    if (!runs) return null;
+    if (Array.isArray(runs)) {
+        const map = {};
+        for (const run of runs) {
+            const id = run?.id || run?.summary?.id;
+            if (id) map[id] = run;
+        }
+        return map;
+    }
+    if (typeof runs === "object") return runs;
+    return null;
+}
+
+function normalizeRestoredRun(id, bundle) {
+    const reloadMeta = reloadMetadataForRun(bundle);
+    return {
+        ...bundle,
+        id,
+        // Preserve reload identifiers so index-only restores can still rehydrate
+        // from the sidecar after a refresh.
+        originalRunId: bundle.originalRunId || reloadMeta.originalRunId,
+        sidecarJobId: bundle.sidecarJobId || reloadMeta.sidecarJobId,
+        sidecarRunId: bundle.sidecarRunId || reloadMeta.sidecarRunId,
+        outputFolder: bundle.outputFolder || reloadMeta.outputFolder,
+        sourceOutputFolder: bundle.sourceOutputFolder || reloadMeta.sourceOutputFolder,
+        folderName: bundle.folderName || reloadMeta.folderName,
+        reloadAvailable: bundle.reloadAvailable ?? hasReloadIdentifier(reloadMeta),
+        // Defensive shape — keep full data when present, default to empty so the
+        // derived view never crashes on a partial/index-only backup entry.
+        trades: Array.isArray(bundle.trades) ? bundle.trades : [],
+        tradesByVariant: bundle.tradesByVariant && typeof bundle.tradesByVariant === "object" ? bundle.tradesByVariant : {},
+        equityCurve: Array.isArray(bundle.equityCurve) ? bundle.equityCurve : [],
+        equityCurveByVariant: bundle.equityCurveByVariant && typeof bundle.equityCurveByVariant === "object" ? bundle.equityCurveByVariant : {},
+        tradeMarkers: Array.isArray(bundle.tradeMarkers) ? bundle.tradeMarkers : [],
+        tradeMarkersByVariant: bundle.tradeMarkersByVariant && typeof bundle.tradeMarkersByVariant === "object" ? bundle.tradeMarkersByVariant : {},
+        orderBlocks: Array.isArray(bundle.orderBlocks) ? bundle.orderBlocks : [],
+        candles: Array.isArray(bundle.candles) ? bundle.candles : (bundle.candles ?? null),
+        importedAt: bundle.importedAt || bundle.summary?.importedAt || new Date().toISOString(),
+        summary: { ...(bundle.summary || {}), id },
+    };
+}
+
+/**
+ * Import a backup produced by getRunsBackupPayload().
+ * @param {object} payload  Parsed backup JSON.
+ * @param {{ overwriteExisting?: boolean }} [options]
+ * @returns {{ ok, error?, imported, skipped, projectsImported, warnings }}
+ */
+export function importRunsBackup(payload, options = {}) {
+    const { overwriteExisting = false } = options;
+    const fail = (error) => ({ ok: false, error, imported: 0, skipped: 0, projectsImported: 0, warnings: [] });
+
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+        return fail("Backup file is not a valid object.");
+    }
+    if (Number(payload.version) !== 1) {
+        return fail(`Unsupported backup version: ${payload.version ?? "unknown"}. Expected version 1.`);
+    }
+    const incomingRuns = coerceBackupRuns(payload.runs);
+    if (!incomingRuns) {
+        return fail("Backup is missing a valid `runs` map/array.");
+    }
+
+    const warnings = [];
+    let imported = 0;
+    let skipped = 0;
+    const nextRuns = { ...state.runs };
+    for (const [id, bundle] of Object.entries(incomingRuns)) {
+        if (!id || !bundle || typeof bundle !== "object") {
+            warnings.push(`Skipped malformed run entry "${id}".`);
+            skipped += 1;
+            continue;
+        }
+        if (nextRuns[id] && !overwriteExisting) {
+            skipped += 1;
+            continue;
+        }
+        const restored = normalizeRestoredRun(id, bundle);
+        nextRuns[id] = restored;
+        imported += 1;
+        // SP-2: if the backup carried full data, persist it to IndexedDB so it
+        // survives a later refresh. Stubs are skipped inside persistRunBundleToIdb.
+        persistRunBundleToIdb(id, restored);
+    }
+
+    // Merge projects (non-destructive: keep existing, add only new ids).
+    let projectsImported = 0;
+    const nextProjects = { ...state.projects };
+    const incomingProjects = payload.projects && typeof payload.projects === "object" && !Array.isArray(payload.projects)
+        ? payload.projects
+        : {};
+    for (const [pid, project] of Object.entries(incomingProjects)) {
+        if (!pid || !project || typeof project !== "object") continue;
+        if (nextProjects[pid]) continue;
+        nextProjects[pid] = project;
+        projectsImported += 1;
+    }
+
+    state = { ...state, runs: nextRuns, projects: nextProjects };
+
+    // Set a useful active run only if none is currently valid.
+    const currentValid = state.activeRunId && state.runs[state.activeRunId];
+    if (!currentValid) {
+        const desired = (payload.activeRunId && state.runs[payload.activeRunId])
+            ? payload.activeRunId
+            : chooseFallbackRunId();
+        if (desired) {
+            state = {
+                ...state,
+                activeRunId: desired,
+                selectedTradeVariant: selectedVariantFor(state.runs[desired]),
+                scenario: { ...DEFAULT_SCENARIO, runId: desired },
+            };
+            try { localStorage.setItem(LS_ACTIVE, desired); } catch { /* noop */ }
+        }
+    }
+    // Adopt the backup's active project only if none is set locally.
+    if (!state.activeProjectId && payload.activeProjectId && state.projects[payload.activeProjectId]) {
+        state = { ...state, activeProjectId: payload.activeProjectId };
+        try { localStorage.setItem(LS_ACTIVE_PROJECT, payload.activeProjectId); } catch { /* noop */ }
+    }
+
+    persistRuns();
+    persistProjects();
+    persistScenario();
+    notify();
+    return { ok: true, imported, skipped, projectsImported, warnings };
 }
 
 export function setActiveRunId(runId) {
@@ -1176,6 +1386,40 @@ export function updateResearchProject(projectId, patch) {
     notify();
 }
 
+// WF-4: append a single research finding to a project. Reuses the existing
+// findings model so notes captured from Run Workspace render identically in
+// ProjectDetail. Returns the created entry, or null when the project/input is
+// invalid. Persisted via updateResearchProject → persistProjects().
+export function addProjectFinding(projectId, finding = {}) {
+    if (!projectId || !state.projects[projectId]) return null;
+    const cleanTitle = String(finding.title || "").trim();
+    const cleanNote = String(finding.note || "").trim();
+    if (!cleanTitle && !cleanNote) return null;
+    const current = state.projects[projectId];
+    const entry = {
+        id: `finding_${Date.now()}`,
+        type: finding.type || "finding",
+        title: cleanTitle || "Finding",
+        note: cleanNote,
+        sourceRunId: finding.sourceRunId || finding.runId || "",
+        createdAt: new Date().toISOString(),
+        // Metadata (ignored by existing renderers, available to future Insights).
+        source: finding.source || "run_workspace",
+        runId: finding.runId || finding.sourceRunId || "",
+        ...(finding.tag ? { tag: finding.tag } : {}),
+        // Optional context pass-through (e.g. Table Compare). Only stored when
+        // provided; existing renderers ignore unknown keys.
+        ...(finding.comparedRunId ? { comparedRunId: finding.comparedRunId } : {}),
+        ...(finding.table ? { table: finding.table } : {}),
+        ...(finding.bucket ? { bucket: finding.bucket } : {}),
+        ...(finding.meta && typeof finding.meta === "object" ? { meta: finding.meta } : {}),
+    };
+    updateResearchProject(projectId, {
+        findings: [entry, ...(current.findings || [])],
+    });
+    return entry;
+}
+
 export function assignRunToProject(runId, projectId, metadata = {}) {
     if (!runId || !state.runs[runId] || !projectId || !state.projects[projectId]) return;
     const currentRun = state.runs[runId];
@@ -1282,6 +1526,27 @@ export function setScenario(patch) {
     notify();
 }
 
+// ── Results Basis setters (Phase RB-1) ─────────────────────────────────────
+// Same pattern as setScenario: mutate the slice, persist, notify. No consumer
+// reads these yet, so calling them is inert beyond persistence.
+export function setResultsBasis(basis) {
+    const next = basis === "current_equity" ? "current_equity" : "raw_r";
+    if (next === state.resultsBasis) return;
+    state = { ...state, resultsBasis: next };
+    persistResultsBasis();
+    notify();
+}
+
+export function setAccountSettings(patch) {
+    if (!patch || typeof patch !== "object") return;
+    state = {
+        ...state,
+        accountSettings: normalizeAccountSettings({ ...state.accountSettings, ...patch }),
+    };
+    persistAccountSettings();
+    notify();
+}
+
 /**
  * Switch to a different run. Resets family / positionVariant / threshold /
  * fillMode to null so Phase 2+ selectors can derive clean defaults for the
@@ -1357,6 +1622,9 @@ export function addRunBundle(bundle) {
     persistRuns();
     persistScenario();
     notify();
+    // SP-2: mirror the full bundle into IndexedDB so a refresh restores it
+    // without the sidecar. Non-blocking; candles are stripped (stored separately).
+    persistRunBundleToIdb(id, nextBundle);
     return nextBundle;
 }
 
@@ -1431,6 +1699,9 @@ export function replaceRunBundleData(runId, bundle) {
     persistRuns();
     persistScenario();
     notify();
+    // SP-2: persist the refreshed full bundle (e.g. after a sidecar reload) so
+    // subsequent refreshes hydrate from IndexedDB instead of re-hitting the sidecar.
+    persistRunBundleToIdb(runId, nextBundle);
     return nextBundle;
 }
 
@@ -1699,6 +1970,9 @@ export function updateRunBundle(runId, patch) {
 export function deleteRunBundle(id) {
     if (!state.runs[id]) return;
     deleteCandles(id).catch(() => {});
+    // SP-2: also drop the persisted full bundle from IndexedDB.
+    idbDeleteRunBundle(id).catch(() => {});
+    IDB_BUNDLE_SESSION_SAVED.delete(id);
     try { localStorage.removeItem(runStorageKey(id)); } catch { /* noop */ }
     const next = { ...state.runs };
     delete next[id];
@@ -1738,7 +2012,12 @@ export function removeRunBundle(id) {
 }
 
 export function clearAllRuns() {
-    Object.keys(state.runs).forEach((id) => deleteCandles(id).catch(() => {}));
+    Object.keys(state.runs).forEach((id) => {
+        deleteCandles(id).catch(() => {});
+        // SP-2: also drop persisted full bundles from IndexedDB.
+        idbDeleteRunBundle(id).catch(() => {});
+        IDB_BUNDLE_SESSION_SAVED.delete(id);
+    });
     cleanupLegacyRunKeys();
     const nextProjects = Object.fromEntries(Object.entries(state.projects).map(([projectId, project]) => [
         projectId,
@@ -1836,4 +2115,120 @@ function persistScenario() {
     } catch {
         // Scenario is non-critical; session state is authoritative.
     }
+}
+
+function persistResultsBasis() {
+    try {
+        localStorage.setItem(LS_RESULTS_BASIS, state.resultsBasis);
+    } catch {
+        // Results Basis is non-critical; session state is authoritative.
+    }
+}
+
+function persistAccountSettings() {
+    try {
+        localStorage.setItem(LS_ACCOUNT_SETTINGS, JSON.stringify(state.accountSettings));
+    } catch {
+        // Account settings are non-critical display prefs.
+    }
+}
+
+// ── IndexedDB full-run-bundle persistence (Phase SP-2) ──────────────────────
+// localStorage keeps an index-only manifest (unchanged). The full bundle —
+// trades, variants, equity curves, order blocks, entry/protection results —
+// is mirrored into the IndexedDB `runs` store so a refresh on the same origin
+// restores full data without the sidecar. Candle arrays are intentionally NOT
+// duplicated here (they live in the `candles` store and rehydrate separately).
+const IDB_BUNDLE_SESSION_SAVED = new Set();
+
+function bundleHasFullData(run) {
+    if (!run) return false;
+    return Boolean(
+        (Array.isArray(run.trades) && run.trades.length)
+        || Object.values(run.tradesByVariant || {}).some((t) => Array.isArray(t) && t.length)
+        || Object.values(run.entryResults?.tradesByMode || {}).some((t) => Array.isArray(t) && t.length)
+        || Object.values(run.protectionResults?.tradesByMode || {}).some((t) => Array.isArray(t) && t.length)
+        || (Array.isArray(run.orderBlocks) && run.orderBlocks.length)
+    );
+}
+
+// Drop the heavy candle array before persisting — candles are stored/rehydrated
+// via the separate `candles` object store. Candle metadata fields are retained.
+function stripBundleForIdb(bundle) {
+    if (!bundle || typeof bundle !== "object") return bundle;
+    return { ...bundle, candles: null };
+}
+
+function persistRunBundleToIdb(runId, bundle) {
+    if (!runId || !bundle) return;
+    // Only persist bundles that carry full data; index-only stubs add nothing
+    // and would overwrite a previously-saved full bundle with an empty one.
+    if (!bundleHasFullData(bundle)) return;
+    idbSaveRunBundle(runId, stripBundleForIdb(bundle))
+        .then(() => { IDB_BUNDLE_SESSION_SAVED.add(runId); })
+        .catch((e) => {
+            // Non-blocking: memory + localStorage index already hold the run.
+            state = {
+                ...state,
+                candlePersistenceNotice: `Run kept in memory; IndexedDB bundle save failed for ${runId}: ${e?.message || e}.`,
+            };
+            notify();
+        });
+}
+
+let __idbHydrationDone = false;
+
+// Boot hydration: after loadIndexedRuns() restored index-only stubs, pull full
+// bundles from IndexedDB and merge them in. Skips runs that already have full
+// data in memory (just imported, or already reloaded from the sidecar) so it
+// never clobbers fresher data. Active run/project/scenario are left untouched —
+// only the runs map is enriched — and a single notify() re-renders subscribers.
+async function hydrateRunsFromIndexedDB() {
+    if (__idbHydrationDone) return;
+    __idbHydrationDone = true;
+    const ids = Object.keys(state.runs);
+    if (!ids.length) return;
+    let changed = false;
+    for (const id of ids) {
+        const current = state.runs[id];
+        if (!current || bundleHasFullData(current)) continue;
+        let record = null;
+        try {
+            record = await idbLoadRunBundle(id);
+        } catch {
+            record = null;
+        }
+        const saved = record?.bundle;
+        if (!saved || !bundleHasFullData(saved)) continue;
+        // Re-check liveness — state may have moved on during the await.
+        const live = state.runs[id];
+        if (!live || bundleHasFullData(live)) continue;
+        const merged = {
+            ...saved,
+            id,
+            // Candles rehydrate separately; preserve any already loaded into memory.
+            candles: live.candles ?? null,
+            displayName: live.displayName || saved.displayName,
+            name: live.name || saved.name,
+            projectId: live.projectId ?? saved.projectId,
+            runRole: live.runRole || saved.runRole,
+            experimentType: live.experimentType || saved.experimentType,
+            reloadAvailable: live.reloadAvailable ?? saved.reloadAvailable ?? false,
+            hasFullData: true,
+            storageMode: "indexeddb_full",
+            indexOnly: false,
+            summary: { ...(saved.summary || {}), id },
+        };
+        state = { ...state, runs: { ...state.runs, [id]: merged } };
+        IDB_BUNDLE_SESSION_SAVED.add(id);
+        changed = true;
+    }
+    if (changed) notify();
+}
+
+// Kick off boot hydration immediately but non-blocking. The synchronous initial
+// state already holds index-only stubs, so the app renders right away; full
+// bundles merge in as they load.
+if (typeof window !== "undefined") {
+    Promise.resolve().then(() => hydrateRunsFromIndexedDB().catch(() => { /* best-effort */ }));
 }
