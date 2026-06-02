@@ -1,18 +1,19 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { LabRunHero } from "@/components/lab/LabRunHero";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { MetricChip } from "@/components/lab/MetricChip";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
 import { NeonSelect, NeonButton } from "@/components/lab/controls";
-import { getRunDisplayName, compactTimeframe, useDataset } from "@/data/store";
+import { getRunDisplayName, compactTimeframe, useDataset, addProjectFinding } from "@/data/store";
 import { useTradeUniverse } from "@/data/useTradeUniverse";
 import { TradeUniverseBadge } from "@/components/lab/TradeUniverseBadge";
 // RB-8d: canonical Results Basis summaries replace the deprecated lib/metrics.
 import { toCanonicalSummaryRow, maxDrawdownFromCurve } from "@/data/resultsBasis";
 import { useResultsLens } from "@/data/useResultsLens";
 import { evaluateCompare } from "@/data/useCompareGuard";
-import { Plus, X, Trophy, Crown } from "lucide-react";
+import { buildResearchFindingPayload } from "@/data/projectWorkflow";
+import { Plus, X, Trophy, Crown, FileText, Check } from "lucide-react";
 import {
     AreaChart, Area, BarChart, Bar, ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
 } from "recharts";
@@ -33,8 +34,91 @@ const PALETTE = [
 // missing-scenario fallbacks, etc.).
 const BASELINE_SCENARIO_OVERRIDE = Object.freeze({ family: "baseline" });
 
+// COCKPIT-2A — explainable winner. Pure: scores runs across directional metrics
+// using values the page already computes (no new analytics). All five use
+// "higher wins" — for Max DD the values are ≤ 0 R, so less-negative (higher)
+// is the improvement. A metric is only awarded when there is a single clear
+// winner; null/undefined/non-finite values are skipped. Overall winner = most
+// metric wins, tie-broken by Net R; falls back to the pure Net R winner when no
+// metric produces a clear leader.
+const WINNER_METRICS = [
+    { key: "netR",       label: "Net R" },
+    { key: "winRate",    label: "Win Rate" },
+    { key: "pf",         label: "Profit Factor" },
+    { key: "maxDd",      label: "Max DD" },
+    { key: "validation", label: "Validation" },
+];
+
+function netROrNegInf(row) {
+    const v = Number(row?.netR);
+    return Number.isFinite(v) ? v : -Infinity;
+}
+
+function computeExplainableWinner(metricRows) {
+    const n = Array.isArray(metricRows) ? metricRows.length : 0;
+    if (n === 0) {
+        return { winnerIdx: 0, winnerLabels: [], winnerWinCount: 0, totalMetrics: WINNER_METRICS.length, otherLeads: [], smallSample: false, winnerTrades: null, maxTrades: 0 };
+    }
+
+    const winsCount = new Array(n).fill(0);
+    const metricWinnerByKey = {};
+    for (const m of WINNER_METRICS) {
+        let bestIdx = -1, bestVal = -Infinity, tie = false;
+        for (let i = 0; i < n; i += 1) {
+            const v = Number(metricRows[i]?.[m.key]);
+            if (!Number.isFinite(v)) continue;            // skip null/undefined/NaN
+            if (v > bestVal) { bestVal = v; bestIdx = i; tie = false; }
+            else if (v === bestVal) { tie = true; }       // shared best → no clear winner
+        }
+        if (bestIdx >= 0 && !tie) {
+            winsCount[bestIdx] += 1;
+            metricWinnerByKey[m.key] = bestIdx;
+        }
+    }
+
+    const anyWins = winsCount.some((c) => c > 0);
+    let winnerIdx = 0;
+    if (anyWins) {
+        let bestScore = -1, bestNetR = -Infinity;
+        for (let i = 0; i < n; i += 1) {
+            const score = winsCount[i];
+            const netR = netROrNegInf(metricRows[i]);
+            if (score > bestScore || (score === bestScore && netR > bestNetR)) {
+                bestScore = score; bestNetR = netR; winnerIdx = i;
+            }
+        }
+    } else {
+        // Fallback: pure Net R winner (preserves prior behavior).
+        winnerIdx = metricRows.reduce(
+            (best, _r, i, all) => (netROrNegInf(all[i]) > netROrNegInf(all[best]) ? i : best),
+            0,
+        );
+    }
+
+    const winnerLabels = WINNER_METRICS.filter((m) => metricWinnerByKey[m.key] === winnerIdx).map((m) => m.label);
+    const otherLeads = WINNER_METRICS
+        .filter((m) => metricWinnerByKey[m.key] != null && metricWinnerByKey[m.key] !== winnerIdx)
+        .map((m) => ({ idx: metricWinnerByKey[m.key], label: m.label }));
+
+    const tradeCounts = metricRows.map((r) => Number(r?.trades)).filter(Number.isFinite);
+    const maxTrades = tradeCounts.length ? Math.max(...tradeCounts) : 0;
+    const winnerTrades = Number(metricRows[winnerIdx]?.trades);
+    const smallSample = Number.isFinite(winnerTrades) && maxTrades > 0 && winnerTrades < 0.5 * maxTrades;
+
+    return {
+        winnerIdx,
+        winnerLabels,
+        winnerWinCount: winsCount[winnerIdx],
+        totalMetrics: WINNER_METRICS.length,
+        otherLeads,
+        smallSample,
+        winnerTrades: Number.isFinite(winnerTrades) ? winnerTrades : null,
+        maxTrades,
+    };
+}
+
 export default function ComparisonLab() {
-    const { RUNS, EQUITY_CURVE, TRADES, ACTIVE_RUN, getRunData } = useDataset();
+    const { RUNS, EQUITY_CURVE, TRADES, ACTIVE_RUN, ACTIVE_PROJECT, getRunData } = useDataset();
     // Phase 3B-3 — ComparisonLab is intentionally baseline-only. We resolve
     // the baseline universe via useTradeUniverse with an explicit override so
     // the TradeUniverseBadge shows the unprotected reference source even when
@@ -186,7 +270,75 @@ export default function ComparisonLab() {
         { key: "validation",    label: "Validation",       fmt: (v) => v != null ? `${Number(v).toFixed(1)}%` : "—", delta: (v, base) => v != null && base != null ? `${v - base >= 0 ? "+" : ""}${(v - base).toFixed(1)}%` : "—", posIfGreater: true },
     ];
 
-    const winnerIdx = runs.length > 0 ? runs.reduce((best, r, i, all) => (r.netR > all[best].netR ? i : best), 0) : 0;
+    // COCKPIT-2A — explainable winner from existing per-run values (no new analytics).
+    const winnerInfo = computeExplainableWinner(
+        runs.map((r) => ({
+            netR: r?.netR,
+            winRate: wrOf(r),
+            pf: runMetrics(r).pf,
+            maxDd: runMetrics(r).maxDd,
+            validation: r?.validation,
+            trades: r?.trades,
+        })),
+    );
+    const winnerIdx = runs.length > 0 ? winnerInfo.winnerIdx : 0;
+    const winnerOtherLeadText = (() => {
+        const groups = {};
+        winnerInfo.otherLeads.forEach((o) => { (groups[o.idx] = groups[o.idx] || []).push(o.label); });
+        return Object.entries(groups)
+            .map(([idx, labels]) => `Run ${PALETTE[Number(idx) % PALETTE.length].short} leads ${labels.join(" & ")}`)
+            .join("; ");
+    })();
+
+    // COCKPIT-2B — Save the comparison verdict as a project finding (reuses the
+    // shared findings loop; no new findings system). Target project resolves from
+    // the baseline run, else any selected run, else the active run / project.
+    const targetProjectId =
+        runs[0]?.projectId
+        || runs.find((r) => r?.projectId)?.projectId
+        || ACTIVE_RUN?.projectId
+        || ACTIVE_PROJECT?.id
+        || null;
+    const [comparisonSaved, setComparisonSaved] = useState(false);
+    // Reset the saved marker when the selected runs or the winner change.
+    useEffect(() => { setComparisonSaved(false); }, [ids, winnerIdx]);
+
+    const handleSaveComparison = () => {
+        const winnerRun = runs[winnerIdx];
+        const baselineRun = runs[0];
+        if (!targetProjectId || comparisonSaved || !winnerRun) return;
+        const winnerShort = PALETTE[winnerIdx % PALETTE.length].short;
+        const leadsText = winnerInfo.winnerWinCount > 0
+            ? `leads ${winnerInfo.winnerWinCount}/${winnerInfo.totalMetrics} (${winnerInfo.winnerLabels.join(", ")})`
+            : "tie-broken by Net R (no single metric leader)";
+        const noteParts = [
+            `Winner: ${getRunDisplayName(winnerRun)} ${leadsText}.`,
+            `Baseline: ${getRunDisplayName(baselineRun)}.`,
+        ];
+        if (winnerOtherLeadText) noteParts.push(`${winnerOtherLeadText}.`);
+        if (winnerInfo.smallSample) {
+            noteParts.push(`Small sample: winner ${winnerInfo.winnerTrades} trades vs ${winnerInfo.maxTrades} max — directional.`);
+        }
+        const entry = addProjectFinding(targetProjectId, buildResearchFindingPayload({
+            source: "comparison",
+            tag: "Comparison",
+            title: `Comparison · Run ${winnerShort} leads`,
+            note: noteParts.join(" "),
+            runId: baselineRun?.id,
+            sourceRunId: baselineRun?.id,
+            comparedRunId: winnerRun?.id,
+            table: "Comparison Lab",
+            metaExtra: {
+                runIds: runs.map((r) => r?.id).filter(Boolean),
+                winnerRunId: winnerRun?.id || null,
+                winnerIdx,
+                metricsWon: winnerInfo.winnerLabels,
+                smallSample: winnerInfo.smallSample,
+                targetProjectId,
+            },
+        }));
+        if (entry) setComparisonSaved(true);
+    };
 
     // ── Empty state: need at least 2 imported runs to compare ────────
     if (importedRuns.length < 2) {
@@ -407,9 +559,41 @@ export default function ComparisonLab() {
                         </table>
                     </div>
                     {runs.length > 1 && (
-                        <div className="mt-3 inline-flex items-center gap-2 px-2.5 py-1 border border-[hsl(var(--accent-primary)/0.5)] clip-bevel-sm bg-[hsl(var(--accent-primary)/0.07)]">
-                            <Trophy className="w-3.5 h-3.5 text-[hsl(var(--accent-primary))]" />
-                            <span className="text-[11px] font-ui uppercase tracking-wider text-white">Winner · Run {PALETTE[winnerIdx % PALETTE.length].short}</span>
+                        <div className="mt-3 flex flex-col gap-1">
+                            <div className="inline-flex items-center gap-2 px-2.5 py-1 border border-[hsl(var(--accent-primary)/0.5)] clip-bevel-sm bg-[hsl(var(--accent-primary)/0.07)] self-start">
+                                <Trophy className="w-3.5 h-3.5 text-[hsl(var(--accent-primary))]" />
+                                <span className="text-[11px] font-ui uppercase tracking-wider text-white">
+                                    Winner · Run {PALETTE[winnerIdx % PALETTE.length].short}
+                                    {runs[winnerIdx] ? ` · ${getRunDisplayName(runs[winnerIdx])}` : ""}
+                                </span>
+                            </div>
+                            <div className="text-[10.5px] font-ui text-[hsl(var(--text-2))] leading-relaxed">
+                                {winnerInfo.winnerWinCount > 0
+                                    ? `Leads ${winnerInfo.winnerWinCount}/${winnerInfo.totalMetrics}: ${winnerInfo.winnerLabels.join(", ")}.`
+                                    : "Tie-broken by Net R — no single metric leader."}
+                                {winnerOtherLeadText ? ` ${winnerOtherLeadText}.` : ""}
+                            </div>
+                            {winnerInfo.smallSample && (
+                                <div className="text-[10px] font-ui text-[hsl(var(--warning))]">
+                                    ⚠ Small sample — winner has {winnerInfo.winnerTrades} trades vs {winnerInfo.maxTrades} max; treat as directional.
+                                </div>
+                            )}
+                            <div className="flex items-center gap-2 mt-0.5">
+                                {targetProjectId ? (
+                                    <NeonButton
+                                        icon={comparisonSaved ? Check : FileText}
+                                        tone="secondary"
+                                        onClick={handleSaveComparison}
+                                        disabled={comparisonSaved}
+                                        data-testid="cmp-save-finding"
+                                        className={comparisonSaved ? "opacity-60 cursor-default" : undefined}
+                                    >
+                                        {comparisonSaved ? "Saved to project" : "Save as Finding"}
+                                    </NeonButton>
+                                ) : (
+                                    <span className="text-[10px] font-ui text-muted-lab">Link a compared run to a project to save findings.</span>
+                                )}
+                            </div>
                         </div>
                     )}
                 </NeonPanel>
