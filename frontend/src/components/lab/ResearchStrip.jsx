@@ -54,9 +54,9 @@ export function ResearchStrip({ project, projectId, runId, runRole, nextStep, ru
     const [open, setOpen] = React.useState(() => {
         try {
             const stored = localStorage.getItem(storageKey);
-            return stored === null ? true : stored === "true";
+            return stored === null ? false : stored === "true";
         } catch {
-            return true;
+            return false;
         }
     });
     React.useEffect(() => {

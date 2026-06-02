@@ -17,12 +17,15 @@
 
 import React from "react";
 import { cn } from "@/lib/utils";
+import { ChevronDown } from "lucide-react";
 import {
     extractRunConfig,
     formatRunConfigValue,
     compareRunConfigs,
 } from "./runConfigHelpers";
 import { getRunDisplayName } from "@/data/store";
+
+const CONFIG_STRIP_OPEN_KEY = "fxob_run_config_strip_open_v1";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal chip
@@ -159,30 +162,73 @@ export function RunConfigStrip({ run, dense = false, className }) {
         [config],
     );
 
+    const [open, setOpen] = React.useState(() => {
+        try {
+            const stored = localStorage.getItem(CONFIG_STRIP_OPEN_KEY);
+            return stored === null ? false : stored === "true";
+        } catch { return false; }
+    });
+
+    React.useEffect(() => {
+        try { localStorage.setItem(CONFIG_STRIP_OPEN_KEY, String(open)); } catch { /* non-critical */ }
+    }, [open]);
+
     if (!run || !chips.length) return null;
 
+    // Compact summary shown when collapsed: core chips only (sym · tf · rr · struct · dir)
+    const coreChips = chips.slice(0, coreEnd);
+
     return (
-        <div
-            className={cn(
-                "mx-6 mb-4 flex items-center flex-wrap gap-1",
-                dense ? "py-0" : "py-0.5",
-                "relative",
-                className,
+        <div className={cn("mx-6 mb-3", className)} aria-label="Run configuration">
+            {/* Toggle row */}
+            <button
+                type="button"
+                onClick={() => setOpen((v) => !v)}
+                className="w-full flex items-center gap-2 group"
+            >
+                {/* Collapsed summary — core params only */}
+                {!open && (
+                    <div className="flex items-center gap-1 flex-wrap">
+                        {coreChips.map((chip) => (
+                            <ConfigChip key={chip.field} label={chip.label} value={chip.value} />
+                        ))}
+                    </div>
+                )}
+                {open && (
+                    <span className="text-[9px] font-ui uppercase tracking-widest text-muted-lab opacity-60 select-none shrink-0">
+                        Config
+                    </span>
+                )}
+                <ChevronDown
+                    className={cn(
+                        "w-3 h-3 text-muted-lab opacity-40 transition-transform duration-200 shrink-0 ml-auto",
+                        open && "rotate-180",
+                    )}
+                />
+            </button>
+
+            {/* Full chip grid — visible when expanded */}
+            {open && (
+                <div
+                    className={cn(
+                        "mt-1.5 flex items-center flex-wrap gap-1",
+                        dense ? "py-0" : "py-0.5",
+                    )}
+                >
+                    {chips.map((chip, i) => {
+                        const showDivider =
+                            (i === coreEnd   && i < chips.length) ||
+                            (i === entryEnd  && i < chips.length) ||
+                            (i === filterEnd && i < chips.length);
+                        return (
+                            <React.Fragment key={chip.field}>
+                                {showDivider && <ChipDivider />}
+                                <ConfigChip label={chip.label} value={chip.value} />
+                            </React.Fragment>
+                        );
+                    })}
+                </div>
             )}
-            aria-label="Run configuration"
-        >
-            {chips.map((chip, i) => {
-                const showDivider =
-                    (i === coreEnd  && i < chips.length) ||
-                    (i === entryEnd && i < chips.length) ||
-                    (i === filterEnd && i < chips.length);
-                return (
-                    <React.Fragment key={chip.field}>
-                        {showDivider && <ChipDivider />}
-                        <ConfigChip label={chip.label} value={chip.value} />
-                    </React.Fragment>
-                );
-            })}
         </div>
     );
 }
