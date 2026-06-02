@@ -108,7 +108,7 @@ function QualityBar({ pct }) {
                     style={{ width: `${barPct}%` }}
                 />
             </div>
-            <span className="shrink-0 w-10 text-right text-[10.5px] font-mono tabular-nums text-[hsl(var(--text-2))]">
+            <span className="shrink-0 w-10 text-right text-[10.5px] font-num tabular-nums text-[hsl(var(--text-2))]">
                 {Math.round(pct * 100)}%
             </span>
         </div>
@@ -185,11 +185,11 @@ export function ProtectionDataQualityPanel({ trades }) {
                 {/* Summary row */}
                 <div className="flex flex-wrap items-center gap-2 pt-1">
                     <span className="text-[11.5px] text-[hsl(var(--text-3))]">
-                        <span className="font-mono tabular-nums text-[hsl(var(--text-1))]">{trades.length}</span> trades assessed
+                        <span className="font-num tabular-nums text-[hsl(var(--text-1))]">{trades.length}</span> trades assessed
                     </span>
                     {Object.entries(counts).filter(([, n]) => n > 0).map(([status, n]) => (
                         <span key={status} className={cn("text-[11px] font-medium", STATUS_META[status].color)}>
-                            <span className="font-mono tabular-nums">{n}</span> {STATUS_META[status].label.toLowerCase()}
+                            <span className="font-num tabular-nums">{n}</span> {STATUS_META[status].label.toLowerCase()}
                         </span>
                     ))}
                 </div>

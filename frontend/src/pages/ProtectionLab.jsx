@@ -5,6 +5,8 @@ import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
 import { LabRunHero } from "@/components/lab/LabRunHero";
 import { RunConfigStrip } from "@/components/lab/RunConfigStrip";
 import { useDataset } from "@/data/store";
+import { useTradeUniverse } from "@/data/useTradeUniverse";
+import { TradeUniverseBadge } from "@/components/lab/TradeUniverseBadge";
 import {
     ShieldAlert, ShieldCheck, AlertTriangle, TrendingUp, Activity,
     Hash, Target, Clock, Newspaper, Ban, ListChecks, Check, ChevronDown, ChevronUp,
@@ -26,6 +28,12 @@ import { buildPairedTrades, calcEfficiencyRatio, calcRobustnessScore } from "@/c
 const PENETRATION_THRESHOLDS = [75, 90, 100];
 
 const EMPTY_TRADES = [];
+
+// Phase 3B-2 — stable scenario override so useTradeUniverse memoizes
+// correctly. ProtectionLab pins to the baseline universe regardless of the
+// user's currently-selected Strategy Map scenario; the protection-result
+// CSVs were exported against the primary variant only.
+const BASELINE_SCENARIO_OVERRIDE = Object.freeze({ family: "baseline" });
 
 const WHAT_IF_FILTERS = [
     { key: "noNyFill", group: "Session", label: "Exclude NY fills", summary: "NY fills", matches: (t) => fillSessionOf(t) === "New York" },
@@ -76,6 +84,14 @@ const PROTECTION_BACKLOG = [
 export default function ProtectionLab() {
     const { ACTIVE_PROJECT, ACTIVE_RUN, TRADES, ACTIVE_TRADE_VARIANT, activeRunId, runs } = useDataset();
     const trades = React.useMemo(() => (Array.isArray(TRADES) ? TRADES : EMPTY_TRADES), [TRADES]);
+    // Phase 3B-2 — Protection Lab is intentionally baseline-only. We resolve
+    // the baseline universe via useTradeUniverse with an explicit override so
+    // the TradeUniverseBadge shows the unprotected reference source even when
+    // the user has a triggered-edge scenario selected in Strategy Map. No
+    // analytics consume this universe — `trades` (above) still drives every
+    // KPI, table, and chart on the page. The badge exists purely to make the
+    // page's design contract visible.
+    const baselineUniverse = useTradeUniverse(null, BASELINE_SCENARIO_OVERRIDE);
     const [whatIfFilters, setWhatIfFilters] = React.useState({});
     const [selectedProtectionMode, setSelectedProtectionMode] = React.useState(null);
     const activeRun = activeRunId ? runs?.[activeRunId] : null;
@@ -154,6 +170,23 @@ export default function ProtectionLab() {
 
             <RunConfigStrip run={activeRun} />
 
+            {/* Phase 3B-2 — baseline-only universe badge.
+                Protection results are computed against the primary variant /
+                unprotected baseline, NOT against arbitrary entry-model
+                scenarios. The badge below mirrors the unprotected baseline
+                source even when the user has a triggered-edge scenario active
+                in Strategy Map. Analytics are unchanged — this is clarity UI
+                only. See Phase 3A audit for the design rationale. */}
+            {activeRunId && (
+                <div className="px-6 mt-2 mb-3 flex flex-col gap-1.5">
+                    <TradeUniverseBadge universe={baselineUniverse} />
+                    <p className="text-[10.5px] font-ui text-[hsl(var(--text-2))] leading-relaxed">
+                        Protection results are computed against the primary variant / unprotected baseline.
+                        Scenario-aware protection requires a backend re-export.
+                    </p>
+                </div>
+            )}
+
             {/* Baseline KPI row — 8 chips (4×2 grid at lg; canonical kpi-strip base) */}
             <div className="kpi-strip mb-5 lg:!grid-cols-4">
                 <MetricChip label="Trades"       value={String(p.n)}              sub="active trade variant"         tone="primary"   icon={Hash} />
@@ -183,7 +216,7 @@ export default function ProtectionLab() {
                     title="Research Confidence · Exact vs Research Estimate"
                     action={<div className="flex items-center gap-1.5"><ConfidenceTag level="exact" /><ConfidenceTag level="estimated" /><ConfidenceTag level="requires" /></div>}
                 >
-                    <div className="flex items-start gap-2 text-[11.5px] font-mono text-[hsl(var(--warning))]" data-testid="protlab-research-safety">
+                    <div className="flex items-start gap-2 text-[11.5px] font-ui text-[hsl(var(--warning))]" data-testid="protlab-research-safety">
                         <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
                         <span>
                             Research-estimate protection results are directional only. They use hard invalidation and penetration flags, not candle-level re-simulation.
@@ -205,7 +238,7 @@ export default function ProtectionLab() {
                                     type="button"
                                     onClick={exportProtectionResults}
                                     disabled={!hasExactProtection}
-                                    className="px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider border border-[hsl(var(--accent-secondary)/0.55)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.06)] hover:bg-[hsl(var(--accent-secondary)/0.12)] disabled:opacity-40 clip-bevel-sm"
+                                    className="px-2.5 py-1 text-[10px] font-ui uppercase tracking-wider border border-[hsl(var(--accent-secondary)/0.55)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.06)] hover:bg-[hsl(var(--accent-secondary)/0.12)] disabled:opacity-40 clip-bevel-sm"
                                 >
                                     Export Protection Backtest CSV
                                 </button>
@@ -252,7 +285,7 @@ export default function ProtectionLab() {
                 {/* A) Baseline */}
                 <NeonPanel title={hasExactProtection ? "A · Unprotected Baseline · Research Reference" : "A · Unprotected Baseline"} action={<ConfidenceTag level="exact" />}>
                     <Desc icon={ShieldCheck}>Unprotected strategy result before any protection rule is applied.</Desc>
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 font-mono text-[11.5px] mt-3" data-testid="protlab-baseline">
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 font-ui text-[11.5px] mt-3" data-testid="protlab-baseline">
                         {[
                             ["Trades", String(p.n)],
                             ["Wins", String(p.wins)],
@@ -266,7 +299,7 @@ export default function ProtectionLab() {
                         ].map(([k, v]) => (
                             <React.Fragment key={k}>
                                 <div className="text-muted-lab uppercase tracking-wider text-[10px]">{k}</div>
-                                <div className="text-right text-white">{v}</div>
+                                <div className="text-right text-white font-num">{v}</div>
                             </React.Fragment>
                         ))}
                     </div>
@@ -543,7 +576,7 @@ function Desc({ icon: Icon, children }) {
 
 function Note({ tone = "muted", children }) {
     const color = tone === "warning" ? "text-[hsl(var(--warning))]" : "text-muted-lab";
-    return <div className={`mt-2 text-[10.5px] font-mono leading-relaxed ${color}`}>{children}</div>;
+    return <div className={`mt-2 text-[10.5px] font-ui leading-relaxed ${color}`}>{children}</div>;
 }
 
 function FutureCard({ icon: Icon, title, body, status }) {
@@ -571,9 +604,9 @@ function InsightChip({ label, value, sub, tone = "primary" }) {
     }[tone] || "text-white";
     return (
         <div className="border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] clip-bevel-sm px-2.5 py-2">
-            <div className="text-[9px] font-mono uppercase tracking-[0.16em] text-muted-lab leading-tight">{label}</div>
+            <div className="text-[9px] font-ui uppercase tracking-[0.16em] text-muted-lab leading-tight">{label}</div>
             <div className={`font-display font-semibold tabular-nums text-[14px] leading-tight mt-1 ${color}`}>{value}</div>
-            {sub && <div className="text-[9.5px] font-mono text-muted-lab mt-0.5">{sub}</div>}
+            {sub && <div className="text-[9.5px] font-ui text-muted-lab mt-0.5">{sub}</div>}
         </div>
     );
 }
@@ -584,7 +617,7 @@ function InsightGroup({ title, children, icon: Icon = Activity, tone = "primary"
         <div className={`relative min-w-0 overflow-hidden border ${style.border} bg-[hsl(var(--panel-2)/0.52)] clip-bevel-sm px-4 py-3.5 ${style.glow}`}>
             <div className={`absolute left-3.5 top-3.5 h-1.5 w-1.5 rounded-full ${style.accent} shadow-[0_0_10px_currentColor]`} />
             {Icon && <Icon className="absolute right-3.5 top-3.5 w-4 h-4 text-muted-lab" />}
-            <div className="text-[10px] font-mono uppercase tracking-[0.2em] text-muted-lab leading-tight truncate pl-4 pr-6 mb-3">{title}</div>
+            <div className="text-[10px] font-ui uppercase tracking-[0.2em] text-muted-lab leading-tight truncate pl-4 pr-6 mb-3">{title}</div>
             <div className="space-y-2">{children}</div>
         </div>
     );
@@ -607,10 +640,10 @@ function InsightRow({ label, value, sub, tone = "primary" }) {
         muted: "text-muted-lab",
     }[tone] || "text-white";
     return (
-        <div className="flex items-start justify-between gap-3 font-mono text-[11.5px]">
+        <div className="flex items-start justify-between gap-3 font-ui text-[11.5px]">
             <span className="text-[hsl(var(--text-2))] leading-snug">{label}</span>
             <span className="text-right leading-tight shrink-0">
-                <span className={`block text-[15px] font-semibold tabular-nums ${color}`}>{value}</span>
+                <span className={`block text-[15px] font-semibold tabular-nums font-num ${color}`}>{value}</span>
                 {sub && <span className="block text-[10px] text-muted-lab mt-0.5">{sub}</span>}
             </span>
         </div>
@@ -623,15 +656,15 @@ function MiniInsightTable({ title, rows, columns, danger = false, icon: Icon = A
         <div className={`relative min-w-0 overflow-hidden border ${style.border} bg-[hsl(var(--panel-2)/0.52)] clip-bevel-sm px-4 py-3.5 ${style.glow}`}>
             <div className={`absolute left-3.5 top-3.5 h-1.5 w-1.5 rounded-full ${style.accent} shadow-[0_0_10px_currentColor]`} />
             {Icon && <Icon className="absolute right-3.5 top-3.5 w-4 h-4 text-muted-lab" />}
-            <div className="text-[10px] font-mono uppercase tracking-[0.2em] text-muted-lab leading-tight mb-3 truncate pl-4 pr-6">{title}</div>
+            <div className="text-[10px] font-ui uppercase tracking-[0.2em] text-muted-lab leading-tight mb-3 truncate pl-4 pr-6">{title}</div>
             <div className="space-y-2">
                 {rows.length ? rows.map((row) => (
-                    <div key={`${title}-${row[columns[0]]}`} className="flex items-center justify-between gap-3 font-mono text-[12px]">
+                    <div key={`${title}-${row[columns[0]]}`} className="flex items-center justify-between gap-3 font-ui text-[12px]">
                         <span className="text-[hsl(var(--text-2))] truncate leading-snug">{row[columns[0]]}</span>
-                        <span className={`tabular-nums leading-snug shrink-0 ${danger ? "text-[hsl(var(--danger))]" : "text-white"}`}>{row[columns[1]]}</span>
+                        <span className={`font-num tabular-nums leading-snug shrink-0 ${danger ? "text-[hsl(var(--danger))]" : "text-white"}`}>{row[columns[1]]}</span>
                     </div>
                 )) : (
-                    <div className="text-[12px] font-mono text-muted-lab">Limited Data</div>
+                    <div className="text-[12px] font-ui text-muted-lab">Limited Data</div>
                 )}
             </div>
         </div>
@@ -683,7 +716,7 @@ function ModeLabel({ row }) {
             : "text-white";
     return (
         <div className="flex items-center gap-1.5 whitespace-nowrap">
-            <span className={`font-mono font-semibold ${labelClass}`}>{prettyMode(row.mode)}</span>
+            <span className={`font-ui font-semibold ${labelClass}`}>{prettyMode(row.mode)}</span>
             {row.isBaseline && <Pill tone="secondary">UNPROTECTED</Pill>}
             {row.isBest && <Pill tone="success">BEST NET R</Pill>}
             {row.underperforms && <Pill tone="danger">UNDERPERFORMS</Pill>}
@@ -693,12 +726,12 @@ function ModeLabel({ row }) {
 
 function DeltaVsBaseline({ row }) {
     if (row.isBaseline) {
-        return <span className="font-mono text-[hsl(var(--accent-secondary))]">UNPROTECTED</span>;
+        return <span className="font-ui text-[hsl(var(--accent-secondary))]">UNPROTECTED</span>;
     }
     if (row.netVsBaseline == null || !isFiniteNumber(row.netVsBaseline)) return "—";
     const value = Number(row.netVsBaseline);
     const color = value >= 0 ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]";
-    return <span className={`font-mono font-semibold tabular-nums ${color}`}>{fmtR(value)}</span>;
+    return <span className={`font-num font-semibold tabular-nums ${color}`}>{fmtR(value)}</span>;
 }
 
 function WhatIfFilterSimulator({ filters, activeFilters, onToggle, onClear, onPreset, onRestoreFilters, result }) {
@@ -800,7 +833,7 @@ function WhatIfFilterSimulator({ filters, activeFilters, onToggle, onClear, onPr
                     <button
                         type="button"
                         onClick={() => setCollapsed((value) => !value)}
-                        className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-mono uppercase tracking-wider border border-[hsl(var(--border-mid))] text-muted-lab hover:text-white clip-bevel-sm"
+                        className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-ui uppercase tracking-wider border border-[hsl(var(--border-mid))] text-muted-lab hover:text-white clip-bevel-sm"
                     >
                         {collapsed ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
                         {collapsed ? "Expand" : "Collapse"}
@@ -815,7 +848,7 @@ function WhatIfFilterSimulator({ filters, activeFilters, onToggle, onClear, onPr
                     resetToBaseline();
                 }}
             >
-                <div className="mt-3 border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.38)] clip-bevel-sm px-3 py-2 text-[11px] font-mono text-[hsl(var(--text-2))]">
+                <div className="mt-3 border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.38)] clip-bevel-sm px-3 py-2 text-[11px] font-ui text-[hsl(var(--text-2))]">
                     {activeCount ? <>Active screens: <span className="text-white">{activeSummary}</span></> : "No defensive screens active"}
                 </div>
                 {collapsed ? null : (
@@ -826,7 +859,7 @@ function WhatIfFilterSimulator({ filters, activeFilters, onToggle, onClear, onPr
                                 key={preset.label}
                                 type="button"
                                 onClick={() => onPreset(preset.keys)}
-                                className="px-2.5 py-1.5 text-[10px] font-mono uppercase tracking-wider border border-[hsl(var(--accent-secondary)/0.45)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.06)] hover:bg-[hsl(var(--accent-secondary)/0.12)] clip-bevel-sm"
+                                className="px-2.5 py-1.5 text-[10px] font-ui uppercase tracking-wider border border-[hsl(var(--accent-secondary)/0.45)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.06)] hover:bg-[hsl(var(--accent-secondary)/0.12)] clip-bevel-sm"
                             >
                                 {preset.label}
                             </button>
@@ -835,7 +868,7 @@ function WhatIfFilterSimulator({ filters, activeFilters, onToggle, onClear, onPr
                             type="button"
                             onClick={() => setSavedSimulations([])}
                             disabled={!savedSimulations.length}
-                            className="px-2.5 py-1.5 text-[10px] font-mono uppercase tracking-wider border border-[hsl(var(--border-mid))] text-muted-lab hover:text-white disabled:opacity-40 disabled:hover:text-muted-lab clip-bevel-sm"
+                            className="px-2.5 py-1.5 text-[10px] font-ui uppercase tracking-wider border border-[hsl(var(--border-mid))] text-muted-lab hover:text-white disabled:opacity-40 disabled:hover:text-muted-lab clip-bevel-sm"
                         >
                             Clear Saved Screens
                         </button>
@@ -844,7 +877,7 @@ function WhatIfFilterSimulator({ filters, activeFilters, onToggle, onClear, onPr
                             onClick={promoteHypothesis}
                             disabled={!activeCount}
                             title="Creates a clean hypothesis/config idea from the selected screens so it can later be tested by the Python backtester. This frontend screen is research-only."
-                            className="px-2.5 py-1.5 text-[10px] font-mono uppercase tracking-wider border border-[hsl(var(--warning)/0.55)] text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.08)] hover:bg-[hsl(var(--warning)/0.14)] disabled:opacity-40 clip-bevel-sm"
+                            className="px-2.5 py-1.5 text-[10px] font-ui uppercase tracking-wider border border-[hsl(var(--warning)/0.55)] text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.08)] hover:bg-[hsl(var(--warning)/0.14)] disabled:opacity-40 clip-bevel-sm"
                         >
                             {copied ? "Hypothesis copied" : "Promote to Exact Backtest"}
                         </button>
@@ -857,13 +890,13 @@ function WhatIfFilterSimulator({ filters, activeFilters, onToggle, onClear, onPr
                     </div>
 
                     <div className="mt-3 space-y-2" data-testid="protlab-whatif-filters" data-whatif-keep-active="true">
-                        <div className="text-[10.5px] font-mono uppercase tracking-wider text-muted-lab">
+                        <div className="text-[10.5px] font-ui uppercase tracking-wider text-muted-lab">
                             Matching trades are removed from the unprotected baseline. Remaining trades are recalculated as if those setups were never taken.
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-2">
                             {WHAT_IF_GROUPS.map((group) => (
                                 <div key={group} className="border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.26)] clip-bevel-sm p-2">
-                                    <div className="text-[9.5px] font-mono uppercase tracking-[0.2em] text-title-lab mb-1.5">{group}</div>
+                                    <div className="text-[9.5px] font-ui uppercase tracking-[0.2em] text-title-lab mb-1.5">{group}</div>
                                     <div className="grid grid-cols-1 gap-1.5">
                                         {filters.filter((filter) => filter.group === group).map((filter) => (
                                             <WhatIfFilterButton
@@ -894,7 +927,7 @@ function WhatIfFilterSimulator({ filters, activeFilters, onToggle, onClear, onPr
                             onRename={renameSimulation}
                         />
                     </div>
-                    <div className="mt-2 text-[10.5px] font-mono uppercase tracking-wider text-muted-lab">
+                    <div className="mt-2 text-[10.5px] font-ui uppercase tracking-wider text-muted-lab">
                         Promotion creates a copyable hypothesis/config idea only; it does not run Python.
                     </div>
                     </>
@@ -921,7 +954,7 @@ function WhatIfResultsTable({
     };
     return (
         <div className="overflow-x-auto border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.28)] clip-bevel-sm" data-testid="protlab-whatif-results">
-            <table className="w-full min-w-[980px] text-[11px] font-mono">
+            <table className="w-full min-w-[980px] text-[11px] font-ui">
                 <thead className="text-[9.5px] uppercase tracking-[0.18em] text-title-lab">
                     <tr className="border-b border-[hsl(var(--border-soft))]">
                         <th className="px-3 py-2 text-left font-medium">Research Set</th>
@@ -997,13 +1030,13 @@ function WhatIfResultsTable({
                                     )}
                                 </div>
                             </td>
-                            <td className="px-3 py-2.5 text-right tabular-nums">{metric(row, "n")}</td>
-                            <td className="px-3 py-2.5 text-right tabular-nums">{metric(row, "removedCount")}</td>
-                            <td className="px-3 py-2.5 text-right tabular-nums">{metric(row, "winRate", fmtPct)}</td>
-                            <td className="px-3 py-2.5 text-right tabular-nums"><ColoredR value={row.netR} /></td>
-                            <td className="px-3 py-2.5 text-right tabular-nums">{metric(row, "expectancy", fmtExp)}</td>
-                            <td className="px-3 py-2.5 text-right tabular-nums">{metric(row, "maxDD", fmtR)}</td>
-                            <td className="px-3 py-2.5 text-right tabular-nums">
+                            <td className="px-3 py-2.5 text-right tabular-nums font-num">{metric(row, "n")}</td>
+                            <td className="px-3 py-2.5 text-right tabular-nums font-num">{metric(row, "removedCount")}</td>
+                            <td className="px-3 py-2.5 text-right tabular-nums font-num">{metric(row, "winRate", fmtPct)}</td>
+                            <td className="px-3 py-2.5 text-right tabular-nums font-num"><ColoredR value={row.netR} /></td>
+                            <td className="px-3 py-2.5 text-right tabular-nums font-num">{metric(row, "expectancy", fmtExp)}</td>
+                            <td className="px-3 py-2.5 text-right tabular-nums font-num">{metric(row, "maxDD", fmtR)}</td>
+                            <td className="px-3 py-2.5 text-right tabular-nums font-num">
                                 {row.delta == null ? (
                                     <span className="text-muted-lab">—</span>
                                 ) : (
@@ -1052,7 +1085,7 @@ function WhatIfFilterButton({ filter, active, count, onToggle }) {
             type="button"
             onClick={() => onToggle(filter.key)}
             className={[
-                "text-left px-2 py-1.5 clip-bevel-sm border text-[10px] font-mono uppercase tracking-wider transition-colors",
+                "text-left px-2 py-1.5 clip-bevel-sm border text-[10px] font-ui uppercase tracking-wider transition-colors",
                 active
                     ? "border-[hsl(var(--warning)/0.75)] bg-[hsl(var(--warning)/0.13)] text-[hsl(var(--warning))] shadow-[0_0_18px_hsl(var(--warning)/0.12)]"
                     : "border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.38)] text-[hsl(var(--text-2))] hover:border-[hsl(var(--accent-secondary)/0.55)] hover:text-white",
@@ -1727,16 +1760,16 @@ function deriveSessionFromTimestamp(value) {
 
 function WeekHourHeatmap({ grid, testId }) {
     if (!grid.total) {
-        return <div data-testid={testId} className="py-6 text-center text-muted-lab font-mono text-[12px]">No invalidations recorded for this view.</div>;
+        return <div data-testid={testId} className="py-6 text-center text-muted-lab font-ui text-[12px]">No invalidations recorded for this view.</div>;
     }
     return (
         <div className="overflow-x-auto scrollbar-thin" data-testid={testId}>
-            <table className="min-w-[820px] font-mono text-[10.5px] border-separate border-spacing-1">
+            <table className="min-w-[820px] font-ui text-[10.5px] border-separate border-spacing-1">
                 <thead>
                     <tr>
                         <th className="text-muted-lab text-left px-2 py-1 text-[10px] uppercase tracking-wider whitespace-nowrap">Day / Hr (UTC)</th>
                         {HOURS.map((h) => (
-                            <th key={h} className="text-muted-lab px-1 py-1 text-[9px] tabular-nums">{padH(h)}</th>
+                            <th key={h} className="text-muted-lab px-1 py-1 text-[9px] tabular-nums font-num">{padH(h)}</th>
                         ))}
                     </tr>
                 </thead>
@@ -1757,7 +1790,7 @@ function WeekHourHeatmap({ grid, testId }) {
                                 const bg = c.netR >= 0 ? `hsl(var(--accent-primary) / ${alpha})` : `hsl(var(--bear) / ${alpha})`;
                                 return (
                                     <td key={h}>
-                                        <div className="clip-bevel-sm px-1 py-1 text-center text-white tabular-nums leading-tight"
+                                        <div className="clip-bevel-sm px-1 py-1 text-center text-white tabular-nums font-num leading-tight"
                                             style={{ background: bg }}
                                             title={`${wd} ${padH(h)}:00 UTC · ${c.count} invalidation${c.count === 1 ? "" : "s"} · ${fmtR(c.netR)}`}>
                                             <div>{c.count}</div>
@@ -1787,7 +1820,7 @@ function BreachSessionMatrix({ matrix }) {
     return (
         <NeonPanel className="xl:col-span-3" title="Origin Session × Invalidation Session" action={<Pill tone="muted">{matrix.total} INVALIDATIONS</Pill>}>
             <div className="overflow-x-auto scrollbar-thin" data-testid="protlab-breach-matrix">
-                <table className="w-full min-w-[640px] font-mono text-[11px] border-separate border-spacing-1">
+                <table className="w-full min-w-[640px] font-ui text-[11px] border-separate border-spacing-1">
                     <thead>
                         <tr>
                             <th className="text-muted-lab text-left px-2 py-1 text-[10px] uppercase tracking-wider whitespace-nowrap">Origin / Invalidation</th>
@@ -1813,7 +1846,7 @@ function BreachSessionMatrix({ matrix }) {
                                     const bg = cell.netR >= 0 ? `hsl(var(--accent-primary) / ${alpha})` : `hsl(var(--bear) / ${alpha})`;
                                     return (
                                         <td key={col}>
-                                            <div className="clip-bevel-sm px-2 py-1.5 text-center text-white tabular-nums leading-tight" style={{ background: bg }}>
+                                            <div className="clip-bevel-sm px-2 py-1.5 text-center text-white tabular-nums font-num leading-tight" style={{ background: bg }}>
                                                 <div>{cell.count}</div>
                                                 <div className="text-[9px] text-white/70">{cellR(cell.netR)}</div>
                                             </div>

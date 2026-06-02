@@ -262,6 +262,18 @@ export function buildObBreakdown(trades) {
     };
 }
 
+// RB-6B — expose the per-tab grouping functions so the canonical bucket table
+// can recompute Current-Equity contribution over the same baseline trades and
+// grouping the Raw R breakdown uses. Order is derived from the visible rows at
+// the call site so CE and Raw R show an identical bucket set.
+export const OB_BREAKDOWN_LABEL_FNS = {
+    byWidth:     _widthBucket,
+    byAge:       _ageBucket,
+    byDepth:     _depthBucket,
+    byStructure: _structure,
+    byDirection: _direction,
+};
+
 // ── buildEquityCurveOverlayData ───────────────────────────────────────────────
 // Builds equity curve data for baseline vs selected protection mode.
 // Returns [{i, label, netR, netRB}] where netRB is the protected mode's cumulative R.

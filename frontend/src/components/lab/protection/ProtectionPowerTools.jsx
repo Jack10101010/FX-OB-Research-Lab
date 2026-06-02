@@ -33,7 +33,7 @@ const STATUS_LABELS = {
 // ── Shared tokens ─────────────────────────────────────────────────────────────
 function EmptyState({ message }) {
     return (
-        <div className="flex items-center justify-center py-10 text-[11px] font-mono text-[hsl(var(--text-3))] text-center px-4">
+        <div className="flex items-center justify-center py-10 text-[11px] font-ui text-[hsl(var(--text-3))] text-center px-4">
             {message}
         </div>
     );
@@ -55,11 +55,11 @@ const PAIRED_COLS = [
       sortValue: r => Number(r.delta),
       render: row => {
           const d = row.delta ?? 0;
-          return <span className={cn("font-mono tabular-nums text-[11px]", d > 0 ? "text-[hsl(var(--success))]" : d < 0 ? "text-[hsl(var(--danger))]" : "text-[hsl(var(--text-3))]")}>{d >= 0 ? "+" : ""}{Number(d).toFixed(2)}R</span>;
+          return <span className={cn("font-num tabular-nums text-[11px]", d > 0 ? "text-[hsl(var(--success))]" : d < 0 ? "text-[hsl(var(--danger))]" : "text-[hsl(var(--text-3))]")}>{d >= 0 ? "+" : ""}{Number(d).toFixed(2)}R</span>;
       }},
     { key: "exitReason", label: "Exit",   width: "20%",
       render: row => row.exitReason
-          ? <span className="text-[10px] font-mono text-[hsl(var(--text-2))] truncate max-w-[120px] block">{row.exitReason}</span>
+          ? <span className="text-[10px] font-ui text-[hsl(var(--text-2))] truncate max-w-[120px] block">{row.exitReason}</span>
           : <span className="text-[hsl(var(--text-3))]">—</span> },
     { key: "outcome",   label: "Outcome", width: "14%",
       render: row => {
@@ -107,15 +107,15 @@ export function PairedTradeTable({ baselineTrades, tradesByMode, selectedMode, o
             <div className={cn(
                 "flex flex-wrap items-center gap-3 mb-3 px-1 py-2 border-b border-[hsl(var(--border-soft)/0.4)]",
             )}>
-                <span className="text-[10px] font-mono text-[hsl(var(--text-3))]">
+                <span className="text-[10px] font-ui text-[hsl(var(--text-3))]">
                     Pairing method: <span className="text-[hsl(var(--text-2))]">{pairingMethod === "id" ? "Trade ID matched" : pairingMethod === "index" ? "Index matched fallback" : "None"}</span>
                 </span>
-                <span className="text-[10px] font-mono text-[hsl(var(--text-3))]">
+                <span className="text-[10px] font-ui text-[hsl(var(--text-3))]">
                     Matched: <span className="text-[hsl(var(--text-2))]">{pairedCount} / {pairs.length}</span>
                     {pairRatePct < 100 && <span className="ml-1 text-[hsl(var(--warning))]">({pairRatePct}%)</span>}
                 </span>
                 {pairingWarning && (
-                    <span className="text-[10px] font-mono text-[hsl(var(--warning))]">
+                    <span className="text-[10px] font-ui text-[hsl(var(--warning))]">
                         Low ID match rate. Positional fallback is active; treat deltas as approximate.
                     </span>
                 )}
@@ -128,7 +128,7 @@ export function PairedTradeTable({ baselineTrades, tradesByMode, selectedMode, o
                         key={f}
                         onClick={() => setFilter(f)}
                         className={cn(
-                            "px-2.5 py-0.5 clip-bevel-sm border text-[10px] font-mono uppercase tracking-[0.12em] transition-colors",
+                            "px-2.5 py-0.5 clip-bevel-sm border text-[10px] font-ui uppercase tracking-[0.12em] transition-colors",
                             filter === f
                                 ? "border-[hsl(var(--accent-primary)/0.6)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.1)]"
                                 : "border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))] hover:text-[hsl(var(--text-1))]",
@@ -184,7 +184,7 @@ export function TradeDrilldownDrawer({ trade, onClose }) {
                 {/* Header */}
                 <div className="flex items-center justify-between px-5 py-4 border-b border-[hsl(var(--border-soft))]">
                     <div>
-                        <div className="text-[10px] font-mono uppercase tracking-[0.2em] text-[hsl(var(--accent-secondary))]">Protection Trade Detail</div>
+                        <div className="text-[10px] font-ui uppercase tracking-[0.2em] text-[hsl(var(--accent-secondary))]">Protection Trade Detail</div>
                         <div className="mt-0.5 text-lg font-display text-[hsl(var(--text-1))]">
                             {trade.id ?? `Trade #${trade.tradeNum ?? "?"}`}
                         </div>
@@ -210,7 +210,7 @@ export function TradeDrilldownDrawer({ trade, onClose }) {
                             <DrawerRow
                                 label="Protection Delta"
                                 value={
-                                    <span className={cn("font-mono tabular-nums text-[12px]", (trade.delta ?? 0) >= 0 ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]")}>
+                                    <span className={cn("font-num tabular-nums text-[12px]", (trade.delta ?? 0) >= 0 ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]")}>
                                         {(trade.delta ?? 0) >= 0 ? "+" : ""}{Number(trade.delta).toFixed(2)}R
                                     </span>
                                 }
@@ -279,7 +279,7 @@ function DrawerSection({ label, children, collapsible = false, defaultCollapsed 
                 )}
                 onClick={collapsible ? () => setOpen(p => !p) : undefined}
             >
-                <span className="text-[9px] font-mono uppercase tracking-[0.2em] text-[hsl(var(--accent-secondary))]">{label}</span>
+                <span className="text-[9px] font-ui uppercase tracking-[0.2em] text-[hsl(var(--accent-secondary))]">{label}</span>
                 {collapsible && (
                     <ChevronRight className={cn("w-3 h-3 text-[hsl(var(--text-3))] transition-transform", open && "rotate-90")} />
                 )}
@@ -293,8 +293,8 @@ function DrawerSection({ label, children, collapsible = false, defaultCollapsed 
 function DrawerRow({ label, value, mono = false }) {
     return (
         <div className="flex items-start justify-between gap-3 py-0.5 text-[11px] border-b border-[hsl(var(--border-soft)/0.2)] last:border-0">
-            <span className="text-[hsl(var(--text-3))] shrink-0 font-mono">{label}</span>
-            <span className={cn("text-right break-all", mono ? "font-mono text-[10px]" : "font-mono")}>
+            <span className="text-[hsl(var(--text-3))] shrink-0 font-ui">{label}</span>
+            <span className={cn("text-right break-all", mono ? "font-code text-[10px]" : "font-ui")}>
                 {value}
             </span>
         </div>
@@ -341,7 +341,7 @@ export function ProtectionModeMatrix({ exactRows, baselineMaxDD }) {
 
     return (
         <div className="overflow-auto">
-            <table className="w-full text-[11px] font-mono border-collapse">
+            <table className="w-full text-[11px] font-ui border-collapse">
                 <thead>
                     <tr className="bg-[hsl(var(--panel-2))]">
                         <th className="text-left px-3 py-2 text-[10px] uppercase tracking-[0.18em] text-[hsl(var(--text-3))] font-medium sticky left-0 bg-[hsl(var(--panel-2))]">
@@ -369,7 +369,7 @@ export function ProtectionModeMatrix({ exactRows, baselineMaxDD }) {
                                 const val = Number(row[m.key]);
                                 const cellClass = Number.isFinite(val) ? matrixCellColor(val, m, allVals) : "";
                                 return (
-                                    <td key={m.key} className={cn("px-3 py-2 text-right tabular-nums", cellClass)}>
+                                    <td key={m.key} className={cn("px-3 py-2 text-right tabular-nums font-num", cellClass)}>
                                         {Number.isFinite(val) ? m.fmt(val) : "—"}
                                     </td>
                                 );
@@ -418,12 +418,12 @@ function HypothesisCard({ hypo, onUpdate, onDelete }) {
                     <input
                         value={title}
                         onChange={e => setTitle(e.target.value)}
-                        className="flex-1 bg-transparent border-b border-[hsl(var(--border-soft))] text-[12px] font-mono text-[hsl(var(--text-1))] focus:outline-none focus:border-[hsl(var(--accent-primary))]"
+                        className="flex-1 bg-transparent border-b border-[hsl(var(--border-soft))] text-[12px] font-ui text-[hsl(var(--text-1))] focus:outline-none focus:border-[hsl(var(--accent-primary))]"
                         placeholder="Protection hypothesis title…"
                     />
                 ) : (
                     <div
-                        className="flex-1 text-[12px] font-mono text-[hsl(var(--text-1))] cursor-pointer hover:text-white transition-colors"
+                        className="flex-1 text-[12px] font-ui text-[hsl(var(--text-1))] cursor-pointer hover:text-white transition-colors"
                         onClick={() => setEditing(true)}
                     >
                         {hypo.title}
@@ -435,7 +435,7 @@ function HypothesisCard({ hypo, onUpdate, onDelete }) {
                         value={hypo.status}
                         onChange={e => onUpdate({ status: e.target.value })}
                         className={cn(
-                            "appearance-none bg-transparent border px-1.5 py-0.5 clip-bevel-sm text-[9px] font-mono uppercase tracking-[0.14em] cursor-pointer focus:outline-none",
+                            "appearance-none bg-transparent border px-1.5 py-0.5 clip-bevel-sm text-[9px] font-ui uppercase tracking-[0.14em] cursor-pointer focus:outline-none",
                             STATUS_STYLES[hypo.status] ?? STATUS_STYLES.open,
                         )}
                     >
@@ -455,27 +455,27 @@ function HypothesisCard({ hypo, onUpdate, onDelete }) {
                         value={notes}
                         onChange={e => setNotes(e.target.value)}
                         rows={3}
-                        className="w-full bg-[hsl(var(--panel)/0.8)] border border-[hsl(var(--border-soft)/0.5)] text-[11px] font-mono text-[hsl(var(--text-2))] px-2 py-1.5 focus:outline-none focus:border-[hsl(var(--accent-primary))] resize-none"
+                        className="w-full bg-[hsl(var(--panel)/0.8)] border border-[hsl(var(--border-soft)/0.5)] text-[11px] font-ui text-[hsl(var(--text-2))] px-2 py-1.5 focus:outline-none focus:border-[hsl(var(--accent-primary))] resize-none"
                         placeholder="Evidence, trade pattern, conclusion…"
                     />
                     <div className="flex gap-2">
-                        <button onClick={handleSave} className="px-2.5 py-1 clip-bevel-sm border border-[hsl(var(--accent-primary)/0.5)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.08)] text-[10px] font-mono uppercase tracking-[0.14em] hover:bg-[hsl(var(--accent-primary)/0.16)] transition-colors">
+                        <button onClick={handleSave} className="px-2.5 py-1 clip-bevel-sm border border-[hsl(var(--accent-primary)/0.5)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.08)] text-[10px] font-ui uppercase tracking-[0.14em] hover:bg-[hsl(var(--accent-primary)/0.16)] transition-colors">
                             Save
                         </button>
-                        <button onClick={() => { setTitle(hypo.title); setNotes(hypo.notes); setEditing(false); }} className="px-2.5 py-1 clip-bevel-sm border border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))] text-[10px] font-mono uppercase tracking-[0.14em] hover:text-[hsl(var(--text-1))] transition-colors">
+                        <button onClick={() => { setTitle(hypo.title); setNotes(hypo.notes); setEditing(false); }} className="px-2.5 py-1 clip-bevel-sm border border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))] text-[10px] font-ui uppercase tracking-[0.14em] hover:text-[hsl(var(--text-1))] transition-colors">
                             Cancel
                         </button>
                     </div>
                 </div>
             ) : (
                 hypo.notes && (
-                    <div className="text-[10px] font-mono text-[hsl(var(--text-3))] leading-relaxed line-clamp-3 cursor-pointer hover:line-clamp-none" onClick={() => setEditing(true)}>
+                    <div className="text-[10px] font-ui text-[hsl(var(--text-3))] leading-relaxed line-clamp-3 cursor-pointer hover:line-clamp-none" onClick={() => setEditing(true)}>
                         {hypo.notes}
                     </div>
                 )
             )}
 
-            <div className="text-[9px] font-mono text-[hsl(var(--text-3))] tabular-nums">
+            <div className="text-[9px] font-num text-[hsl(var(--text-3))] tabular-nums">
                 {new Date(hypo.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
                 {hypo.updatedAt !== hypo.createdAt && ` · updated ${new Date(hypo.updatedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}`}
             </div>
@@ -531,12 +531,12 @@ export function HypothesisWorkbench({ activeRunId }) {
                     onChange={e => setNewTitle(e.target.value)}
                     onKeyDown={e => e.key === "Enter" && handleAdd()}
                     placeholder="Add protection hypothesis…"
-                    className="flex-1 bg-[hsl(var(--panel-2)/0.6)] border border-[hsl(var(--border-soft)/0.5)] px-3 py-1.5 text-[11px] font-mono text-[hsl(var(--text-1))] placeholder:text-[hsl(var(--text-3))] focus:outline-none focus:border-[hsl(var(--accent-primary)/0.6)] clip-bevel-sm"
+                    className="flex-1 bg-[hsl(var(--panel-2)/0.6)] border border-[hsl(var(--border-soft)/0.5)] px-3 py-1.5 text-[11px] font-ui text-[hsl(var(--text-1))] placeholder:text-[hsl(var(--text-3))] focus:outline-none focus:border-[hsl(var(--accent-primary)/0.6)] clip-bevel-sm"
                 />
                 <button
                     onClick={handleAdd}
                     disabled={!newTitle.trim()}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 clip-bevel-sm border border-[hsl(var(--accent-primary)/0.5)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.08)] text-[10px] font-mono uppercase tracking-[0.14em] hover:bg-[hsl(var(--accent-primary)/0.16)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 clip-bevel-sm border border-[hsl(var(--accent-primary)/0.5)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.08)] text-[10px] font-ui uppercase tracking-[0.14em] hover:bg-[hsl(var(--accent-primary)/0.16)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
                     <Plus className="w-3 h-3" />
                     Add Hypothesis
@@ -551,7 +551,7 @@ export function HypothesisWorkbench({ activeRunId }) {
                             key={s}
                             onClick={() => setFilterStatus(s)}
                             className={cn(
-                                "inline-flex items-center gap-1 px-2 py-0.5 clip-bevel-sm border text-[9px] font-mono uppercase tracking-[0.14em] transition-colors",
+                                "inline-flex items-center gap-1 px-2 py-0.5 clip-bevel-sm border text-[9px] font-ui uppercase tracking-[0.14em] transition-colors",
                                 filterStatus === s
                                     ? "border-[hsl(var(--accent-primary)/0.6)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.1)]"
                                     : "border-[hsl(var(--border-soft))] text-[hsl(var(--text-3))] hover:text-[hsl(var(--text-2))]",
@@ -565,7 +565,7 @@ export function HypothesisWorkbench({ activeRunId }) {
                 {hypotheses.length > 0 && (
                     <button
                         onClick={handleExport}
-                        className="inline-flex items-center gap-1.5 px-2 py-1 clip-bevel-sm border border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))] text-[10px] font-mono uppercase tracking-[0.12em] hover:text-[hsl(var(--text-1))] transition-colors"
+                        className="inline-flex items-center gap-1.5 px-2 py-1 clip-bevel-sm border border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))] text-[10px] font-ui uppercase tracking-[0.12em] hover:text-[hsl(var(--text-1))] transition-colors"
                     >
                         <Download className="w-3 h-3" />
                         Export CSV
@@ -628,13 +628,13 @@ export function ProtectionPowerTools({
             {/* Mode selector */}
             {modeKeys.length > 0 && onModeChange && (
                 <div className="mx-6 flex flex-wrap gap-2">
-                    <span className="self-center text-[10px] font-mono uppercase tracking-[0.16em] text-[hsl(var(--text-3))] mr-1">Protection Result</span>
+                    <span className="self-center text-[10px] font-ui uppercase tracking-[0.16em] text-[hsl(var(--text-3))] mr-1">Protection Result</span>
                     {modeKeys.map(m => (
                         <button
                             key={m}
                             onClick={() => onModeChange(m)}
                             className={cn(
-                                "px-3 py-1 clip-bevel-sm border text-[10px] font-mono uppercase tracking-[0.14em] transition-colors",
+                                "px-3 py-1 clip-bevel-sm border text-[10px] font-ui uppercase tracking-[0.14em] transition-colors",
                                 selectedMode === m
                                     ? "border-[hsl(var(--accent-primary)/0.6)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.1)]"
                                     : "border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))] hover:text-[hsl(var(--text-1))]",
@@ -654,7 +654,7 @@ export function ProtectionPowerTools({
                     defaultCollapsed={false}
                     action={
                         selectedMode ? (
-                            <span className="text-[10px] font-mono text-[hsl(var(--text-3))] uppercase tracking-[0.12em]">
+                            <span className="text-[10px] font-ui text-[hsl(var(--text-3))] uppercase tracking-[0.12em]">
                                 {prettyModeName(selectedMode)}
                             </span>
                         ) : null
@@ -684,7 +684,7 @@ export function ProtectionPowerTools({
             <div className="mx-6">
                 <NeonPanel title="Protection Hypothesis Workbench" collapsible defaultCollapsed={false}
                     action={
-                        <span className="inline-flex items-center gap-1 text-[10px] font-mono text-[hsl(var(--text-3))]">
+                        <span className="inline-flex items-center gap-1 text-[10px] font-ui text-[hsl(var(--text-3))]">
                             <BookMarked className="w-3 h-3" />
                             Persisted per run
                         </span>

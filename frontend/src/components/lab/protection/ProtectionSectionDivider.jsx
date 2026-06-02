@@ -47,11 +47,11 @@ export function ProtectionSectionDivider({
 
                 {/* Label group */}
                 <div className="flex flex-wrap items-baseline gap-2 min-w-0">
-                    <span className="text-[11px] font-mono uppercase tracking-[0.22em] text-[hsl(var(--text-1))] font-semibold">
+                    <span className="text-[11px] font-ui uppercase tracking-[0.14em] text-[hsl(var(--text-1))] font-semibold">
                         {label}
                     </span>
                     {subLabel && (
-                        <span className="text-[10px] font-mono text-[hsl(var(--text-3))] tracking-[0.1em]">
+                        <span className="text-[10px] font-ui text-[hsl(var(--text-3))] tracking-[0.1em]">
                             {subLabel}
                         </span>
                     )}

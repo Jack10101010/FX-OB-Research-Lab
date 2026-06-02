@@ -7,7 +7,7 @@ import {
     Cell,
 } from "recharts";
 import { NeonPanel } from "@/components/lab/NeonPanel";
-import { DataTable, Pill } from "@/components/lab/DataTable";
+import { HeroBadge } from "@/components/lab/controls";
 import {
     buildEquityCurveOverlayData,
     buildRBins,
@@ -16,8 +16,15 @@ import {
     buildDrawdownCurves,
     buildTradeLifecycleFlow,
     buildObBreakdown,
+    OB_BREAKDOWN_LABEL_FNS,
     prettyModeName,
 } from "./protectionAnalytics";
+import { CHART_NUM_FONT } from "@/lib/chartStyles";
+// RB-6B — the OB characteristic breakdown (baseline-scoped) routes through the
+// shared canonical bucket table. Protection-mode comparison tables are NOT
+// migrated; ProtectionLab stays pinned to the unprotected baseline universe.
+import { useResultsLens } from "@/data/useResultsLens";
+import { CanonicalBucketTable } from "@/components/lab/CanonicalBucketTable";
 
 // ── Shared style tokens ───────────────────────────────────────────────────────
 const C_BASELINE  = "hsl(var(--accent-secondary))";
@@ -31,7 +38,7 @@ const PANEL_BG    = "hsl(var(--panel-2))";
 
 function EmptyState({ message = "No protection dataset available for this view." }) {
     return (
-        <div className="flex items-center justify-center h-32 text-[11px] font-mono text-[hsl(var(--text-3))] text-center px-4">
+        <div className="flex items-center justify-center h-32 text-[11px] font-ui text-[hsl(var(--text-3))] text-center px-4">
             {message}
         </div>
     );
@@ -40,7 +47,7 @@ function EmptyState({ message = "No protection dataset available for this view."
 function ChartTooltipBox({ active, payload, label, labelFn, rowFn }) {
     if (!active || !payload?.length) return null;
     return (
-        <div className="bg-[hsl(var(--panel))] border border-[hsl(var(--border-soft))] clip-bevel-sm px-3 py-2 text-[11px] font-mono shadow-xl min-w-[120px]">
+        <div className="bg-[hsl(var(--panel))] border border-[hsl(var(--border-soft))] clip-bevel-sm px-3 py-2 text-[11px] font-ui shadow-xl min-w-[120px]">
             {label != null && (
                 <div className="text-[hsl(var(--text-3))] mb-1">{labelFn ? labelFn(label) : label}</div>
             )}
@@ -79,7 +86,7 @@ export function EquityCurveOverlay({ baselineTrades, tradesByMode, selectedMode 
                     <LegendDot color={C_PROTECTED} label={`Protected  ${protectedFinal >= 0 ? "+" : ""}${protectedFinal.toFixed(2)}R`} />
                 )}
                 {delta != null && (
-                    <span className={cn("text-[10px] font-mono tabular-nums", Number(delta) >= 0 ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]")}>
+                    <span className={cn("text-[10px] font-num tabular-nums", Number(delta) >= 0 ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]")}>
                         Δ {Number(delta) >= 0 ? "+" : ""}{delta}R
                     </span>
                 )}
@@ -98,7 +105,7 @@ export function EquityCurveOverlay({ baselineTrades, tradesByMode, selectedMode 
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke={C_BORDER} strokeOpacity={0.25} />
                     <XAxis dataKey="i" hide />
-                    <YAxis tick={{ fill: C_TEXT2, fontSize: 9, fontFamily: "monospace" }} tickLine={false} axisLine={false} width={36} tickFormatter={v => `${v}R`} />
+                    <YAxis tick={{ fill: C_TEXT2, fontSize: 9, fontFamily: CHART_NUM_FONT }} tickLine={false} axisLine={false} width={36} tickFormatter={v => `${v}R`} />
                     <ReferenceLine y={0} stroke={C_BORDER} strokeOpacity={0.5} />
                     <Tooltip content={<ChartTooltipBox labelFn={v => `Trade #${v + 1}`} rowFn={e => `${e.value >= 0 ? "+" : ""}${Number(e.value).toFixed(2)}R`} />} />
                     <Area type="monotone" dataKey="netR" name="Unprotected" stroke={C_BASELINE} fill="url(#gradBase)" strokeWidth={1.5} dot={false} />
@@ -144,14 +151,14 @@ export function ProtectionImpactScatter({ pairs }) {
                     <CartesianGrid strokeDasharray="3 3" stroke={C_BORDER} strokeOpacity={0.25} />
                     <XAxis
                         type="number" dataKey="base" name="Unprotected R" domain={[minV, maxV]}
-                        tick={{ fill: C_TEXT2, fontSize: 9, fontFamily: "monospace" }}
+                        tick={{ fill: C_TEXT2, fontSize: 9, fontFamily: CHART_NUM_FONT }}
                         tickLine={false} axisLine={false}
                         tickFormatter={v => `${v}R`}
-                        label={{ value: "Unprotected R", fill: C_TEXT2, fontSize: 9, fontFamily: "monospace", position: "insideBottom", offset: -2 }}
+                        label={{ value: "Unprotected R", fill: C_TEXT2, fontSize: 9, fontFamily: CHART_NUM_FONT, position: "insideBottom", offset: -2 }}
                     />
                     <YAxis
                         type="number" dataKey="prot" name="Protected R" domain={[minV, maxV]}
-                        tick={{ fill: C_TEXT2, fontSize: 9, fontFamily: "monospace" }}
+                        tick={{ fill: C_TEXT2, fontSize: 9, fontFamily: CHART_NUM_FONT }}
                         tickLine={false} axisLine={false} width={36}
                         tickFormatter={v => `${v}R`}
                     />
@@ -207,10 +214,10 @@ export function RDistributionHistogram({ baselineTrades, protectedTrades }) {
                 <BarChart data={bins} margin={{ top: 4, right: 12, left: -8, bottom: 0 }} barCategoryGap="20%">
                     <CartesianGrid strokeDasharray="3 3" stroke={C_BORDER} strokeOpacity={0.25} vertical={false} />
                     <XAxis
-                        dataKey="bin" tick={{ fill: C_TEXT2, fontSize: 9, fontFamily: "monospace" }}
+                        dataKey="bin" tick={{ fill: C_TEXT2, fontSize: 9, fontFamily: CHART_NUM_FONT }}
                         tickLine={false} axisLine={false}
                     />
-                    <YAxis tick={{ fill: C_TEXT2, fontSize: 9, fontFamily: "monospace" }} tickLine={false} axisLine={false} width={28} />
+                    <YAxis tick={{ fill: C_TEXT2, fontSize: 9, fontFamily: CHART_NUM_FONT }} tickLine={false} axisLine={false} width={28} />
                     <Tooltip content={<ChartTooltipBox />} />
                     <Bar dataKey="base" name="Unprotected" fill={C_BASELINE} fillOpacity={0.75} radius={[2, 2, 0, 0]} />
                     {bins.some(b => b.prot != null) && (
@@ -241,7 +248,7 @@ export function PenetrationSensitivity({ trades }) {
     return (
         <div>
             <div className="flex flex-wrap items-center gap-4 mb-3 px-1">
-                <label className="flex items-center gap-2 text-[10px] font-mono text-[hsl(var(--text-2))]">
+                <label className="flex items-center gap-2 text-[10px] font-ui text-[hsl(var(--text-2))]">
                     Min %
                     <input
                         type="range" min={0} max={95} step={5} value={minPct}
@@ -250,7 +257,7 @@ export function PenetrationSensitivity({ trades }) {
                     />
                     <span className="w-6 tabular-nums">{minPct}</span>
                 </label>
-                <label className="flex items-center gap-2 text-[10px] font-mono text-[hsl(var(--text-2))]">
+                <label className="flex items-center gap-2 text-[10px] font-ui text-[hsl(var(--text-2))]">
                     Max %
                     <input
                         type="range" min={5} max={100} step={5} value={maxPct}
@@ -259,15 +266,15 @@ export function PenetrationSensitivity({ trades }) {
                     />
                     <span className="w-6 tabular-nums">{maxPct}</span>
                 </label>
-                <span className="text-[10px] font-mono text-[hsl(var(--text-3))]">
+                <span className="text-[10px] font-ui text-[hsl(var(--text-3))]">
                     Unprotected: {sweep.baselineNet >= 0 ? "+" : ""}{sweep.baselineNet?.toFixed(2)}R
                 </span>
             </div>
             <ResponsiveContainer width="100%" height={180}>
                 <ComposedChart data={sweep.results} margin={{ top: 4, right: 12, left: -8, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke={C_BORDER} strokeOpacity={0.25} />
-                    <XAxis dataKey="threshold" tick={{ fill: C_TEXT2, fontSize: 9, fontFamily: "monospace" }} tickLine={false} axisLine={false} tickFormatter={v => `${v}%`} />
-                    <YAxis tick={{ fill: C_TEXT2, fontSize: 9, fontFamily: "monospace" }} tickLine={false} axisLine={false} width={36} tickFormatter={v => `${v}R`} />
+                    <XAxis dataKey="threshold" tick={{ fill: C_TEXT2, fontSize: 9, fontFamily: CHART_NUM_FONT }} tickLine={false} axisLine={false} tickFormatter={v => `${v}%`} />
+                    <YAxis tick={{ fill: C_TEXT2, fontSize: 9, fontFamily: CHART_NUM_FONT }} tickLine={false} axisLine={false} width={36} tickFormatter={v => `${v}R`} />
                     <ReferenceLine y={sweep.baselineNet} stroke={C_BASELINE} strokeDasharray="4 4" strokeWidth={1} label={{ value: "Unprotected", fill: C_BASELINE, fontSize: 9 }} />
                     <ReferenceLine y={0} stroke={C_BORDER} strokeOpacity={0.5} />
                     <Tooltip content={<ChartTooltipBox labelFn={v => `Threshold: ${v}%`} rowFn={e => `${e.value >= 0 ? "+" : ""}${Number(e.value).toFixed(2)}R`} />} />
@@ -313,7 +320,7 @@ export function DrawdownComparison({ baselineTrades, tradesByMode }) {
                             key={c.mode}
                             onClick={() => !c.isBaseline && toggleMode(c.mode)}
                             className={cn(
-                                "inline-flex items-center gap-1.5 px-2 py-0.5 clip-bevel-sm border text-[10px] font-mono uppercase tracking-[0.12em] transition-opacity",
+                                "inline-flex items-center gap-1.5 px-2 py-0.5 clip-bevel-sm border text-[10px] font-ui uppercase tracking-[0.12em] transition-opacity",
                                 activeModes.includes(c.mode) || c.isBaseline ? "opacity-100" : "opacity-30",
                                 c.isBaseline ? "cursor-default" : "cursor-pointer hover:opacity-80",
                             )}
@@ -332,7 +339,7 @@ export function DrawdownComparison({ baselineTrades, tradesByMode }) {
                 <LineChart data={merged} margin={{ top: 4, right: 12, left: -8, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke={C_BORDER} strokeOpacity={0.25} />
                     <XAxis dataKey="i" hide />
-                    <YAxis tick={{ fill: C_TEXT2, fontSize: 9, fontFamily: "monospace" }} tickLine={false} axisLine={false} width={36} tickFormatter={v => `${v}R`} />
+                    <YAxis tick={{ fill: C_TEXT2, fontSize: 9, fontFamily: CHART_NUM_FONT }} tickLine={false} axisLine={false} width={36} tickFormatter={v => `${v}R`} />
                     <ReferenceLine y={0} stroke={C_BORDER} strokeOpacity={0.5} />
                     <Tooltip content={<ChartTooltipBox labelFn={v => `Trade #${v + 1}`} rowFn={e => `${Number(e.value).toFixed(2)}R`} />} />
                     {curves.map(c => (
@@ -442,10 +449,10 @@ export function TriggerTimeHistogram({ breachTimes }) {
                 <XAxis
                     dataKey="label"
                     interval={3}
-                    tick={{ fill: C_TEXT2, fontSize: 9, fontFamily: "monospace" }}
+                    tick={{ fill: C_TEXT2, fontSize: 9, fontFamily: CHART_NUM_FONT }}
                     tickLine={false} axisLine={false}
                 />
-                <YAxis tick={{ fill: C_TEXT2, fontSize: 9, fontFamily: "monospace" }} tickLine={false} axisLine={false} width={24} />
+                <YAxis tick={{ fill: C_TEXT2, fontSize: 9, fontFamily: CHART_NUM_FONT }} tickLine={false} axisLine={false} width={24} />
                 <Tooltip content={<ChartTooltipBox labelFn={v => `${v} UTC`} rowFn={e => `${e.value} triggers`} />} />
                 <Bar dataKey="count" name="Invalidation Triggers" radius={[2, 2, 0, 0]}>
                     {hourData.map((d, i) => (
@@ -472,25 +479,38 @@ const OB_BREAKDOWN_TABS = [
     { key: "byDirection", label: "Direction" },
 ];
 
-const OB_COLUMNS = [
-    { key: "bucket", label: "Group", width: "35%" },
-    { key: "count",  label: "Trades", align: "right", width: "15%" },
-    { key: "winRate", label: "Win %", align: "right", width: "15%",
-      render: row => <span className={row.winRate >= 50 ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]"}>{row.winRate?.toFixed(1)}%</span> },
-    { key: "avgR", label: "Avg R", align: "right", width: "15%",
-      render: row => <span className={row.avgR >= 0 ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]"}>{row.avgR >= 0 ? "+" : ""}{row.avgR?.toFixed(2)}R</span> },
-    { key: "netR",  label: "Net R", align: "right", width: "20%",
-      render: row => <span className={row.netR >= 0 ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]"}>{row.netR >= 0 ? "+" : ""}{row.netR?.toFixed(2)}R</span> },
+// RB-6B canonical schema. Columns/labels preserved (Group / Trades / Win % /
+// Avg R / Net R); fields mapped to the canonical bucket row (label, rows,
+// winRate, expectancy, netR). WR uses the frozen wins/(wins+losses) denominator.
+// (This also corrects a pre-existing latent field mismatch where the old
+// columns read row.bucket / row.avgR, which the builder never emitted.)
+const OB_RAW_SCHEMA = [
+    { key: "label",      label: "Group",  kind: "label", sortable: false },
+    { key: "rows",       label: "Trades", align: "right", kind: "int" },
+    { key: "winRate",    label: "Win %",  align: "right", kind: "pct", invariant: true },
+    { key: "expectancy", label: "Avg R",  align: "right", kind: "expR", heatmap: true },
+    { key: "netR",       label: "Net R",  align: "right", kind: "rNet", heatmap: true },
 ];
+const OB_CE_SCHEMA = [
+    { key: "label",              label: "Group",        kind: "label", sortable: false },
+    { key: "rows",               label: "Trades",       align: "right", kind: "int" },
+    { key: "winRate",            label: "Win %",        align: "right", kind: "pct", invariant: true },
+    { key: "contributionAmount", label: "Contribution", align: "right", kind: "money", heatmap: true },
+    { key: "contributionPct",    label: "Contrib %",    align: "right", kind: "moneyPct" },
+];
+const OB_SCHEMA = { raw: OB_RAW_SCHEMA, ce: OB_CE_SCHEMA };
 
 export function ObCharacteristicBreakdown({ trades }) {
     const [tab, setTab] = React.useState("byWidth");
+    const lens = useResultsLens();
 
     const breakdown = React.useMemo(() => buildObBreakdown(trades), [trades]);
-
     const rows = breakdown?.[tab] ?? [];
-
     const hasData = rows.length > 0;
+    // CE recompute groups the SAME baseline trades; order is derived from the
+    // visible Raw R rows so both bases show an identical bucket set.
+    const def = { labelFn: OB_BREAKDOWN_LABEL_FNS[tab], order: rows.map((r) => r.label) };
+    const isPureR = (lens.accountSettings?.mode || "r_only") === "r_only";
 
     return (
         <div>
@@ -500,7 +520,7 @@ export function ObCharacteristicBreakdown({ trades }) {
                         key={t.key}
                         onClick={() => setTab(t.key)}
                         className={cn(
-                            "px-3 py-1 clip-bevel-sm border text-[10px] font-mono uppercase tracking-[0.14em] transition-colors",
+                            "px-3 py-1 clip-bevel-sm border text-[10px] font-ui uppercase tracking-[0.14em] transition-colors",
                             tab === t.key
                                 ? "border-[hsl(var(--accent-primary)/0.6)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.1)]"
                                 : "border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))] hover:text-[hsl(var(--text-1))]",
@@ -510,15 +530,34 @@ export function ObCharacteristicBreakdown({ trades }) {
                     </button>
                 ))}
             </div>
+            <div className="mb-2 flex flex-col gap-1.5">
+                <div className="flex items-center gap-2">
+                    <span className="text-[9px] font-ui uppercase tracking-widest text-[hsl(var(--text-muted))]">Results Basis</span>
+                    <HeroBadge tone={lens.isCurrentEquity ? "secondary" : "muted"}>{lens.isCurrentEquity ? "Current Equity" : "Raw R"}</HeroBadge>
+                    <span className="text-[9px] font-ui uppercase tracking-widest text-[hsl(var(--text-muted))]">· Unprotected baseline</span>
+                </div>
+                {lens.isCurrentEquity && (
+                    <div className="flex items-start gap-2 border border-[hsl(var(--warning)/0.35)] bg-[hsl(var(--warning)/0.06)] clip-bevel-sm px-2.5 py-1.5">
+                        <span className="text-[10.5px] leading-relaxed text-[hsl(var(--text-2))]">
+                            Current Equity bucket values are sequence-dependent contribution over the unprotected
+                            baseline, not isolated edge.
+                            {isPureR && " Account model is Pure R — set an account mode in Settings → Results Basis for dollar contribution."}
+                        </span>
+                    </div>
+                )}
+            </div>
             {hasData ? (
-                <DataTable
-                    columns={OB_COLUMNS}
-                    rows={rows}
-                    rowKey="bucket"
+                <CanonicalBucketTable
+                    bare
+                    bareHeatmap
                     compact
-                    heatmap
+                    restrictToOrder
+                    testId={`protlab-ob-breakdown-${tab}`}
+                    rawRows={rows}
+                    trades={trades}
+                    def={def}
+                    schema={OB_SCHEMA}
                     defaultSortKey="netR"
-                    defaultSortDir="desc"
                 />
             ) : (
                 <EmptyState message={`No ${OB_BREAKDOWN_TABS.find(t => t.key === tab)?.label} data. Required field is not populated in this dataset.`} />
@@ -536,7 +575,10 @@ export function TradeLifecycleFlow({ trades, tradesByMode, selectedMode }) {
         [trades, tradesByMode, selectedMode],
     );
 
-    if (!flow.n) return <EmptyState message="No trades available for lifecycle flow." />;
+    // buildTradeLifecycleFlow returns null when there are no trades; guard the
+    // whole object (not just .n) so the empty case renders the limited-data
+    // state instead of crashing on `null.n`.
+    if (!flow || !flow.n) return <EmptyState message="No trades available for lifecycle flow." />;
 
     const {
         n, wins, losses, breakeven,
@@ -659,7 +701,7 @@ export function TradeLifecycleFlow({ trades, tradesByMode, selectedMode }) {
 // ──────────────────────────────────────────────────────────────────────────────
 function LegendDot({ color, label }) {
     return (
-        <span className="inline-flex items-center gap-1.5 text-[10px] font-mono text-[hsl(var(--text-2))]">
+        <span className="inline-flex items-center gap-1.5 text-[10px] font-ui text-[hsl(var(--text-2))]">
             <span className="inline-block w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: color }} />
             {label}
         </span>
@@ -676,8 +718,8 @@ function Stat({ label, value, tone = "muted" }) {
     }[tone] || "text-[hsl(var(--text-2))]";
     return (
         <div className="flex flex-col items-start">
-            <span className="text-[9px] font-mono uppercase tracking-[0.16em] text-[hsl(var(--text-3))]">{label}</span>
-            <span className={cn("text-[13px] font-mono tabular-nums font-semibold", toneColor)}>{value}</span>
+            <span className="text-[9px] font-ui uppercase tracking-[0.16em] text-[hsl(var(--text-3))]">{label}</span>
+            <span className={cn("text-[13px] font-num tabular-nums font-semibold", toneColor)}>{value}</span>
         </div>
     );
 }
@@ -718,13 +760,13 @@ export function ProtectionVisualAnalytics({
             {/* Mode selector strip */}
             {modeKeys.length > 0 && onModeChange && (
                 <div className="mx-6 flex flex-wrap gap-2">
-                    <span className="self-center text-[10px] font-mono uppercase tracking-[0.16em] text-[hsl(var(--text-3))] mr-1">Protection Result</span>
+                    <span className="self-center text-[10px] font-ui uppercase tracking-[0.16em] text-[hsl(var(--text-3))] mr-1">Protection Result</span>
                     {modeKeys.map(m => (
                         <button
                             key={m}
                             onClick={() => onModeChange(m)}
                             className={cn(
-                                "px-3 py-1 clip-bevel-sm border text-[10px] font-mono uppercase tracking-[0.14em] transition-colors",
+                                "px-3 py-1 clip-bevel-sm border text-[10px] font-ui uppercase tracking-[0.14em] transition-colors",
                                 selectedMode === m
                                     ? "border-[hsl(var(--accent-primary)/0.6)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.1)]"
                                     : "border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))] hover:text-[hsl(var(--text-1))]",
