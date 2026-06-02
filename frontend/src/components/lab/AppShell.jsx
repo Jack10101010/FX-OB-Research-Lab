@@ -25,7 +25,7 @@ export function PageHeader({ eyebrow, title, subtitle, actions }) {
             <div className="flex items-start justify-between gap-4 flex-wrap">
                 <div>
                     {eyebrow && (
-                        <div className="text-[10px] font-mono uppercase tracking-[0.32em] text-[hsl(var(--accent-primary))] mb-2">
+                        <div className="text-[10px] font-ui uppercase tracking-[0.20em] text-[hsl(var(--accent-primary))] mb-2">
                             <span className="inline-block w-6 h-px bg-[hsl(var(--accent-primary))] mr-2 align-middle" />
                             {eyebrow}
                         </div>

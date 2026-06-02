@@ -1,6 +1,7 @@
 import React from "react";
 import "@/App.css";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { useDataset } from "@/data/store";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { AppShell } from "@/components/lab/AppShell";
 import { RouteErrorBoundary } from "@/components/lab/RouteErrorBoundary";
@@ -10,6 +11,7 @@ import StrategyLogic from "@/pages/StrategyLogic";
 import StrategyBuilder from "@/pages/StrategyBuilder";
 import Projects from "@/pages/Projects";
 import ProjectDetail from "@/pages/ProjectDetail";
+import Insights from "@/pages/Insights";
 import Runs from "@/pages/Runs";
 import RunDetail from "@/pages/RunDetail";
 import OrderBlockLab from "@/pages/OrderBlockLab";
@@ -26,6 +28,14 @@ import FailuresLab from "@/pages/FailuresLab";
 import ParityDebugger from "@/pages/ParityDebugger";
 import MonteCarlo from "@/pages/MonteCarlo";
 import Settings from "@/pages/Settings";
+
+function ActiveRunRedirect() {
+    const { activeRunId } = useDataset();
+    if (activeRunId) {
+        return <Navigate to={`/runs/${encodeURIComponent(activeRunId)}`} replace />;
+    }
+    return <Navigate to="/runs" replace />;
+}
 
 const withRouteBoundary = (element) => (
     <RouteErrorBoundary>
@@ -44,8 +54,10 @@ function App() {
                         <Route path="/strategy-logic" element={withRouteBoundary(<StrategyLogic />)} />
                         <Route path="/projects" element={withRouteBoundary(<Projects />)} />
                         <Route path="/projects/:projectId" element={withRouteBoundary(<ProjectDetail />)} />
+                        <Route path="/insights" element={withRouteBoundary(<Insights />)} />
                         <Route path="/strategy" element={withRouteBoundary(<StrategyBuilder />)} />
                         <Route path="/runs" element={withRouteBoundary(<Runs />)} />
+                        <Route path="/runs/active" element={<ActiveRunRedirect />} />
                         <Route path="/runs/:runId" element={withRouteBoundary(<RunDetail />)} />
                         <Route path="/order-block-lab" element={withRouteBoundary(<OrderBlockLab />)} />
                         <Route path="/protection-lab" element={withRouteBoundary(<ProtectionLab />)} />

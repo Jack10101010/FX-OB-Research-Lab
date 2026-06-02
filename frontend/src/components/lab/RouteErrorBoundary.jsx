@@ -30,13 +30,13 @@ export class RouteErrorBoundary extends React.Component {
 
                     <div className="flex items-center gap-2 px-4 py-3 border-b border-[hsl(var(--warning)/0.28)]">
                         <AlertTriangle className="w-4 h-4 text-[hsl(var(--warning))]" />
-                        <h2 className="text-[11px] font-mono tracking-[0.22em] uppercase text-[hsl(var(--warning))]">
+                        <h2 className="text-[11px] font-ui tracking-[0.14em] uppercase text-[hsl(var(--warning))]">
                             Page failed to render
                         </h2>
                     </div>
 
                     <div className="p-4">
-                        <p className="text-[12px] font-mono text-muted-lab">
+                        <p className="text-[12px] font-ui text-muted-lab">
                             This page crashed, but the dashboard shell is still running.
                         </p>
                         <NeonButton

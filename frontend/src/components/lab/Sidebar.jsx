@@ -5,40 +5,77 @@ import {
     FlaskConical, GitCompareArrows, ShieldCheck, Dices, Settings as Cog,
     Beaker, Boxes, ChevronRight, MonitorCog, Lock, CalendarRange, ShieldAlert,
     MousePointerClick, TestTubeDiagonal, Newspaper, FolderKanban,
-    BookOpen, ChevronLeft, Microscope,
+    BookOpen, ChevronLeft, Microscope, Lightbulb,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme, THEMES } from "@/context/ThemeContext";
+import { useDataset, compactTimeframe } from "@/data/store";
 
 const SIDEBAR_COLLAPSED_KEY = "fxob_sidebar_collapsed_v1";
 
-const NAV = [
-    { to: "/workflow-guide",  label: "Workflow Guide",  icon: Beaker },
-    { to: "/",                label: "Overview",        icon: LayoutDashboard },
-    { to: "/projects",        label: "Projects",        icon: FolderKanban },
-    { to: "/strategy",        label: "Strategy Builder", icon: Wrench },
-    { to: "/strategy-logic",  label: "Strategy Logic",  icon: BookOpen },
-    { to: "/runs",            label: "Runs",             icon: ListOrdered },
-    { to: "/runs/active",     label: "Run Detail",       icon: Activity },
-    { to: "/order-block-lab",  label: "Order Block Lab",  icon: Boxes },
-    { to: "/protection-lab",  label: "Protection Lab",   icon: ShieldAlert },
-    { to: "/entries-lab",     label: "Entries Lab",      icon: MousePointerClick },
-    { to: "/news-lab",        label: "News Lab",         icon: Newspaper },
-    { to: "/strategy-map",    label: "Strategy Map",     icon: Map },
-    { to: "/trade-inspector", label: "Trade Inspector",  icon: Crosshair },
-    { to: "/sweep",           label: "Sweep Lab",        icon: FlaskConical },
-    { to: "/comparison",      label: "Comparison Lab",   icon: GitCompareArrows },
-    { to: "/walk-forward",     label: "Walk-Forward Lab",  icon: CalendarRange },
-    { to: "/hypothesis-lab",  label: "Hypothesis Lab",   icon: TestTubeDiagonal },
-    { to: "/failures-lab",    label: "Failures Lab",     icon: Microscope },
-    { to: "/parity",          label: "Parity Debugger",  icon: ShieldCheck },
-    { to: "/monte-carlo",     label: "Monte Carlo",      icon: Dices },
-    { to: "/settings",        label: "Settings",         icon: Cog },
+// Grouped navigation (WF-1). Routes are unchanged — only labels/order/section
+// headers. "Run Detail" is relabeled "Run Workspace". No routes removed.
+const NAV_GROUPS = [
+    {
+        section: "Workspace",
+        items: [
+            { to: "/",          label: "Overview",        icon: LayoutDashboard },
+            { to: "/projects",  label: "Projects",        icon: FolderKanban },
+            { to: "/runs",      label: "Runs",            icon: ListOrdered },
+            { to: "/insights",  label: "Insights",        icon: Lightbulb },
+        ],
+    },
+    {
+        section: "Build & Run",
+        items: [
+            { to: "/strategy",       label: "Strategy Builder", icon: Wrench },
+            { to: "/strategy-logic", label: "Strategy Logic",   icon: BookOpen },
+        ],
+    },
+    {
+        section: "Analyze",
+        items: [
+            { to: "/runs/active",     label: "Run Workspace",   icon: Activity },
+            { to: "/strategy-map",    label: "Strategy Map",    icon: Map },
+            { to: "/order-block-lab", label: "Order Block Lab", icon: Boxes },
+            { to: "/entries-lab",     label: "Entries Lab",     icon: MousePointerClick },
+            { to: "/protection-lab",  label: "Protection Lab",  icon: ShieldAlert },
+            { to: "/news-lab",        label: "News Lab",        icon: Newspaper },
+            { to: "/trade-inspector", label: "Trade Inspector", icon: Crosshair },
+            { to: "/failures-lab",    label: "Failures Lab",    icon: Microscope },
+        ],
+    },
+    {
+        section: "Compare & Validate",
+        items: [
+            { to: "/comparison",     label: "Comparison Lab",  icon: GitCompareArrows },
+            { to: "/sweep",          label: "Sweep Lab",       icon: FlaskConical },
+            { to: "/walk-forward",   label: "Walk-Forward Lab", icon: CalendarRange },
+            { to: "/hypothesis-lab", label: "Hypothesis Lab",  icon: TestTubeDiagonal },
+            { to: "/monte-carlo",    label: "Monte Carlo",     icon: Dices },
+        ],
+    },
+    {
+        section: "Utilities",
+        items: [
+            { to: "/settings",       label: "Settings",        icon: Cog },
+            { to: "/workflow-guide", label: "Workflow Guide",  icon: Beaker },
+            { to: "/parity",         label: "Parity Debugger", icon: ShieldCheck },
+        ],
+    },
 ];
 
 export function Sidebar() {
     const { theme, setTheme } = useTheme();
     const current = THEMES.find((t) => t.id === theme) || THEMES[0];
+    const { ACTIVE_RUN } = useDataset();
+    const hasRun = Boolean(ACTIVE_RUN?.id);
+    const symbol = ACTIVE_RUN?.symbol || "—";
+    const tf = compactTimeframe(ACTIVE_RUN?.detectionTf) || ACTIVE_RUN?.detectionTf || "—";
+    const rr = hasRun && Number(ACTIVE_RUN?.rr) > 0 ? `RR ${Number(ACTIVE_RUN.rr).toFixed(1)}` : "—";
+    const netRVal = hasRun ? (ACTIVE_RUN?.netR ?? 0) : null;
+    const netRLabel = netRVal !== null ? `${netRVal >= 0 ? "+" : ""}${Number(netRVal).toFixed(1)}R` : "—";
+    const netRColor = netRVal === null ? "text-muted-lab" : netRVal > 0 ? "text-[hsl(var(--success))]" : netRVal < 0 ? "text-[hsl(var(--danger))]" : "text-muted-lab";
     const [collapsed, setCollapsed] = React.useState(() => {
         try {
             return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true";
@@ -75,7 +112,7 @@ export function Sidebar() {
                     </div>
                     {!collapsed && <div className="leading-tight">
                         <div className="font-display text-[14px] font-semibold tracking-wide">FX-OB</div>
-                        <div className="text-[9.5px] font-mono uppercase tracking-[0.22em] text-muted-lab">Research Lab</div>
+                        <div className="text-[9.5px] font-ui uppercase tracking-[0.14em] text-muted-lab">Research Lab</div>
                     </div>}
                 </div>
                 <button
@@ -93,46 +130,55 @@ export function Sidebar() {
             </div>
 
             {/* Nav */}
-            <nav className={cn("flex-1 py-4 space-y-0.5 overflow-y-auto scrollbar-thin", collapsed ? "px-2" : "px-3")}>
-                {NAV.map((item) => (
-                    <NavLink
-                        key={item.to}
-                        to={item.to}
-                        end={item.to === "/"}
-                        data-testid={`nav-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
-                        title={collapsed ? item.label : undefined}
-                        aria-label={item.label}
-                        className={({ isActive }) =>
-                            cn(
-                                "group relative flex items-center py-2 text-[12.5px] font-medium tracking-tight transition-all",
-                                collapsed ? "justify-center px-0" : "gap-2.5 px-2.5",
-                                "text-[hsl(var(--text-2))] hover:text-white",
-                                isActive
-                                    ? "bg-[hsl(var(--accent-primary)/0.10)] text-white"
-                                    : "hover:bg-[hsl(var(--panel-2))]",
-                            )
-                        }
-                    >
-                        {({ isActive }) => (
-                            <>
-                                <span
-                                    className={cn(
-                                        "absolute left-0 top-1 bottom-1 w-[2px] transition-opacity",
-                                        isActive ? "bg-[hsl(var(--accent-primary))] opacity-100" : "opacity-0",
-                                    )}
-                                    style={isActive ? { boxShadow: "0 0 10px hsl(var(--accent-primary))" } : undefined}
-                                />
-                                <item.icon className={cn("w-4 h-4", isActive && "text-[hsl(var(--accent-primary))]")} />
-                                {!collapsed && <span>{item.label}</span>}
-                                {isActive && !collapsed && <ChevronRight className="w-3.5 h-3.5 ml-auto text-[hsl(var(--accent-primary))]" />}
-                            </>
+            <nav className={cn("flex-1 py-4 overflow-y-auto scrollbar-thin", collapsed ? "px-2" : "px-3")}>
+                {NAV_GROUPS.map((group, groupIndex) => (
+                    <div key={group.section} className={cn("space-y-0.5", groupIndex > 0 && (collapsed ? "mt-3 pt-3 border-t border-[hsl(var(--border-soft))]" : "mt-4"))}>
+                        {!collapsed && (
+                            <div className="px-2.5 mb-1 text-[9.5px] font-ui uppercase tracking-[0.14em] text-muted-lab">
+                                {group.section}
+                            </div>
                         )}
-                    </NavLink>
+                        {group.items.map((item) => (
+                            <NavLink
+                                key={item.to}
+                                to={item.to}
+                                end={item.to === "/"}
+                                data-testid={`nav-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
+                                title={collapsed ? item.label : undefined}
+                                aria-label={item.label}
+                                className={({ isActive }) =>
+                                    cn(
+                                        "group relative flex items-center py-2 text-[12.5px] font-medium tracking-tight transition-all",
+                                        collapsed ? "justify-center px-0" : "gap-2.5 px-2.5",
+                                        "text-[hsl(var(--text-2))] hover:text-white",
+                                        isActive
+                                            ? "bg-[hsl(var(--accent-primary)/0.10)] text-white"
+                                            : "hover:bg-[hsl(var(--panel-2))]",
+                                    )
+                                }
+                            >
+                                {({ isActive }) => (
+                                    <>
+                                        <span
+                                            className={cn(
+                                                "absolute left-0 top-1 bottom-1 w-[2px] transition-opacity",
+                                                isActive ? "bg-[hsl(var(--accent-primary))] opacity-100" : "opacity-0",
+                                            )}
+                                            style={isActive ? { boxShadow: "0 0 10px hsl(var(--accent-primary))" } : undefined}
+                                        />
+                                        <item.icon className={cn("w-4 h-4", isActive && "text-[hsl(var(--accent-primary))]")} />
+                                        {!collapsed && <span>{item.label}</span>}
+                                        {isActive && !collapsed && <ChevronRight className="w-3.5 h-3.5 ml-auto text-[hsl(var(--accent-primary))]" />}
+                                    </>
+                                )}
+                            </NavLink>
+                        ))}
+                    </div>
                 ))}
 
                 {/* Research Workstation — future desktop sidecar (placeholder) */}
                 <div className="pt-3 mt-2 border-t border-[hsl(var(--border-soft))]">
-                    {!collapsed && <div className="px-2.5 mb-1 text-[9.5px] font-mono uppercase tracking-[0.22em] text-muted-lab">Roadmap</div>}
+                    {!collapsed && <div className="px-2.5 mb-1 text-[9.5px] font-ui uppercase tracking-[0.14em] text-muted-lab">Roadmap</div>}
                     <WorkstationItem collapsed={collapsed} />
                     <RoadmapItem
                         testId="nav-ai-review"
@@ -151,7 +197,7 @@ export function Sidebar() {
 
             {/* Theme selector preview */}
             <div className={cn("pb-2", collapsed ? "px-2" : "px-3")}>
-                {!collapsed && <div className="text-[9.5px] font-mono uppercase tracking-[0.22em] text-muted-lab px-1 mb-1.5">Theme</div>}
+                {!collapsed && <div className="text-[9.5px] font-ui uppercase tracking-[0.14em] text-muted-lab px-1 mb-1.5">Theme</div>}
                 <div className={cn("flex items-center gap-1.5 flex-wrap", collapsed && "justify-center")} data-testid="theme-quick-picker">
                     {THEMES.map((t) => (
                         <button
@@ -169,7 +215,7 @@ export function Sidebar() {
                         </button>
                     ))}
                 </div>
-                {!collapsed && <div className="px-1 mt-1.5 text-[10.5px] font-mono text-[hsl(var(--text-2))]">
+                {!collapsed && <div className="px-1 mt-1.5 text-[10.5px] font-ui text-[hsl(var(--text-2))]">
                     {current.name}
                 </div>}
             </div>
@@ -179,14 +225,21 @@ export function Sidebar() {
                 <div className="clip-bevel-sm p-[1px] bg-gradient-to-br from-[hsl(var(--accent-primary)/0.45)] to-[hsl(var(--accent-secondary)/0.30)]">
                     <div className={cn("clip-bevel-sm bg-[hsl(var(--panel))]", collapsed ? "px-2 py-2 text-center" : "px-3 py-2.5")}>
                         {collapsed ? (
-                            <div className="font-mono text-[10px] text-[hsl(var(--accent-secondary))]" title="Active Config: EURUSD · M15 · RR 3.3">M15</div>
+                            <div
+                                className="font-num text-[10px] text-[hsl(var(--accent-secondary))]"
+                                title={hasRun ? `Active Config: ${symbol} · ${tf} · ${rr}` : "No active run"}
+                            >
+                                {hasRun ? tf : "—"}
+                            </div>
                         ) : (
                             <>
-                                <div className="text-[9.5px] font-mono uppercase tracking-[0.22em] text-muted-lab">Active Config</div>
-                                <div className="font-mono text-[11.5px] mt-1 text-white">EURUSD · M15</div>
+                                <div className="text-[9.5px] font-ui uppercase tracking-[0.14em] text-muted-lab">Active Config</div>
+                                <div className="font-ui text-[11.5px] mt-1 text-white">
+                                    {hasRun ? `${symbol} · ${tf}` : "No active run"}
+                                </div>
                                 <div className="flex items-center justify-between mt-1.5">
-                                    <span className="font-mono text-[10.5px] text-[hsl(var(--accent-secondary))]">RR 3.3</span>
-                                    <span className="font-mono text-[10.5px] text-[hsl(var(--success))]">+39.3R</span>
+                                    <span className="font-num text-[10.5px] text-[hsl(var(--accent-secondary))]">{rr}</span>
+                                    <span className={cn("font-num text-[10.5px]", netRColor)}>{netRLabel}</span>
                                 </div>
                             </>
                         )}
@@ -196,12 +249,12 @@ export function Sidebar() {
 
             {/* Profile */}
             <div className={cn("px-3 pb-3 border-t border-[hsl(var(--border-soft))] pt-3 flex items-center", collapsed ? "justify-center" : "gap-2.5")}>
-                <div className="w-8 h-8 clip-bevel-sm bg-gradient-to-br from-[hsl(var(--accent-primary))] to-[hsl(var(--accent-secondary))] flex items-center justify-center text-[10px] font-mono font-bold text-[hsl(var(--bg))]">
+                <div className="w-8 h-8 clip-bevel-sm bg-gradient-to-br from-[hsl(var(--accent-primary))] to-[hsl(var(--accent-secondary))] flex items-center justify-center text-[10px] font-ui font-bold text-[hsl(var(--bg))]">
                     QO
                 </div>
                 {!collapsed && <div className="leading-tight">
                     <div className="text-[11.5px] font-medium">QuantOperator</div>
-                    <div className="text-[9.5px] font-mono uppercase tracking-wider text-muted-lab">Research</div>
+                    <div className="text-[9.5px] font-ui uppercase tracking-wider text-muted-lab">Research</div>
                 </div>}
             </div>
         </aside>
@@ -225,10 +278,10 @@ function RoadmapItem({ testId, label, sublabel, collapsed = false }) {
                 {!collapsed && <Lock className="w-3 h-3 ml-auto text-muted-lab" />}
             </div>
             {!collapsed && <div className="mt-1 flex items-center gap-1.5 px-2.5">
-                <span className="inline-flex items-center text-[8.5px] font-mono uppercase tracking-[0.22em] px-1.5 py-[1px] border border-[hsl(var(--accent-secondary)/0.5)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.06)] clip-bevel-sm">
+                <span className="inline-flex items-center text-[8.5px] font-ui uppercase tracking-[0.10em] px-1.5 py-[1px] border border-[hsl(var(--accent-secondary)/0.5)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.06)] clip-bevel-sm">
                     Coming Soon
                 </span>
-                <span className="text-[9.5px] font-mono text-muted-lab">{sublabel}</span>
+                <span className="text-[9.5px] font-ui text-muted-lab">{sublabel}</span>
             </div>}
         </div>
     );
@@ -259,12 +312,12 @@ function WorkstationItem({ collapsed = false }) {
             </div>
             {!collapsed && <div className="mt-1 flex items-center gap-1.5 px-2.5">
                 <span
-                    className="inline-flex items-center text-[8.5px] font-mono uppercase tracking-[0.22em] px-1.5 py-[1px] border border-[hsl(var(--accent-secondary)/0.5)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.06)] clip-bevel-sm"
+                    className="inline-flex items-center text-[8.5px] font-ui uppercase tracking-[0.10em] px-1.5 py-[1px] border border-[hsl(var(--accent-secondary)/0.5)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.06)] clip-bevel-sm"
                     data-testid="workstation-coming-soon-badge"
                 >
                     Coming Soon
                 </span>
-                <span className="text-[9.5px] font-mono text-muted-lab">Desktop Mode</span>
+                <span className="text-[9.5px] font-ui text-muted-lab">Desktop Mode</span>
             </div>}
             {open && (
                 <div
@@ -278,13 +331,13 @@ function WorkstationItem({ collapsed = false }) {
                     <div className="clip-bevel bg-[hsl(var(--panel))] p-3">
                         <div className="flex items-center gap-2">
                             <MonitorCog className="w-3.5 h-3.5 text-[hsl(var(--accent-secondary))]" />
-                            <span className="text-[10.5px] font-mono uppercase tracking-[0.22em] text-[hsl(var(--accent-secondary))]">Coming Soon</span>
+                            <span className="text-[10.5px] font-ui uppercase tracking-[0.10em] text-[hsl(var(--accent-secondary))]">Coming Soon</span>
                         </div>
                         <div className="font-display text-[13px] text-white mt-1.5">Research Workstation</div>
                         <p className="text-[11px] text-[hsl(var(--text-2))] mt-1 leading-relaxed">
                             Future local desktop sidecar that turns this dashboard into a full research workstation:
                         </p>
-                        <ul className="text-[10.5px] text-[hsl(var(--text-2))] mt-2 space-y-1 font-mono">
+                        <ul className="text-[10.5px] text-[hsl(var(--text-2))] mt-2 space-y-1 font-ui">
                             <li className="flex gap-2"><span className="text-[hsl(var(--accent-secondary))]">▸</span> Watch FX-OB-Backtester output folders</li>
                             <li className="flex gap-2"><span className="text-[hsl(var(--accent-secondary))]">▸</span> Auto-refresh new runs and sweeps</li>
                             <li className="flex gap-2"><span className="text-[hsl(var(--accent-secondary))]">▸</span> Trigger Python backtests from the UI</li>
