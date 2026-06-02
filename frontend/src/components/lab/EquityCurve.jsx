@@ -116,7 +116,13 @@ function dotFill(point, showNews) {
     const fundingPhase = String(point.fundingPhase || point.phase || "").trim();
     const tradeR     = Number(point.tradeR);
     if (fundingMarker === "funded_start")                              return "hsl(330 88% 68%)";
-    if (fundingPhase === "Funded")                                      return "hsl(var(--accent-primary))";
+    if (fundingPhase === "Funded") {
+        // News-flattened trades → orange, same as pre-funded news/special dots
+        if (outcome.includes("FLATTEN"))               return "hsl(var(--warning))";
+        if (outcome === "WIN"  || tradeR >  0.005)     return "hsl(var(--success))";
+        if (outcome === "LOSS" || tradeR < -0.005)     return "hsl(var(--bear))";
+        return "hsl(var(--muted))";
+    }
     if (fundingMarker)                                                  return "hsl(var(--warning))";
     if (showNews && newsAction)                                         return "hsl(var(--warning))";
     if (outcome === "WIN")                                              return "hsl(var(--accent-primary))";
@@ -148,8 +154,10 @@ const LEGEND_ITEMS = [
 ];
 
 const FUNDING_LEGEND_ITEMS = [
-    { label: "Funded Live",  color: "hsl(var(--accent-primary))" },
-    { label: "Funded Start", color: "hsl(330 88% 68%)"           },
+    { label: "Funded Win",       color: "hsl(var(--success))"  },
+    { label: "Funded Flattened", color: "hsl(var(--warning))"  },
+    { label: "Funded Loss",      color: "hsl(var(--bear))"     },
+    { label: "Funded Start",     color: "hsl(330 88% 68%)"     },
 ];
 
 const TT_STYLE = {
@@ -207,9 +215,11 @@ function TradeTooltip({ active, payload, accountMode = false, currency = "USD" }
     const ddN = Number(p.drawdown);
     const rColor  = rN  >= 0 ? "hsl(var(--accent-primary))" : "hsl(var(--bear))";
     const ddColor = ddN < -0.005 ? "hsl(var(--bear))" : "hsl(var(--accent-primary))";
-    const newsAction   = String(p.news_action || "").trim();
-    const missedReason = String(p.missed_reason || "").trim();
-    const protExit     = String(p.protection_exit_reason || "").trim();
+    // Fall back to p.trade?.field for FTMO phase points, where buildPhasePoints
+    // spreads the trade object but does not extract these event fields explicitly.
+    const newsAction   = String(p.news_action   || p.trade?.news_action   || "").trim();
+    const missedReason = String(p.missed_reason || p.trade?.missed_reason || "").trim();
+    const protExit     = String(p.protection_exit_reason || p.trade?.protection_exit_reason || "").trim();
 
     return (
         <div style={TT_STYLE}>
@@ -247,7 +257,7 @@ function TradeTooltip({ active, payload, accountMode = false, currency = "USD" }
                 <div style={SEP} />
                 <div style={{ color: "hsl(var(--warning))" }}>
                     ⚡ {newsAction.replace(/_/g, " ")}
-                    {isFinite(Number(p.news_flatten_r)) ? ` → ${fmtR(p.news_flatten_r)}` : ""}
+                    {isFinite(Number(p.news_flatten_r ?? p.trade?.news_flatten_r)) ? ` → ${fmtR(p.news_flatten_r ?? p.trade?.news_flatten_r)}` : ""}
                 </div>
             </>}
             {/* Session filter / missed */}
