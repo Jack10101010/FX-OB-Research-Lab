@@ -1,13 +1,14 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { LabRunHero } from "@/components/lab/LabRunHero";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { Field, NeonInput, NeonToggle, Segment } from "@/components/lab/controls";
+import { ResultsLensControl } from "@/components/lab/ResultsLensControl";
 import { useTheme, THEMES } from "@/context/ThemeContext";
 import { ImportZone } from "@/components/lab/ImportZone";
 import { Pill } from "@/components/lab/DataTable";
 import { getLatestSidecarOutputs, getSidecarHealth, getSidecarRun, startSidecarRun, DEFAULT_SIDECAR_URL } from "@/data/sidecarClient";
-import { getRunsBackupPayload, useDataset } from "@/data/store";
-import { Check, Download, PlugZap, ShieldAlert, Sparkles } from "lucide-react";
+import { getRunsBackupPayload, getStorageDiagnostics, getIndexedDbDiagnostics, importRunsBackup, useDataset } from "@/data/store";
+import { Check, Database, Download, HardDrive, PlugZap, ShieldAlert, Sparkles, Upload } from "lucide-react";
 
 const RUNNER_PRESETS = ["baseline", "protection sweep", "entry penetration sweep", "session filter sweep", "custom config"];
 const REIMPORT_REMINDER = "After running, import the latest outputs/runs folder back into Research Lab.";
@@ -23,8 +24,69 @@ const TEST_CONFIG = {
 };
 
 export default function Settings() {
-    const { persistWarning, importedCount } = useDataset();
+    const { persistWarning, importedCount, activeRunId, RUNS, ACTIVE_RUN } = useDataset();
     const { theme, setTheme } = useTheme();
+    const restoreInputRef = useRef(null);
+    const [restoreMsg, setRestoreMsg] = useState(null); // { tone: "success"|"warning"|"error", text }
+    const storageOrigin = typeof window !== "undefined" ? window.location.origin : "—";
+    const activeRunName = (RUNS || []).find((r) => r.id === activeRunId)?.displayName
+        || (ACTIVE_RUN && ACTIVE_RUN.id ? ACTIVE_RUN.displayName : "")
+        || activeRunId
+        || "—";
+
+    const handleRestoreFile = (event) => {
+        const file = event.target.files?.[0];
+        // Reset so selecting the same file again re-triggers onChange.
+        event.target.value = "";
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+            let payload;
+            try {
+                payload = JSON.parse(String(reader.result || ""));
+            } catch {
+                setRestoreMsg({ tone: "error", text: "Invalid file: not valid JSON." });
+                return;
+            }
+            const result = importRunsBackup(payload);
+            if (!result.ok) {
+                setRestoreMsg({ tone: "error", text: result.error || "Restore failed." });
+                return;
+            }
+            const parts = [`Imported ${result.imported} run${result.imported === 1 ? "" : "s"}`];
+            if (result.skipped) parts.push(`${result.skipped} skipped (already present)`);
+            if (result.projectsImported) parts.push(`${result.projectsImported} project${result.projectsImported === 1 ? "" : "s"}`);
+            setRestoreMsg({
+                tone: result.imported ? "success" : "warning",
+                text: `${parts.join(" · ")}.`,
+            });
+        };
+        reader.onerror = () => setRestoreMsg({ tone: "error", text: "Could not read the selected file." });
+        reader.readAsText(file);
+    };
+
+    // SP-3 read-only storage diagnostics. Sync snapshot from the store + an async
+    // IndexedDB record count that refreshes whenever the run set changes.
+    const diagnostics = getStorageDiagnostics();
+    const [idbDiag, setIdbDiag] = useState(null);
+    const [idbDiagError, setIdbDiagError] = useState("");
+    useEffect(() => {
+        let cancelled = false;
+        getIndexedDbDiagnostics()
+            .then((res) => {
+                if (cancelled) return;
+                setIdbDiag(res);
+                setIdbDiagError(res.available ? "" : "IndexedDB is unavailable in this browser.");
+            })
+            .catch((e) => {
+                if (cancelled) return;
+                setIdbDiag(null);
+                setIdbDiagError(e?.message || "IndexedDB diagnostics could not be read.");
+            });
+        return () => { cancelled = true; };
+    }, [importedCount]);
+    const idbBundleSet = useMemo(() => new Set(idbDiag?.bundleIds || []), [idbDiag]);
+    const idbCandleSet = useMemo(() => new Set(idbDiag?.candleIds || []), [idbDiag]);
     const [dense, setDense] = useState(true);
     const [glow, setGlow] = useState(70);
     const [markerSize, setMarkerSize] = useState(6);
@@ -122,6 +184,16 @@ export default function Settings() {
             />
 
             <div className="px-6 grid grid-cols-1 xl:grid-cols-3 gap-4">
+                <NeonPanel className="xl:col-span-3" title="Results Basis · Lens" action={<Pill tone="secondary">PREVIEW</Pill>}>
+                    <p className="mb-3 text-[11.5px] leading-relaxed text-[hsl(var(--text-2))]">
+                        Results Basis controls how trades are measured across the app. Trade Universe answers
+                        “which trades?”; Results Basis answers “how are they measured?”. This is a global preview —
+                        changing it persists your preference, but analytics pages still calculate in Raw R until each
+                        is migrated.
+                    </p>
+                    <ResultsLensControl />
+                </NeonPanel>
+
                 <NeonPanel className="xl:col-span-2" title="Theme">
                     <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                         {THEMES.map((t) => {
@@ -145,7 +217,7 @@ export default function Settings() {
                                             {active && <Check className="w-3.5 h-3.5 text-white ml-auto" />}
                                         </div>
                                         <div className="relative mt-3 font-display text-[13px] text-white">{t.name}</div>
-                                        <div className="relative text-[10px] font-mono uppercase tracking-wider text-muted-lab mt-0.5">accent · {t.id}</div>
+                                        <div className="relative text-[10px] font-ui uppercase tracking-wider text-muted-lab mt-0.5">accent · {t.id}</div>
                                     </div>
                                 </button>
                             );
@@ -172,6 +244,81 @@ export default function Settings() {
                     <ImportZone />
                 </NeonPanel>
 
+                <NeonPanel title="Storage Origin" action={<Pill tone="muted">THIS URL</Pill>}>
+                    <div className="space-y-2">
+                        <div className="flex items-start gap-2 text-[11.5px] leading-relaxed text-[hsl(var(--text-2))]">
+                            <HardDrive className="w-4 h-4 shrink-0 mt-0.5 text-[hsl(var(--accent-secondary))]" />
+                            <span>Browser data (imported runs, candles, preferences) is tied to this exact URL/port. Open the app on a different port and it has a separate, empty storage bucket.</span>
+                        </div>
+                        <SidecarMeta k="Origin" v={storageOrigin} />
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            <SidecarMeta k="Imported runs" v={importedCount} />
+                            <SidecarMeta k="Active run" v={activeRunName} />
+                        </div>
+                    </div>
+                </NeonPanel>
+
+                <NeonPanel className="xl:col-span-3" title="Storage Diagnostics" action={<Pill tone="muted">READ ONLY</Pill>}>
+                    <div className="space-y-3">
+                        <div className="flex items-start gap-2 text-[11.5px] leading-relaxed text-[hsl(var(--text-2))]">
+                            <Database className="w-4 h-4 shrink-0 mt-0.5 text-[hsl(var(--accent-secondary))]" />
+                            <span>Read-only view of what is persisted for this origin. localStorage stores a lightweight run index; full run bundles and candles are persisted in IndexedDB and hydrated on load, with sidecar reload as a fallback.</span>
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2">
+                            <SidecarMeta k="Run index (localStorage)" v={diagnostics.indexCount} />
+                            <SidecarMeta k="Full in memory" v={diagnostics.memoryFullCount} />
+                            <SidecarMeta k="Index only" v={diagnostics.indexOnlyCount} />
+                            <SidecarMeta k="IndexedDB bundles" v={idbDiag ? idbDiag.bundleCount : "—"} />
+                            <SidecarMeta k="IndexedDB candle records" v={idbDiag ? idbDiag.candleCount : "—"} />
+                            <SidecarMeta k="Active run mode" v={diagnostics.activeRunStorageMode} />
+                        </div>
+                        {idbDiagError && (
+                            <div className="text-[11px] font-ui clip-bevel-sm px-3 py-2 border border-[hsl(var(--warning)/0.4)] bg-[hsl(var(--warning)/0.06)] text-[hsl(var(--warning))]">
+                                {idbDiagError}
+                            </div>
+                        )}
+                        {diagnostics.runs.length > 0 ? (
+                            <div className="overflow-x-auto scrollbar-thin border border-[hsl(var(--border-soft))] clip-bevel-sm">
+                                <table className="w-full text-[10.5px] font-ui">
+                                    <thead>
+                                        <tr className="text-muted-lab uppercase tracking-wider border-b border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.35)]">
+                                            <th className="text-left px-2 py-1.5">Run</th>
+                                            <th className="text-center px-2 py-1.5">Memory</th>
+                                            <th className="text-center px-2 py-1.5">IDB Bundle</th>
+                                            <th className="text-center px-2 py-1.5">Candles</th>
+                                            <th className="text-center px-2 py-1.5">Reload</th>
+                                            <th className="text-left px-2 py-1.5">Storage Mode</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {diagnostics.runs.map((r) => (
+                                            <tr key={r.id} className="border-b border-[hsl(var(--border-soft)/0.5)] last:border-b-0">
+                                                <td className="text-left px-2 py-1.5 text-[hsl(var(--text-2))] truncate max-w-[220px]" title={r.id}>
+                                                    {r.isActive && <span className="text-[hsl(var(--accent-primary))]">● </span>}
+                                                    {r.displayName}
+                                                </td>
+                                                <td className="text-center px-2 py-1.5"><DiagDot on={r.memoryFull} /></td>
+                                                <td className="text-center px-2 py-1.5">
+                                                    {idbDiag ? <DiagDot on={idbBundleSet.has(r.id)} /> : <span className="text-muted-lab">—</span>}
+                                                </td>
+                                                <td className="text-center px-2 py-1.5">
+                                                    {idbDiag
+                                                        ? <DiagDot on={idbCandleSet.has(r.id) || r.candlesInMemory} />
+                                                        : <DiagDot on={r.candlesInMemory || r.hasCandlesMeta} />}
+                                                </td>
+                                                <td className="text-center px-2 py-1.5"><DiagDot on={r.reloadAvailable} /></td>
+                                                <td className="text-left px-2 py-1.5 text-muted-lab">{r.storageMode}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ) : (
+                            <div className="text-[11px] font-ui text-muted-lab">No runs persisted for this origin yet.</div>
+                        )}
+                    </div>
+                </NeonPanel>
+
                 <NeonPanel title="Run Persistence Backup" action={<Pill tone={persistWarning ? "warning" : "success"}>{persistWarning ? "CHECK STORAGE" : "READY"}</Pill>}>
                     <div className="space-y-3">
                         {persistWarning && (
@@ -187,17 +334,49 @@ export default function Settings() {
                                 Imported runs are stored in browser localStorage. Export a backup before clearing browser data or switching machines.
                             </div>
                         )}
-                        <button
-                            type="button"
-                            onClick={downloadRunsBackup}
-                            disabled={!importedCount}
-                            className="inline-flex items-center gap-2 px-3 py-2 text-[10.5px] font-mono uppercase tracking-wider border border-[hsl(var(--accent-secondary)/0.5)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.06)] hover:bg-[hsl(var(--accent-secondary)/0.12)] disabled:opacity-50 disabled:cursor-not-allowed clip-bevel-sm"
-                        >
-                            <Download className="w-3.5 h-3.5" />
-                            Export Runs Backup
-                        </button>
-                        <div className="text-[10.5px] font-mono text-muted-lab">
-                            Import backup will be added later. For now, keep this file safe.
+                        <div className="flex flex-wrap gap-2">
+                            <button
+                                type="button"
+                                onClick={downloadRunsBackup}
+                                disabled={!importedCount}
+                                className="inline-flex items-center gap-2 px-3 py-2 text-[10.5px] font-ui uppercase tracking-wider border border-[hsl(var(--accent-secondary)/0.5)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.06)] hover:bg-[hsl(var(--accent-secondary)/0.12)] disabled:opacity-50 disabled:cursor-not-allowed clip-bevel-sm"
+                            >
+                                <Download className="w-3.5 h-3.5" />
+                                Export Runs Backup
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => restoreInputRef.current?.click()}
+                                className="inline-flex items-center gap-2 px-3 py-2 text-[10.5px] font-ui uppercase tracking-wider border border-[hsl(var(--accent-primary)/0.5)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.06)] hover:bg-[hsl(var(--accent-primary)/0.12)] clip-bevel-sm"
+                            >
+                                <Upload className="w-3.5 h-3.5" />
+                                Restore Backup
+                            </button>
+                            <input
+                                ref={restoreInputRef}
+                                type="file"
+                                accept="application/json,.json"
+                                onChange={handleRestoreFile}
+                                className="hidden"
+                                data-testid="restore-backup-input"
+                            />
+                        </div>
+                        {restoreMsg && (
+                            <div
+                                className={`text-[11px] leading-relaxed font-ui clip-bevel-sm px-3 py-2 border ${
+                                    restoreMsg.tone === "error"
+                                        ? "border-[hsl(var(--danger)/0.4)] bg-[hsl(var(--danger)/0.06)] text-[hsl(var(--danger))]"
+                                        : restoreMsg.tone === "warning"
+                                            ? "border-[hsl(var(--warning)/0.4)] bg-[hsl(var(--warning)/0.06)] text-[hsl(var(--warning))]"
+                                            : "border-[hsl(var(--accent-primary)/0.4)] bg-[hsl(var(--accent-primary)/0.06)] text-[hsl(var(--accent-primary))]"
+                                }`}
+                            >
+                                {restoreMsg.text}
+                            </div>
+                        )}
+                        <div className="text-[10.5px] font-ui text-muted-lab">
+                            Restore merges runs from a backup file without deleting existing runs; entries with an id
+                            already present are skipped.
                         </div>
                     </div>
                 </NeonPanel>
@@ -223,25 +402,25 @@ export default function Settings() {
                     </div>
                     <div className="mt-3 border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm p-3">
                         <div className="flex items-center justify-between gap-3 mb-2">
-                            <span className="text-[10px] font-mono uppercase tracking-wider text-muted-lab">Generated command</span>
+                            <span className="text-[10px] font-ui uppercase tracking-wider text-muted-lab">Generated command</span>
                             <Pill tone={runnerPreset === "baseline" ? "success" : "warning"}>{runnerPreset === "baseline" ? "REAL" : "FUTURE PRESET"}</Pill>
                         </div>
-                        <pre className="overflow-x-auto scrollbar-thin text-[11px] font-mono text-[hsl(var(--accent-secondary))] leading-relaxed whitespace-pre-wrap">
+                        <pre className="overflow-x-auto scrollbar-thin text-[11px] font-code text-[hsl(var(--accent-secondary))] leading-relaxed whitespace-pre-wrap">
                             {runnerCommand(runnerPath, runnerPreset)}
                         </pre>
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2">
-                        <button type="button" onClick={() => copyText(runnerCommand(runnerPath, runnerPreset), setCopiedRunner, "command")} className="px-3 py-2 text-[10.5px] font-mono uppercase tracking-wider border border-[hsl(var(--accent-secondary)/0.5)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.06)] hover:bg-[hsl(var(--accent-secondary)/0.12)] clip-bevel-sm">
+                        <button type="button" onClick={() => copyText(runnerCommand(runnerPath, runnerPreset), setCopiedRunner, "command")} className="px-3 py-2 text-[10.5px] font-ui uppercase tracking-wider border border-[hsl(var(--accent-secondary)/0.5)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.06)] hover:bg-[hsl(var(--accent-secondary)/0.12)] clip-bevel-sm">
                             {copiedRunner === "command" ? "Copied command" : "Copy command"}
                         </button>
-                        <button type="button" onClick={() => copyText(REIMPORT_REMINDER, setCopiedRunner, "reminder")} className="px-3 py-2 text-[10.5px] font-mono uppercase tracking-wider border border-[hsl(var(--accent-primary)/0.5)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.06)] hover:bg-[hsl(var(--accent-primary)/0.12)] clip-bevel-sm">
+                        <button type="button" onClick={() => copyText(REIMPORT_REMINDER, setCopiedRunner, "reminder")} className="px-3 py-2 text-[10.5px] font-ui uppercase tracking-wider border border-[hsl(var(--accent-primary)/0.5)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.06)] hover:bg-[hsl(var(--accent-primary)/0.12)] clip-bevel-sm">
                             {copiedRunner === "reminder" ? "Copied reminder" : "Copy re-import reminder"}
                         </button>
-                        <button type="button" disabled className="px-3 py-2 text-[10.5px] font-mono uppercase tracking-wider border border-dashed border-[hsl(var(--border-mid))] text-muted-lab bg-[hsl(var(--panel-2)/0.25)] opacity-70 cursor-not-allowed clip-bevel-sm">
+                        <button type="button" disabled className="px-3 py-2 text-[10.5px] font-ui uppercase tracking-wider border border-dashed border-[hsl(var(--border-mid))] text-muted-lab bg-[hsl(var(--panel-2)/0.25)] opacity-70 cursor-not-allowed clip-bevel-sm">
                             Future: Generate config JSON
                         </button>
                     </div>
-                    <div className="mt-3 text-[11px] text-[hsl(var(--text-2))] font-mono">
+                    <div className="mt-3 text-[11px] text-[hsl(var(--text-2))] font-ui">
                         {REIMPORT_REMINDER}
                     </div>
                 </NeonPanel>
@@ -253,8 +432,8 @@ export default function Settings() {
                             <span>Local sidecar only. Do not expose this server publicly.</span>
                         </div>
                         <div className="flex items-center justify-between border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm px-3 py-2">
-                            <span className="text-[10px] font-mono uppercase tracking-wider text-muted-lab">Status</span>
-                            <span className={`inline-flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider ${sidecarHealth?.ok ? "text-[hsl(var(--accent-primary))]" : "text-[hsl(var(--warning))]"}`}>
+                            <span className="text-[10px] font-ui uppercase tracking-wider text-muted-lab">Status</span>
+                            <span className={`inline-flex items-center gap-1.5 text-[10px] font-ui uppercase tracking-wider ${sidecarHealth?.ok ? "text-[hsl(var(--accent-primary))]" : "text-[hsl(var(--warning))]"}`}>
                                 <PlugZap className="w-3 h-3" />
                                 {sidecarStatusText}
                             </span>
@@ -276,7 +455,7 @@ export default function Settings() {
                         </div>
 
                         {sidecarError && (
-                            <div className="border border-[hsl(var(--danger)/0.4)] bg-[hsl(var(--danger)/0.06)] clip-bevel-sm px-3 py-2 text-[11px] font-mono text-[hsl(var(--danger))]">
+                            <div className="border border-[hsl(var(--danger)/0.4)] bg-[hsl(var(--danger)/0.06)] clip-bevel-sm px-3 py-2 text-[11px] font-ui text-[hsl(var(--danger))]">
                                 {sidecarError}
                             </div>
                         )}
@@ -294,17 +473,17 @@ export default function Settings() {
                                 value={testConfigText}
                                 onChange={(e) => setTestConfigText(e.target.value)}
                                 spellCheck={false}
-                                className="w-full min-h-[220px] clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11px] leading-relaxed font-mono text-[hsl(var(--text-2))] outline-none focus:border-[hsl(var(--accent-secondary)/0.65)]"
+                                className="w-full min-h-[220px] clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11px] leading-relaxed font-code text-[hsl(var(--text-2))] outline-none focus:border-[hsl(var(--accent-secondary)/0.65)]"
                             />
                         </Field>
                         {!parsedTestConfig.ok && (
-                            <div className="text-[11px] font-mono text-[hsl(var(--danger))]">Invalid JSON: {parsedTestConfig.error}</div>
+                            <div className="text-[11px] font-ui text-[hsl(var(--danger))]">Invalid JSON: {parsedTestConfig.error}</div>
                         )}
 
                         {sidecarJob && (
                             <div className="border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm p-3">
                                 <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                                    <div className="text-[10px] font-mono uppercase tracking-wider text-title-lab">Run status</div>
+                                    <div className="text-[10px] font-ui uppercase tracking-wider text-title-lab">Run status</div>
                                     <Pill tone={sidecarJob.status === "succeeded" ? "success" : sidecarJob.status === "failed" ? "warning" : "secondary"}>{sidecarJob.status}</Pill>
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-3">
@@ -319,12 +498,12 @@ export default function Settings() {
 
                         {latestOutputs.length > 0 && (
                             <div className="border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm p-3">
-                                <div className="text-[10px] font-mono uppercase tracking-wider text-title-lab mb-2">Latest output folders</div>
+                                <div className="text-[10px] font-ui uppercase tracking-wider text-title-lab mb-2">Latest output folders</div>
                                 <div className="space-y-1.5">
                                     {latestOutputs.map((output) => (
-                                        <div key={output.path} className="grid grid-cols-1 md:grid-cols-[0.8fr_1.4fr_0.8fr] gap-2 text-[10.5px] font-mono text-[hsl(var(--text-2))] border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.28)] clip-bevel-sm px-2 py-1.5">
+                                        <div key={output.path} className="grid grid-cols-1 md:grid-cols-[0.8fr_1.4fr_0.8fr] gap-2 text-[10.5px] font-ui text-[hsl(var(--text-2))] border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.28)] clip-bevel-sm px-2 py-1.5">
                                             <span className="text-title-lab">{output.name}</span>
-                                            <span className="truncate">{output.path}</span>
+                                            <span className="font-code truncate">{output.path}</span>
                                             <span className="text-muted-lab">{output.modified_at}</span>
                                         </div>
                                     ))}
@@ -334,7 +513,7 @@ export default function Settings() {
 
                         <div className="grid grid-cols-1 gap-1.5">
                             {["No auto-import yet", "No arbitrary command execution", "One local sidecar job at a time"].map((item) => (
-                                <div key={item} className="flex items-center gap-2 text-[10.5px] font-mono uppercase tracking-wider text-muted-lab">
+                                <div key={item} className="flex items-center gap-2 text-[10.5px] font-ui uppercase tracking-wider text-muted-lab">
                                     <PlugZap className="w-3 h-3 text-[hsl(var(--accent-secondary))]" />
                                     {item}
                                 </div>
@@ -344,7 +523,7 @@ export default function Settings() {
                 </NeonPanel>
 
                 <NeonPanel title="Symbol Metadata">
-                    <div className="space-y-2 font-mono text-[11.5px]">
+                    <div className="space-y-2 font-ui text-[11.5px]">
                         <Meta k="EURUSD · pip size" v="0.00010" />
                         <Meta k="EURUSD · tick size" v="0.00001" />
                         <Meta k="GBPUSD · pip size" v="0.00010" />
@@ -368,7 +547,7 @@ export default function Settings() {
 function Row({ label, checked, onChange }) {
     return (
         <div className="flex items-center justify-between border border-[hsl(var(--border-soft))] clip-bevel-sm px-3 py-2">
-            <span className="text-[11.5px] font-mono uppercase tracking-wider text-[hsl(var(--text-2))]">{label}</span>
+            <span className="text-[11.5px] font-ui uppercase tracking-wider text-[hsl(var(--text-2))]">{label}</span>
             <NeonToggle checked={checked} onChange={onChange} />
         </div>
     );
@@ -410,17 +589,22 @@ function RunnerButton({ children, disabled = false, onClick }) {
             type="button"
             onClick={onClick}
             disabled={disabled}
-            className="inline-flex items-center justify-center gap-2 px-3 py-2 text-[10.5px] font-mono uppercase tracking-wider border border-[hsl(var(--accent-secondary)/0.5)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.06)] hover:bg-[hsl(var(--accent-secondary)/0.12)] disabled:opacity-45 disabled:cursor-not-allowed clip-bevel-sm"
+            className="inline-flex items-center justify-center gap-2 px-3 py-2 text-[10.5px] font-ui uppercase tracking-wider border border-[hsl(var(--accent-secondary)/0.5)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.06)] hover:bg-[hsl(var(--accent-secondary)/0.12)] disabled:opacity-45 disabled:cursor-not-allowed clip-bevel-sm"
         >
             {children}
         </button>
     );
 }
+function DiagDot({ on }) {
+    return on
+        ? <Check className="inline w-3.5 h-3.5 text-[hsl(var(--success))]" aria-label="yes" />
+        : <span className="text-muted-lab" aria-label="no">·</span>;
+}
 function SidecarMeta({ k, v }) {
     return (
         <div className="border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.28)] clip-bevel-sm px-3 py-2">
-            <div className="text-[9.5px] font-mono uppercase tracking-wider text-muted-lab">{k}</div>
-            <div className="mt-1 text-[11px] font-mono text-[hsl(var(--text-2))] break-all">{String(v ?? "—")}</div>
+            <div className="text-[9.5px] font-ui uppercase tracking-wider text-muted-lab">{k}</div>
+            <div className="mt-1 text-[11px] font-code text-[hsl(var(--text-2))] break-all">{String(v ?? "—")}</div>
         </div>
     );
 }
@@ -429,8 +613,8 @@ function LogBlock({ title, text, tone = "secondary" }) {
     const toneClass = tone === "warning" ? "text-[hsl(var(--warning))]" : "text-[hsl(var(--accent-secondary))]";
     return (
         <div className="mt-2">
-            <div className="mb-1 text-[9.5px] font-mono uppercase tracking-wider text-muted-lab">{title}</div>
-            <pre className={`max-h-52 overflow-auto scrollbar-thin whitespace-pre-wrap border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel)/0.65)] clip-bevel-sm p-2 text-[10.5px] leading-relaxed font-mono ${toneClass}`}>{text}</pre>
+            <div className="mb-1 text-[9.5px] font-ui uppercase tracking-wider text-muted-lab">{title}</div>
+            <pre className={`max-h-52 overflow-auto scrollbar-thin whitespace-pre-wrap border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel)/0.65)] clip-bevel-sm p-2 text-[10.5px] leading-relaxed font-code ${toneClass}`}>{text}</pre>
         </div>
     );
 }
@@ -438,7 +622,7 @@ function Meta({ k, v }) {
     return (
         <div className="flex items-center justify-between">
             <span className="text-muted-lab text-[10px] uppercase tracking-wider">{k}</span>
-            <span className="text-white">{v}</span>
+            <span className="font-num text-white">{v}</span>
         </div>
     );
 }
@@ -447,7 +631,7 @@ function Note({ icon: Icon, title, body }) {
         <div className="border border-[hsl(var(--warning)/0.35)] bg-[hsl(var(--warning)/0.05)] clip-bevel-sm p-3">
             <div className="flex items-center gap-2">
                 <Icon className="w-3.5 h-3.5 text-[hsl(var(--warning))]" />
-                <span className="text-[10.5px] font-mono uppercase tracking-wider text-[hsl(var(--warning))]">{title}</span>
+                <span className="text-[10.5px] font-ui uppercase tracking-wider text-[hsl(var(--warning))]">{title}</span>
             </div>
             <p className="text-[11.5px] text-[hsl(var(--text-2))] mt-2 leading-relaxed">{body}</p>
         </div>

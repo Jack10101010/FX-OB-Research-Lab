@@ -9,10 +9,12 @@ import { NeonButton, NeonInput, NeonSelect, FilterToggle } from "@/components/la
 import { RunConfigStrip } from "@/components/lab/RunConfigStrip";
 import { compactTimeframe, formatRunDateRange, getRunDisplayName, reloadFullRunFromSidecar, updateRunBundle, useDataset } from "@/data/store";
 import { setActiveRunId, setSelectedTradeVariant } from "@/data/store";
+import { getNextStep, resolveRunReference, summarizeRunForDelta, buildRunDelta } from "@/data/projectWorkflow";
+import { ResearchStrip } from "@/components/lab/ResearchStrip";
+import { useResultsLens } from "@/data/useResultsLens";
 import {
     buildAccountEquityCurve,
     formatAccountValue,
-    normalizeAccountSettings,
     summarizeAccountEquity,
 } from "@/components/lab/account/accountEquity";
 import {
@@ -31,7 +33,11 @@ import {
 } from "@/data/tradeClassification";
 import { TradeSanityStrip } from "@/components/lab/TradeSanityStrip";
 
-const ACCOUNT_SETTINGS_KEY = "fxob_account_view_settings_v1";
+// RB-8a/8b: account config lives in the global store (state.accountSettings),
+// read/written via useResultsLens (lens.accountSettings / lens.setAccountSettings)
+// and persisted under fxob_account_settings_v1. RunDetail keeps no local copy.
+// The legacy fxob_account_view_settings_v1 key is migrated once by the store
+// loader and is intentionally left intact.
 const FUNDING_CHALLENGE_SETTINGS_KEY = "fxob_funding_challenge_settings_v1";
 
 // Performance-trade gate for the KPI strip. Delegates to the canonical
@@ -161,22 +167,6 @@ function formatStructureFilterValue(value) {
     return "Both";
 }
 
-function loadAccountViewSettings() {
-    try {
-        return normalizeAccountSettings(JSON.parse(localStorage.getItem(ACCOUNT_SETTINGS_KEY) || "{}"));
-    } catch {
-        return normalizeAccountSettings();
-    }
-}
-
-function saveAccountViewSettings(settings) {
-    try {
-        localStorage.setItem(ACCOUNT_SETTINGS_KEY, JSON.stringify(normalizeAccountSettings(settings)));
-    } catch {
-        // Account display preferences are optional.
-    }
-}
-
 function loadFundingChallengeSettings() {
     try {
         return normalizeFundingChallengeSettings(JSON.parse(localStorage.getItem(FUNDING_CHALLENGE_SETTINGS_KEY) || "{}"));
@@ -198,30 +188,30 @@ function FundingPhaseCard({ title, phase, currency }) {
     return (
         <div className="border border-[hsl(var(--border-soft)/0.7)] bg-[hsl(var(--panel-2)/0.25)] clip-bevel-sm p-3">
             <div className="flex items-center justify-between gap-2">
-                <div className="text-[10px] font-mono uppercase tracking-widest text-muted-lab">{title}</div>
+                <div className="text-[10px] font-ui uppercase tracking-widest text-muted-lab">{title}</div>
                 <Pill tone={challengeTone(status)}>{formatChallengeStatus(status)}</Pill>
             </div>
             <div className="mt-3 grid grid-cols-2 gap-2">
                 <div>
-                    <div className="text-[9px] font-mono uppercase tracking-widest text-muted-lab">Trigger</div>
+                    <div className="text-[9px] font-ui uppercase tracking-widest text-muted-lab">Trigger</div>
                     <div className="mt-1 text-[15px] font-semibold tabular-nums text-[hsl(var(--text))]">
                         {phase?.tradeNumber ? `Trade ${phase.tradeNumber}` : "—"}
                     </div>
                 </div>
                 <div>
-                    <div className="text-[9px] font-mono uppercase tracking-widest text-muted-lab">Equity</div>
+                    <div className="text-[9px] font-ui uppercase tracking-widest text-muted-lab">Equity</div>
                     <div className="mt-1 text-[15px] font-semibold tabular-nums text-[hsl(var(--text))]">
                         {formatAccountValue(phase?.equity, currency)}
                     </div>
                 </div>
                 <div>
-                    <div className="text-[9px] font-mono uppercase tracking-widest text-muted-lab">Days</div>
+                    <div className="text-[9px] font-ui uppercase tracking-widest text-muted-lab">Days</div>
                     <div className="mt-1 text-[13px] tabular-nums text-[hsl(var(--text-2))]">
                         {phase?.tradingDays ?? 0} {phase?.minTradingDaysMet ? "met" : "pending"}
                     </div>
                 </div>
                 <div>
-                    <div className="text-[9px] font-mono uppercase tracking-widest text-muted-lab">Date</div>
+                    <div className="text-[9px] font-ui uppercase tracking-widest text-muted-lab">Date</div>
                     <div className="mt-1 text-[13px] tabular-nums text-[hsl(var(--text-2))]">
                         {formatChallengeDate(phase?.date)}
                     </div>
@@ -235,7 +225,9 @@ function FundingPhaseCard({ title, phase, currency }) {
 }
 
 export default function RunDetail() {
-    const { ACTIVE_RUN, TRADES, RUNS, getRunData, ACTIVE_TRADE_VARIANT, AVAILABLE_TRADE_VARIANTS } = useDataset();
+    const { ACTIVE_RUN, TRADES, RUNS, PROJECTS, getRunData, ACTIVE_TRADE_VARIANT, AVAILABLE_TRADE_VARIANTS } = useDataset();
+    // RB-8b: basis + account config consumed through the canonical lens hook.
+    const lens = useResultsLens();
     const params = useParams();
     const navigate = useNavigate();
     const runId = params.runId === "active" ? ACTIVE_RUN.id : decodeURIComponent(params.runId || ACTIVE_RUN.id);
@@ -245,6 +237,22 @@ export default function RunDetail() {
     const runConfig = runData?.config || run?.config || {};
     const displayName = getRunDisplayName(runData || run);
     const projectId = runData?.projectId || runData?.summary?.projectId || run?.projectId || run?.summary?.projectId;
+    // WF-2: surface the project workflow "next step" on the Run Workspace.
+    const linkedProject = projectId ? (PROJECTS || []).find((p) => p.id === projectId) || null : null;
+    const runRole = runData?.runRole || runData?.summary?.runRole || run?.runRole || "imported";
+    const nextStep = linkedProject ? getNextStep(linkedProject, linkedProject.checklist || {}) : null;
+    // WF-3: headline "what changed?" delta vs the most relevant reference run.
+    const runReference = React.useMemo(
+        () => resolveRunReference({ currentRun: run, project: linkedProject, runs: RUNS }),
+        [run, linkedProject, RUNS],
+    );
+    const deltaRows = React.useMemo(() => {
+        if (!runReference.run) return [];
+        const current = summarizeRunForDelta(run, runData?.trades);
+        const refData = getRunData(runReference.run.id);
+        const reference = summarizeRunForDelta(runReference.run, refData?.trades);
+        return buildRunDelta(current, reference);
+    }, [run, runData, runReference, getRunData]);
     const runSymbol = run.symbol || runData?.summary?.symbol || runData?.config?.symbol || "—";
     const runTf = compactTimeframe(run.detectionTf || runData?.summary?.detectionTf || runData?.summary?.detection_tf || runData?.config?.detection_timeframe || "—");
     const runRr = Number(run.rr ?? runData?.summary?.rr ?? runData?.config?.rr_multiple);
@@ -253,7 +261,7 @@ export default function RunDetail() {
     const stopBufferPips = readNumberValue(runConfig.stop_buffer_pips, runConfig.stop_buffer, runConfig.stopBuffer, run.stopBuffer);
     const verifyLimitTicks = readNumberValue(runConfig.verify_limit_ticks, runConfig.verify_ticks, runConfig.verifyTicks, run.verifyTicks);
     const structureFilter = readFirstPresent(runConfig.structure_filter, runConfig.structureFilter, runConfig.structure_type, run.structureFilter);
-    const rawRunDateRange = run.dateRange || runData?.summary?.dateRange || "2025-05-18 → 2026-05-18";
+    const rawRunDateRange = run.dateRange || runData?.summary?.dateRange || "";
     const runDateRange = formatRunDateRange(rawRunDateRange);
     const runMonthSpan = formatRunMonthSpan(rawRunDateRange);
     const runDateRangeLine = runDateRange && runMonthSpan ? `${runDateRange} • ${runMonthSpan}` : runDateRange;
@@ -288,15 +296,14 @@ export default function RunDetail() {
     const [ledgerSessionFilter,   setLedgerSessionFilter]   = React.useState("All");
     const [ledgerDirectionFilter, setLedgerDirectionFilter] = React.useState("All");
     const [ledgerSearch,          setLedgerSearch]          = React.useState("");
-    const [accountSettings, setAccountSettings] = React.useState(loadAccountViewSettings);
+    // RB-8a/8b: account config is the single store slice, read via the lens.
+    const accountSettings = lens.accountSettings;
     const [fundingSettings, setFundingSettings] = React.useState(loadFundingChallengeSettings);
     const [fundingChartMode, setFundingChartMode] = React.useState("funding_phase");
     const [reloadBusy, setReloadBusy] = React.useState(false);
     const [reloadError, setReloadError] = React.useState("");
     const autoReloadAttempted = React.useRef(new Set());
-    React.useEffect(() => {
-        saveAccountViewSettings(accountSettings);
-    }, [accountSettings]);
+    // Account settings persistence is owned by the store (setAccountSettings).
     React.useEffect(() => {
         saveFundingChallengeSettings(fundingSettings);
     }, [fundingSettings]);
@@ -307,8 +314,8 @@ export default function RunDetail() {
         { value: "current_equity_pct", label: "% of current equity" },
     ];
     const patchAccountSettings = React.useCallback((patch) => {
-        setAccountSettings((current) => normalizeAccountSettings({ ...current, ...patch }));
-    }, []);
+        lens.setAccountSettings(patch); // store normalizes, merges, persists, notifies
+    }, [lens]);
     const patchFundingSettings = React.useCallback((patch) => {
         setFundingSettings((current) => normalizeFundingChallengeSettings({ ...current, ...patch }));
     }, []);
@@ -443,6 +450,38 @@ export default function RunDetail() {
     );
     const accountCurrency = accountSettings.currency;
     const useFundingPhaseChart = fundingSettings.enabled && accountModeEnabled && fundingChartMode === "funding_phase";
+    // Funded/live period metrics — derived from fundingChallenge.fundedPoints (the
+    // already-sorted slice), NOT from validTradesForRun.slice(fundedStart.tradeIndex),
+    // because fundedStart.tradeIndex is an index into the internally-sorted trade list
+    // used by simulateFundingChallenge and may not match the unsorted validTradesForRun.
+    const fundedTrades = React.useMemo(() => {
+        if (!useFundingPhaseChart || fundingChallenge.status !== "funded") return [];
+        return (fundingChallenge.fundedPoints || []).map((p) => p.trade).filter(Boolean);
+    }, [useFundingPhaseChart, fundingChallenge]);
+    const fundedStats = React.useMemo(() => {
+        if (!fundedTrades.length) return null;
+        const wins = fundedTrades.filter((t) => tradeResultSign(t) > 0).length;
+        const losses = fundedTrades.filter((t) => tradeResultSign(t) < 0).length;
+        const grossW = fundedTrades.reduce((sum, t) => {
+            const r = numericTradeR(t) ?? 0;
+            return r > 0 ? sum + r : sum;
+        }, 0);
+        const grossL = fundedTrades.reduce((sum, t) => {
+            const r = numericTradeR(t) ?? 0;
+            return r < 0 ? sum + Math.abs(r) : sum;
+        }, 0);
+        return {
+            tradeCount: fundedTrades.length,
+            wins,
+            losses,
+            winRate: wins + losses > 0 ? (wins / (wins + losses)) * 100 : null,
+            pf: grossL > 0 ? grossW / grossL : grossW > 0 ? Infinity : null,
+        };
+    }, [fundedTrades]);
+    const fundedSummary = React.useMemo(
+        () => (fundedTrades.length ? summarizeAccountEquity(fundedTrades, accountSettings) : null),
+        [fundedTrades, accountSettings],
+    );
     const fundingPhase1Target = accountSettings.startingBalance * (1 + fundingSettings.phase1TargetPct / 100);
     const fundingPhase2Target = accountSettings.startingBalance * (1 + fundingSettings.phase2TargetPct / 100);
     const fundingLossFloor = accountSettings.startingBalance * (1 - fundingSettings.maxOverallLossPct / 100);
@@ -496,6 +535,17 @@ export default function RunDetail() {
         scenarioLabel: "Baseline (no entry-model overlay)",
         hasEntryScenarios,
         isIndexOnly: isIndexOnlyRun,
+        // RB-8b.1: surface TWO distinct facts so the user can't conflate them:
+        //   • the GLOBAL Results Basis (Settings · Results Basis lens), and
+        //   • RunDetail's local ACCOUNT VIEW — an explicit account simulation
+        //     (R remains the source of truth) that drives the $ metrics here.
+        // RunDetail is the Current-Equity host: its Account View toggle, not the
+        // global basis, governs whether this page renders R or account dollars.
+        globalBasisLabel: lens.basisLabel,
+        accountSimulation: accountModeEnabled,
+        accountViewSub: accountModeEnabled
+            ? `${accountModeOptions.find((o) => o.value === accountSettings.mode)?.label || accountSettings.mode} · ${accountSettings.currency}`
+            : null,
     };
     const filteredLedgerRows = React.useMemo(() => {
         const rows = Array.isArray(tradesForRun) ? tradesForRun : [];
@@ -570,10 +620,15 @@ export default function RunDetail() {
 
     // ── Equity chart data: synthetic START at 0R + recomputed from filtered trades ──
     const equityChartData = React.useMemo(() => {
-        if (!filteredTradesForEquity.length) return [];
         if (useFundingPhaseChart) {
-            return buildFundingChallengeEquityCurve(filteredTradesForEquity, accountSettings, fundingSettings);
+            // Funding phase chart always uses the full valid trade set so that
+            // phase boundaries (pass indices, funded-start) are stable and match
+            // the FundingPhaseCard figures.  Chart filters must not silently shift
+            // which trade number constitutes "Phase 1 Pass" or "Funded Start".
+            if (!validTradesForRun.length) return [];
+            return buildFundingChallengeEquityCurve(validTradesForRun, accountSettings, fundingSettings);
         }
+        if (!filteredTradesForEquity.length) return [];
         const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
         const accountCurve = accountModeEnabled
             ? buildAccountEquityCurve(filteredTradesForEquity, accountSettings)
@@ -640,6 +695,9 @@ export default function RunDetail() {
                 missed_reason:          trade.missed_reason || "",
                 protection_exit_reason: trade.protection_exit_reason || "",
                 drawdown,
+                accountDrawdownPct:     accountModeEnabled
+                    ? (accountPoint?.accountDrawdownPct ?? null)
+                    : null,
                 isAtHigh:               drawdown >= 0,
                 equityAfter:            accountPoint?.equityAfter ?? null,
                 pnlAmount:              accountPoint?.pnlAmount ?? null,
@@ -648,7 +706,7 @@ export default function RunDetail() {
             };
         });
         return [startPoint, ...tradePoints];
-    }, [accountModeEnabled, accountSettings, filteredTradesForEquity, fundingSettings, useFundingPhaseChart]);
+    }, [accountModeEnabled, accountSettings, filteredTradesForEquity, fundingSettings, useFundingPhaseChart, validTradesForRun]);
 
     // ── Per-run analytics — computed from this run's trades, not global store ──
     const MONTHLY = React.useMemo(() => {
@@ -976,9 +1034,9 @@ export default function RunDetail() {
     return (
         <div className="pb-12">
             <LabRunHero
-                pageLabel="Run Detail"
+                pageLabel="Run Workspace"
                 title={displayName}
-                runLine={`Run: ${displayName} · ${runSymbol} · ${runTf} · ${run.trades} trades`}
+                runLine={`Run: ${displayName} · ${runSymbol} · ${runTf} · ${totalTradeRows || Number(run.trades) || 0} trades`}
                 configLine={[
                     runSymbol,
                     runTf,
@@ -1013,6 +1071,17 @@ export default function RunDetail() {
 
             <RunConfigStrip run={runData} />
 
+            <ResearchStrip
+                project={linkedProject}
+                projectId={projectId}
+                runId={runId}
+                runRole={runRole}
+                nextStep={nextStep}
+                runReference={runReference}
+                deltaRows={deltaRows}
+                runs={RUNS}
+            />
+
             {/* Scenario-scope chip — tells the user exactly which universe of
                 trades powers everything on this page (KPI strip, equity curve,
                 R-distribution, ledger, session/time-of-day grids, account
@@ -1030,6 +1099,18 @@ export default function RunDetail() {
                             </ScopeRow>
                             <ScopeRow label="Variant">
                                 <Pill tone="muted">{scopeChip.variantLabel || "Primary variant"}</Pill>
+                            </ScopeRow>
+                            <ScopeRow label="Results Basis">
+                                <Pill tone="muted">{scopeChip.globalBasisLabel}</Pill>
+                                <span className="text-[10px] text-muted-lab">global default</span>
+                            </ScopeRow>
+                            <ScopeRow label="Account View">
+                                <Pill tone={scopeChip.accountSimulation ? "secondary" : "muted"}>
+                                    {scopeChip.accountSimulation ? "Account simulation" : "R · source of truth"}
+                                </Pill>
+                                {scopeChip.accountViewSub && (
+                                    <span className="text-[10px] text-muted-lab">{scopeChip.accountViewSub}</span>
+                                )}
                             </ScopeRow>
                             <ScopeRow label="Scenario-aware">
                                 <Pill tone="muted">No</Pill>
@@ -1080,11 +1161,11 @@ export default function RunDetail() {
             <div className="px-6 mb-4">
                 <div className="flex flex-wrap items-end gap-2 border border-[hsl(var(--border-soft)/0.7)] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm px-3 py-2">
                     <div className="mr-1">
-                        <div className="text-[9px] font-mono uppercase tracking-widest text-muted-lab opacity-70">Account View</div>
+                        <div className="text-[9px] font-ui uppercase tracking-widest text-muted-lab opacity-70">Account View</div>
                         <div className="text-[11px] text-[hsl(var(--text-2))]">R remains the source of truth.</div>
                     </div>
                     <label className="min-w-[118px]">
-                        <span className="mb-1 block text-[9px] font-mono uppercase tracking-widest text-muted-lab">Unit</span>
+                        <span className="mb-1 block text-[9px] font-ui uppercase tracking-widest text-muted-lab">Unit</span>
                         <NeonSelect
                             value={accountModeEnabled ? "account" : "r_only"}
                             onChange={(value) => {
@@ -1103,7 +1184,7 @@ export default function RunDetail() {
                     {accountModeEnabled && (
                         <>
                             <label className="min-w-[190px]">
-                                <span className="mb-1 block text-[9px] font-mono uppercase tracking-widest text-muted-lab">Account Mode</span>
+                                <span className="mb-1 block text-[9px] font-ui uppercase tracking-widest text-muted-lab">Account Mode</span>
                                 <NeonSelect
                                     value={accountSettings.mode}
                                     onChange={(value) => patchAccountSettings({ mode: value })}
@@ -1111,14 +1192,14 @@ export default function RunDetail() {
                                 />
                             </label>
                             <label className="w-[92px]">
-                                <span className="mb-1 block text-[9px] font-mono uppercase tracking-widest text-muted-lab">Currency</span>
+                                <span className="mb-1 block text-[9px] font-ui uppercase tracking-widest text-muted-lab">Currency</span>
                                 <NeonInput
                                     value={accountSettings.currency}
                                     onChange={(event) => patchAccountSettings({ currency: event.target.value })}
                                 />
                             </label>
                             <label className="w-[140px]">
-                                <span className="mb-1 block text-[9px] font-mono uppercase tracking-widest text-muted-lab">Starting Balance</span>
+                                <span className="mb-1 block text-[9px] font-ui uppercase tracking-widest text-muted-lab">Starting Balance</span>
                                 <NeonInput
                                     type="number"
                                     value={accountSettings.startingBalance}
@@ -1127,7 +1208,7 @@ export default function RunDetail() {
                             </label>
                             {accountSettings.mode === "fixed_dollar" ? (
                                 <label className="w-[130px]">
-                                    <span className="mb-1 block text-[9px] font-mono uppercase tracking-widest text-muted-lab">Risk Amount</span>
+                                    <span className="mb-1 block text-[9px] font-ui uppercase tracking-widest text-muted-lab">Risk Amount</span>
                                     <NeonInput
                                         type="number"
                                         value={accountSettings.fixedRiskAmount}
@@ -1136,7 +1217,7 @@ export default function RunDetail() {
                                 </label>
                             ) : (
                                 <label className="w-[100px]">
-                                    <span className="mb-1 block text-[9px] font-mono uppercase tracking-widest text-muted-lab">Risk %</span>
+                                    <span className="mb-1 block text-[9px] font-ui uppercase tracking-widest text-muted-lab">Risk %</span>
                                     <NeonInput
                                         type="number"
                                         value={accountSettings.riskPct}
@@ -1167,7 +1248,7 @@ export default function RunDetail() {
                             {fundingSettings.enabled ? "Overlay On" : "Overlay Off"}
                         </FilterToggle>
                         <label className="min-w-[140px]">
-                            <span className="mb-1 block text-[9px] font-mono uppercase tracking-widest text-muted-lab">Preset</span>
+                            <span className="mb-1 block text-[9px] font-ui uppercase tracking-widest text-muted-lab">Preset</span>
                             <NeonSelect
                                 value={fundingSettings.preset}
                                 onChange={(value) => patchFundingSettings({ preset: value })}
@@ -1177,7 +1258,7 @@ export default function RunDetail() {
                         {fundingSettings.enabled && (
                             <>
                                 <label className="w-[110px]">
-                                    <span className="mb-1 block text-[9px] font-mono uppercase tracking-widest text-muted-lab">Phase 1 Target %</span>
+                                    <span className="mb-1 block text-[9px] font-ui uppercase tracking-widest text-muted-lab">Phase 1 Target %</span>
                                     <NeonInput
                                         type="number"
                                         value={fundingSettings.phase1TargetPct}
@@ -1185,7 +1266,7 @@ export default function RunDetail() {
                                     />
                                 </label>
                                 <label className="w-[110px]">
-                                    <span className="mb-1 block text-[9px] font-mono uppercase tracking-widest text-muted-lab">Phase 2 Target %</span>
+                                    <span className="mb-1 block text-[9px] font-ui uppercase tracking-widest text-muted-lab">Phase 2 Target %</span>
                                     <NeonInput
                                         type="number"
                                         value={fundingSettings.phase2TargetPct}
@@ -1193,7 +1274,7 @@ export default function RunDetail() {
                                     />
                                 </label>
                                 <label className="w-[120px]">
-                                    <span className="mb-1 block text-[9px] font-mono uppercase tracking-widest text-muted-lab">Max Overall Loss %</span>
+                                    <span className="mb-1 block text-[9px] font-ui uppercase tracking-widest text-muted-lab">Max Overall Loss %</span>
                                     <NeonInput
                                         type="number"
                                         value={fundingSettings.maxOverallLossPct}
@@ -1201,7 +1282,7 @@ export default function RunDetail() {
                                     />
                                 </label>
                                 <label className="w-[105px]">
-                                    <span className="mb-1 block text-[9px] font-mono uppercase tracking-widest text-muted-lab">Min Days</span>
+                                    <span className="mb-1 block text-[9px] font-ui uppercase tracking-widest text-muted-lab">Min Days</span>
                                     <NeonInput
                                         type="number"
                                         value={fundingSettings.minTradingDays}
@@ -1234,7 +1315,7 @@ export default function RunDetail() {
                                     />
                                     <div className="border border-[hsl(var(--border-soft)/0.7)] bg-[hsl(var(--panel-2)/0.25)] clip-bevel-sm p-3">
                                         <div className="flex items-center justify-between gap-2">
-                                            <div className="text-[10px] font-mono uppercase tracking-widest text-muted-lab">Funded Start</div>
+                                            <div className="text-[10px] font-ui uppercase tracking-widest text-muted-lab">Funded Start</div>
                                             <Pill tone={fundingChallenge.status === "funded" ? "success" : "muted"}>
                                                 {formatChallengeStatus(fundingChallenge.status)}
                                             </Pill>
@@ -1285,6 +1366,57 @@ export default function RunDetail() {
                 <MetricChip label="Max Drawdown"   value={maxDdMetricValue}            sub={maxDdMetricSub}            tone="danger"    icon={AlertTriangle} />
             </div>
 
+            {/* ── Funded / Live Period strip — shown only when FTMO overlay is active ── */}
+            {useFundingPhaseChart && fundingChallenge.status === "funded" && fundedStats && fundedSummary && (
+                <>
+                    <div className="px-6 mt-4 mb-1 text-[9px] font-ui uppercase tracking-[0.12em] text-[hsl(var(--warning))]">
+                        ◆ Funded / Live Period
+                    </div>
+                    <div className="kpi-strip">
+                        <MetricChip
+                            size="compact"
+                            label="Net PnL"
+                            value={formatAccountValue(fundedSummary.netPnlAmount, accountCurrency)}
+                            sub={`${formatSignedR(fundedSummary.totalR, 1)} R`}
+                            tone={fundedSummary.netPnlAmount >= 0 ? "primary" : "danger"}
+                            icon={TrendingUp}
+                        />
+                        <MetricChip
+                            size="compact"
+                            label="Trades"
+                            value={String(fundedStats.tradeCount)}
+                            sub={`from trade ${fundingChallenge.fundedStart?.tradeNumber ?? "—"}`}
+                            tone="muted"
+                            icon={Hash}
+                        />
+                        <MetricChip
+                            size="compact"
+                            label="Win Rate"
+                            value={fundedStats.winRate != null ? `${fundedStats.winRate.toFixed(1)}%` : "N/A"}
+                            sub={<><span className="text-[hsl(var(--success))]">{fundedStats.wins}</span>{` / ${fundedStats.losses}`}</>}
+                            tone="secondary"
+                            icon={Target}
+                        />
+                        <MetricChip
+                            size="compact"
+                            label="Max Drawdown"
+                            value={formatAccountValue(fundedSummary.maxDrawdownAmount, accountCurrency)}
+                            sub={`${Math.abs(fundedSummary.maxDrawdownPct ?? 0).toFixed(1)}%`}
+                            tone="danger"
+                            icon={AlertTriangle}
+                        />
+                        <MetricChip
+                            size="compact"
+                            label="Profit Factor"
+                            value={fundedStats.pf != null ? (isFinite(fundedStats.pf) ? fundedStats.pf.toFixed(2) : "∞") : "N/A"}
+                            sub="Σ wins / |Σ losses|"
+                            tone="secondary"
+                            icon={ShieldCheck}
+                        />
+                    </div>
+                </>
+            )}
+
             <div className="px-6 mt-5 grid grid-cols-1 xl:grid-cols-3 gap-4">
                 <NeonPanel
                     className="xl:col-span-3"
@@ -1321,13 +1453,13 @@ export default function RunDetail() {
                                 {label}
                             </FilterToggle>
                         ))}
-                        <span className="ml-auto text-[9.5px] font-mono text-muted-lab opacity-60 italic">
+                        <span className="ml-auto text-[9.5px] font-ui text-muted-lab opacity-60 italic">
                             Equity filters affect chart only
                         </span>
                     </div>
                     {fundingSettings.enabled && accountModeEnabled && (
                         <div className="flex flex-wrap items-center gap-2 mb-2 border border-[hsl(var(--border-soft)/0.55)] bg-[hsl(var(--panel-2)/0.25)] clip-bevel-sm px-2 py-1.5">
-                            <span className="text-[9.5px] font-mono uppercase tracking-widest text-muted-lab">Funding Chart</span>
+                            <span className="text-[9.5px] font-ui uppercase tracking-widest text-muted-lab">Funding Chart</span>
                             <FilterToggle
                                 active={fundingChartMode === "funding_phase"}
                                 inactiveBorder="mid"
@@ -1375,7 +1507,7 @@ export default function RunDetail() {
                         ))}
                     </div>
                     {equityChartData.length === 0 ? (
-                        <div className="py-10 text-center font-mono text-[11px] text-muted-lab">
+                        <div className="py-10 text-center font-ui text-[11px] text-muted-lab">
                             No trades match current equity filters.
                         </div>
                     ) : (
@@ -1385,6 +1517,14 @@ export default function RunDetail() {
                             showDots={showDots}
                             showDrawdown={showDrawdown}
                             showNews={showNews || useFundingPhaseChart}
+                            accountMode={accountModeEnabled}
+                            currency={accountCurrency}
+                            referenceLevels={useFundingPhaseChart ? [
+                                { y: fundingLossFloor,                label: "Blowout Floor", color: "hsl(var(--bear))",            dash: "4 2" },
+                                { y: accountSettings.startingBalance, label: "Baseline",      color: "hsl(var(--muted))",          dash: "2 4" },
+                                { y: fundingPhase2Target,             label: "P2 Target",     color: "hsl(var(--accent-secondary))", dash: "4 2" },
+                                { y: fundingPhase1Target,             label: "P1 Target",     color: "hsl(var(--success))",        dash: "4 2" },
+                            ] : []}
                         />
                     )}
                 </NeonPanel>
@@ -1394,14 +1534,14 @@ export default function RunDetail() {
                 <NeonPanel title="Configuration">
                     {/* ── Group A — Market / Detection ─────────────────────── */}
                     <div className="mb-4">
-                        <div className="text-[9px] font-mono uppercase tracking-widest text-muted-lab mb-2 opacity-60">Market · Detection</div>
-                        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 font-mono text-[11px]">
+                        <div className="text-[9px] font-ui uppercase tracking-widest text-muted-lab mb-2 opacity-60">Market · Detection</div>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 font-ui text-[11px]">
                             <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Symbol</div>
                             <div className="text-right text-white font-semibold">{runSymbol}</div>
                             <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Detection TF</div>
                             <div className="text-right text-white">{runTf}</div>
                             <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Execution TF</div>
-                            <div className="text-right text-white">{compactTimeframe(run.executionTf || runData?.config?.execution_timeframe || "1m")}</div>
+                            <div className="text-right text-white">{compactTimeframe(run.executionTf || runData?.config?.execution_timeframe) || "—"}</div>
                             <div className="col-span-2 border-t border-[hsl(var(--border-soft)/0.4)] my-0.5" />
                             <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Date Range</div>
                             <div className="text-right text-white">{runDateRange}</div>
@@ -1410,7 +1550,7 @@ export default function RunDetail() {
                                 {(() => {
                                     const v = structureFilter;
                                     if (!v) return <span className="text-muted-lab">—</span>;
-                                    return <span className="px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-wider border border-[hsl(var(--accent-primary)/0.4)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.08)]">{formatStructureFilterValue(v)}</span>;
+                                    return <span className="px-1.5 py-0.5 text-[9px] font-ui uppercase tracking-wider border border-[hsl(var(--accent-primary)/0.4)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.08)]">{formatStructureFilterValue(v)}</span>;
                                 })()}
                             </div>
                             <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Direction</div>
@@ -1424,7 +1564,7 @@ export default function RunDetail() {
                                         : vl === "short"
                                         ? "border-[hsl(var(--accent-secondary)/0.4)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.08)]"
                                         : "border-[hsl(var(--border-soft))] text-white";
-                                    return <span className={`px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-wider border ${cls}`}>{v}</span>;
+                                    return <span className={`px-1.5 py-0.5 text-[9px] font-ui uppercase tracking-wider border ${cls}`}>{v}</span>;
                                 })()}
                             </div>
                             <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Swing</div>
@@ -1436,8 +1576,8 @@ export default function RunDetail() {
 
                     {/* ── Group B — Execution / Risk ───────────────────────── */}
                     <div className="mb-4">
-                        <div className="text-[9px] font-mono uppercase tracking-widest text-muted-lab mb-2 opacity-60">Execution · Risk</div>
-                        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 font-mono text-[11px]">
+                        <div className="text-[9px] font-ui uppercase tracking-widest text-muted-lab mb-2 opacity-60">Execution · Risk</div>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 font-ui text-[11px]">
                             <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">RR</div>
                             <div className="text-right text-[hsl(var(--accent-primary))] font-semibold">{Number.isFinite(runRr) ? `${runRr.toFixed(1)}×` : "—"}</div>
                             <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Entry Depth</div>
@@ -1474,18 +1614,18 @@ export default function RunDetail() {
                         if (allPermissive) {
                             return (
                                 <div className="mb-4">
-                                    <div className="text-[9px] font-mono uppercase tracking-widest text-muted-lab mb-1 opacity-60">Filters</div>
-                                    <div className="font-mono text-[10px] text-muted-lab">Session filter: Off · All sessions eligible</div>
+                                    <div className="text-[9px] font-ui uppercase tracking-widest text-muted-lab mb-1 opacity-60">Filters</div>
+                                    <div className="font-ui text-[10px] text-muted-lab">Session filter: Off · All sessions eligible</div>
                                 </div>
                             );
                         }
                         return (
                             <div className="mb-4">
-                                <div className="text-[9px] font-mono uppercase tracking-widest text-muted-lab mb-2 opacity-60">Filters</div>
-                                <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 font-mono text-[11px]">
+                                <div className="text-[9px] font-ui uppercase tracking-widest text-muted-lab mb-2 opacity-60">Filters</div>
+                                <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 font-ui text-[11px]">
                                     <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Session Filter</div>
                                     <div className="text-right">
-                                        <span className={`px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-wider border ${sfEnabled ? "border-[hsl(var(--accent-primary)/0.4)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.08)]" : "border-[hsl(var(--border-soft))] text-muted-lab"}`}>
+                                        <span className={`px-1.5 py-0.5 text-[9px] font-ui uppercase tracking-wider border ${sfEnabled ? "border-[hsl(var(--accent-primary)/0.4)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.08)]" : "border-[hsl(var(--border-soft))] text-muted-lab"}`}>
                                             {sfEnabled ? "✓ Enabled" : "Off"}
                                         </span>
                                     </div>
@@ -1494,7 +1634,7 @@ export default function RunDetail() {
                                             <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Allowed</div>
                                             <div className="text-right flex flex-wrap gap-1 justify-end">
                                                 {allowedSessions.map((s) => (
-                                                    <span key={s} className="px-1 py-0.5 text-[8.5px] font-mono uppercase border border-[hsl(var(--accent-primary)/0.3)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.06)]">{s}</span>
+                                                    <span key={s} className="px-1 py-0.5 text-[8.5px] font-ui uppercase border border-[hsl(var(--accent-primary)/0.3)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.06)]">{s}</span>
                                                 ))}
                                             </div>
                                         </>
@@ -1527,8 +1667,8 @@ export default function RunDetail() {
                         if (!newsOn) {
                             return (
                                 <div>
-                                    <div className="text-[9px] font-mono uppercase tracking-widest text-muted-lab mb-1 opacity-60">News · Costs</div>
-                                    <div className="font-mono text-[10px] text-muted-lab">
+                                    <div className="text-[9px] font-ui uppercase tracking-widest text-muted-lab mb-1 opacity-60">News · Costs</div>
+                                    <div className="font-ui text-[10px] text-muted-lab">
                                         {"News protection: Off"}
                                         {hasAnyCost
                                             ? ` · Spread ${spread ?? "—"} · Slip ${slippage ?? "—"} · Comm ${commission != null ? `${commission}R` : "—"}`
@@ -1546,11 +1686,11 @@ export default function RunDetail() {
                         const flatLead = cfg.news_flatten_minutes_before_blackout;
                         return (
                             <div>
-                                <div className="text-[9px] font-mono uppercase tracking-widest text-muted-lab mb-2 opacity-60">News · Costs</div>
-                                <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 font-mono text-[11px]">
+                                <div className="text-[9px] font-ui uppercase tracking-widest text-muted-lab mb-2 opacity-60">News · Costs</div>
+                                <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 font-ui text-[11px]">
                                     <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">News Blackout</div>
                                     <div className="text-right">
-                                        <span className="px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-wider border border-[hsl(var(--accent-primary)/0.4)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.08)]">✓ On</span>
+                                        <span className="px-1.5 py-0.5 text-[9px] font-ui uppercase tracking-wider border border-[hsl(var(--accent-primary)/0.4)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.08)]">✓ On</span>
                                     </div>
                                     {(mBefore != null || mAfter != null) && (
                                         <>
@@ -1565,7 +1705,7 @@ export default function RunDetail() {
                                             <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Impacts</div>
                                             <div className="text-right flex flex-wrap gap-1 justify-end">
                                                 {impacts.map((imp) => (
-                                                    <span key={imp} className="px-1 py-0.5 text-[8.5px] font-mono uppercase border border-[hsl(var(--warning)/0.3)] text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.06)]">{imp}</span>
+                                                    <span key={imp} className="px-1 py-0.5 text-[8.5px] font-ui uppercase border border-[hsl(var(--warning)/0.3)] text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.06)]">{imp}</span>
                                                 ))}
                                             </div>
                                         </>
@@ -1580,7 +1720,7 @@ export default function RunDetail() {
                                         <>
                                             <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Cancel Touched</div>
                                             <div className="text-right">
-                                                <span className={`px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-wider border ${cancelT ? "border-[hsl(var(--accent-primary)/0.4)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.08)]" : "border-[hsl(var(--border-soft))] text-muted-lab"}`}>
+                                                <span className={`px-1.5 py-0.5 text-[9px] font-ui uppercase tracking-wider border ${cancelT ? "border-[hsl(var(--accent-primary)/0.4)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.08)]" : "border-[hsl(var(--border-soft))] text-muted-lab"}`}>
                                                     {cancelT ? "✓ On" : "Off"}
                                                 </span>
                                             </div>
@@ -1590,7 +1730,7 @@ export default function RunDetail() {
                                         <>
                                             <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Flatten Active</div>
                                             <div className="text-right">
-                                                <span className={`px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-wider border ${flatAct ? "border-[hsl(var(--accent-primary)/0.4)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.08)]" : "border-[hsl(var(--border-soft))] text-muted-lab"}`}>
+                                                <span className={`px-1.5 py-0.5 text-[9px] font-ui uppercase tracking-wider border ${flatAct ? "border-[hsl(var(--accent-primary)/0.4)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.08)]" : "border-[hsl(var(--border-soft))] text-muted-lab"}`}>
                                                     {flatAct ? "✓ On" : "Off"}
                                                 </span>
                                             </div>
@@ -1605,7 +1745,7 @@ export default function RunDetail() {
                                 </div>
                                 <div className="mt-3 pt-2.5 border-t border-[hsl(var(--border-soft)/0.4)]">
                                     {hasAnyCost ? (
-                                        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 font-mono text-[11px]">
+                                        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 font-ui text-[11px]">
                                             <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Spread</div>
                                             <div className="text-right text-muted-lab text-[10.5px]">{spread != null ? `${spread} pip` : "—"}</div>
                                             <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Slippage</div>
@@ -1614,7 +1754,7 @@ export default function RunDetail() {
                                             <div className="text-right text-muted-lab text-[10.5px]">{commission != null ? `${commission}R` : "—"}</div>
                                         </div>
                                     ) : (
-                                        <div className="font-mono text-[10px] text-muted-lab">No cost model applied</div>
+                                        <div className="font-ui text-[10px] text-muted-lab">No cost model applied</div>
                                     )}
                                 </div>
                             </div>
@@ -1695,7 +1835,7 @@ export default function RunDetail() {
 
                 <NeonPanel title="Order Block Stats">
                     {obStats.total === 0 ? (
-                        <div className="py-6 text-center font-mono text-[11px] text-muted-lab">
+                        <div className="py-6 text-center font-ui text-[11px] text-muted-lab">
                             {runData ? "No order block data in this run." : "Import a run to see order block stats."}
                         </div>
                     ) : (
@@ -1712,8 +1852,8 @@ export default function RunDetail() {
                                     { label: "Unfilled",  value: obStats.unfilledCount, cls: "text-muted-lab" },
                                 ].map(({ label, value, cls }) => (
                                     <div key={label} className="flex flex-col items-center justify-center px-2 py-1.5 border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] clip-bevel-sm">
-                                        <span className={`font-mono text-[14px] font-bold leading-none tabular-nums ${cls}`}>{value}</span>
-                                        <span className="mt-0.5 font-mono text-[8.5px] uppercase tracking-wider text-muted-lab">{label}</span>
+                                        <span className={`font-num text-[14px] font-bold leading-none tabular-nums ${cls}`}>{value}</span>
+                                        <span className="mt-0.5 font-ui text-[8.5px] uppercase tracking-wider text-muted-lab">{label}</span>
                                     </div>
                                 ))}
                             </div>
@@ -1744,7 +1884,7 @@ export default function RunDetail() {
                                 return (
                                     <div className="flex flex-wrap gap-1">
                                         {badges.slice(0, 6).map((b, i) => (
-                                            <span key={i} className={`px-1.5 py-0.5 font-mono text-[9px] border clip-bevel-sm ${b.type === "success" ? "border-[hsl(var(--success)/0.35)] text-[hsl(var(--success))] bg-[hsl(var(--success)/0.06)]" : "border-[hsl(var(--warning)/0.35)] text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.06)]"}`}>
+                                            <span key={i} className={`px-1.5 py-0.5 font-ui text-[9px] border clip-bevel-sm ${b.type === "success" ? "border-[hsl(var(--success)/0.35)] text-[hsl(var(--success))] bg-[hsl(var(--success)/0.06)]" : "border-[hsl(var(--warning)/0.35)] text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.06)]"}`}>
                                                 {b.text}
                                             </span>
                                         ))}
@@ -1759,7 +1899,7 @@ export default function RunDetail() {
                                         invalidatedCount, filledWins, filledLosses, filledBE, filledUnlinked } = obStats;
                                 const pct = (n, d) => d > 0 ? `${Math.round((n / d) * 100)}%` : "—";
                                 const R = (key, indent, connector, label, count, denom, colorCls) => (
-                                    <div key={key} className="flex items-baseline font-mono text-[10.5px]" style={{ paddingLeft: `${indent * 11}px` }}>
+                                    <div key={key} className="flex items-baseline font-code text-[10.5px]" style={{ paddingLeft: `${indent * 11}px` }}>
                                         {connector
                                             ? <span className="text-muted-lab mr-1 w-4 shrink-0 text-[9.5px]">{connector}</span>
                                             : indent > 0 ? <span className="w-4 mr-1 shrink-0" /> : null}
@@ -1783,10 +1923,10 @@ export default function RunDetail() {
                                 ];
                                 return (
                                     <div>
-                                        <div className="text-[9px] font-mono uppercase tracking-widest text-muted-lab mb-1.5 opacity-60">Lifecycle</div>
+                                        <div className="text-[9px] font-ui uppercase tracking-widest text-muted-lab mb-1.5 opacity-60">Lifecycle</div>
                                         <div className="flex flex-col gap-px">{rows}</div>
                                         {filledUnlinked > 0 && (
-                                            <div className="mt-1.5 font-mono text-[9px] text-muted-lab italic">
+                                            <div className="mt-1.5 font-ui text-[9px] text-muted-lab italic">
                                                 {filledUnlinked} OB{filledUnlinked !== 1 ? "s" : ""} filled but unlinked — W/L may be understated.
                                             </div>
                                         )}
@@ -1797,7 +1937,7 @@ export default function RunDetail() {
                             {/* ── Zone 4 — Directional Sanity (stacked) ───────── */}
                             {(obStats.dirStats.long.trades > 0 || obStats.dirStats.short.trades > 0) && (
                                 <div>
-                                    <div className="text-[9px] font-mono uppercase tracking-widest text-muted-lab mb-1.5 opacity-60">Directional</div>
+                                    <div className="text-[9px] font-ui uppercase tracking-widest text-muted-lab mb-1.5 opacity-60">Directional</div>
                                     <div className="flex flex-col gap-1.5">
                                         {[
                                             { key: "long",  label: "Long",  accentCls: "text-[hsl(var(--accent-primary))]",   borderCls: "border-[hsl(var(--accent-primary)/0.2)]" },
@@ -1811,13 +1951,13 @@ export default function RunDetail() {
                                                 <div key={key} className={`border ${borderCls} bg-[hsl(var(--panel-2)/0.4)] clip-bevel-sm px-2.5 py-2`}>
                                                     {/* Header row */}
                                                     <div className="flex items-center justify-between mb-1">
-                                                        <span className={`font-mono text-[9px] uppercase tracking-wider font-semibold ${accentCls}`}>{label}</span>
-                                                        <span className={`font-mono text-[11px] font-semibold tabular-nums ${s.netR >= 0 ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]"}`}>
+                                                        <span className={`font-ui text-[9px] uppercase tracking-wider font-semibold ${accentCls}`}>{label}</span>
+                                                        <span className={`font-num text-[11px] font-semibold tabular-nums ${s.netR >= 0 ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]"}`}>
                                                             {s.netR >= 0 ? "+" : ""}{s.netR.toFixed(1)}R
                                                         </span>
                                                     </div>
                                                     {/* Stats row */}
-                                                    <div className="flex items-center gap-2 font-mono text-[10px] text-muted-lab flex-wrap">
+                                                    <div className="flex items-center gap-2 font-num text-[10px] text-muted-lab flex-wrap">
                                                         <span>{s.obCount} OBs</span>
                                                         <span className="opacity-40">·</span>
                                                         <span>{s.trades}T</span>
@@ -1861,8 +2001,8 @@ export default function RunDetail() {
                                     <div className="flex flex-col gap-1">
                                         {insights.slice(0, 3).map((insight, i) => (
                                             <div key={i} className="flex items-start gap-1.5 px-2 py-1.5 border-l-2 border-[hsl(var(--accent-primary)/0.4)] bg-[hsl(var(--accent-primary)/0.05)]">
-                                                <span className="font-mono text-[9.5px] text-[hsl(var(--accent-primary))] shrink-0 mt-px">→</span>
-                                                <span className="font-mono text-[9.5px] text-[hsl(var(--text-2))] leading-snug">{insight}</span>
+                                                <span className="font-ui text-[9.5px] text-[hsl(var(--accent-primary))] shrink-0 mt-px">→</span>
+                                                <span className="font-ui text-[9.5px] text-[hsl(var(--text-2))] leading-snug">{insight}</span>
                                             </div>
                                         ))}
                                     </div>
@@ -1875,8 +2015,8 @@ export default function RunDetail() {
                                 className="flex items-center justify-between gap-2 px-2.5 py-2 border border-[hsl(var(--accent-primary)/0.22)] bg-[hsl(var(--accent-primary)/0.04)] clip-bevel-sm hover:bg-[hsl(var(--accent-primary)/0.09)] hover:border-[hsl(var(--accent-primary)/0.4)] transition-colors"
                             >
                                 <div>
-                                    <div className="font-mono text-[10px] uppercase tracking-wider text-[hsl(var(--accent-primary))]">→ Order Block Lab</div>
-                                    <div className="font-mono text-[8.5px] text-muted-lab mt-0.5 leading-snug">Structure · Width · Penetration · Age · Session analysis</div>
+                                    <div className="font-ui text-[10px] uppercase tracking-wider text-[hsl(var(--accent-primary))]">→ Order Block Lab</div>
+                                    <div className="font-ui text-[8.5px] text-muted-lab mt-0.5 leading-snug">Structure · Width · Penetration · Age · Session analysis</div>
                                 </div>
                                 <span className="text-[hsl(var(--accent-primary)/0.5)] text-[10px] shrink-0">↗</span>
                             </Link>
@@ -1887,7 +2027,7 @@ export default function RunDetail() {
 
                 <NeonPanel className="xl:col-span-2" title="Outcome Distribution">
                     {!outcomeSummary || outcomeSummary.total === 0 ? (
-                        <div className="py-6 text-center font-mono text-[11px] text-muted-lab">
+                        <div className="py-6 text-center font-ui text-[11px] text-muted-lab">
                             No trade outcome data available.
                         </div>
                     ) : (
@@ -2041,7 +2181,7 @@ export default function RunDetail() {
                             </ResponsiveContainer>
                         </div>
                     ) : (
-                        <div className="py-8 text-center font-mono text-[11px] text-muted-lab">
+                        <div className="py-8 text-center font-ui text-[11px] text-muted-lab">
                             Monthly chart will populate when trades with entry timestamps are available.
                         </div>
                     )}
@@ -2114,7 +2254,7 @@ function variantLabel(v) {
 function ScopeRow({ label, children }) {
     return (
         <span className="inline-flex items-center gap-1.5">
-            <span className="text-[9px] font-mono uppercase tracking-widest text-muted-lab">
+            <span className="text-[9px] font-ui uppercase tracking-widest text-muted-lab">
                 {label}
             </span>
             {children}
@@ -2339,7 +2479,7 @@ function Stat({ label, value, tone }) {
     const color = { primary: "text-[hsl(var(--accent-primary))]", secondary: "text-[hsl(var(--accent-secondary))]", warning: "text-[hsl(var(--warning))]", muted: "text-white" }[tone];
     return (
         <div className="border border-[hsl(var(--border-soft))] clip-bevel-sm px-3 py-2.5 bg-[hsl(var(--panel-2)/0.5)]">
-            <div className="text-[9.5px] font-mono uppercase tracking-wider text-muted-lab">{label}</div>
+            <div className="text-[9.5px] font-ui uppercase tracking-wider text-muted-lab">{label}</div>
             <div className={`text-[18px] font-display font-semibold tabular-nums mt-1 ${color}`}>{value}</div>
         </div>
     );
@@ -2432,8 +2572,7 @@ function SessionSplit({ trades }) {
                 if (netR > peak) peak = netR;
                 const dd = netR - peak;
                 if (dd < maxDD) maxDD = dd;
-                const outcome = String(trade.outcome || "").toUpperCase().replace(/[^A-Z0-9]+/g, "_");
-                if (outcome === "WIN") wins++;
+                if (tradeResultSign(trade) > 0) wins++;
                 return { v: netR };
             });
 
@@ -2467,7 +2606,7 @@ function SessionSplit({ trades }) {
     if (!sessions.length) {
         return (
             <NeonPanel className="xl:col-span-3" title="Session Split">
-                <div className="py-6 text-center font-mono text-[11px] text-muted-lab">
+                <div className="py-6 text-center font-ui text-[11px] text-muted-lab">
                     No session split data available.
                 </div>
             </NeonPanel>
@@ -2480,11 +2619,11 @@ function SessionSplit({ trades }) {
             title="Session Split"
             action={
                 <div className="flex items-center gap-2">
-                    <Pill tone="muted">STATIC · ALL TRADES</Pill>
+                    <Pill tone="muted">UNFILTERED · ALL VARIANT TRADES</Pill>
                     <button
                         type="button"
                         onClick={toggle}
-                        className="px-2 py-0.5 text-[9.5px] font-mono uppercase tracking-wider border border-[hsl(var(--border-mid))] text-muted-lab hover:text-white transition-colors"
+                        className="px-2 py-0.5 text-[9.5px] font-ui uppercase tracking-wider border border-[hsl(var(--border-mid))] text-muted-lab hover:text-white transition-colors"
                     >
                         {open ? "▲ Collapse" : "▼ Expand"}
                     </button>
@@ -2510,10 +2649,10 @@ function SessionSplit({ trades }) {
                         >
                             {/* Header */}
                             <div className="flex items-center justify-between">
-                                <span className="font-mono text-[10px] uppercase tracking-wider text-muted-lab">
+                                <span className="font-ui text-[10px] uppercase tracking-wider text-muted-lab">
                                     {sess.name}
                                 </span>
-                                <span className="font-mono text-[9px] text-muted-lab">
+                                <span className="font-num text-[9px] text-muted-lab">
                                     {sess.count} trade{sess.count !== 1 ? "s" : ""}
                                 </span>
                             </div>
@@ -2524,7 +2663,7 @@ function SessionSplit({ trades }) {
                             </div>
 
                             {/* Win rate + max DD */}
-                            <div className="flex items-center gap-4 font-mono text-[10px]">
+                            <div className="flex items-center gap-4 font-num text-[10px]">
                                 <span className="text-muted-lab">
                                     WR&nbsp;
                                     <span className="text-white">{sess.winRate.toFixed(0)}%</span>
@@ -2598,25 +2737,25 @@ function SessionMatrix({ trades }) {
             </div>
 
             <div className="overflow-x-auto scrollbar-thin" data-testid="session-matrix">
-                <table className="w-full min-w-[720px] font-mono text-[11px] border-separate border-spacing-1">
+                <table className="w-full min-w-[720px] text-[11px] border-separate border-spacing-1">
                     <thead>
                         <tr>
-                            <th className="text-muted-lab text-left px-2 py-1 text-[10px] uppercase tracking-wider">Origin / Fill</th>
+                            <th className="font-ui text-muted-lab text-left px-2 py-1 text-[10px] uppercase tracking-wider">Origin / Fill</th>
                             {SESSION_COLUMNS.map((session) => (
-                                <th key={session} className="text-muted-lab px-2 py-1 text-[10px] uppercase tracking-wider">{session}</th>
+                                <th key={session} className="font-ui text-muted-lab px-2 py-1 text-[10px] uppercase tracking-wider">{session}</th>
                             ))}
                         </tr>
                     </thead>
                     <tbody>
                         {data.rows.map((row) => (
                             <tr key={row}>
-                                <td className="text-muted-lab px-2 py-1 whitespace-nowrap">{row}</td>
+                                <td className="font-ui text-muted-lab px-2 py-1 whitespace-nowrap">{row}</td>
                                 {SESSION_COLUMNS.map((col) => {
                                     const cell = data.cells[`${row}|||${col}`];
                                     if (!cell) {
                                         return (
                                             <td key={col}>
-                                                <div className="clip-bevel-sm px-2 py-2 text-center text-muted-lab bg-[hsl(var(--panel-2)/0.4)]">·</div>
+                                                <div className="font-ui clip-bevel-sm px-2 py-2 text-center text-muted-lab bg-[hsl(var(--panel-2)/0.4)]">·</div>
                                             </td>
                                         );
                                     }
@@ -2626,7 +2765,7 @@ function SessionMatrix({ trades }) {
                                         : `hsl(var(--bear) / ${alpha})`;
                                     return (
                                         <td key={col}>
-                                            <div className="clip-bevel-sm px-2 py-1.5 text-center text-white tabular-nums" style={{ background: bg }}>
+                                            <div className="font-num clip-bevel-sm px-2 py-1.5 text-center text-white tabular-nums" style={{ background: bg }}>
                                                 <div>{fmtR(cell.netR)}</div>
                                                 <div className="text-[9px] text-white/70">{cell.count} trade{cell.count === 1 ? "" : "s"}</div>
                                             </div>
@@ -2703,7 +2842,7 @@ function TimeOfDayHeatmap({ trades }) {
     if (!used) {
         return (
             <NeonPanel className="xl:col-span-3" title="Entry Time Heatmap · All Trades by Weekday × Hour">
-                <div data-testid="tod-heatmap-empty" className="py-8 text-center text-muted-lab font-mono text-[12px]">
+                <div data-testid="tod-heatmap-empty" className="py-8 text-center text-muted-lab font-ui text-[12px]">
                     No timestamped trades available to build the time-of-day heatmap.
                 </div>
             </NeonPanel>
@@ -2716,7 +2855,7 @@ function TimeOfDayHeatmap({ trades }) {
             title="Entry Time Heatmap · All Trades by Weekday × Hour"
             action={<Pill tone="muted">{used} trades{skipped ? ` · ${skipped} undated` : ""}</Pill>}
         >
-            <div className="mb-3 text-[11px] font-mono text-muted-lab">
+            <div className="mb-3 text-[11px] font-ui text-muted-lab">
                 Aggregates every trade in the selected run by entry weekday and hour.
             </div>
 
@@ -2730,25 +2869,25 @@ function TimeOfDayHeatmap({ trades }) {
             </div>
 
             <div className="overflow-x-auto scrollbar-thin" data-testid="tod-heatmap">
-                <table className="font-mono text-[11px] border-separate border-spacing-1">
+                <table className="text-[11px] border-separate border-spacing-1">
                     <thead>
                         <tr>
-                            <th className="text-muted-lab text-left px-2 py-1 text-[10px] uppercase tracking-wider">Day / Hr</th>
+                            <th className="font-ui text-muted-lab text-left px-2 py-1 text-[10px] uppercase tracking-wider">Day / Hr</th>
                             {hours.map((h) => (
-                                <th key={h} className="text-muted-lab px-2 py-1 text-[10px] uppercase tracking-wider tabular-nums">{fmtHour(h)}</th>
+                                <th key={h} className="font-num text-muted-lab px-2 py-1 text-[10px] uppercase tracking-wider tabular-nums">{fmtHour(h)}</th>
                             ))}
                         </tr>
                     </thead>
                     <tbody>
                         {DOW_ORDER.map((day) => (
                             <tr key={day}>
-                                <td className="text-muted-lab px-2 py-1">{DOW[day]}</td>
+                                <td className="font-ui text-muted-lab px-2 py-1">{DOW[day]}</td>
                                 {hours.map((h) => {
                                     const c = cells[`${day}-${h}`];
                                     if (!c || c.count === 0) {
                                         return (
                                             <td key={h}>
-                                                <div className="clip-bevel-sm px-2 py-1 text-center text-muted-lab bg-[hsl(var(--panel-2)/0.4)]">·</div>
+                                                <div className="font-ui clip-bevel-sm px-2 py-1 text-center text-muted-lab bg-[hsl(var(--panel-2)/0.4)]">·</div>
                                             </td>
                                         );
                                     }
@@ -2759,7 +2898,7 @@ function TimeOfDayHeatmap({ trades }) {
                                     return (
                                         <td key={h}>
                                             <div
-                                                className="clip-bevel-sm px-2 py-1 text-center text-white tabular-nums"
+                                                className="font-num clip-bevel-sm px-2 py-1 text-center text-white tabular-nums"
                                                 style={{ background: bg }}
                                                 title={`${DOW[day]} ${fmtHour(h)} · ${c.count} trade${c.count === 1 ? "" : "s"}`}
                                             >

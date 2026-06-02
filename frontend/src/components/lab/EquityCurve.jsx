@@ -4,6 +4,7 @@ import {
     ComposedChart, XAxis, YAxis, CartesianGrid, Tooltip,
     ResponsiveContainer, ReferenceLine,
 } from "recharts";
+import { CHART_NUM_FONT } from "@/lib/chartStyles";
 
 // ── EquityCurve (original — unchanged) ───────────────────────────────────────
 
@@ -27,14 +28,14 @@ export function EquityCurve({ data, height = 280, color = "primary", showAxis = 
                         )}
                     </defs>
                     <CartesianGrid stroke="hsl(var(--grid))" strokeDasharray="2 4" vertical={false} />
-                    <XAxis dataKey="label" tick={{ fill: "hsl(var(--muted))", fontFamily: "JetBrains Mono", fontSize: 10 }} interval={Math.floor(data.length / 8)} hide={!showAxis} />
-                    <YAxis tick={{ fill: "hsl(var(--muted))", fontFamily: "JetBrains Mono", fontSize: 10 }} tickFormatter={(v) => `${v}R`} hide={!showAxis} />
+                    <XAxis dataKey="label" tick={{ fill: "hsl(var(--muted))", fontFamily: CHART_NUM_FONT, fontSize: 10 }} interval={Math.floor(data.length / 8)} hide={!showAxis} />
+                    <YAxis tick={{ fill: "hsl(var(--muted))", fontFamily: CHART_NUM_FONT, fontSize: 10 }} tickFormatter={(v) => `${v}R`} hide={!showAxis} />
                     <Tooltip
                         contentStyle={{
                             background: "hsl(var(--panel-2))",
                             border: "1px solid hsl(var(--accent-primary) / 0.4)",
                             borderRadius: 2,
-                            fontFamily: "JetBrains Mono",
+                            fontFamily: CHART_NUM_FONT,
                             fontSize: 11,
                         }}
                         labelStyle={{ color: "hsl(var(--muted))" }}
@@ -80,13 +81,43 @@ function fmtUtc(value) {
     return `${d.getUTCDate()} ${months[d.getUTCMonth()]} ${d.getUTCFullYear()}, ${String(d.getUTCHours()).padStart(2,"0")}:${String(d.getUTCMinutes()).padStart(2,"0")} UTC`;
 }
 
+// Format an account dollar value for the tooltip (e.g. "$100,000", "-$2,500").
+function fmtAcct(v, currency = "USD") {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return "—";
+    try {
+        return new Intl.NumberFormat("en-US", {
+            style: "currency",
+            currency: String(currency || "USD").toUpperCase(),
+            maximumFractionDigits: Math.abs(n) >= 1000 ? 0 : 2,
+        }).format(n);
+    } catch {
+        return `${n >= 0 ? "" : "-"}${Math.abs(n).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+    }
+}
+
+// Format a dollar value for the Y-axis tick label (e.g. "100k", "90k").
+function fmtAcctTick(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return "";
+    const abs = Math.abs(n);
+    if (abs >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    if (abs >= 1_000)     return `${(n / 1_000).toFixed(0)}k`;
+    return String(n);
+}
+
 // Colour for a trade dot (and the legend).
 // Must match LEGEND_ITEMS order below.
 function dotFill(point, showNews) {
     if (!point) return "hsl(var(--muted))";
     const outcome    = String(point.outcome || "").toUpperCase().replace(/[^A-Z0-9]+/g, "_");
     const newsAction = String(point.news_action || "").trim();
+    const fundingMarker = String(point.fundingMarker || "").trim();
+    const fundingPhase = String(point.fundingPhase || point.phase || "").trim();
     const tradeR     = Number(point.tradeR);
+    if (fundingMarker === "funded_start")                              return "hsl(330 88% 68%)";
+    if (fundingPhase === "Funded")                                      return "hsl(var(--accent-primary))";
+    if (fundingMarker)                                                  return "hsl(var(--warning))";
     if (showNews && newsAction)                                         return "hsl(var(--warning))";
     if (outcome === "WIN")                                              return "hsl(var(--accent-primary))";
     if (outcome === "LOSS")                                             return "hsl(var(--bear))";
@@ -116,11 +147,16 @@ const LEGEND_ITEMS = [
     { label: "Breakeven / Zero", color: "hsl(var(--muted))"          },
 ];
 
+const FUNDING_LEGEND_ITEMS = [
+    { label: "Funded Live",  color: "hsl(var(--accent-primary))" },
+    { label: "Funded Start", color: "hsl(330 88% 68%)"           },
+];
+
 const TT_STYLE = {
     background: "hsl(var(--panel-2))",
     border: "1px solid hsl(var(--accent-primary) / 0.4)",
     borderRadius: 2,
-    fontFamily: "JetBrains Mono",
+    fontFamily: CHART_NUM_FONT,
     fontSize: 11,
     padding: "8px 10px",
     lineHeight: 1.75,
@@ -131,19 +167,43 @@ const TT_STYLE = {
 
 const SEP = { borderTop: "1px solid hsl(var(--border-soft))", margin: "4px 0" };
 
-function TradeTooltip({ active, payload }) {
+function TradeTooltip({ active, payload, accountMode = false, currency = "USD" }) {
     if (!active || !payload?.length) return null;
     const p = payload[0]?.payload;
     if (!p) return null;
-    // Synthetic start anchor — show minimal tooltip
+
+    // Synthetic start anchor — minimal tooltip
     if (p.isStart) {
         return (
             <div style={TT_STYLE}>
-                <div style={{ fontWeight: 700, color: "hsl(var(--text-1))" }}>Start · 0.00R</div>
+                <div style={{ fontWeight: 700, color: "hsl(var(--text-1))" }}>
+                    {accountMode ? `Start · ${fmtAcct(p.netR, currency)}` : "Start · 0.00R"}
+                </div>
             </div>
         );
     }
-    const rN = Number(p.tradeR);
+
+    // Phase boundary anchor (Verification Start, Funded Start) — no trade data
+    if (p.trade === null && p.fundingMarker) {
+        const phaseLabel = {
+            phase_2_start: "Verification Start",
+            funded_start:  "Funded Start",
+        }[p.fundingMarker] || p.displayTradeId || p.fundingMarker;
+        return (
+            <div style={TT_STYLE}>
+                <div style={{ fontWeight: 700, color: "hsl(var(--warning))", marginBottom: accountMode ? 4 : 0 }}>
+                    ◆ {phaseLabel}
+                </div>
+                {accountMode && Number.isFinite(Number(p.netR)) && (
+                    <div style={{ color: "hsl(var(--text-2))", fontSize: 11 }}>
+                        Balance: {fmtAcct(p.netR, currency)}
+                    </div>
+                )}
+            </div>
+        );
+    }
+
+    const rN  = Number(p.tradeR);
     const ddN = Number(p.drawdown);
     const rColor  = rN  >= 0 ? "hsl(var(--accent-primary))" : "hsl(var(--bear))";
     const ddColor = ddN < -0.005 ? "hsl(var(--bear))" : "hsl(var(--accent-primary))";
@@ -163,18 +223,26 @@ function TradeTooltip({ active, payload }) {
                 {p.session ? <><br />{p.session}</> : null}
             </div>
             <div style={SEP} />
-            {/* R values */}
+            {/* R / balance values */}
             <div style={{ display: "grid", gridTemplateColumns: "90px 1fr", rowGap: 1 }}>
                 <span style={{ color: "hsl(var(--muted))" }}>R Result</span>
                 <span style={{ color: rColor, fontWeight: 600 }}>{fmtR(rN)}</span>
-                <span style={{ color: "hsl(var(--muted))" }}>Cumul. R</span>
-                <span style={{ color: "hsl(var(--text-1))" }}>{fmtR(p.netR)}</span>
+                <span style={{ color: "hsl(var(--muted))" }}>
+                    {accountMode ? "Balance" : "Cumul. R"}
+                </span>
+                <span style={{ color: "hsl(var(--text-1))" }}>
+                    {accountMode ? fmtAcct(p.netR, currency) : fmtR(p.netR)}
+                </span>
                 <span style={{ color: "hsl(var(--muted))" }}>Drawdown</span>
                 <span style={{ color: ddColor }}>
-                    {p.isAtHigh ? "new high ✓" : fmtR(ddN)}
+                    {p.isAtHigh
+                        ? "new high ✓"
+                        : accountMode
+                            ? fmtAcct(ddN, currency)
+                            : fmtR(ddN)}
                 </span>
             </div>
-            {/* News */}
+            {/* News — only real trade news events, never phase markers */}
             {newsAction && <>
                 <div style={SEP} />
                 <div style={{ color: "hsl(var(--warning))" }}>
@@ -205,50 +273,86 @@ function TradeTooltip({ active, payload }) {
 export function EquityCurveV2({
     data = [],
     height = 360,
-    showDots     = true,
-    showDrawdown = true,
-    showNews     = true,
+    showDots      = true,
+    showDrawdown  = true,
+    showNews      = true,
+    accountMode   = false,          // true when netR values are dollar amounts, not R
+    currency      = "USD",          // display currency for tooltip and axis in accountMode
+    referenceLevels = [],           // [{ y, label, color, dash? }] — FTMO targets, floors, baseline
 }) {
     const STRIP_H  = 10;   // thin continuous underwater strip
     const LEGEND_H = 22;   // dot-colour legend row
     const mainH    = height - (showDrawdown ? STRIP_H : 0) - LEGEND_H;
 
     // drawdownBar: 1 gives every strip bar a constant height;
-    // Cell fill provides the depth-coded colour via ddFill().
+    // Cell fill provides the depth-coded colour via ddFill():
+    //   R mode       — uses pt.drawdown (R units; thresholds at -1 / -3 / -5 R)
+    //   accountMode  — uses pt.accountDrawdownPct (% from peak; same thresholds
+    //                  read as -1% / -3% / -5%, giving meaningful colour gradation
+    //                  across a 10% FTMO-style buffer).  Falls back to pt.drawdown
+    //                  for synthetic anchor points that carry no accountDrawdownPct.
     const chartData = React.useMemo(
         () => data.map((p) => ({ ...p, drawdownBar: 1 })),
         [data],
     );
+    const legendItems = React.useMemo(
+        () => {
+            const hasFunding = chartData.some((point) => point.fundingMarker || point.fundingPhase === "Funded" || point.phase === "Funded");
+            return hasFunding ? [...LEGEND_ITEMS, ...FUNDING_LEGEND_ITEMS] : LEGEND_ITEMS;
+        },
+        [chartData],
+    );
 
-    // Y-domain: always includes 0 with breathing room below, even when all trades are profitable
+    // Y-domain:
+    //   R mode    — always extends below 0 so the zero-line has breathing room.
+    //   Account mode — anchors to the actual equity/reference range, no forced zero.
+    //   Reference levels (FTMO floor, baseline, targets) are included so they
+    //   are never clipped off the visible canvas.
     const yDomain = React.useMemo(() => {
         if (!chartData.length) return ["auto", "auto"];
-        const vals = chartData.map((p) => Number(p.netR)).filter(Number.isFinite);
-        if (!vals.length) return ["auto", "auto"];
-        const maxVal = Math.max(...vals);
-        const minVal = Math.min(...vals);
+        const dataVals = chartData.map((p) => Number(p.netR)).filter(Number.isFinite);
+        if (!dataVals.length) return ["auto", "auto"];
+        // Pull reference level Y values in so floor/targets are always in view.
+        const refVals = referenceLevels.map((r) => Number(r.y)).filter(Number.isFinite);
+        const allVals = [...dataVals, ...refVals];
+        const maxVal = Math.max(...allVals);
+        const minVal = Math.min(...allVals);
         const range  = Math.abs(maxVal - minVal) || 1;
-        const pad    = Math.max(range * 0.1, 1);
-        // domainMin is always below 0 so the zero-line has breathing room
-        const domainMin = Math.min(minVal, 0) - pad;
-        const domainMax = maxVal + Math.max(range * 0.05, 0.5);
+        const pad    = Math.max(range * 0.08, accountMode ? 1 : 0.5);
+        const domainMin = accountMode
+            ? minVal - pad
+            : Math.min(minVal, 0) - pad;           // R mode keeps zero in view
+        const domainMax = maxVal + Math.max(range * 0.05, accountMode ? 1 : 0.5);
+        if (accountMode) {
+            return [Math.floor(domainMin), Math.ceil(domainMax)];
+        }
         return [Number(domainMin.toFixed(1)), Number(domainMax.toFixed(1))];
-    }, [chartData]);
+    }, [chartData, referenceLevels, accountMode]);
 
-    // Y-axis ticks: explicit clean integers so Recharts never picks fractional values
+    // Y-axis ticks: explicit clean values so Recharts never picks fractional or
+    // unreadable numbers.  Account mode uses human-friendly increments (5k, 10k,
+    // 25k …); R mode uses the original integer step logic.
     const yAxisTicks = React.useMemo(() => {
         const [lo, hi] = yDomain;
         const numLo = Number(lo);
         const numHi = Number(hi);
         if (!Number.isFinite(numLo) || !Number.isFinite(numHi)) return undefined;
         const range = numHi - numLo;
-        // Pick step to produce roughly 5–7 ticks
         let step;
-        if      (range <=  8) step = 1;
-        else if (range <= 20) step = 2;
-        else if (range <= 50) step = 5;
-        else if (range <= 100) step = 10;
-        else step = Math.pow(10, Math.floor(Math.log10(range / 5)));
+        if (accountMode) {
+            // Dollar amounts — aim for 4–6 human-readable ticks.
+            const rawStep  = range / 5;
+            const magnitude = Math.pow(10, Math.floor(Math.log10(Math.max(rawStep, 1))));
+            const norm = rawStep / magnitude;
+            step = magnitude * (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10);
+        } else {
+            // R values — pick step for ~5–7 ticks
+            if      (range <=  8) step = 1;
+            else if (range <= 20) step = 2;
+            else if (range <= 50) step = 5;
+            else if (range <= 100) step = 10;
+            else step = Math.pow(10, Math.floor(Math.log10(range / 5)));
+        }
         const start = Math.ceil(numLo  / step) * step;
         const end   = Math.floor(numHi / step) * step;
         const ticks = [];
@@ -258,7 +362,7 @@ export function EquityCurveV2({
             t += step;
         }
         return ticks;
-    }, [yDomain]);
+    }, [yDomain, accountMode]);
 
     // X-axis: one tick per calendar month, at the first trade of each new month
     const xAxisConfig = React.useMemo(() => {
@@ -311,7 +415,7 @@ export function EquityCurveV2({
         return (
             <div
                 style={{ width: "100%", height, display: "flex", alignItems: "center", justifyContent: "center" }}
-                className="font-mono text-[11px] text-muted-lab"
+                className="font-ui text-[11px] text-muted-lab"
                 data-testid="equity-curve-v2"
             >
                 No data available
@@ -342,33 +446,54 @@ export function EquityCurveV2({
                             domain={["dataMin", "dataMax"]}
                             ticks={xAxisConfig.ticks}
                             tickFormatter={(idx) => xAxisConfig.labelMap[idx] ?? ""}
-                            tick={{ fill: "hsl(var(--muted))", fontFamily: "JetBrains Mono", fontSize: 10 }}
+                            tick={{ fill: "hsl(var(--muted))", fontFamily: CHART_NUM_FONT, fontSize: 10 }}
                             axisLine={false}
                             tickLine={false}
                         />
 
                         <YAxis
-                            tick={{ fill: "hsl(var(--muted))", fontFamily: "JetBrains Mono", fontSize: 10 }}
+                            tick={{ fill: "hsl(var(--muted))", fontFamily: CHART_NUM_FONT, fontSize: 10 }}
                             tickFormatter={(v) => {
                                 const n = Number(v);
                                 if (!Number.isFinite(n)) return "";
-                                // Explicit ticks are always integers or clean decimals —
-                                // render as integer when whole, 1 dp otherwise
+                                if (accountMode) return fmtAcctTick(n);
                                 return `${Number.isInteger(n) ? n : n.toFixed(1)}R`;
                             }}
                             ticks={yAxisTicks}
-                            width={48}
+                            width={accountMode ? 52 : 48}
                             domain={yDomain}
                         />
 
-                        <Tooltip content={<TradeTooltip />} />
+                        <Tooltip content={(props) => <TradeTooltip {...props} accountMode={accountMode} currency={currency} />} />
 
-                        {/* Zero-equity reference — solid, subtle, instantly readable */}
-                        <ReferenceLine
-                            y={0}
-                            stroke="hsl(var(--muted))"
-                            strokeWidth={1}
-                        />
+                        {/* Zero-equity reference — R mode only; not meaningful for dollar charts */}
+                        {!accountMode && (
+                            <ReferenceLine
+                                y={0}
+                                stroke="hsl(var(--muted))"
+                                strokeWidth={1}
+                            />
+                        )}
+
+                        {/* FTMO / account reference levels (blowout floor, baseline, phase targets) */}
+                        {referenceLevels.map(({ y, label, color, dash = "4 3" }) => (
+                            <ReferenceLine
+                                key={`reflvl-${y}`}
+                                y={y}
+                                stroke={color}
+                                strokeWidth={1.5}
+                                strokeDasharray={dash}
+                                label={{
+                                    value: label,
+                                    position: "insideTopRight",
+                                    fill: color,
+                                    fontFamily: CHART_NUM_FONT,
+                                    fontSize: 9,
+                                    fontWeight: 600,
+                                    dy: -4,
+                                }}
+                            />
+                        ))}
 
                         {/*
                          * Cumulative R area with per-trade coloured dots.
@@ -396,17 +521,18 @@ export function EquityCurveV2({
                         {/*
                          * barCategoryGap="0%" eliminates inter-bar spacing so the strip
                          * reads as a continuous coloured band rather than a histogram.
-                         * left: 52 aligns with the main chart plot area
-                         *   (YAxis width 48 + margin.left 4 = 52).
+                         * left must match the main chart plot area origin:
+                         *   R mode:       YAxis width 48 + margin.left 4 = 52
+                         *   accountMode:  YAxis width 52 + margin.left 4 = 56
                          */}
                         <BarChart
                             data={chartData}
                             barCategoryGap="0%"
-                            margin={{ top: 0, right: 8, left: 52, bottom: 0 }}
+                            margin={{ top: 0, right: 8, left: accountMode ? 56 : 52, bottom: 0 }}
                         >
                             <Bar dataKey="drawdownBar" isAnimationActive={false} radius={0}>
                                 {chartData.map((pt, idx) => (
-                                    <Cell key={idx} fill={ddFill(pt.drawdown)} />
+                                    <Cell key={idx} fill={ddFill(accountMode ? (pt.accountDrawdownPct ?? pt.drawdown) : pt.drawdown)} />
                                 ))}
                             </Bar>
                         </BarChart>
@@ -425,14 +551,14 @@ export function EquityCurveV2({
                     marginTop: 4,
                 }}
             >
-                {LEGEND_ITEMS.map(({ label, color }) => (
+                {legendItems.map(({ label, color }) => (
                     <div
                         key={label}
                         style={{
                             display: "flex",
                             alignItems: "center",
                             gap: 5,
-                            fontFamily: "JetBrains Mono",
+                            fontFamily: CHART_NUM_FONT,
                             fontSize: 10,
                             color: "hsl(var(--muted))",
                         }}

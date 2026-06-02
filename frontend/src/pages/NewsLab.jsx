@@ -8,6 +8,10 @@ import { RunConfigStrip } from "@/components/lab/RunConfigStrip";
 import { useDataset } from "@/data/store";
 import { useTradeUniverse } from "@/data/useTradeUniverse";
 import { TradeUniverseBadge } from "@/components/lab/TradeUniverseBadge";
+// Phase RB-5 — overlap breakdown tables route through the shared canonical
+// bucket table (frozen RB-3.2 contract). Other NewsLab surfaces are unchanged.
+import { useResultsLens } from "@/data/useResultsLens";
+import { CanonicalBucketTable } from "@/components/lab/CanonicalBucketTable";
 import {
     AlertTriangle, CalendarClock, Clipboard, Download, FileText,
     Globe2, ListChecks, Newspaper, ShieldAlert,
@@ -112,6 +116,8 @@ export default function NewsLab() {
     const visibleOverlapRows = React.useMemo(() => overlapRows.slice(0, OVERLAP_PREVIEW_LIMIT), [overlapRows]);
     const overlapAnalytics = React.useMemo(() => buildOverlapAnalytics(overlapRows), [overlapRows]);
     const overlapBreakdowns = React.useMemo(() => buildOverlapBreakdowns(overlapRows), [overlapRows]);
+    // RB-5: adapted overlap rows for the canonical bucket table's Current-Equity path.
+    const overlapTrades = React.useMemo(() => overlapRowsToTrades(overlapRows), [overlapRows]);
     const exactBlockedRows = React.useMemo(() => buildExactBlockedRows(trades), [trades]);
     const exactSummary = React.useMemo(() => buildExactNewsSummary(exactBlockedRows), [exactBlockedRows]);
     const blockedRows = React.useMemo(
@@ -280,26 +286,26 @@ export default function NewsLab() {
                         title="News Date Range"
                         action={<Pill tone={dateRangeActive ? "warning" : "muted"}>{dateRangeActive ? "RANGE ACTIVE" : "FRONTEND ANALYSIS ONLY"}</Pill>}
                     >
-                        <div className="mb-2 text-[11px] font-mono text-muted-lab">
+                        <div className="mb-2 text-[11px] font-ui text-muted-lab">
                             Filters all tables and overlap preview to a date window. Does not affect Python backtest or exact blackout results.
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto_auto_auto] gap-2 items-end">
-                            <label className="grid gap-1 text-[10px] font-mono uppercase tracking-[0.18em] text-muted-lab">
+                            <label className="grid gap-1 text-[10px] font-ui uppercase tracking-[0.18em] text-muted-lab">
                                 Start date (UTC)
                                 <input
                                     type="date"
                                     value={newsDateStart}
                                     onChange={(e) => updateNewsDateStart(e.target.value)}
-                                    className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-mono text-[hsl(var(--text-2))]"
+                                    className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-ui text-[hsl(var(--text-2))]"
                                 />
                             </label>
-                            <label className="grid gap-1 text-[10px] font-mono uppercase tracking-[0.18em] text-muted-lab">
+                            <label className="grid gap-1 text-[10px] font-ui uppercase tracking-[0.18em] text-muted-lab">
                                 End date (UTC)
                                 <input
                                     type="date"
                                     value={newsDateEnd}
                                     onChange={(e) => updateNewsDateEnd(e.target.value)}
-                                    className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-mono text-[hsl(var(--text-2))]"
+                                    className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-ui text-[hsl(var(--text-2))]"
                                 />
                             </label>
                             <ActionButton onClick={applyActiveRunRange} icon={CalendarClock} disabled={!trades.length}>Match Active Run</ActionButton>
@@ -307,7 +313,7 @@ export default function NewsLab() {
                             <ActionButton onClick={clearDateRange} icon={FileText} disabled={!dateRangeActive}>Clear</ActionButton>
                         </div>
                         {dateRangeActive && (
-                            <div className="mt-2 text-[11px] font-mono text-muted-lab">
+                            <div className="mt-2 text-[11px] font-ui text-muted-lab">
                                 {dateFilteredNewsEvents.length} of {newsEvents.length} events in selected range.
                             </div>
                         )}
@@ -325,21 +331,21 @@ export default function NewsLab() {
                     <div className="grid grid-cols-1 lg:grid-cols-[1.15fr_0.85fr] gap-4">
                         <div>
                             <div className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.55)] p-3">
-                                <pre className="text-[11.5px] font-mono text-[hsl(var(--text-2))] overflow-x-auto whitespace-pre">{CSV_TEMPLATE}</pre>
+                                <pre className="text-[11.5px] font-code text-[hsl(var(--text-2))] overflow-x-auto whitespace-pre">{CSV_TEMPLATE}</pre>
                             </div>
-                            <div className="mt-3 grid gap-1.5 text-[11.5px] font-mono text-[hsl(var(--text-2))]">
+                            <div className="mt-3 grid gap-1.5 text-[11.5px] font-ui text-[hsl(var(--text-2))]">
                                 <div className="flex items-start gap-2"><CalendarClock className="w-3.5 h-3.5 mt-0.5 text-[hsl(var(--accent-secondary))]" /> Time should be UTC unless explicitly configured.</div>
                                 <div className="flex items-start gap-2"><FileText className="w-3.5 h-3.5 mt-0.5 text-[hsl(var(--accent-secondary))]" /> V1 supports manual CSV import / export from the Python backtester.</div>
                                 <div className="flex items-start gap-2"><Globe2 className="w-3.5 h-3.5 mt-0.5 text-[hsl(var(--accent-secondary))]" /> No live calendar API is connected yet.</div>
                             </div>
                         </div>
                         <div className="space-y-2">
-                            <div className="text-[10px] font-mono uppercase tracking-[0.22em] text-title-lab">News Source Path</div>
+                            <div className="text-[10px] font-ui uppercase tracking-[0.14em] text-title-lab">News Source Path</div>
                             <input
                                 disabled
                                 value="data/news/high_impact_events.csv"
                                 readOnly
-                                className="w-full clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-mono text-muted-lab"
+                                className="w-full clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-code text-muted-lab"
                             />
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
                                 <ActionButton disabled icon={FileText}>Import News CSV</ActionButton>
@@ -358,11 +364,11 @@ export default function NewsLab() {
                         defaultCollapsed
                     >
                         <div className="grid grid-cols-1 md:grid-cols-[0.7fr_0.7fr_1.6fr] gap-2 mb-3">
-                            <select value={currencyFilter} onChange={(e) => setCurrencyFilter(e.target.value)} className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-mono text-[hsl(var(--text-2))]">
+                            <select value={currencyFilter} onChange={(e) => setCurrencyFilter(e.target.value)} className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-ui text-[hsl(var(--text-2))]">
                                 <option value="ALL">All currencies</option>
                                 {eventSummary.currencyOptions.map((currency) => <option key={currency} value={currency}>{currency}</option>)}
                             </select>
-                            <select value={impactFilter} onChange={(e) => setImpactFilter(e.target.value)} className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-mono text-[hsl(var(--text-2))]">
+                            <select value={impactFilter} onChange={(e) => setImpactFilter(e.target.value)} className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-ui text-[hsl(var(--text-2))]">
                                 <option value="ALL">All impacts</option>
                                 <option value="high">High</option>
                                 <option value="medium">Medium</option>
@@ -372,10 +378,10 @@ export default function NewsLab() {
                                 value={searchFilter}
                                 onChange={(e) => setSearchFilter(e.target.value)}
                                 placeholder="Search events..."
-                                className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-mono text-[hsl(var(--text-2))] placeholder:text-muted-lab"
+                                className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-ui text-[hsl(var(--text-2))] placeholder:text-muted-lab"
                             />
                         </div>
-                        <div className="mb-3 text-[11px] font-mono text-muted-lab">
+                        <div className="mb-3 text-[11px] font-ui text-muted-lab">
                             Showing first {Math.min(TABLE_ROW_LIMIT, filteredEvents.length)} of {filteredEvents.length} filtered events.
                         </div>
                         <DataTable
@@ -402,7 +408,7 @@ export default function NewsLab() {
                         defaultCollapsed
                     >
                         {!relevantCurrencies.length && <LimitedData>Active run symbol is unavailable, so currency relevance cannot be derived.</LimitedData>}
-                        <div className="mb-3 text-[11px] font-mono text-muted-lab">
+                        <div className="mb-3 text-[11px] font-ui text-muted-lab">
                             Showing first {Math.min(TABLE_ROW_LIMIT, relevantEvents.length)} of {relevantEvents.length} relevant events.
                         </div>
                         <DataTable
@@ -431,7 +437,7 @@ export default function NewsLab() {
                             <LimitedData>No active symbol — currency relevance unavailable; overlap preview disabled.</LimitedData>
                         )}
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-3">
-                            <label className="grid gap-1 text-[10px] font-mono uppercase tracking-[0.18em] text-muted-lab">
+                            <label className="grid gap-1 text-[10px] font-ui uppercase tracking-[0.18em] text-muted-lab">
                                 Minutes before event
                                 <input
                                     type="number"
@@ -439,10 +445,10 @@ export default function NewsLab() {
                                     max="1440"
                                     value={overlapBeforeMinutes}
                                     onChange={(e) => updateOverlapBefore(e.target.value)}
-                                    className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-mono text-[hsl(var(--text-2))]"
+                                    className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-ui text-[hsl(var(--text-2))]"
                                 />
                             </label>
-                            <label className="grid gap-1 text-[10px] font-mono uppercase tracking-[0.18em] text-muted-lab">
+                            <label className="grid gap-1 text-[10px] font-ui uppercase tracking-[0.18em] text-muted-lab">
                                 Minutes after event
                                 <input
                                     type="number"
@@ -450,15 +456,15 @@ export default function NewsLab() {
                                     max="1440"
                                     value={overlapAfterMinutes}
                                     onChange={(e) => updateOverlapAfter(e.target.value)}
-                                    className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-mono text-[hsl(var(--text-2))]"
+                                    className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-ui text-[hsl(var(--text-2))]"
                                 />
                             </label>
-                            <label className="grid gap-1 text-[10px] font-mono uppercase tracking-[0.18em] text-muted-lab">
+                            <label className="grid gap-1 text-[10px] font-ui uppercase tracking-[0.18em] text-muted-lab">
                                 Impact filter
                                 <select
                                     value={overlapImpactMode}
                                     onChange={(e) => updateOverlapImpact(e.target.value)}
-                                    className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-mono text-[hsl(var(--text-2))]"
+                                    className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-ui text-[hsl(var(--text-2))]"
                                 >
                                     <option value="high">High only</option>
                                     <option value="medium_high">Medium + High</option>
@@ -468,19 +474,19 @@ export default function NewsLab() {
                         </div>
                         {!overlapEnabled ? (
                             <div className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.35)] p-3">
-                                <div className="text-[11.5px] font-mono text-[hsl(var(--text-2))]">Overlap preview is disabled until calculated to keep the page fast.</div>
+                                <div className="text-[11.5px] font-ui text-[hsl(var(--text-2))]">Overlap preview is disabled until calculated to keep the page fast.</div>
                                 <button
                                     type="button"
                                     onClick={() => setOverlapEnabled(true)}
                                     disabled={!relevantCurrencies.length}
-                                    className="mt-3 inline-flex items-center justify-center px-3 py-2 text-[10px] font-mono uppercase tracking-wider border border-[hsl(var(--accent-secondary)/0.55)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.06)] hover:bg-[hsl(var(--accent-secondary)/0.12)] disabled:opacity-45 disabled:cursor-not-allowed clip-bevel-sm"
+                                    className="mt-3 inline-flex items-center justify-center px-3 py-2 text-[10px] font-ui uppercase tracking-wider border border-[hsl(var(--accent-secondary)/0.55)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.06)] hover:bg-[hsl(var(--accent-secondary)/0.12)] disabled:opacity-45 disabled:cursor-not-allowed clip-bevel-sm"
                                 >
                                     {overlapButtonLabel}
                                 </button>
                             </div>
                         ) : (
                             <>
-                                <div className="mb-3 clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.32)] px-3 py-2 text-[11.5px] font-mono text-[hsl(var(--text-2))] leading-relaxed">
+                                <div className="mb-3 clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.32)] px-3 py-2 text-[11.5px] font-ui text-[hsl(var(--text-2))] leading-relaxed">
                                     Wins and losses shown here are the <strong>original outcomes</strong> of trades whose fill time fell inside the selected news window. This is a frontend overlap preview — not a simulated blackout result.
                                 </div>
                                 <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-2 mb-3">
@@ -495,12 +501,12 @@ export default function NewsLab() {
                                 </div>
                                 <div className="mb-3 clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.32)] p-3">
                                     <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto] gap-2 items-end">
-                                        <label className="grid gap-1 text-[10px] font-mono uppercase tracking-[0.18em] text-muted-lab">
+                                        <label className="grid gap-1 text-[10px] font-ui uppercase tracking-[0.18em] text-muted-lab">
                                             Scenario name
                                             <input
                                                 value={scenarioNameDraft}
                                                 onChange={(e) => setScenarioNameDraft(e.target.value)}
-                                                className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-mono text-[hsl(var(--text-2))]"
+                                                className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-ui text-[hsl(var(--text-2))]"
                                             />
                                         </label>
                                         <ActionButton onClick={saveOverlapScenario} icon={FileText}>Save Scenario</ActionButton>
@@ -532,16 +538,19 @@ export default function NewsLab() {
                                     ]}
                                     rows={visibleOverlapRows}
                                 />
-                                <div className="mt-4 grid grid-cols-1 xl:grid-cols-3 gap-3">
-                                    <OverlapBreakdownTable title="By Impact" rows={overlapBreakdowns.byImpact} />
-                                    <OverlapBreakdownTable title="By Event Name" rows={overlapBreakdowns.byEvent} />
-                                    <OverlapBreakdownTable title="By Proximity" rows={overlapBreakdowns.byProximity} />
+                                <div className="mt-4">
+                                    <OverlapBasisNote />
+                                    <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
+                                        <OverlapBreakdownTable title="By Impact" rows={overlapBreakdowns.byImpact} trades={overlapTrades} labelFn={(t) => t.impact || "unknown"} />
+                                        <OverlapBreakdownTable title="By Event Name" rows={overlapBreakdowns.byEvent} trades={overlapTrades} labelFn={(t) => t.event || "Unknown"} />
+                                        <OverlapBreakdownTable title="By Proximity" rows={overlapBreakdowns.byProximity} trades={overlapTrades} labelFn={overlapProximityLabel} />
+                                    </div>
                                 </div>
                             </>
                         )}
                         {savedOverlapScenarios.length > 0 && (
                             <div className="mt-4">
-                                <div className="mb-2 text-[10px] font-mono uppercase tracking-[0.2em] text-title-lab">Saved Overlap Scenarios</div>
+                                <div className="mb-2 text-[10px] font-ui uppercase tracking-[0.2em] text-title-lab">Saved Overlap Scenarios</div>
                                 <DataTable
                                     testId="newslab-saved-overlap-scenarios"
                                     maxHeight={280}
@@ -550,7 +559,7 @@ export default function NewsLab() {
                                             <input
                                                 value={r.name}
                                                 onChange={(e) => renameSavedScenario(r.id, e.target.value)}
-                                                className="w-44 clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-2 py-1 text-[11px] font-mono text-[hsl(var(--text-2))]"
+                                                className="w-44 clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-2 py-1 text-[11px] font-ui text-[hsl(var(--text-2))]"
                                             />
                                         ) },
                                         { key: "window", label: "Window", render: (r) => formatScenarioWindow(r) },
@@ -604,7 +613,7 @@ export default function NewsLab() {
                     <div className="space-y-2 mb-3">
                         {comparisonScenarios.map((scenario) => (
                             <div key={scenario.id} className="grid grid-cols-1 md:grid-cols-[1fr_1fr_1.2fr_auto] gap-2 items-end clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.28)] p-2">
-                                <label className="grid gap-1 text-[10px] font-mono uppercase tracking-[0.18em] text-muted-lab">
+                                <label className="grid gap-1 text-[10px] font-ui uppercase tracking-[0.18em] text-muted-lab">
                                     Before
                                     <input
                                         type="number"
@@ -612,10 +621,10 @@ export default function NewsLab() {
                                         max="1440"
                                         value={scenario.beforeMinutes}
                                         onChange={(e) => updateComparisonScenario(scenario.id, { beforeMinutes: clampMinutes(e.target.value) })}
-                                        className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-mono text-[hsl(var(--text-2))]"
+                                        className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-ui text-[hsl(var(--text-2))]"
                                     />
                                 </label>
-                                <label className="grid gap-1 text-[10px] font-mono uppercase tracking-[0.18em] text-muted-lab">
+                                <label className="grid gap-1 text-[10px] font-ui uppercase tracking-[0.18em] text-muted-lab">
                                     After
                                     <input
                                         type="number"
@@ -623,15 +632,15 @@ export default function NewsLab() {
                                         max="1440"
                                         value={scenario.afterMinutes}
                                         onChange={(e) => updateComparisonScenario(scenario.id, { afterMinutes: clampMinutes(e.target.value) })}
-                                        className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-mono text-[hsl(var(--text-2))]"
+                                        className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-ui text-[hsl(var(--text-2))]"
                                     />
                                 </label>
-                                <label className="grid gap-1 text-[10px] font-mono uppercase tracking-[0.18em] text-muted-lab">
+                                <label className="grid gap-1 text-[10px] font-ui uppercase tracking-[0.18em] text-muted-lab">
                                     Impact
                                     <select
                                         value={scenario.impactMode}
                                         onChange={(e) => updateComparisonScenario(scenario.id, { impactMode: e.target.value })}
-                                        className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-mono text-[hsl(var(--text-2))]"
+                                        className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-ui text-[hsl(var(--text-2))]"
                                     >
                                         <option value="high">High only</option>
                                         <option value="medium_high">Medium + High</option>
@@ -667,7 +676,7 @@ export default function NewsLab() {
                         rows={comparisonRows}
                     />
                     {!comparisonRows.length && (
-                        <div className="mt-3 text-[11px] font-mono text-muted-lab">
+                        <div className="mt-3 text-[11px] font-ui text-muted-lab">
                             Add or edit scenario rows, then calculate to compare frontend overlap metrics.
                         </div>
                     )}
@@ -722,7 +731,7 @@ function CollapsiblePanel({ title, action, className, defaultCollapsed = false, 
             <button
                 type="button"
                 onClick={() => setCollapsed((c) => !c)}
-                className="text-[9px] font-mono uppercase tracking-[0.2em] text-muted-lab border border-[hsl(var(--border-soft))] px-2 py-1 clip-bevel-sm hover:text-[hsl(var(--text-2))]"
+                className="text-[9px] font-ui uppercase tracking-[0.2em] text-muted-lab border border-[hsl(var(--border-soft))] px-2 py-1 clip-bevel-sm hover:text-[hsl(var(--text-2))]"
             >
                 {collapsed ? "Show ▾" : "Hide ▴"}
             </button>
@@ -735,25 +744,93 @@ function CollapsiblePanel({ title, action, className, defaultCollapsed = false, 
     );
 }
 
-// ── Overlap breakdown table ──────────────────────────────────────────────────
+// ── Overlap breakdown table (RB-5: canonical bucket contract) ─────────────────
+// These three breakdowns (By Impact / By Event / By Proximity) are NewsLab's
+// only bucket-style WR tables. They now render through the shared
+// CanonicalBucketTable in `bare` mode: Raw R preserves the existing
+// Trades/W/L/Net R values and order (WR shifts to the canonical
+// wins/(wins+losses)); Current Equity adds Contribution / Contrib %. The
+// section-level basis chip + caveat live above the grid.
 
-function OverlapBreakdownTable({ title, rows }) {
+const OVERLAP_RAW_SCHEMA = [
+    { key: "label",   label: "Bucket", kind: "label",  sortable: false },
+    { key: "rows",    label: "Trades", align: "right", kind: "int" },
+    { key: "wins",    label: "W",      align: "right", kind: "int" },
+    { key: "losses",  label: "L",      align: "right", kind: "int" },
+    { key: "winRate", label: "WR",     align: "right", kind: "pct", invariant: true },
+    { key: "netR",    label: "Net R",  align: "right", kind: "rNet" },
+];
+const OVERLAP_CE_SCHEMA = [
+    { key: "label",              label: "Bucket",       kind: "label",  sortable: false },
+    { key: "rows",               label: "Trades",       align: "right", kind: "int" },
+    { key: "winRate",            label: "WR",           align: "right", kind: "pct", invariant: true },
+    { key: "contributionAmount", label: "Contribution", align: "right", kind: "money" },
+    { key: "contributionPct",    label: "Contrib %",    align: "right", kind: "moneyPct" },
+];
+
+const OVERLAP_SCHEMA = { raw: OVERLAP_RAW_SCHEMA, ce: OVERLAP_CE_SCHEMA };
+
+function overlapProximityLabel(row) {
+    const abs = Math.abs(Number(row.minutesFromEvent));
+    if (abs <= 5) return "0–5 min";
+    if (abs <= 15) return "5–15 min";
+    if (abs <= 30) return "15–30 min";
+    return "30m+";
+}
+
+// Adapt trade×event overlap rows into trade-like objects so the canonical
+// calculator can read R (`originalR` → `r`) and order by fill time for CE.
+function overlapRowsToTrades(rows) {
+    return (rows || []).map((row) => ({
+        ...row,
+        r: Number(row.originalR),
+        outcome: row.originalOutcome,
+        fill_time: row.fillTime,
+        entry: row.fillTime,
+    }));
+}
+
+function OverlapBreakdownTable({ title, rows, trades, labelFn }) {
+    // CE bucket set is restricted to exactly the Raw R buckets (same labels +
+    // order, including By Event's top-20), so the two bases stay aligned.
+    const def = { labelFn, order: (rows || []).map((r) => r.label) };
     return (
         <div>
-            <div className="text-[10px] font-mono uppercase tracking-[0.2em] text-title-lab mb-2">{title}</div>
-            <DataTable
+            <div className="text-[10px] font-ui uppercase tracking-[0.2em] text-title-lab mb-2">{title}</div>
+            <CanonicalBucketTable
+                bare
+                compact
                 testId={`newslab-overlap-breakdown-${slug(title)}`}
-                maxHeight={200}
-                columns={[
-                    { key: "label", label: "Bucket" },
-                    { key: "count", label: "Trades", align: "right", render: (r) => fmtMaybeCount(r.count) },
-                    { key: "wins", label: "W", align: "right", render: (r) => fmtMaybeCount(r.wins) },
-                    { key: "losses", label: "L", align: "right", render: (r) => fmtMaybeCount(r.losses) },
-                    { key: "winRate", label: "WR", align: "right", render: (r) => fmtMaybePct(r.winRate) },
-                    { key: "netR", label: "Net R", align: "right", render: (r) => r.netR == null ? "—" : <ColoredR value={num(r.netR)} /> },
-                ]}
-                rows={rows}
+                rawRows={rows}
+                trades={trades}
+                def={def}
+                schema={OVERLAP_SCHEMA}
+                restrictToOrder
+                defaultSortKey={null}
             />
+        </div>
+    );
+}
+
+// Section-level Results Basis chip + Current-Equity caveat for the overlap
+// breakdowns (shown once above the 3-column grid).
+function OverlapBasisNote() {
+    const lens = useResultsLens();
+    return (
+        <div className="mb-2 flex flex-col gap-1.5">
+            <div className="flex items-center gap-2">
+                <span className="text-[9px] font-ui uppercase tracking-widest text-[hsl(var(--text-muted))]">Results Basis</span>
+                <HeroBadge tone={lens.isCurrentEquity ? "secondary" : "muted"}>{lens.isCurrentEquity ? "Current Equity" : "Raw R"}</HeroBadge>
+            </div>
+            {lens.isCurrentEquity && (
+                <div className="flex items-start gap-2 border border-[hsl(var(--warning)/0.35)] bg-[hsl(var(--warning)/0.06)] clip-bevel-sm px-2.5 py-1.5">
+                    <span className="text-[10.5px] leading-relaxed text-[hsl(var(--text-2))]">
+                        Current Equity overlap contribution is sequence-dependent and counts a trade once per
+                        overlapping event — research view, not isolated edge.
+                        {(lens.accountSettings?.mode || "r_only") === "r_only" && " Account model is Pure R — set an account mode in Settings → Results Basis for dollar contribution."}
+                    </span>
+                </div>
+            )}
         </div>
     );
 }
@@ -772,8 +849,8 @@ function EventTimeline({ newsResults }) {
                         ["R saved / lost", "Aggregate blocked winners and losers around each event."],
                     ].map(([title, body]) => (
                         <div key={title} className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.35)] p-3">
-                            <div className="text-[10px] font-mono uppercase tracking-[0.2em] text-title-lab">{title}</div>
-                            <div className="mt-1 text-[11.5px] font-mono text-[hsl(var(--text-2))] leading-relaxed">{body}</div>
+                            <div className="text-[10px] font-ui uppercase tracking-[0.2em] text-title-lab">{title}</div>
+                            <div className="mt-1 text-[11.5px] font-ui text-[hsl(var(--text-2))] leading-relaxed">{body}</div>
                         </div>
                     ))}
                 </div>
@@ -820,7 +897,7 @@ function NewsDebugPanel({ activeRun }) {
             title="News Debug Trace"
             action={<Pill tone="warning">{debugRows.length} OB{debugRows.length !== 1 ? "s" : ""} TRACED</Pill>}
         >
-            <div className="mb-2 text-[10.5px] font-mono text-muted-lab">
+            <div className="mb-2 text-[10.5px] font-ui text-muted-lab">
                 Per-OB flatten trace — exported when <code>news_debug_ob_ids</code> is set in config. Use to verify why a specific OB did or did not flatten.
             </div>
             <div className="space-y-3">
@@ -828,9 +905,9 @@ function NewsDebugPanel({ activeRun }) {
                     const flattenFired = row.flatten_fired ?? row.flattened ?? false;
                     const activeAtTarget = row.active_at_flatten_target ?? row.was_active ?? null;
                     return (
-                        <div key={idx} className={`clip-bevel-sm border p-3 font-mono text-[11px] ${flattenFired ? "border-[hsl(var(--success)/0.5)] bg-[hsl(var(--success)/0.06)]" : "border-[hsl(var(--danger)/0.5)] bg-[hsl(var(--danger)/0.06)]"}`}>
+                        <div key={idx} className={`clip-bevel-sm border p-3 font-ui text-[11px] ${flattenFired ? "border-[hsl(var(--success)/0.5)] bg-[hsl(var(--success)/0.06)]" : "border-[hsl(var(--danger)/0.5)] bg-[hsl(var(--danger)/0.06)]"}`}>
                             <div className="flex items-center gap-3 mb-2">
-                                <span className="text-[12px] font-bold text-white">{row.ob_id ?? `OB-${idx + 1}`}</span>
+                                <span className="font-code text-[12px] font-bold text-white">{row.ob_id ?? `OB-${idx + 1}`}</span>
                                 <Pill tone={flattenFired ? "success" : "warning"}>{flattenFired ? "FLATTENED" : "NOT FLATTENED"}</Pill>
                                 {activeAtTarget === true && <Pill tone="secondary">ACTIVE AT FLATTEN TARGET</Pill>}
                                 {activeAtTarget === false && <Pill tone="muted">NOT ACTIVE AT TARGET</Pill>}
@@ -878,7 +955,7 @@ function ResearchBacklog() {
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-2">
                 {BACKLOG.map((item) => (
                     <div key={item} className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.32)] p-2.5">
-                        <div className="flex items-start gap-2 text-[11px] font-mono text-[hsl(var(--text-2))]">
+                        <div className="flex items-start gap-2 text-[11px] font-ui text-[hsl(var(--text-2))]">
                             <ListChecks className="w-3.5 h-3.5 mt-0.5 text-[hsl(var(--accent-secondary))] shrink-0" />
                             <span>{item}</span>
                         </div>
@@ -898,7 +975,7 @@ function ActionButton({ children, icon: Icon, disabled = false, onClick }) {
             type="button"
             onClick={onClick}
             disabled={disabled}
-            className="inline-flex items-center justify-center gap-2 px-2.5 py-2 text-[10px] font-mono uppercase tracking-wider border border-[hsl(var(--accent-secondary)/0.55)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.06)] hover:bg-[hsl(var(--accent-secondary)/0.12)] disabled:opacity-45 disabled:cursor-not-allowed clip-bevel-sm"
+            className="inline-flex items-center justify-center gap-2 px-2.5 py-2 text-[10px] font-ui uppercase tracking-wider border border-[hsl(var(--accent-secondary)/0.55)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.06)] hover:bg-[hsl(var(--accent-secondary)/0.12)] disabled:opacity-45 disabled:cursor-not-allowed clip-bevel-sm"
         >
             <Icon className="w-3.5 h-3.5" />
             {children}
@@ -915,7 +992,7 @@ function TinyButton({ children, disabled = false, onClick, tone = "secondary" })
             type="button"
             onClick={onClick}
             disabled={disabled}
-            className={`px-2 py-1 text-[9.5px] font-mono uppercase tracking-wider disabled:opacity-45 disabled:cursor-not-allowed clip-bevel-sm border ${toneClass}`}
+            className={`px-2 py-1 text-[9.5px] font-ui uppercase tracking-wider disabled:opacity-45 disabled:cursor-not-allowed clip-bevel-sm border ${toneClass}`}
         >
             {children}
         </button>
@@ -924,7 +1001,7 @@ function TinyButton({ children, disabled = false, onClick, tone = "secondary" })
 
 function LimitedData({ children }) {
     return (
-        <div className="mb-3 flex items-start gap-2 text-[11.5px] font-mono text-[hsl(var(--warning))]">
+        <div className="mb-3 flex items-start gap-2 text-[11.5px] font-ui text-[hsl(var(--warning))]">
             <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
             <span>{children}</span>
         </div>
@@ -934,7 +1011,7 @@ function LimitedData({ children }) {
 function MiniStat({ label, value, tone = "primary" }) {
     return (
         <div className={`clip-bevel-sm border px-3 py-2 bg-[hsl(var(--panel-2)/0.38)] ${toneBorderClass(tone)}`}>
-            <div className="text-[9.5px] font-mono uppercase tracking-[0.2em] text-muted-lab">{label}</div>
+            <div className="text-[9.5px] font-ui uppercase tracking-[0.2em] text-muted-lab">{label}</div>
             <div className={`mt-1 font-display text-[18px] ${toneTextClass(tone)}`}>{value}</div>
         </div>
     );
@@ -943,8 +1020,8 @@ function MiniStat({ label, value, tone = "primary" }) {
 function MiniStatSmall({ label, value, tone = "primary" }) {
     return (
         <div className={`clip-bevel-sm border px-3 py-2 bg-[hsl(var(--panel-2)/0.38)] ${toneBorderClass(tone)}`}>
-            <div className="text-[9.5px] font-mono uppercase tracking-[0.2em] text-muted-lab">{label}</div>
-            <div className={`mt-1 font-mono text-[11px] leading-snug ${toneTextClass(tone)}`}>{value || "—"}</div>
+            <div className="text-[9.5px] font-ui uppercase tracking-[0.2em] text-muted-lab">{label}</div>
+            <div className={`mt-1 font-ui text-[11px] leading-snug ${toneTextClass(tone)}`}>{value || "—"}</div>
         </div>
     );
 }
