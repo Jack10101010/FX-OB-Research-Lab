@@ -142,6 +142,7 @@ const DELTA_METRICS = [
 export function classifyFindingSource(finding) {
     if (finding?.source === "table_compare") return "table_compare";
     if (finding?.source === "edge_explorer") return "edge_explorer";
+    if (finding?.source === "comparison") return "comparison";
     if (finding?.source === "run_workspace") return "run_workspace";
     return "manual";
 }
@@ -152,6 +153,7 @@ export const FINDING_SOURCE_FILTERS = [
     { value: "run_workspace", label: "Run Workspace" },
     { value: "table_compare", label: "Table Compare" },
     { value: "edge_explorer", label: "Edge Explorer" },
+    { value: "comparison", label: "Comparison" },
 ];
 
 // ── Shared finding-payload builder (EDGE-3) ──────────────────────────────────

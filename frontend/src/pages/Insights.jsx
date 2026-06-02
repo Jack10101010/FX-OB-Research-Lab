@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Lightbulb, FolderKanban, Activity } from "lucide-react";
+import { FolderKanban, Activity } from "lucide-react";
 import { LabRunHero } from "@/components/lab/LabRunHero";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { Pill } from "@/components/lab/DataTable";
@@ -19,9 +19,9 @@ const GROUP_MODES = [
     { value: "project", label: "By Project" },
     { value: "source", label: "By Source" },
 ];
-const SOURCE_GROUP_LABEL = { manual: "Manual", run_workspace: "Run Workspace", table_compare: "Table Compare", edge_explorer: "Edge Explorer" };
+const SOURCE_GROUP_LABEL = { manual: "Manual", run_workspace: "Run Workspace", table_compare: "Table Compare", edge_explorer: "Edge Explorer", comparison: "Comparison" };
 // Stable display order for source groups.
-const SOURCE_GROUP_ORDER = ["manual", "run_workspace", "table_compare", "edge_explorer"];
+const SOURCE_GROUP_ORDER = ["manual", "run_workspace", "table_compare", "edge_explorer", "comparison"];
 
 function formatDateTime(value) {
     const date = new Date(value);
@@ -54,7 +54,7 @@ export default function Insights() {
     }, [PROJECTS]);
 
     const sourceCounts = useMemo(() => {
-        const c = { all: 0, manual: 0, run_workspace: 0, table_compare: 0, edge_explorer: 0 };
+        const c = { all: 0, manual: 0, run_workspace: 0, table_compare: 0, edge_explorer: 0, comparison: 0 };
         for (const f of allFindings) {
             c.all += 1;
             c[classifyFindingSource(f)] += 1;
@@ -246,6 +246,7 @@ export default function Insights() {
 function InsightCard({ finding, runLabel }) {
     const isTableCompare = finding.source === "table_compare";
     const isEdge = finding.source === "edge_explorer";
+    const isComparison = finding.source === "comparison";
     const meta = finding.meta && typeof finding.meta === "object" ? finding.meta : {};
     const tableName = finding.table || meta.table || "";
     const bucketName = finding.bucket || meta.bucket || "";
@@ -265,6 +266,7 @@ function InsightCard({ finding, runLabel }) {
                         </Pill>
                         {isTableCompare && <Pill tone="secondary">Table Compare</Pill>}
                         {isEdge && <Pill tone="secondary">Edge Explorer</Pill>}
+                        {isComparison && <Pill tone="secondary">Comparison</Pill>}
                         <span className="font-display text-[13px] text-white">{finding.title || (TYPE_LABEL[finding.type] || "Finding")}</span>
                     </div>
 
@@ -272,7 +274,7 @@ function InsightCard({ finding, runLabel }) {
                         <p className="mt-2 text-[12px] leading-relaxed text-[hsl(var(--text-2))] whitespace-pre-wrap break-words">{finding.note}</p>
                     )}
 
-                    {(isTableCompare || isEdge) && (tableName || bucketName || comparedLabel || universeKey || basisLabel) && (
+                    {(isTableCompare || isEdge || isComparison) && (tableName || bucketName || comparedLabel || universeKey || basisLabel) && (
                         <div className="mt-2 flex flex-wrap items-center gap-1.5">
                             {tableName && <Pill tone="muted">{tableName}</Pill>}
                             {bucketName && <Pill tone="muted">Bucket: {bucketName}</Pill>}

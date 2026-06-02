@@ -708,7 +708,7 @@ function RunActions({ run, projectId, projectActiveRunId, globalActiveRunId }) {
 // the same classifier used to filter, so labels and results always agree.
 function FindingsFilterBar({ findings, value, onChange }) {
     const counts = React.useMemo(() => {
-        const c = { all: 0, manual: 0, run_workspace: 0, table_compare: 0, edge_explorer: 0 };
+        const c = { all: 0, manual: 0, run_workspace: 0, table_compare: 0, edge_explorer: 0, comparison: 0 };
         for (const f of findings || []) {
             c.all += 1;
             c[classifyFindingSource(f)] += 1;
@@ -747,6 +747,7 @@ function FindingItem({ finding, runs }) {
     // source/table/bucket/comparedRunId/meta) fall through to the original layout.
     const isTableCompare = finding.source === "table_compare";
     const isEdge = finding.source === "edge_explorer";
+    const isComparison = finding.source === "comparison";
     const meta = finding.meta && typeof finding.meta === "object" ? finding.meta : {};
     const tableName = finding.table || meta.table || "";
     const bucketName = finding.bucket || meta.bucket || "";
@@ -765,12 +766,13 @@ function FindingItem({ finding, runs }) {
                         </Pill>
                         {isTableCompare && <Pill tone="secondary">Table Compare</Pill>}
                         {isEdge && <Pill tone="secondary">Edge Explorer</Pill>}
+                        {isComparison && <Pill tone="secondary">Comparison</Pill>}
                         <span className="font-display text-[13px] text-white">{finding.title || typeLabel(finding.type)}</span>
                     </div>
                     {finding.note && (
                         <p className="mt-2 text-[12px] leading-relaxed text-[hsl(var(--text-2))] whitespace-pre-wrap">{finding.note}</p>
                     )}
-                    {(isTableCompare || isEdge) && (tableName || bucketName || comparedLabel || universeKey || basisLabel) && (
+                    {(isTableCompare || isEdge || isComparison) && (tableName || bucketName || comparedLabel || universeKey || basisLabel) && (
                         <div className="mt-2 flex flex-wrap items-center gap-1.5">
                             {tableName && <Pill tone="muted">{tableName}</Pill>}
                             {bucketName && <Pill tone="muted">Bucket: {bucketName}</Pill>}
