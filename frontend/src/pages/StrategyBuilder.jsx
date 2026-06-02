@@ -21,14 +21,25 @@ import {
 const LAST_CONFIG_KEY = "fxob_strategy_builder_last_config";
 const LAST_RUN_KEY = "fxob_strategy_builder_last_run";
 
+function getDefaultDates() {
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const to = today.toISOString().slice(0, 10);
+    const from = new Date(today);
+    from.setUTCMonth(from.getUTCMonth() - 3);
+    return { dateFrom: from.toISOString().slice(0, 10), dateTo: to };
+}
+
 export default function StrategyBuilder() {
     const { PROJECTS, ACTIVE_PROJECT, RUNS, activeProjectId, getRunData } = useDataset();
-    const [cfg, setCfg] = useState({
+    const [cfg, setCfg] = useState(() => {
+        const { dateFrom, dateTo } = getDefaultDates();
+        return {
         symbol: "EURUSD",
         detectionTf: "M15",
         executionTf: "1m",
-        dateFrom: "2026-02-18",
-        dateTo: "2026-05-18",
+        dateFrom,
+        dateTo,
         dataFile: "data/candles/EURUSD_1m.csv",
         swing: 50,
         obFilter: "ATR",
@@ -67,7 +78,19 @@ export default function StrategyBuilder() {
         entryResearchExports: true,
         entryPenetrationThresholds: "25,50",
         useBatchedEntryPenetration: true,
+        triggeredEdgeEntries: false,
+        triggeredEdgeThresholds: "25",
+        triggeredEdgeEntryLevelPct: 0,
+        triggeredEdgeSameCandleMode: "both",
+        triggeredEdgeCancelOnRetrace: false,
+        triggeredEdgeCancelRetracePips: 0,
+        triggeredEdgeCancelRetraceObPct: 0,
+        entryMode: "single",
+        selectedEntryModel: "baseline",
+        singlePenetrationPct: 25,
+        singleTriggeredEdgeThreshold: 25,
         monteCarlo: false,
+        };
     });
     const set = (k) => (v) => setCfg((c) => ({ ...c, [k]: v }));
 
@@ -86,8 +109,10 @@ export default function StrategyBuilder() {
     const [loadRunId, setLoadRunId] = useState("");
     const [loadedRunId, setLoadedRunId] = useState("");
     const [loadReport, setLoadReport] = useState(null);
+    const [loadOtherOpen, setLoadOtherOpen] = useState(false);
     const [lastConfig, setLastConfig] = useState(() => readStoredJson(LAST_CONFIG_KEY));
     const [lastRun, setLastRun] = useState(() => readStoredJson(LAST_RUN_KEY));
+    const [activeBuilderCard, setActiveBuilderCard] = useState("");
     const didHydrateConfig = useRef(false);
     const showFlash = (msg) => { setFlash(msg); setTimeout(() => setFlash(""), 1800); };
     const sidecarConfig = useMemo(() => buildBacktesterConfig(cfg), [cfg]);
@@ -101,6 +126,13 @@ export default function StrategyBuilder() {
     const selectedLoadProject = selectedLoadRun?.projectId
         ? PROJECTS.find((project) => project.id === selectedLoadRun.projectId)
         : null;
+    const mostRecentRun = useMemo(() => {
+        const first = RUNS[0];
+        if (!first) return null;
+        return getRunData(first._bundleId || first.id) || first;
+    }, [RUNS, getRunData]);
+    const lastRunPreview = useMemo(() => runConfigPreview(mostRecentRun), [mostRecentRun]);
+    const selectedLoadPreview = useMemo(() => runConfigPreview(selectedLoadRun), [selectedLoadRun]);
 
     useEffect(() => {
         if (!runJob?.job_id || !runInProgress) return undefined;
@@ -165,16 +197,18 @@ export default function StrategyBuilder() {
             symbol: cfg.symbol,
             timeframe: cfg.detectionTf,
         });
+        if (project?.id) setActiveProjectId(project.id);
         showFlash(`Project created · ${project.name}`);
     };
-    const onLoadFromRun = () => {
-        if (!selectedLoadRun) return;
-        const report = buildRunConfigLoadReport(cfg, selectedLoadRun);
+    const applyRunConfig = (run) => {
+        if (!run) return;
+        const report = buildRunConfigLoadReport(cfg, run);
         setCfg(report.config);
-        setLoadedRunId(selectedLoadRun.id);
+        setLoadedRunId(run.id);
         setLoadReport(report);
-        showFlash(`Loaded settings from ${getRunDisplayName(selectedLoadRun)}`);
+        showFlash(`Loaded settings from ${getRunDisplayName(run)}`);
     };
+    const onLoadFromRun = () => applyRunConfig(selectedLoadRun);
     const onRunLocal = async () => {
         if (sessionSelectionWarning) {
             setRunError("Select at least one session or disable session filtering.");
@@ -285,11 +319,12 @@ export default function StrategyBuilder() {
                 title="Create New Backtest"
                 description="Configure research parameters. This builder writes config only — execution happens against local Python engine."
                 actions={
-                    <>
+                    <div className="flex flex-col items-end gap-2">
+                        <ConfigScopeRibbon cfg={cfg} />
                         <NeonButton icon={Play} tone="primary" onClick={onRunLocal} disabled={runBusy || runInProgress} data-testid="builder-run-backtest">
                             {runBusy ? "Starting..." : runInProgress ? "Running..." : "Run Backtest Locally"}
                         </NeonButton>
-                    </>
+                    </div>
                 }
             />
 
@@ -297,7 +332,7 @@ export default function StrategyBuilder() {
                 <div className="clip-bevel p-[1px] bg-gradient-to-r from-[hsl(var(--border-mid))] via-[hsl(var(--accent-secondary)/0.25)] to-[hsl(var(--border-mid))]">
                     <div className="clip-bevel bg-[hsl(var(--panel))] px-4 py-3 flex items-center gap-3 flex-wrap">
                         <div className="min-w-[260px]">
-                            <div className="control-label text-[10px] font-mono uppercase tracking-[0.22em] text-muted-lab">
+                            <div className="control-label text-[10px] font-ui uppercase tracking-[0.14em] text-muted-lab">
                                 {ACTIVE_PROJECT ? "Active Research Project" : "Research Project Required"}
                             </div>
                             <div className={`text-[10.5px] ${ACTIVE_PROJECT ? "text-[hsl(var(--accent-secondary))]" : "text-[hsl(var(--warning))]"}`}>
@@ -333,57 +368,101 @@ export default function StrategyBuilder() {
                 </div>
             </div>
 
-            <div className="px-6 mb-4">
-                <div className="clip-bevel p-[1px] bg-gradient-to-r from-[hsl(var(--border-mid))] via-[hsl(var(--accent-secondary)/0.18)] to-[hsl(var(--border-mid))]">
-                    <div className="clip-bevel bg-[hsl(var(--panel))] px-4 py-3 flex items-center gap-3 flex-wrap">
-                        <div className="min-w-[220px]">
-                            <div className="control-label text-[10px] font-mono uppercase tracking-[0.22em] text-muted-lab">
-                                Load From Run
+            {/* ── Strategy Recall ─────────────────────────────────────── */}
+            <div className="px-6 mb-4 flex flex-col gap-2.5">
+                {/* A · Primary — Last Run Config */}
+                <div className="clip-bevel p-[1px] bg-gradient-to-r from-[hsl(var(--border-mid))] via-[hsl(var(--accent-secondary)/0.28)] to-[hsl(var(--border-mid))]">
+                    <div className="clip-bevel bg-[hsl(var(--panel))] px-4 py-3">
+                        {lastRunPreview ? (
+                            <div className="flex items-center gap-4 flex-wrap">
+                                <div className="min-w-[150px]">
+                                    <div className="control-label text-[10px] font-ui uppercase tracking-[0.14em] text-muted-lab">Last Run Config</div>
+                                    <div className="mt-0.5 text-[12px] font-ui text-[hsl(var(--accent-secondary))] truncate max-w-[240px]">{lastRunPreview.name}</div>
+                                    {lastRunPreview.date && <div className="text-[10px] text-muted-lab">{lastRunPreview.date}</div>}
+                                </div>
+                                <ConfigSnapshot preview={lastRunPreview} className="flex-1 min-w-[220px]" />
+                                <NeonButton icon={FileInput} tone="secondary" onClick={() => applyRunConfig(mostRecentRun)}>
+                                    Apply Config
+                                </NeonButton>
                             </div>
-                            <div className="text-[10.5px] text-muted-lab">
-                                Reuse saved config from an imported or sidecar run.
-                            </div>
-                        </div>
-                        <NeonSelect
-                            value={loadRunId}
-                            onChange={setLoadRunId}
-                            options={[
-                                { value: "", label: "— select previous run —" },
-                                ...RUNS.map((run) => {
-                                    const bundle = getRunData(run._bundleId || run.id) || run;
-                                    return { value: bundle.id, label: formatLoadRunLabel(bundle) };
-                                }),
-                            ]}
-                            className="min-w-[340px] flex-1"
-                        />
-                        <NeonButton icon={FileInput} tone="secondary" onClick={onLoadFromRun} disabled={!selectedLoadRun}>
-                            Load Settings
-                        </NeonButton>
-                        {selectedLoadProject && selectedLoadProject.id !== activeProjectId && (
-                            <NeonButton tone="ghost" onClick={() => setActiveProjectId(selectedLoadProject.id)}>
-                                Use This Run&apos;s Project
-                            </NeonButton>
-                        )}
-                        {selectedLoadProject && (
-                            <Pill tone="secondary">Run belongs to: {selectedLoadProject.name}</Pill>
-                        )}
-                        {loadedRunId && (
-                            <div className="basis-full text-[10.5px] text-[hsl(var(--accent-secondary))]">
-                                Loaded settings from {getRunDisplayName(getRunData(loadedRunId))}. Adjust and run as a new variant.
-                                {loadReport && (
-                                    <span className="ml-2 text-muted-lab">
-                                        Loaded {loadReport.loadedFields.length} fields · missing {loadReport.missingFields.length}
-                                        {loadReport.missingFields.length ? ` (${loadReport.missingFields.join(", ")})` : ""}
-                                    </span>
-                                )}
+                        ) : (
+                            <div>
+                                <div className="control-label text-[10px] font-ui uppercase tracking-[0.14em] text-muted-lab">Last Run Config</div>
+                                <div className="mt-0.5 text-[10.5px] text-muted-lab">No previous runs yet. Imported or local runs appear here for one-tap recall.</div>
                             </div>
                         )}
                     </div>
                 </div>
+
+                {/* B · Secondary — Load Other Run (collapsible) */}
+                <div>
+                    <button
+                        onClick={() => setLoadOtherOpen((v) => !v)}
+                        className="flex items-center gap-2 control-label text-[10px] font-ui uppercase tracking-[0.14em] text-muted-lab hover:text-white transition-colors"
+                        aria-expanded={loadOtherOpen}
+                    >
+                        {loadOtherOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                        <span>Load Other Run</span>
+                        <span className="text-muted-lab/70 normal-case tracking-normal">· recall config from any previous run</span>
+                    </button>
+                    {loadOtherOpen && (
+                        <div className="mt-2 clip-bevel p-[1px] bg-gradient-to-r from-[hsl(var(--border-mid))] via-[hsl(var(--accent-secondary)/0.16)] to-[hsl(var(--border-mid))]">
+                            <div className="clip-bevel bg-[hsl(var(--panel))] px-4 py-3 flex flex-col gap-3">
+                                <div className="flex items-center gap-3 flex-wrap">
+                                    <NeonSelect
+                                        value={loadRunId}
+                                        onChange={setLoadRunId}
+                                        options={[
+                                            { value: "", label: "— select previous run —" },
+                                            ...RUNS.map((run) => {
+                                                const bundle = getRunData(run._bundleId || run.id) || run;
+                                                return { value: bundle.id, label: formatLoadRunLabel(bundle) };
+                                            }),
+                                        ]}
+                                        className="min-w-[340px] flex-1"
+                                    />
+                                    <NeonButton icon={FileInput} tone="secondary" onClick={onLoadFromRun} disabled={!selectedLoadRun}>
+                                        Apply Config
+                                    </NeonButton>
+                                    {selectedLoadProject && selectedLoadProject.id !== activeProjectId && (
+                                        <NeonButton tone="ghost" onClick={() => setActiveProjectId(selectedLoadProject.id)}>
+                                            Use This Run&apos;s Project
+                                        </NeonButton>
+                                    )}
+                                    {selectedLoadProject && (
+                                        <Pill tone="secondary">Run belongs to: {selectedLoadProject.name}</Pill>
+                                    )}
+                                </div>
+                                {selectedLoadPreview && (
+                                    <div className="border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.3)] clip-bevel-sm px-3 py-2 flex items-center gap-4 flex-wrap">
+                                        <div className="min-w-[140px]">
+                                            <div className="control-label text-[9.5px] font-ui uppercase tracking-wider text-muted-lab">Config Preview</div>
+                                            <div className="mt-0.5 text-[11.5px] font-ui text-[hsl(var(--accent-secondary))] truncate max-w-[220px]">{selectedLoadPreview.name}</div>
+                                            {selectedLoadPreview.date && <div className="text-[10px] text-muted-lab">{selectedLoadPreview.date}</div>}
+                                        </div>
+                                        <ConfigSnapshot preview={selectedLoadPreview} className="flex-1 min-w-[200px]" />
+                                    </div>
+                                )}
+                                {loadedRunId && (
+                                    <div className="text-[10.5px] text-[hsl(var(--accent-secondary))]">
+                                        Loaded settings from {getRunDisplayName(getRunData(loadedRunId))}. Adjust and run as a new variant.
+                                        {loadReport && (
+                                            <span className="ml-2 text-muted-lab">
+                                                Loaded {loadReport.loadedFields.length} fields · missing {loadReport.missingFields.length}
+                                                {loadReport.missingFields.length ? ` (${loadReport.missingFields.join(", ")})` : ""}
+                                            </span>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                </div>
             </div>
 
             <div className="px-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
-                <NeonPanel title="Basic Settings">
+                <BuilderFocusCard id="basic" activeId={activeBuilderCard} onActivate={setActiveBuilderCard}>
+                <NeonPanel title="Basic Settings" className="flex-1">
                     <div className="grid grid-cols-1 sm:grid-cols-6 gap-3">
                         <Field label="Symbol" className="sm:col-span-2">
                             <NeonSelect testId="bld-symbol" value={cfg.symbol} onChange={set("symbol")} options={["EURUSD", "GBPUSD", "USDJPY", "XAUUSD", "AUDUSD"]} />
@@ -405,8 +484,10 @@ export default function StrategyBuilder() {
                         </Field>
                     </div>
                 </NeonPanel>
+                </BuilderFocusCard>
 
-                <NeonPanel title="Structure Settings">
+                <BuilderFocusCard id="structure" activeId={activeBuilderCard} onActivate={setActiveBuilderCard}>
+                <NeonPanel title="Structure Settings" className="flex-1">
                     <div className="grid grid-cols-2 gap-3">
                         <Field label="Swing Length">
                             <NeonInput type="number" min="2" max="30" value={cfg.swing} onChange={(e) => set("swing")(Number(e.target.value))} />
@@ -428,31 +509,13 @@ export default function StrategyBuilder() {
                         </Field>
                     </div>
                 </NeonPanel>
+                </BuilderFocusCard>
 
-                <NeonPanel title="Execution Settings">
+                <BuilderFocusCard id="execution" activeId={activeBuilderCard} onActivate={setActiveBuilderCard}>
+                <NeonPanel title="Execution Settings" className="flex-1">
                     <div className="grid grid-cols-2 gap-3">
                         <Field label="RR Multiple">
                             <NeonInput data-testid="bld-rr" type="number" step="0.1" value={cfg.rr} onChange={(e) => set("rr")(Number(e.target.value))} />
-                        </Field>
-                        <Field
-                            label="Entry Depth"
-                            help="Moves entry deeper into OB. Stop stays fixed. TP recalculates from new risk."
-                            className="col-span-2"
-                        >
-                            <Segment
-                                options={[
-                                    { value: 0, label: "Edge" },
-                                    { value: 25, label: "25%" },
-                                    { value: 50, label: "50%" },
-                                    { value: 75, label: "75%" },
-                                    { value: 100, label: "100%" },
-                                ]}
-                                value={Number(cfg.obEntryDepthPct ?? 0)}
-                                onChange={(value) => set("obEntryDepthPct")(Number(value))}
-                            />
-                            <div className="mt-1 text-[10.5px] text-muted-lab">
-                                Moves entry deeper into OB. Stop stays fixed. TP recalculates from new risk.
-                            </div>
                         </Field>
                         <Field label="Entry Buffer (pips)">
                             <NeonInput type="number" step="0.1" value={cfg.entryBuffer} onChange={(e) => set("entryBuffer")(Number(e.target.value))} />
@@ -508,8 +571,13 @@ export default function StrategyBuilder() {
                         </Field>
                     </div>
                 </NeonPanel>
+                </BuilderFocusCard>
 
-                <NeonPanel title="Filters" className="lg:col-span-2">
+                {/* ── Middle row: Filters (left 2/3) + Entry Mode + Advanced (right 1/3) ── */}
+                <div className="lg:col-span-3 grid grid-cols-1 lg:grid-cols-3 gap-4 items-stretch">
+                <div className="lg:col-span-2 flex flex-col">
+                <BuilderFocusCard id="filters" activeId={activeBuilderCard} onActivate={setActiveBuilderCard} className="flex-1">
+                <NeonPanel title="Filters" className="flex-1">
                     <>
                             <div className="flex items-center justify-between mb-3">
                                 <div>
@@ -525,7 +593,7 @@ export default function StrategyBuilder() {
                                     <button
                                         key={k}
                                         onClick={() => set(k)(!cfg[k])}
-                                        className={`clip-bevel-sm px-2.5 py-1 text-[11px] font-mono uppercase tracking-wider border transition-colors ${
+                                        className={`clip-bevel-sm px-2.5 py-1 text-[11px] font-ui uppercase tracking-wider border transition-colors ${
                                             cfg[k]
                                                 ? "border-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.15)] text-white"
                                                 : "border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:border-[hsl(var(--accent-secondary))]"
@@ -536,7 +604,7 @@ export default function StrategyBuilder() {
                                 ))}
                             </div>
                             {sessionSelectionWarning && (
-                                <div className="mb-4 border border-[hsl(var(--warning)/0.4)] bg-[hsl(var(--warning)/0.06)] clip-bevel-sm px-3 py-2 text-[10.5px] font-mono uppercase tracking-wider text-[hsl(var(--warning))]">
+                                <div className="mb-4 border border-[hsl(var(--warning)/0.4)] bg-[hsl(var(--warning)/0.06)] clip-bevel-sm px-3 py-2 text-[10.5px] font-ui uppercase tracking-wider text-[hsl(var(--warning))]">
                                     Select at least one session or disable session filtering.
                                 </div>
                             )}
@@ -550,7 +618,7 @@ export default function StrategyBuilder() {
                                 <div className="col-span-2 border border-[hsl(var(--accent-primary)/0.28)] bg-gradient-to-b from-[hsl(var(--accent-primary)/0.03)] to-transparent clip-bevel-sm p-3">
                                     <div className="flex items-center justify-between gap-3">
                                         <div>
-                                            <div className="control-label text-[11px] font-mono uppercase tracking-wider text-muted-lab">News Blackout</div>
+                                            <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">News Blackout</div>
                                             <div className="text-[10.5px] text-muted-lab">Blocks fills around matching news events. Before/after windows can be different.</div>
                                         </div>
                                         <NeonToggle checked={cfg.newsBlackout} onChange={set("newsBlackout")} />
@@ -563,13 +631,13 @@ export default function StrategyBuilder() {
                                             <NeonInput type="number" min="0" step="1" value={cfg.newsBlackoutAfter} onChange={(e) => set("newsBlackoutAfter")(Number(e.target.value))} />
                                         </Field>
                                         <div className="sm:col-span-2">
-                                            <div className="control-label mb-2 text-[11px] font-mono uppercase tracking-wider text-muted-lab">Impacts</div>
+                                            <div className="control-label mb-2 text-[11px] font-ui uppercase tracking-wider text-muted-lab">Impacts</div>
                                             <div className="flex flex-wrap gap-2">
                                                 {["low", "medium", "high"].map((impact) => (
                                                     <button
                                                         key={impact}
                                                         onClick={() => toggleNewsImpact(impact)}
-                                                        className={`clip-bevel-sm px-2.5 py-1 text-[11px] font-mono uppercase tracking-wider border transition-colors ${
+                                                        className={`clip-bevel-sm px-2.5 py-1 text-[11px] font-ui uppercase tracking-wider border transition-colors ${
                                                             cfg.newsBlackoutImpacts?.includes(impact)
                                                                 ? "border-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.15)] text-white"
                                                                 : "border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:border-[hsl(var(--accent-secondary))]"
@@ -584,28 +652,28 @@ export default function StrategyBuilder() {
                                         <div className="sm:col-span-2 mt-1 border-t border-[hsl(var(--border-soft))] pt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
                                             <div className="flex items-center justify-between gap-3">
                                                 <div>
-                                                    <div className="control-label text-[11px] font-mono uppercase tracking-wider text-muted-lab">Pause Pending Orders</div>
+                                                    <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Pause Pending Orders</div>
                                                     <div className="text-[10px] text-muted-lab">Suspend unfilled OBs during blackout; rearm after</div>
                                                 </div>
                                                 <NeonToggle checked={cfg.newsPausePending} onChange={set("newsPausePending")} />
                                             </div>
                                             <div className="flex items-center justify-between gap-3">
                                                 <div>
-                                                    <div className="control-label text-[11px] font-mono uppercase tracking-wider text-muted-lab">Block New Fills</div>
+                                                    <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Block New Fills</div>
                                                     <div className="text-[10px] text-muted-lab">Prevent entry fills while inside blackout window</div>
                                                 </div>
                                                 <NeonToggle checked={cfg.newsBlockFills} onChange={set("newsBlockFills")} />
                                             </div>
                                             <div className="flex items-center justify-between gap-3">
                                                 <div>
-                                                    <div className="control-label text-[11px] font-mono uppercase tracking-wider text-muted-lab">Cancel If Touched (blackout)</div>
+                                                    <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Cancel If Touched (blackout)</div>
                                                     <div className="text-[10px] text-muted-lab">Export NEWS_TOUCH_CANCEL if paused OB is touched</div>
                                                 </div>
                                                 <NeonToggle checked={cfg.newsCancelIfTouched} onChange={set("newsCancelIfTouched")} />
                                             </div>
                                             <div className="flex items-center justify-between gap-3">
                                                 <div>
-                                                    <div className="control-label text-[11px] font-mono uppercase tracking-wider text-muted-lab">Flatten Active Trades</div>
+                                                    <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Flatten Active Trades</div>
                                                     <div className="text-[10px] text-muted-lab">Close live positions before blackout start</div>
                                                 </div>
                                                 <NeonToggle checked={cfg.newsFlattenActiveTrades} onChange={set("newsFlattenActiveTrades")} />
@@ -627,71 +695,308 @@ export default function StrategyBuilder() {
                             </div>
                     </>
                 </NeonPanel>
+                </BuilderFocusCard>
+                </div>{/* end left Filters col */}
+                <div className="flex flex-col gap-4">
+                {/* ── Entry Mode panel ──────────────────────────────────────── */}
+                <BuilderFocusCard id="entry-mode" activeId={activeBuilderCard} onActivate={setActiveBuilderCard}>
+                <NeonPanel title="Entry Mode">
+                    {/* Mode selector */}
+                    <div className="mb-4">
+                        <Segment
+                            options={[
+                                { value: "single", label: "Single Model" },
+                                { value: "research", label: "Research Export" },
+                            ]}
+                            value={cfg.entryMode}
+                            onChange={set("entryMode")}
+                        />
+                        <div className="mt-2 text-[10.5px] text-muted-lab">
+                            {cfg.entryMode === "single"
+                                ? "One active entry model, plus baseline reference output."
+                                : "Multiple entry models run in one pass. Each model exports a separate scenario CSV for comparison."}
+                        </div>
+                    </div>
 
-                <NeonPanel title="Advanced">
+                    {/* ── Single Model ──────────────────────────────────── */}
+                    {cfg.entryMode === "single" && (
+                        <div>
+                            <Segment
+                                options={[
+                                    { value: "baseline", label: "Baseline Edge" },
+                                    { value: "entry_penetration", label: "Penetration" },
+                                    { value: "triggered_edge", label: "Triggered Edge" },
+                                ]}
+                                value={cfg.selectedEntryModel}
+                                onChange={set("selectedEntryModel")}
+                            />
+
+                            {/* Baseline */}
+                            {cfg.selectedEntryModel === "baseline" && (
+                                <div className="mt-3 border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
+                                    <Field label="Baseline Entry Depth">
+                                        <Segment
+                                            options={[
+                                                { value: 0, label: "Edge" },
+                                                { value: 25, label: "25%" },
+                                                { value: 50, label: "50%" },
+                                                { value: 75, label: "75%" },
+                                                { value: 100, label: "100%" },
+                                            ]}
+                                            value={Number(cfg.obEntryDepthPct ?? 0)}
+                                            onChange={(value) => set("obEntryDepthPct")(Number(value))}
+                                        />
+                                    </Field>
+                                    <div className="mt-2 text-[10.5px] text-muted-lab">
+                                        Shifts the resting limit order deeper into the OB. Applies only to Baseline Edge.
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Penetration */}
+                            {cfg.selectedEntryModel === "entry_penetration" && (
+                                <div className="mt-3 border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
+                                    <Field label="Entry Threshold %">
+                                        <NeonInput
+                                            type="number"
+                                            min="1"
+                                            max="99"
+                                            step="1"
+                                            value={cfg.singlePenetrationPct}
+                                            onChange={(e) => set("singlePenetrationPct")(Number(e.target.value))}
+                                        />
+                                    </Field>
+                                    <div className="mt-2 text-[10.5px] text-muted-lab">
+                                        Enter directly at this fixed depth into the OB on first touch.
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Triggered Edge */}
+                            {cfg.selectedEntryModel === "triggered_edge" && (
+                                <div className="mt-3 border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
+                                    <div className="text-[10.5px] text-muted-lab mb-3">
+                                        Price must reach the trigger depth to arm the trade. The limit order then sits at Entry Level % where 0 = OB edge.
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <Field label="Trigger Threshold %">
+                                            <NeonInput
+                                                type="number"
+                                                min="1"
+                                                max="99"
+                                                step="1"
+                                                value={cfg.singleTriggeredEdgeThreshold}
+                                                onChange={(e) => set("singleTriggeredEdgeThreshold")(Number(e.target.value))}
+                                            />
+                                        </Field>
+                                        <Field label="Entry Level %" hint="0 is the OB edge.">
+                                            <NeonInput
+                                                type="number"
+                                                min="0"
+                                                max="100"
+                                                step="1"
+                                                value={cfg.triggeredEdgeEntryLevelPct}
+                                                onChange={(e) => set("triggeredEdgeEntryLevelPct")(Number(e.target.value))}
+                                            />
+                                        </Field>
+                                        <Field label="Same-Candle Behavior" className="col-span-2">
+                                            <NeonSelect
+                                                value={cfg.triggeredEdgeSameCandleMode}
+                                                onChange={set("triggeredEdgeSameCandleMode")}
+                                                options={[
+                                                    { value: "same", label: "Same candle only" },
+                                                    { value: "next", label: "Next candle only" },
+                                                    { value: "both", label: "Both" },
+                                                ]}
+                                            />
+                                        </Field>
+                                        <div className="col-span-2 flex items-center justify-between border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
+                                            <div>
+                                                <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Cancel if OB taps then moves away before trigger</div>
+                                                <div className="text-[10.5px] text-muted-lab">Used-OB retrace cancel for triggered-edge setups.</div>
+                                            </div>
+                                            <NeonToggle checked={Boolean(cfg.triggeredEdgeCancelOnRetrace)} onChange={set("triggeredEdgeCancelOnRetrace")} />
+                                        </div>
+                                        {cfg.triggeredEdgeCancelOnRetrace && (
+                                            <>
+                                                <Field label="Retrace Cancel Pips">
+                                                    <NeonInput type="number" min="0" step="0.1" value={cfg.triggeredEdgeCancelRetracePips} onChange={(e) => set("triggeredEdgeCancelRetracePips")(Number(e.target.value))} />
+                                                </Field>
+                                                <Field label="Retrace Cancel OB %">
+                                                    <NeonInput type="number" min="0" step="1" value={cfg.triggeredEdgeCancelRetraceObPct} onChange={(e) => set("triggeredEdgeCancelRetraceObPct")(Number(e.target.value))} />
+                                                </Field>
+                                            </>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* ── Research Export ──────────────────────────────── */}
+                    {cfg.entryMode === "research" && (
+                        <div className="space-y-3">
+                            {/* Baseline Entry Depth */}
+                            <div className="border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
+                                <div className="mb-2">
+                                    <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab">Baseline Entry Depth</div>
+                                    <div className="text-[10px] text-muted-lab">Applies to Baseline Edge only.</div>
+                                </div>
+                                <Segment
+                                    options={[
+                                        { value: 0, label: "Edge" },
+                                        { value: 25, label: "25%" },
+                                        { value: 50, label: "50%" },
+                                        { value: 75, label: "75%" },
+                                        { value: 100, label: "100%" },
+                                    ]}
+                                    value={Number(cfg.obEntryDepthPct ?? 0)}
+                                    onChange={(value) => set("obEntryDepthPct")(Number(value))}
+                                />
+                            </div>
+
+                            {/* B · Penetration Entries */}
+                            <div className="border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
+                                <div className="mb-2 flex items-center justify-between">
+                                    <div>
+                                        <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab">B · Penetration Entries</div>
+                                        <div className="text-[10px] text-muted-lab">Enters at threshold depth on first OB touch. Exports one CSV per threshold.</div>
+                                    </div>
+                                    <NeonToggle
+                                        checked={Boolean(cfg.entryResearchExports)}
+                                        onChange={(val) => {
+                                            if (!val) {
+                                                setCfg((c) => ({ ...c, entryResearchExports: false, entryResearchExportMode: "off", entryPenetrationThresholds: "" }));
+                                            } else {
+                                                setCfg((c) => ({ ...c, entryResearchExports: true, entryResearchExportMode: c.entryResearchExportMode === "off" ? "light" : c.entryResearchExportMode, entryPenetrationThresholds: c.entryPenetrationThresholds || "25,50" }));
+                                            }
+                                        }}
+                                    />
+                                </div>
+                                {cfg.entryResearchExports && (
+                                    <div className="grid grid-cols-2 gap-3 mt-2">
+                                        <Field label="Preset" className="col-span-2" hint="Light is the default. Custom exposes raw thresholds.">
+                                            <NeonSelect
+                                                value={resolveEntryExportMode(cfg) === "off" ? "light" : resolveEntryExportMode(cfg)}
+                                                onChange={(value) => {
+                                                    if (value === "full") {
+                                                        setCfg((current) => ({ ...current, entryResearchExportMode: "full", entryResearchExports: true, entryPenetrationThresholds: "10,25,50,75" }));
+                                                    } else if (value === "custom") {
+                                                        setCfg((current) => ({ ...current, entryResearchExportMode: "custom", entryResearchExports: true, entryPenetrationThresholds: current.entryPenetrationThresholds || "25,50" }));
+                                                    } else {
+                                                        setCfg((current) => ({ ...current, entryResearchExportMode: "light", entryResearchExports: true, entryPenetrationThresholds: "25,50" }));
+                                                    }
+                                                }}
+                                                options={[
+                                                    { value: "light", label: "Light / 25,50" },
+                                                    { value: "full", label: "Full / 10,25,50,75" },
+                                                    { value: "custom", label: "Custom" },
+                                                ]}
+                                            />
+                                        </Field>
+                                        {entryExportFullRangeWarning(cfg) && (
+                                            <div className="col-span-2 border border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.07)] clip-bevel-sm px-3 py-2 text-[10.5px] text-[hsl(var(--warning))]">
+                                                Full entry exports rerun the complete simulation for every threshold. Use Light or shorten the date range before a long backtest.
+                                            </div>
+                                        )}
+                                        {resolveEntryExportMode(cfg) === "custom" && (
+                                            <Field label="Thresholds" className="col-span-2" hint="Comma-separated percentages. Valid values are greater than 0 and less than 100.">
+                                                <NeonInput
+                                                    value={cfg.entryPenetrationThresholds}
+                                                    onChange={(e) => set("entryPenetrationThresholds")(e.target.value)}
+                                                />
+                                            </Field>
+                                        )}
+                                        <div className="col-span-2 flex items-center justify-between border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
+                                            <div>
+                                                <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Optimized batched entry engine</div>
+                                                <div className="text-[10.5px] text-muted-lab">
+                                                    Default on. Evaluates penetration thresholds in one shared pass.
+                                                </div>
+                                            </div>
+                                            <NeonToggle
+                                                checked={Boolean(cfg.useBatchedEntryPenetration)}
+                                                onChange={set("useBatchedEntryPenetration")}
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* C · Triggered Edge Entries */}
+                            <div className="border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab">C · Triggered Edge Entries</div>
+                                        <div className="text-[10px] text-muted-lab">Arms at trigger threshold, then places limit at OB edge or configured entry level. Exports one CSV per threshold × candle mode.</div>
+                                    </div>
+                                    <NeonToggle checked={Boolean(cfg.triggeredEdgeEntries)} onChange={set("triggeredEdgeEntries")} />
+                                </div>
+                                {cfg.triggeredEdgeEntries && (
+                                    <div className="grid grid-cols-2 gap-3 mt-2">
+                                        <Field label="Trigger Thresholds" hint="Comma-separated OB penetration percentages.">
+                                            <NeonInput value={cfg.triggeredEdgeThresholds} onChange={(e) => set("triggeredEdgeThresholds")(e.target.value)} />
+                                        </Field>
+                                        <Field label="Entry Level %" hint="0 is the OB edge.">
+                                            <NeonInput type="number" min="0" max="100" step="1" value={cfg.triggeredEdgeEntryLevelPct} onChange={(e) => set("triggeredEdgeEntryLevelPct")(Number(e.target.value))} />
+                                        </Field>
+                                        <Field label="Same-Candle Behavior" className="col-span-2">
+                                            <NeonSelect
+                                                value={cfg.triggeredEdgeSameCandleMode}
+                                                onChange={set("triggeredEdgeSameCandleMode")}
+                                                options={[
+                                                    { value: "same", label: "Same candle only" },
+                                                    { value: "next", label: "Next candle only" },
+                                                    { value: "both", label: "Both" },
+                                                ]}
+                                            />
+                                        </Field>
+                                        <div className="col-span-2 flex items-center justify-between border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
+                                            <div>
+                                                <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Cancel if OB taps then moves away before trigger</div>
+                                                <div className="text-[10.5px] text-muted-lab">Used-OB retrace cancel for triggered-edge setups.</div>
+                                            </div>
+                                            <NeonToggle checked={Boolean(cfg.triggeredEdgeCancelOnRetrace)} onChange={set("triggeredEdgeCancelOnRetrace")} />
+                                        </div>
+                                        {cfg.triggeredEdgeCancelOnRetrace && (
+                                            <>
+                                                <Field label="Retrace Cancel Pips">
+                                                    <NeonInput type="number" min="0" step="0.1" value={cfg.triggeredEdgeCancelRetracePips} onChange={(e) => set("triggeredEdgeCancelRetracePips")(Number(e.target.value))} />
+                                                </Field>
+                                                <Field label="Retrace Cancel OB %">
+                                                    <NeonInput type="number" min="0" step="1" value={cfg.triggeredEdgeCancelRetraceObPct} onChange={(e) => set("triggeredEdgeCancelRetraceObPct")(Number(e.target.value))} />
+                                                </Field>
+                                            </>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                </NeonPanel>
+                </BuilderFocusCard>
+
+                <BuilderFocusCard id="advanced" activeId={activeBuilderCard} onActivate={setActiveBuilderCard} className="flex-1">
+                <NeonPanel title="Advanced" className="flex-1">
                     <div className="grid grid-cols-2 gap-3">
                         <Field label="Spread (pips)"><NeonInput type="number" step="0.05" value={cfg.spread} onChange={(e) => set("spread")(Number(e.target.value))} /></Field>
                         <Field label="Slippage (pips)"><NeonInput type="number" step="0.05" value={cfg.slippage} onChange={(e) => set("slippage")(Number(e.target.value))} /></Field>
                         <Field label="Commission (R/trade)" className="col-span-2"><NeonInput type="number" step="0.01" value={cfg.commission} onChange={(e) => set("commission")(Number(e.target.value))} /></Field>
-                        <Field label="Entry Research Exports" className="col-span-2" hint="Light is the default. Use Custom only when testing specific penetration thresholds.">
-                            <NeonSelect
-                                value={resolveEntryExportMode(cfg)}
-                                onChange={(value) => {
-                                    if (value === "off") {
-                                        setCfg((current) => ({ ...current, entryResearchExportMode: "off", entryResearchExports: false, entryPenetrationThresholds: "" }));
-                                    } else if (value === "full") {
-                                        setCfg((current) => ({ ...current, entryResearchExportMode: "full", entryResearchExports: true, entryPenetrationThresholds: "10,25,50,75" }));
-                                    } else if (value === "custom") {
-                                        setCfg((current) => ({ ...current, entryResearchExportMode: "custom", entryResearchExports: true, entryPenetrationThresholds: current.entryPenetrationThresholds || "25,50" }));
-                                    } else {
-                                        setCfg((current) => ({ ...current, entryResearchExportMode: "light", entryResearchExports: true, entryPenetrationThresholds: "25,50" }));
-                                    }
-                                }}
-                                options={[
-                                    { value: "off", label: "Off / Baseline only" },
-                                    { value: "light", label: "Light / 25,50" },
-                                    { value: "full", label: "Full / 10,25,50,75" },
-                                    { value: "custom", label: "Custom" },
-                                ]}
-                            />
-                        </Field>
-                        {entryExportFullRangeWarning(cfg) && (
-                            <div className="col-span-2 border border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.07)] clip-bevel-sm px-3 py-2 text-[10.5px] text-[hsl(var(--warning))]">
-                                Full entry exports rerun the complete simulation for every threshold. Use Light or shorten the date range before a long backtest.
-                            </div>
-                        )}
-                        {resolveEntryExportMode(cfg) === "custom" && (
-                            <Field label="Entry Penetration Thresholds" className="col-span-2" hint="Comma-separated percentages. Valid values are greater than 0 and less than 100.">
-                                <NeonInput
-                                    value={cfg.entryPenetrationThresholds}
-                                    onChange={(e) => set("entryPenetrationThresholds")(e.target.value)}
-                                />
-                            </Field>
-                        )}
-                        <div className={`col-span-2 flex items-center justify-between border border-[hsl(var(--border-soft))] clip-bevel-sm p-3 transition-opacity ${cfg.entryResearchExports ? "" : "opacity-45"}`}>
+                        <div className="col-span-2 flex items-center justify-between border border-[hsl(var(--border-soft))] clip-bevel-sm p-3 opacity-50 pointer-events-none" aria-disabled="true">
                             <div>
-                                <div className="control-label text-[11px] font-mono uppercase tracking-wider text-muted-lab">Optimized batched entry engine</div>
-                                <div className="text-[10.5px] text-muted-lab">
-                                    Default on. Evaluates penetration thresholds in one shared pass.
-                                </div>
-                            </div>
-                            <NeonToggle
-                                checked={Boolean(cfg.useBatchedEntryPenetration)}
-                                onChange={set("useBatchedEntryPenetration")}
-                            />
-                        </div>
-                        <div className="col-span-2 flex items-center justify-between border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
-                            <div>
-                                <div className="control-label text-[11px] font-mono uppercase tracking-wider text-muted-lab">Monte Carlo</div>
-                                <div className="text-[10.5px] text-muted-lab">Robustness simulation (placeholder)</div>
+                                <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Monte Carlo</div>
+                                <div className="text-[10.5px] text-muted-lab">Not yet wired to sidecar — no effect on generated config.</div>
                             </div>
                             <NeonToggle checked={cfg.monteCarlo} onChange={set("monteCarlo")} />
                         </div>
                     </div>
                 </NeonPanel>
+                </BuilderFocusCard>
+                </div>{/* end right Entry Mode + Advanced col */}
+                </div>{/* end middle row wrapper */}
 
+                <BuilderFocusCard id="sanity" activeId={activeBuilderCard} onActivate={setActiveBuilderCard} className="lg:col-span-3">
                 <NeonPanel
-                    className="lg:col-span-3"
                     title="Last Run Sanity Check"
                     action={
                         <div className="flex items-center gap-2">
@@ -715,10 +1020,17 @@ export default function StrategyBuilder() {
                         <StatusMeta k="Plan passes" v={sanityRun.total_passes ?? generatedPlan.totalPasses ?? "—"} />
                         <StatusMeta k="Entry passes" v={sanityRun.scenario_plan_summary?.entry ?? generatedPlan.entry ?? "—"} />
                         <StatusMeta k="Protection passes" v={sanityRun.scenario_plan_summary?.protection ?? generatedPlan.protection ?? "—"} />
-                        <StatusMeta k="Entry research exports" v={formatEntryResearchExports(sanityConfig)} />
-                        <StatusMeta k="Entry thresholds" v={(sanityConfig.entry_penetration_thresholds || []).join(", ") || "—"} />
+                        <StatusMeta k="Entry Mode" v={cfg.entryMode === "single" ? "Single Model" : "Research Export"} />
+                        {cfg.entryMode === "single" && (
+                            <StatusMeta k="Active Entry Model" v={{ baseline: "Baseline Edge", entry_penetration: "Penetration", triggered_edge: "Triggered Edge" }[cfg.selectedEntryModel] || cfg.selectedEntryModel} />
+                        )}
+                        <StatusMeta k="Entry models" v={formatEntryModels(sanityConfig)} />
+                        <StatusMeta k="Penetration thresholds" v={(sanityConfig.entry_penetration_thresholds || []).join(", ") || "—"} />
                         <StatusMeta k="Batch entry penetration" v={sanityConfig.batch_entry_penetration ? "On" : "Off"} />
-                        <StatusMeta k="Entry Depth" v={formatPercentValue(sanityConfig.ob_entry_depth_pct)} />
+                        <StatusMeta k="Triggered-edge triggers" v={(sanityConfig.triggered_edge_trigger_thresholds || []).join(", ") || "—"} />
+                        <StatusMeta k="Triggered-edge candle mode" v={formatTriggeredEdgeModes(sanityConfig.triggered_edge_same_candle_modes)} />
+                        <StatusMeta k="Triggered-edge retrace cancel" v={formatTriggeredEdgeRetraceCancel(sanityConfig)} />
+                        <StatusMeta k="Baseline Entry Depth" v={formatPercentValue(sanityConfig.ob_entry_depth_pct)} />
                         <StatusMeta k="Entry Buffer" v={formatPipValue(sanityConfig.entry_buffer_pips)} />
                         <StatusMeta k="Stop Buffer" v={formatPipValue(sanityConfig.stop_buffer_pips)} />
                         <StatusMeta k="Verify Limit" v={formatTickValue(sanityConfig.verify_limit_ticks)} />
@@ -752,21 +1064,23 @@ export default function StrategyBuilder() {
                         <StatusMeta k="Imported run id" v={sanityRun.importedRunId || "—"} />
                     </div>
                 </NeonPanel>
+                </BuilderFocusCard>
 
-                <NeonPanel className="lg:col-span-3" title="Local Sidecar Run" action={<Pill tone={runError ? "warning" : runStatusTone(runJob)}>{runStatusLabel(runJob)}</Pill>}>
+                <BuilderFocusCard id="sidecar-run" activeId={activeBuilderCard} onActivate={setActiveBuilderCard} className="lg:col-span-3">
+                <NeonPanel title="Local Sidecar Run" action={<Pill tone={runError ? "warning" : runStatusTone(runJob)}>{runStatusLabel(runJob)}</Pill>}>
                     <div className="mb-3 flex items-start gap-2 border border-[hsl(var(--warning)/0.35)] bg-[hsl(var(--warning)/0.06)] clip-bevel-sm px-3 py-2">
                         <ShieldAlert className="w-3.5 h-3.5 shrink-0 mt-0.5 text-[hsl(var(--warning))]" />
-                        <span className="text-[11px] font-mono uppercase tracking-wider text-[hsl(var(--warning))]">Requires local sidecar running at http://127.0.0.1:8787.</span>
+                        <span className="text-[11px] font-ui uppercase tracking-wider text-[hsl(var(--warning))]">Requires local sidecar running at http://127.0.0.1:8787.</span>
                     </div>
                     {runError && (
-                        <div className="mb-3 border border-[hsl(var(--danger)/0.4)] bg-[hsl(var(--danger)/0.06)] clip-bevel-sm px-3 py-2 text-[11px] font-mono text-[hsl(var(--danger))]">
+                        <div className="mb-3 border border-[hsl(var(--danger)/0.4)] bg-[hsl(var(--danger)/0.06)] clip-bevel-sm px-3 py-2 text-[11px] font-ui text-[hsl(var(--danger))]">
                             {runError}
                         </div>
                     )}
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                         {/* Run status — primary column */}
                         <div>
-                            <div className="panel-title-label text-[10px] font-mono uppercase tracking-[0.2em] text-title-lab mb-2">Run status</div>
+                            <div className="panel-title-label text-[10px] font-ui uppercase tracking-[0.2em] text-title-lab mb-2">Run status</div>
                             {!runJob && (
                                 <div className="border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.28)] clip-bevel-sm p-3 text-[11.5px] text-[hsl(var(--text-2))]">
                                     No local run started yet.
@@ -777,8 +1091,8 @@ export default function StrategyBuilder() {
                                     <div className={`border ${runStatusNoticeClass(runJob)} clip-bevel-sm px-3 py-2`}>
                                         <div className="flex flex-wrap items-center justify-between gap-2">
                                             <div>
-                                                <div className="control-label text-[10px] font-mono uppercase tracking-wider text-muted-lab">Structured run status</div>
-                                                <div className="mt-1 text-[12px] font-mono text-white">
+                                                <div className="control-label text-[10px] font-ui uppercase tracking-wider text-muted-lab">Structured run status</div>
+                                                <div className="mt-1 text-[12px] font-ui text-white">
                                                     {runStatusLabel(runJob)} · {formatRunProgress(runJob)}
                                                 </div>
                                             </div>
@@ -829,7 +1143,7 @@ export default function StrategyBuilder() {
                                     )}
                                     {isCompletedRun(runJob) && (
                                         <div className="space-y-2 border border-[hsl(var(--success)/0.35)] bg-[hsl(var(--success)/0.06)] clip-bevel-sm px-3 py-2">
-                                            <div className="text-[11px] font-mono text-[hsl(var(--success))]">
+                                            <div className="text-[11px] font-ui text-[hsl(var(--success))]">
                                                 Run completed. Import the completed output folder into Research Lab.
                                             </div>
                                             <div className="flex flex-wrap items-center gap-2">
@@ -838,15 +1152,16 @@ export default function StrategyBuilder() {
                                                 </NeonButton>
                                                 {importedRunId && (
                                                     <>
-                                                        <Pill tone="success">Run imported: {importedRunId}</Pill>
-                                                        <Link to="/runs"><NeonButton tone="ghost">Open Runs</NeonButton></Link>
+                                                        <Pill tone="success">Imported</Pill>
+                                                        <Link to={`/runs/${encodeURIComponent(importedRunId)}`}><NeonButton tone="primary">Open Run</NeonButton></Link>
+                                                        <Link to="/runs"><NeonButton tone="ghost">All Runs</NeonButton></Link>
                                                         <Link to="/strategy-map"><NeonButton tone="ghost">Strategy Map</NeonButton></Link>
                                                         <Link to="/trade-inspector"><NeonButton tone="ghost">Trade Inspector</NeonButton></Link>
                                                     </>
                                                 )}
                                             </div>
                                             {importError && (
-                                                <div className="border border-[hsl(var(--danger)/0.4)] bg-[hsl(var(--danger)/0.06)] clip-bevel-sm px-2 py-1.5 text-[10.5px] font-mono text-[hsl(var(--danger))]">
+                                                <div className="border border-[hsl(var(--danger)/0.4)] bg-[hsl(var(--danger)/0.06)] clip-bevel-sm px-2 py-1.5 text-[10.5px] font-ui text-[hsl(var(--danger))]">
                                                     {importError}
                                                 </div>
                                             )}
@@ -860,10 +1175,10 @@ export default function StrategyBuilder() {
                         {/* Generated config — secondary column, collapsed by default */}
                         <div>
                             <div className="flex items-center justify-between mb-2">
-                                <div className="panel-title-label text-[10px] font-mono uppercase tracking-[0.2em] text-title-lab">Generated Config</div>
+                                <div className="panel-title-label text-[10px] font-ui uppercase tracking-[0.2em] text-title-lab">Generated Config</div>
                                 <button
                                     onClick={() => setShowConfig((v) => !v)}
-                                    className="flex items-center gap-1 control-label text-[10px] font-mono text-muted-lab hover:text-white transition-colors"
+                                    className="flex items-center gap-1 control-label text-[10px] font-ui text-muted-lab hover:text-white transition-colors"
                                     aria-label="Toggle generated config"
                                 >
                                     <span>{showConfig ? "Hide" : "Show"}</span>
@@ -871,28 +1186,111 @@ export default function StrategyBuilder() {
                                 </button>
                             </div>
                             {showConfig && (
-                                <pre className="max-h-80 overflow-auto scrollbar-thin whitespace-pre-wrap border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm p-3 text-[10.5px] leading-relaxed font-mono text-[hsl(var(--accent-secondary))]">
+                                <pre className="max-h-80 overflow-auto scrollbar-thin whitespace-pre-wrap border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm p-3 text-[10.5px] leading-relaxed font-code text-[hsl(var(--accent-secondary))]">
                                     {JSON.stringify(sidecarConfig, null, 2)}
                                 </pre>
                             )}
                         </div>
                     </div>
                 </NeonPanel>
+                </BuilderFocusCard>
             </div>
 
             <div className="mx-6 mt-4 flex items-center gap-2 border border-[hsl(var(--warning)/0.4)] bg-[hsl(var(--warning)/0.06)] clip-bevel-sm px-3 py-2">
                 <ShieldAlert className="w-3.5 h-3.5 text-[hsl(var(--warning))]" />
-                <span className="text-[11px] font-mono uppercase tracking-wider text-[hsl(var(--warning))]">Research only · this builder does NOT place orders</span>
+                <span className="text-[11px] font-ui uppercase tracking-wider text-[hsl(var(--warning))]">Research only · this builder does NOT place orders</span>
             </div>
+        </div>
+    );
+}
+
+function BuilderFocusCard({ id, activeId, onActivate, className = "", children }) {
+    const active = id === activeId;
+    return (
+        <div
+            className={[
+                "flex flex-col transition-[outline-color,box-shadow] duration-150 outline outline-1 outline-transparent",
+                active ? "outline-cyan-300 shadow-[0_0_0_1px_rgba(34,211,238,0.72),0_0_28px_rgba(34,211,238,0.20)]" : "",
+                className,
+            ].filter(Boolean).join(" ")}
+            onMouseDown={() => onActivate(id)}
+            onFocusCapture={() => onActivate(id)}
+        >
+            {children}
         </div>
     );
 }
 
 function buildBacktesterConfig(cfg) {
     const allowedSessions = Boolean(cfg.sessionFilter) ? selectedAllowedSessions(cfg) : [];
-    const entryMode = resolveEntryExportMode(cfg);
-    const entryThresholds = entryThresholdsForMode(entryMode, cfg.entryPenetrationThresholds);
-    const entryResearchEnabled = entryMode !== "off" && entryThresholds.length > 0;
+
+    // ── Entry model fields: Single vs Research Export ─────────────────────
+    let entryModels, obEntryDepthPct, entryPenetrationThresholds, batchEntryPenetration,
+        teThresholds, teEntryLevelPct, teSameCandleModes,
+        teCancelOnRetrace, teCancelRetracePips, teCancelRetraceObPct;
+
+    const isSingle = cfg.entryMode === "single";
+
+    if (isSingle) {
+        const model = cfg.selectedEntryModel || "baseline";
+        if (model === "entry_penetration") {
+            const pct = Number(cfg.singlePenetrationPct ?? 25);
+            entryModels = ["entry_penetration"];
+            obEntryDepthPct = 0;
+            entryPenetrationThresholds = Number.isFinite(pct) && pct > 0 && pct < 100 ? [pct] : [25];
+            batchEntryPenetration = false;
+            teThresholds = [];
+            teEntryLevelPct = 0;
+            teSameCandleModes = [];
+            teCancelOnRetrace = false;
+            teCancelRetracePips = 0;
+            teCancelRetraceObPct = 0;
+        } else if (model === "triggered_edge") {
+            const thr = Number(cfg.singleTriggeredEdgeThreshold ?? 25);
+            entryModels = ["triggered_edge"];
+            obEntryDepthPct = 0;
+            entryPenetrationThresholds = [];
+            batchEntryPenetration = false;
+            teThresholds = Number.isFinite(thr) && thr > 0 && thr < 100 ? [thr] : [25];
+            teEntryLevelPct = clampNumber(cfg.triggeredEdgeEntryLevelPct, 0, 100, 0);
+            teSameCandleModes = triggeredEdgeSameCandleModes(cfg.triggeredEdgeSameCandleMode);
+            teCancelOnRetrace = Boolean(cfg.triggeredEdgeCancelOnRetrace);
+            teCancelRetracePips = Math.max(0, Number(cfg.triggeredEdgeCancelRetracePips) || 0);
+            teCancelRetraceObPct = Math.max(0, Number(cfg.triggeredEdgeCancelRetraceObPct) || 0);
+        } else {
+            // baseline
+            entryModels = ["baseline"];
+            obEntryDepthPct = Number(cfg.obEntryDepthPct ?? 0);
+            entryPenetrationThresholds = [];
+            batchEntryPenetration = false;
+            teThresholds = [];
+            teEntryLevelPct = 0;
+            teSameCandleModes = [];
+            teCancelOnRetrace = false;
+            teCancelRetracePips = 0;
+            teCancelRetraceObPct = 0;
+        }
+    } else {
+        // Research Export — existing multi-model behavior
+        const exportMode = resolveEntryExportMode(cfg);
+        const exportThresholds = entryThresholdsForMode(exportMode, cfg.entryPenetrationThresholds);
+        const exportEnabled = exportMode !== "off" && exportThresholds.length > 0;
+        const teEnabled = Boolean(cfg.triggeredEdgeEntries);
+        const teRawThresholds = teEnabled ? normalizeEntryThresholds(cfg.triggeredEdgeThresholds || "25") : [];
+        entryModels = ["baseline"];
+        if (exportEnabled) entryModels.push("entry_penetration");
+        if (teEnabled && teRawThresholds.length) entryModels.push("triggered_edge");
+        obEntryDepthPct = Number(cfg.obEntryDepthPct ?? 0);
+        entryPenetrationThresholds = exportEnabled ? exportThresholds : [];
+        batchEntryPenetration = exportEnabled ? Boolean(cfg.useBatchedEntryPenetration) : false;
+        teThresholds = teEnabled ? teRawThresholds : [];
+        teEntryLevelPct = teEnabled ? clampNumber(cfg.triggeredEdgeEntryLevelPct, 0, 100, 0) : 0;
+        teSameCandleModes = teEnabled ? triggeredEdgeSameCandleModes(cfg.triggeredEdgeSameCandleMode) : [];
+        teCancelOnRetrace = teEnabled ? Boolean(cfg.triggeredEdgeCancelOnRetrace) : false;
+        teCancelRetracePips = teEnabled ? Math.max(0, Number(cfg.triggeredEdgeCancelRetracePips) || 0) : 0;
+        teCancelRetraceObPct = teEnabled ? Math.max(0, Number(cfg.triggeredEdgeCancelRetraceObPct) || 0) : 0;
+    }
+
     const config = {
         symbol: cfg.symbol || "EURUSD",
         candle_file: normalizeCandleFile(cfg.dataFile),
@@ -905,7 +1303,7 @@ function buildBacktesterConfig(cfg) {
         min_ob_size_pips: Number(cfg.minObSizePips ?? 0),
         max_ob_size_pips: Number(cfg.maxObSizePips ?? 100),
         rr_multiple: Number(cfg.rr) || 3.3,
-        ob_entry_depth_pct: Number(cfg.obEntryDepthPct ?? 0),
+        ob_entry_depth_pct: obEntryDepthPct,
         entry_buffer_pips: Number(cfg.entryBuffer ?? 0),
         stop_buffer_pips: Number(cfg.stopBuffer ?? 0),
         spread_pips: Number(cfg.spread) || 0,
@@ -915,9 +1313,15 @@ function buildBacktesterConfig(cfg) {
         execution_modes: [mapBuilderExecutionMode(cfg.executionMode)],
         trade_direction: mapBuilderTradeDirection(cfg.direction),
         structure_filter: mapBuilderStructureFilter(cfg.structure),
-        entry_models: entryResearchEnabled ? ["baseline", "entry_penetration"] : ["baseline"],
-        entry_penetration_thresholds: entryResearchEnabled ? entryThresholds : [],
-        batch_entry_penetration: entryResearchEnabled ? Boolean(cfg.useBatchedEntryPenetration) : false,
+        entry_models: entryModels,
+        entry_penetration_thresholds: entryPenetrationThresholds,
+        batch_entry_penetration: batchEntryPenetration,
+        triggered_edge_trigger_thresholds: teThresholds,
+        triggered_edge_entry_level_pct: teEntryLevelPct,
+        triggered_edge_same_candle_modes: teSameCandleModes,
+        triggered_edge_cancel_on_retrace: teCancelOnRetrace,
+        triggered_edge_cancel_retrace_pips: teCancelRetracePips,
+        triggered_edge_cancel_retrace_ob_pct: teCancelRetraceObPct,
         protection_modes: ["baseline"],
         session_filter_enabled: Boolean(cfg.sessionFilter),
         allowed_sessions: allowedSessions,
@@ -951,6 +1355,18 @@ function normalizeEntryThresholds(value) {
         .filter((item) => Number.isFinite(item) && item > 0 && item < 100)
         .map((item) => Number(item.toFixed(4))))]
         .sort((a, b) => a - b);
+}
+
+function clampNumber(value, min, max, fallback) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.min(max, Math.max(min, n));
+}
+
+function triggeredEdgeSameCandleModes(value) {
+    if (value === "same") return ["same_candle"];
+    if (value === "next") return ["next_candle"];
+    return ["same_candle", "next_candle"];
 }
 
 function entryThresholdsForMode(mode, customValue) {
@@ -1065,6 +1481,10 @@ function estimateScenarioPlan(config) {
     const closeBuffers = Array.isArray(config?.close_breach_buffers_pips) ? config.close_breach_buffers_pips : [];
     const entryModels = Array.isArray(config?.entry_models) ? config.entry_models : ["baseline"];
     const entryThresholds = Array.isArray(config?.entry_penetration_thresholds) ? config.entry_penetration_thresholds : [];
+    const triggeredThresholds = Array.isArray(config?.triggered_edge_trigger_thresholds) ? config.triggered_edge_trigger_thresholds : [];
+    const triggeredModes = Array.isArray(config?.triggered_edge_same_candle_modes) && config.triggered_edge_same_candle_modes.length
+        ? config.triggered_edge_same_candle_modes
+        : ["same_candle", "next_candle"];
     let baseline = 0;
     let protection = 0;
     for (const mode of protectionModes) {
@@ -1073,7 +1493,9 @@ function estimateScenarioPlan(config) {
         else if (mode === "close_confirmed_ob_breach_exit") protection += Math.max(1, closeBuffers.length);
         else protection += 1;
     }
-    const entry = entryModels.includes("entry_penetration") ? entryThresholds.length : 0;
+    const penetrationEntry = entryModels.includes("entry_penetration") ? entryThresholds.length : 0;
+    const triggeredEntry = entryModels.includes("triggered_edge") ? triggeredThresholds.length * triggeredModes.length : 0;
+    const entry = penetrationEntry + triggeredEntry;
     return {
         baseline: baseline * executionModes.length,
         protection: protection * executionModes.length,
@@ -1205,6 +1627,35 @@ function formatEntryResearchExports(config) {
     return `baseline + penetration (${mode})`;
 }
 
+function formatEntryModels(config) {
+    const models = Array.isArray(config?.entry_models) ? config.entry_models : [];
+    if (!models.length) return "—";
+    const labels = models.map((model) => ({
+        baseline: "Baseline edge",
+        entry_penetration: "Penetration",
+        triggered_edge: "Triggered edge",
+    }[model] || model));
+    return labels.join(" + ");
+}
+
+function formatTriggeredEdgeModes(modes) {
+    const values = ensureArray(modes).map((mode) => String(mode).trim().toLowerCase());
+    if (!values.length) return "—";
+    const hasSame = values.includes("same_candle");
+    const hasNext = values.includes("next_candle");
+    if (hasSame && hasNext) return "Same + next";
+    if (hasSame) return "Same candle";
+    if (hasNext) return "Next candle";
+    return values.join(", ");
+}
+
+function formatTriggeredEdgeRetraceCancel(config) {
+    if (!config?.triggered_edge_cancel_on_retrace) return "Off";
+    const pips = formatPipValue(config.triggered_edge_cancel_retrace_pips);
+    const pct = formatPercentValue(config.triggered_edge_cancel_retrace_ob_pct);
+    return `On · ${pips} / ${pct}`;
+}
+
 function formatSeconds(value) {
     return value == null ? "—" : `${value}s`;
 }
@@ -1267,6 +1718,17 @@ const LOAD_FIELD_LABELS = {
     entryResearchExports: "entry research exports",
     entryPenetrationThresholds: "entry penetration thresholds",
     useBatchedEntryPenetration: "batched entry penetration",
+    triggeredEdgeEntries: "triggered edge entries",
+    triggeredEdgeThresholds: "triggered edge trigger thresholds",
+    triggeredEdgeEntryLevelPct: "triggered edge entry level",
+    triggeredEdgeSameCandleMode: "triggered edge same-candle mode",
+    triggeredEdgeCancelOnRetrace: "triggered edge retrace cancel",
+    triggeredEdgeCancelRetracePips: "triggered edge retrace cancel pips",
+    triggeredEdgeCancelRetraceObPct: "triggered edge retrace cancel OB %",
+    entryMode: "entry mode",
+    selectedEntryModel: "selected entry model",
+    singlePenetrationPct: "single penetration threshold",
+    singleTriggeredEdgeThreshold: "single triggered-edge threshold",
     monteCarlo: "Monte Carlo",
 };
 
@@ -1319,8 +1781,24 @@ function buildRunConfigLoadReport(current, run) {
     applyFirstPresent(patch, source, "entryResearchExports", ["entry_models", "entryModels"], mapConfigEntryResearchExports);
     applyFirstPresent(patch, source, "entryPenetrationThresholds", ["entry_penetration_thresholds", "entryPenetrationThresholds"], mapConfigEntryThresholds);
     applyFirstPresent(patch, source, "useBatchedEntryPenetration", ["batch_entry_penetration", "batchEntryPenetration"], toBool);
+    applyFirstPresent(patch, source, "triggeredEdgeEntries", ["entry_models", "entryModels"], mapConfigTriggeredEdgeEntries);
+    applyFirstPresent(patch, source, "triggeredEdgeThresholds", ["triggered_edge_trigger_thresholds", "triggeredEdgeTriggerThresholds"], mapConfigEntryThresholds);
+    applyFirstPresent(patch, source, "triggeredEdgeEntryLevelPct", ["triggered_edge_entry_level_pct", "triggeredEdgeEntryLevelPct"], toNumber);
+    applyFirstPresent(patch, source, "triggeredEdgeSameCandleMode", ["triggered_edge_same_candle_modes", "triggeredEdgeSameCandleModes"], mapConfigTriggeredEdgeSameCandleMode);
+    applyFirstPresent(patch, source, "triggeredEdgeCancelOnRetrace", ["triggered_edge_cancel_on_retrace", "triggeredEdgeCancelOnRetrace"], toBool);
+    applyFirstPresent(patch, source, "triggeredEdgeCancelRetracePips", ["triggered_edge_cancel_retrace_pips", "triggeredEdgeCancelRetracePips"], toNumber);
+    applyFirstPresent(patch, source, "triggeredEdgeCancelRetraceObPct", ["triggered_edge_cancel_retrace_ob_pct", "triggeredEdgeCancelRetraceObPct"], toNumber);
     if ("entryResearchExports" in patch || "entryPenetrationThresholds" in patch) {
         patch.entryResearchExportMode = mapConfigEntryResearchExportMode(source.entry_models || source.entryModels, source);
+    }
+    // entryMode: honour explicit value from source; otherwise infer from entry_models for backward compat.
+    // Old presets/runs that don't carry entryMode but have entry_models default to "research" so nothing breaks.
+    applyFirstPresent(patch, source, "entryMode", ["entryMode", "entry_mode"], (value) => ["single", "research"].includes(value) ? value : null);
+    if (!("entryMode" in patch)) {
+        const srcModels = ensureArray(source.entry_models || source.entryModels || []);
+        if (srcModels.length > 0) {
+            patch.entryMode = "research";
+        }
     }
     applyFirstPresent(patch, source, "monteCarlo", ["monte_carlo", "monteCarlo", "monte_carlo_enabled"], toBool);
 
@@ -1391,6 +1869,11 @@ function mapConfigEntryResearchExports(value) {
     return models.includes("entry_penetration");
 }
 
+function mapConfigTriggeredEdgeEntries(value) {
+    const models = ensureArray(value).map((item) => String(item).trim().toLowerCase());
+    return models.includes("triggered_edge");
+}
+
 function mapConfigEntryResearchExportMode(value, source) {
     const models = ensureArray(value).map((item) => String(item).trim().toLowerCase());
     const thresholds = normalizeEntryThresholds(source?.entry_penetration_thresholds || source?.entryPenetrationThresholds);
@@ -1403,6 +1886,19 @@ function mapConfigEntryResearchExportMode(value, source) {
 function mapConfigEntryThresholds(value) {
     const thresholds = normalizeEntryThresholds(value);
     return thresholds.length ? thresholds.join(",") : null;
+}
+
+function mapConfigTriggeredEdgeSameCandleMode(value) {
+    const modes = ensureArray(value).map((item) => String(item).trim().toLowerCase());
+    if (modes.includes("both")) return "both";
+    if (modes.includes("same")) return "same";
+    if (modes.includes("next")) return "next";
+    const hasSame = modes.includes("same_candle");
+    const hasNext = modes.includes("next_candle");
+    if (hasSame && hasNext) return "both";
+    if (hasSame) return "same";
+    if (hasNext) return "next";
+    return null;
 }
 
 function ensureArray(value) {
@@ -1559,11 +2055,98 @@ function formatSidecarError(error) {
     return message;
 }
 
+function structureChipLabel(value) {
+    const v = formatStructureFilter(value);
+    if (v === "Both") return "BOS+CHOCH";
+    if (v === "CHoCH") return "CHOCH";
+    return "BOS";
+}
+
+function directionChipLabel(value) {
+    const v = mapConfigDirection(value);
+    if (v === "Both") return "Long+Short";
+    return v;
+}
+
+// Compact display snapshot of a run's config — used by the recall cards/preview.
+function runConfigPreview(run) {
+    if (!run) return null;
+    const source = { ...(run.summary || {}), ...(run.config || {}) };
+    const rr = toNumber(source.rr_multiple ?? source.rr ?? source.risk_reward);
+    const from = normalizeDateValue(source.start_date || source.date_from || source.dateFrom);
+    const to = normalizeDateValue(source.end_date || source.date_to || source.dateTo);
+    return {
+        name: getRunDisplayName(run),
+        date: normalizeDateValue(run.importedAt || source.importedAt || source.createdAt) || "",
+        symbol: source.symbol || "—",
+        detectionTf: mapConfigDetectionTf(source.detection_timeframe || source.detection_tf || source.detectionTf || "M15"),
+        executionTf: mapConfigExecutionTf(source.execution_timeframe || source.execution_tf || source.executionTf || "1m"),
+        structure: structureChipLabel(source.structure ?? source.structure_filter ?? source.allowed_structures),
+        direction: directionChipLabel(source.direction ?? source.trade_direction ?? source.allowed_directions),
+        rr: rr != null ? rr : null,
+        executionMode: formatExecutionMode(mapConfigExecutionMode(source.execution_modes ?? source.executionMode ?? source.execution_mode)),
+        entryModel: formatEntryModels(source),
+        dateRange: from && to ? `${from} → ${to}` : (from || to || ""),
+    };
+}
+
+// Strategy identity snapshot rendered as compact chip groups.
+function ConfigSnapshot({ preview, className = "" }) {
+    if (!preview) return null;
+    const groups = [
+        [preview.symbol, preview.entryModel].filter(Boolean).join(" · "),
+        `${preview.detectionTf} → ${preview.executionTf}`,
+        [preview.structure, preview.direction].filter(Boolean).join(" · "),
+        [preview.rr != null ? `RR ${preview.rr}` : null, preview.executionMode].filter(Boolean).join(" · "),
+        preview.dateRange,
+    ].filter(Boolean);
+    return (
+        <div className={`flex items-center gap-1.5 flex-wrap ${className}`}>
+            {groups.map((g, i) => (
+                <span
+                    key={i}
+                    className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.4)] px-2 py-0.5 text-[10px] font-ui uppercase tracking-wider text-[hsl(var(--text-2))]"
+                >
+                    {g}
+                </span>
+            ))}
+        </div>
+    );
+}
+
+// Subtle top-right ribbon reflecting the builder's current active config identity.
+function ConfigScopeRibbon({ cfg }) {
+    const model = cfg.entryMode === "research"
+        ? "RESEARCH"
+        : ({ baseline: "BASELINE", entry_penetration: "PENETRATION", triggered_edge: "TRIGGERED EDGE" }[cfg.selectedEntryModel] || "BASELINE");
+    const rr = Number(cfg.rr);
+    const chips = [
+        model,
+        structureChipLabel(cfg.structure).toUpperCase(),
+        directionChipLabel(cfg.direction).toUpperCase(),
+        Number.isFinite(rr) ? `RR ${rr}` : null,
+        formatExecutionMode(cfg.executionMode).toUpperCase(),
+    ].filter(Boolean);
+    return (
+        <div className="flex items-center gap-1.5 flex-wrap justify-end">
+            <span className="control-label text-[9px] font-ui uppercase tracking-[0.14em] text-muted-lab mr-0.5">Active Config</span>
+            {chips.map((c) => (
+                <span
+                    key={c}
+                    className="clip-bevel-sm border border-[hsl(var(--accent-secondary)/0.28)] bg-[hsl(var(--accent-secondary)/0.06)] px-2 py-0.5 text-[9.5px] font-ui uppercase tracking-wider text-[hsl(var(--accent-secondary))]"
+                >
+                    {c}
+                </span>
+            ))}
+        </div>
+    );
+}
+
 function StatusMeta({ k, v }) {
     return (
         <div className="border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.28)] clip-bevel-sm px-3 py-2">
-            <div className="control-label text-[9.5px] font-mono uppercase tracking-wider text-muted-lab">{k}</div>
-            <div className="mt-1 text-[11px] font-mono text-[hsl(var(--text-2))] break-all">{String(v ?? "—")}</div>
+            <div className="control-label text-[9.5px] font-ui uppercase tracking-wider text-muted-lab">{k}</div>
+            <div className="mt-1 text-[11px] font-code text-[hsl(var(--text-2))] break-all">{String(v ?? "—")}</div>
         </div>
     );
 }
@@ -1573,8 +2156,8 @@ function LogBlock({ title, text, tone = "secondary" }) {
     const toneClass = tone === "warning" ? "text-[hsl(var(--warning))]" : "text-[hsl(var(--accent-secondary))]";
     return (
         <div>
-            <div className="mb-1 control-label text-[9.5px] font-mono uppercase tracking-wider text-muted-lab">{title}</div>
-            <pre className={`max-h-52 overflow-auto scrollbar-thin whitespace-pre-wrap border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel)/0.65)] clip-bevel-sm p-2 text-[10.5px] leading-relaxed font-mono ${toneClass}`}>{text}</pre>
+            <div className="mb-1 control-label text-[9.5px] font-ui uppercase tracking-wider text-muted-lab">{title}</div>
+            <pre className={`max-h-52 overflow-auto scrollbar-thin whitespace-pre-wrap border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel)/0.65)] clip-bevel-sm p-2 text-[10.5px] leading-relaxed font-code ${toneClass}`}>{text}</pre>
         </div>
     );
 }
