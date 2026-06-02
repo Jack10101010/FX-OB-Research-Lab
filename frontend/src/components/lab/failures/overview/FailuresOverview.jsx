@@ -40,7 +40,7 @@ function DistBar({ value, max, tone = "primary" }) {
 }
 
 function SectionTitle({ children }) {
-    return <h3 className="text-[10px] font-mono uppercase tracking-[0.18em] text-muted-lab">{children}</h3>;
+    return <h3 className="text-[10px] font-ui uppercase tracking-[0.18em] text-muted-lab">{children}</h3>;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -118,10 +118,10 @@ export function FailuresOverview({ losers = [], allLosers = [], allTrades = [], 
                     <div className="p-3 space-y-2">
                         {sessionRows.map(row => (
                             <div key={row.session} className="flex items-center gap-2.5">
-                                <span className="text-[10.5px] font-mono text-[hsl(var(--text-2))] w-20 shrink-0">{row.session}</span>
+                                <span className="text-[10.5px] font-ui text-[hsl(var(--text-2))] w-20 shrink-0">{row.session}</span>
                                 <DistBar value={row.lossCount} max={maxSessLoss} tone="danger" />
-                                <span className="text-[10.5px] font-mono text-white tabular-nums w-6 text-right">{row.lossCount}</span>
-                                <span className="text-[9.5px] font-mono text-muted-lab w-11 text-right">{row.lossRate}%</span>
+                                <span className="text-[10.5px] font-num text-white tabular-nums w-6 text-right">{row.lossCount}</span>
+                                <span className="text-[9.5px] font-num text-muted-lab w-11 text-right">{row.lossRate}%</span>
                             </div>
                         ))}
                     </div>
@@ -135,17 +135,17 @@ export function FailuresOverview({ losers = [], allLosers = [], allTrades = [], 
                             { label: "Short", stat: s, cls: "text-[hsl(var(--danger))]"  },
                         ].map(({ label, stat, cls }) => (
                             <div key={label} className="bg-[hsl(var(--panel))] p-3 space-y-1.5">
-                                <div className={`text-[10px] font-mono uppercase tracking-wider ${cls}`}>{label}</div>
+                                <div className={`text-[10px] font-ui uppercase tracking-wider ${cls}`}>{label}</div>
                                 {stat ? (
                                     <>
                                         <div className="font-display text-[22px] font-semibold text-white">{stat.lossCount}</div>
-                                        <div className="text-[10px] font-mono text-[hsl(var(--text-2))]">{stat.lossRate}% loss rate</div>
-                                        <div className="text-[10px] font-mono text-[hsl(var(--text-2))]">
+                                        <div className="text-[10px] font-num text-[hsl(var(--text-2))]">{stat.lossRate}% loss rate</div>
+                                        <div className="text-[10px] font-num text-[hsl(var(--text-2))]">
                                             Avg: {stat.avgLossR != null ? `${stat.avgLossR}R` : "—"}
                                         </div>
                                     </>
                                 ) : (
-                                    <div className="text-[10px] font-mono text-muted-lab">No {label.toLowerCase()} trades</div>
+                                    <div className="text-[10px] font-ui text-muted-lab">No {label.toLowerCase()} trades</div>
                                 )}
                             </div>
                         ))}
@@ -160,10 +160,10 @@ export function FailuresOverview({ losers = [], allLosers = [], allTrades = [], 
                     <div className="p-3 space-y-2">
                         {weekdayStats.sort((a, b) => b.lossCount - a.lossCount).map(row => (
                             <div key={row.weekday} className="flex items-center gap-2.5">
-                                <span className="text-[10.5px] font-mono text-[hsl(var(--text-2))] w-8 shrink-0">{row.label}</span>
+                                <span className="text-[10.5px] font-ui text-[hsl(var(--text-2))] w-8 shrink-0">{row.label}</span>
                                 <DistBar value={row.lossCount} max={maxDayLoss} tone={row.lossRate > 50 ? "warning" : "primary"} />
-                                <span className="text-[10.5px] font-mono text-white tabular-nums w-6 text-right">{row.lossCount}</span>
-                                <span className="text-[9.5px] font-mono text-muted-lab w-11 text-right">{row.lossRate}%</span>
+                                <span className="text-[10.5px] font-num text-white tabular-nums w-6 text-right">{row.lossCount}</span>
+                                <span className="text-[9.5px] font-num text-muted-lab w-11 text-right">{row.lossRate}%</span>
                             </div>
                         ))}
                     </div>
@@ -179,9 +179,9 @@ export function FailuresOverview({ losers = [], allLosers = [], allTrades = [], 
                             { key: "critical", label: "CRITICAL", color: "text-[hsl(var(--danger))]",             value: sevDist.critical },
                         ].map(({ key, label, color, value }) => (
                             <div key={key} className="bg-[hsl(var(--panel))] p-3">
-                                <div className={`text-[9.5px] font-mono uppercase tracking-wider ${color}`}>{label}</div>
+                                <div className={`text-[9.5px] font-ui uppercase tracking-wider ${color}`}>{label}</div>
                                 <div className="font-display text-[22px] font-semibold text-white mt-1">{value}</div>
-                                <div className="text-[9.5px] font-mono text-muted-lab">
+                                <div className="text-[9.5px] font-num text-muted-lab">
                                     {sevDist.total > 0 ? `${((value / sevDist.total) * 100).toFixed(0)}%` : "—"}
                                 </div>
                             </div>
@@ -200,7 +200,7 @@ export function FailuresOverview({ losers = [], allLosers = [], allTrades = [], 
                         {insights.map((insight, i) => (
                             <div key={i} className="flex items-start gap-2.5">
                                 <Lightbulb className="w-3 h-3 text-[hsl(var(--accent-secondary))] shrink-0 mt-0.5" />
-                                <span className="text-[11px] font-mono text-[hsl(var(--text-2))] leading-relaxed">{insight}</span>
+                                <span className="text-[11px] font-ui text-[hsl(var(--text-2))] leading-relaxed">{insight}</span>
                             </div>
                         ))}
                     </div>

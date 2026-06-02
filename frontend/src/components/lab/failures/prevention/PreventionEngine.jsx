@@ -55,7 +55,7 @@ function PromoteBtn({ ruleKey, rule, promoted, onPromote }) {
             )}
             title={title}
             className={cn(
-                "flex items-center gap-1 px-2 py-1 text-[8.5px] font-mono uppercase tracking-wider border clip-bevel-sm transition-colors whitespace-nowrap",
+                "flex items-center gap-1 px-2 py-1 text-[8.5px] font-ui uppercase tracking-wider border clip-bevel-sm transition-colors whitespace-nowrap",
                 isDone
                     ? "border-[hsl(var(--success)/0.4)] text-[hsl(var(--success))] cursor-default"
                     : isWeak
@@ -113,9 +113,9 @@ export function PreventionEngine({ losers = [], allLosers = [], allTrades = [], 
             key: "losersCaughtPct", label: "Losers %", sortable: true,
             render: r => (
                 <div>
-                    <span className="font-mono text-[hsl(var(--success))]">{r.losersCaughtPct}%</span>
+                    <span className="font-num text-[hsl(var(--success))]">{r.losersCaughtPct}%</span>
                     {r.avgActualLossR != null && (
-                        <div className="text-[9px] font-mono text-muted-lab">avg {r.avgActualLossR}R ea</div>
+                        <div className="text-[9px] font-num text-muted-lab">avg {r.avgActualLossR}R ea</div>
                     )}
                 </div>
             ),
@@ -130,7 +130,7 @@ export function PreventionEngine({ losers = [], allLosers = [], allTrades = [], 
                         {r.winnersRemovedPct}%{r.falsePosWarning ? " ⚠" : ""}
                     </span>
                     {r.avgActualWinR != null && r.winnersRemoved > 0 && (
-                        <div className="text-[9px] font-mono text-muted-lab">avg +{r.avgActualWinR}R ea</div>
+                        <div className="text-[9px] font-num text-muted-lab">avg +{r.avgActualWinR}R ea</div>
                     )}
                 </div>
             ),
@@ -142,11 +142,11 @@ export function PreventionEngine({ losers = [], allLosers = [], allTrades = [], 
                 const val = sortMode === "sevR" ? r.severityNetR : r.netRDelta;
                 return (
                     <div>
-                        <span className={val >= 0 ? "font-mono text-[hsl(var(--success))]" : "font-mono text-[hsl(var(--danger))]"}>
+                        <span className={val >= 0 ? "font-num text-[hsl(var(--success))]" : "font-num text-[hsl(var(--danger))]"}>
                             {val >= 0 ? "+" : ""}{val}R
                         </span>
                         {sortMode !== "sevR" && (
-                            <div className="text-[9px] font-mono text-muted-lab">
+                            <div className="text-[9px] font-num text-muted-lab">
                                 +{r.savedR}R / −{r.sacrificedR}R
                             </div>
                         )}
@@ -161,7 +161,7 @@ export function PreventionEngine({ losers = [], allLosers = [], allTrades = [], 
                 <div className="space-y-0.5">
                     <Pill tone={preventionConfidenceTone(r.confidence)}>{r.confidence}</Pill>
                     {r.avgSeverity != null && (
-                        <div className="text-[9px] font-mono text-muted-lab">sev {r.avgSeverity}</div>
+                        <div className="text-[9px] font-num text-muted-lab">sev {r.avgSeverity}</div>
                     )}
                 </div>
             ),
@@ -179,7 +179,7 @@ export function PreventionEngine({ losers = [], allLosers = [], allTrades = [], 
             {/* Caveat */}
             <div className="border border-[hsl(var(--accent-secondary)/0.3)] bg-[hsl(var(--accent-secondary)/0.04)] clip-bevel p-3 flex items-start gap-2.5">
                 <Info className="w-3.5 h-3.5 text-[hsl(var(--accent-secondary))] shrink-0 mt-0.5" />
-                <p className="text-[10.5px] font-mono text-[hsl(var(--text-2))] leading-relaxed">
+                <p className="text-[10.5px] font-ui text-[hsl(var(--text-2))] leading-relaxed">
                     These are <span className="text-white font-semibold">candidate screens</span>, not proven rules.
                     All metrics are <span className="text-white font-semibold">in-sample</span>.
                     Net R uses actual R values of matched trades — not population averages.
@@ -193,7 +193,7 @@ export function PreventionEngine({ losers = [], allLosers = [], allTrades = [], 
             {speculativeCount > 0 && (
                 <div className="border border-[hsl(var(--danger)/0.3)] bg-[hsl(var(--danger)/0.04)] clip-bevel p-2.5 flex items-center gap-2">
                     <AlertTriangle className="w-3.5 h-3.5 text-[hsl(var(--danger))] shrink-0" />
-                    <p className="text-[10px] font-mono text-[hsl(var(--danger))]">
+                    <p className="text-[10px] font-ui text-[hsl(var(--danger))]">
                         {speculativeCount} rule{speculativeCount !== 1 ? "s" : ""} marked SPECULATIVE
                         — fewer than 5 losses caught. Treat as noise, not signal.
                     </p>
@@ -202,12 +202,12 @@ export function PreventionEngine({ losers = [], allLosers = [], allTrades = [], 
 
             {/* Controls */}
             <div className="flex items-center gap-3 flex-wrap">
-                <span className="text-[10px] font-mono text-muted-lab uppercase tracking-wider">Group:</span>
+                <span className="text-[10px] font-ui text-muted-lab uppercase tracking-wider">Group:</span>
                 <Segment options={groups} value={groupFilter} onChange={setGroupFilter} />
                 <div className="flex items-center gap-2 ml-auto flex-wrap">
-                    <span className="text-[10px] font-mono text-muted-lab">Rank by:</span>
+                    <span className="text-[10px] font-ui text-muted-lab">Rank by:</span>
                     <Segment options={["netR", "sevR"]} value={sortMode} onChange={setSortMode} />
-                    <span className="text-[10px] font-mono text-muted-lab">{displayed.length} rules</span>
+                    <span className="text-[10px] font-num text-muted-lab">{displayed.length} rules</span>
                 </div>
             </div>
 
@@ -225,13 +225,13 @@ export function PreventionEngine({ losers = [], allLosers = [], allTrades = [], 
                     />
                 </NeonPanel>
             ) : (
-                <div className="p-10 text-center text-[10.5px] font-mono text-muted-lab">
+                <div className="p-10 text-center text-[10.5px] font-ui text-muted-lab">
                     No rules matched the current data / group filter.
                 </div>
             )}
 
             {sortMode === "sevR" && (
-                <p className="text-[9.5px] font-mono text-muted-lab px-1 leading-relaxed">
+                <p className="text-[9.5px] font-ui text-muted-lab px-1 leading-relaxed">
                     Severity-weighted Net R: each caught loss is weighted by (1 + severity/10).
                     A CRITICAL loss (sev 8) contributes 1.8× vs an unscored loss (1.0×).
                     Use this ranking to prioritise catching your highest-severity losses.

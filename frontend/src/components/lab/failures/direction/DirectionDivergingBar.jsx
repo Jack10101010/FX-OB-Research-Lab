@@ -10,6 +10,7 @@ import {
 } from "recharts";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { computeDirectionalStats } from "../shared/failuresAnalytics";
+import { CHART_NUM_FONT, CHART_UI_FONT } from "@/lib/chartStyles";
 
 // ── Tooltip ───────────────────────────────────────────────────────────────────
 
@@ -17,7 +18,7 @@ const TT_STYLE = {
     background: "hsl(var(--panel-2))",
     border: "1px solid hsl(var(--border-soft))",
     borderRadius: 2,
-    fontFamily: "JetBrains Mono, monospace",
+    fontFamily: CHART_NUM_FONT,
     fontSize: 10,
     padding: "6px 10px",
 };
@@ -95,7 +96,7 @@ export function DirectionDivergingBar({ allTrades = [] }) {
     return (
         <NeonPanel title="Long vs Short — Metric Comparison">
             <div className="p-4 space-y-3">
-                <p className="text-[10px] font-mono text-[hsl(var(--text-2))] leading-relaxed">
+                <p className="text-[10px] font-ui text-[hsl(var(--text-2))] leading-relaxed">
                     Long bars extend right (green), Short bars extend left (red).
                     Longer bar = worse outcome for that direction on that metric.
                 </p>
@@ -113,14 +114,14 @@ export function DirectionDivergingBar({ allTrades = [] }) {
                             type="number"
                             domain={domain}
                             tickFormatter={v => `${Math.abs(v).toFixed(0)}`}
-                            tick={{ fill: "hsl(var(--muted))", fontFamily: "JetBrains Mono", fontSize: 9 }}
+                            tick={{ fill: "hsl(var(--muted))", fontFamily: CHART_NUM_FONT, fontSize: 9 }}
                             axisLine={false}
                             tickLine={false}
                         />
                         <YAxis
                             type="category"
                             dataKey="metric"
-                            tick={{ fill: "hsl(var(--text-2))", fontFamily: "JetBrains Mono", fontSize: 10 }}
+                            tick={{ fill: "hsl(var(--text-2))", fontFamily: CHART_UI_FONT, fontSize: 10 }}
                             axisLine={false}
                             tickLine={false}
                             width={68}
@@ -133,7 +134,7 @@ export function DirectionDivergingBar({ allTrades = [] }) {
                             <LabelList
                                 dataKey="longRaw"
                                 position="right"
-                                style={{ fill: "hsl(var(--text-2))", fontFamily: "JetBrains Mono", fontSize: 9 }}
+                                style={{ fill: "hsl(var(--text-2))", fontFamily: CHART_NUM_FONT, fontSize: 9 }}
                             />
                         </Bar>
 
@@ -142,7 +143,7 @@ export function DirectionDivergingBar({ allTrades = [] }) {
                             <LabelList
                                 dataKey="shortRaw"
                                 position="left"
-                                style={{ fill: "hsl(var(--text-2))", fontFamily: "JetBrains Mono", fontSize: 9 }}
+                                style={{ fill: "hsl(var(--text-2))", fontFamily: CHART_NUM_FONT, fontSize: 9 }}
                             />
                         </Bar>
                     </BarChart>
@@ -152,13 +153,13 @@ export function DirectionDivergingBar({ allTrades = [] }) {
                 <div className="flex items-center gap-4">
                     <div className="flex items-center gap-1.5">
                         <div className="w-3 h-3" style={{ background: "hsl(var(--success) / 0.6)" }} />
-                        <span className="text-[9.5px] font-mono text-muted-lab">Long ({l?.count ?? 0} trades)</span>
+                        <span className="text-[9.5px] font-ui text-muted-lab">Long ({l?.count ?? 0} trades)</span>
                     </div>
                     <div className="flex items-center gap-1.5">
                         <div className="w-3 h-3" style={{ background: "hsl(var(--danger) / 0.6)" }} />
-                        <span className="text-[9.5px] font-mono text-muted-lab">Short ({s?.count ?? 0} trades)</span>
+                        <span className="text-[9.5px] font-ui text-muted-lab">Short ({s?.count ?? 0} trades)</span>
                     </div>
-                    <span className="text-[9px] font-mono text-muted-lab ml-auto">
+                    <span className="text-[9px] font-ui text-muted-lab ml-auto">
                         Note: Avg Loss and CVaR display magnitude (higher = bigger loss)
                     </span>
                 </div>

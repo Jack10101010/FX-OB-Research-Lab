@@ -20,7 +20,7 @@ function FieldBadge({ label, impact }) {
         ? "border-[hsl(var(--danger)/0.5)] bg-[hsl(var(--danger)/0.06)] text-[hsl(var(--danger))]"
         : "border-[hsl(var(--warning)/0.4)] bg-[hsl(var(--warning)/0.08)] text-[hsl(var(--warning))]";
     return (
-        <span className={cn("inline-flex items-center px-1.5 py-px text-[9.5px] font-mono border clip-bevel-sm", borderCls)}>
+        <span className={cn("inline-flex items-center px-1.5 py-px text-[9.5px] font-ui border clip-bevel-sm", borderCls)}>
             {label}
         </span>
     );
@@ -57,11 +57,11 @@ export function FailuresDataQualityBanner({ trades, className }) {
 
                 <div className="flex-1 min-w-0">
                     {tier0Only ? (
-                        <p className="text-[10.5px] font-mono text-[hsl(var(--warning))] font-semibold uppercase tracking-wider">
+                        <p className="text-[10.5px] font-ui text-[hsl(var(--warning))] font-semibold uppercase tracking-wider">
                             Tier 0 data only — advanced modules unavailable
                         </p>
                     ) : (
-                        <p className="text-[10.5px] font-mono text-[hsl(var(--warning))] font-semibold uppercase tracking-wider">
+                        <p className="text-[10.5px] font-ui text-[hsl(var(--warning))] font-semibold uppercase tracking-wider">
                             Some advanced fields missing
                         </p>
                     )}
@@ -75,7 +75,7 @@ export function FailuresDataQualityBanner({ trades, className }) {
 
                     {/* What's locked */}
                     {uniqueLocked.length > 0 && (
-                        <p className="text-[9.5px] font-mono text-muted-lab mt-1.5">
+                        <p className="text-[9.5px] font-ui text-muted-lab mt-1.5">
                             Locked: {uniqueLocked.join(" · ")}
                             {" · "}
                             <span className="text-[hsl(var(--text-2))]">

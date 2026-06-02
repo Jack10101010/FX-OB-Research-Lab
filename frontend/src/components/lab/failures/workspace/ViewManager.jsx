@@ -103,7 +103,7 @@ export function ViewManager({ losers = [], allLosers = [], filters = {} }) {
             {/* ── CSV Export ─────────────────────────────────────────────────── */}
             <NeonPanel title="CSV Export">
                 <div className="p-4 space-y-3">
-                    <p className="text-[10.5px] font-mono text-[hsl(var(--text-2))] leading-relaxed">
+                    <p className="text-[10.5px] font-ui text-[hsl(var(--text-2))] leading-relaxed">
                         Exports the current cohort ({source.length} failing trades) using the Full Forensic preset —
                         all available columns including archetype, severity score, and severity breakdown.
                         Apply cohort filters before exporting to narrow to specific patterns.
@@ -111,7 +111,7 @@ export function ViewManager({ losers = [], allLosers = [], filters = {} }) {
 
                     {activePills.length > 0 && (
                         <div className="flex flex-wrap gap-1.5 items-center">
-                            <span className="text-[9.5px] font-mono text-muted-lab">Active filters:</span>
+                            <span className="text-[9.5px] font-ui text-muted-lab">Active filters:</span>
                             {activePills.map(p => <Pill key={p.key} tone="primary">{p.label}</Pill>)}
                         </div>
                     )}
@@ -121,13 +121,13 @@ export function ViewManager({ losers = [], allLosers = [], filters = {} }) {
                             type="button"
                             onClick={handleExport}
                             disabled={!source.length}
-                            className="flex items-center gap-2 px-4 py-2 text-[11px] font-mono uppercase tracking-wider border border-[hsl(var(--accent-primary)/0.5)] text-[hsl(var(--accent-primary))] hover:border-[hsl(var(--accent-primary))] hover:bg-[hsl(var(--accent-primary)/0.08)] clip-bevel-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                            className="flex items-center gap-2 px-4 py-2 text-[11px] font-ui uppercase tracking-wider border border-[hsl(var(--accent-primary)/0.5)] text-[hsl(var(--accent-primary))] hover:border-[hsl(var(--accent-primary))] hover:bg-[hsl(var(--accent-primary)/0.08)] clip-bevel-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                             <Download className="w-3.5 h-3.5" />
                             Export {source.length} Losers → CSV
                         </button>
                         {exportMsg && (
-                            <span className="text-[10px] font-mono text-[hsl(var(--success))]">{exportMsg}</span>
+                            <span className="text-[10px] font-ui text-[hsl(var(--success))]">{exportMsg}</span>
                         )}
                     </div>
                 </div>
@@ -136,7 +136,7 @@ export function ViewManager({ losers = [], allLosers = [], filters = {} }) {
             {/* ── Saved forensic views ──────────────────────────────────────── */}
             <NeonPanel title="Saved Forensic Views">
                 <div className="p-4 space-y-4">
-                    <p className="text-[10.5px] font-mono text-[hsl(var(--text-2))] leading-relaxed">
+                    <p className="text-[10.5px] font-ui text-[hsl(var(--text-2))] leading-relaxed">
                         Snapshot the current cohort filter state as a named view. Views persist across
                         page refreshes and record which filters were active and how many trades were in scope.
                     </p>
@@ -153,7 +153,7 @@ export function ViewManager({ losers = [], allLosers = [], filters = {} }) {
                         <button
                             type="button"
                             onClick={handleSave}
-                            className="flex items-center gap-1.5 px-3 py-2 text-[10.5px] font-mono uppercase tracking-wider border border-[hsl(var(--accent-secondary)/0.4)] text-[hsl(var(--accent-secondary))] hover:border-[hsl(var(--accent-secondary))] hover:bg-[hsl(var(--accent-secondary)/0.08)] clip-bevel-sm transition-colors"
+                            className="flex items-center gap-1.5 px-3 py-2 text-[10.5px] font-ui uppercase tracking-wider border border-[hsl(var(--accent-secondary)/0.4)] text-[hsl(var(--accent-secondary))] hover:border-[hsl(var(--accent-secondary))] hover:bg-[hsl(var(--accent-secondary)/0.08)] clip-bevel-sm transition-colors"
                         >
                             <Save className="w-3 h-3" />
                             Save View
@@ -162,7 +162,7 @@ export function ViewManager({ losers = [], allLosers = [], filters = {} }) {
 
                     {/* Saved view list */}
                     {views.length === 0 ? (
-                        <p className="text-[10px] font-mono text-muted-lab">No saved views yet — apply filters and save a cohort above.</p>
+                        <p className="text-[10px] font-ui text-muted-lab">No saved views yet — apply filters and save a cohort above.</p>
                     ) : (
                         <div className="space-y-2">
                             {views.map(view => (
@@ -173,7 +173,7 @@ export function ViewManager({ losers = [], allLosers = [], filters = {} }) {
                                     <Eye className="w-3.5 h-3.5 text-[hsl(var(--accent-primary))] shrink-0 mt-0.5" />
                                     <div className="flex-1 min-w-0 space-y-1.5">
                                         <div className="text-[11.5px] font-medium text-white truncate">{view.name}</div>
-                                        <div className="text-[9.5px] font-mono text-muted-lab">
+                                        <div className="text-[9.5px] font-ui text-muted-lab">
                                             {view.tradeCount} trades · saved {String(view.savedAt).slice(0, 10)}
                                         </div>
                                         {(() => {
@@ -187,7 +187,7 @@ export function ViewManager({ losers = [], allLosers = [], filters = {} }) {
                                                     {pills.map(p => <Pill key={p.key} tone="muted">{p.label}</Pill>)}
                                                 </div>
                                             ) : (
-                                                <div className="text-[9.5px] font-mono text-muted-lab">No filters (all losers)</div>
+                                                <div className="text-[9.5px] font-ui text-muted-lab">No filters (all losers)</div>
                                             );
                                         })()}
                                     </div>
@@ -212,7 +212,7 @@ export function ViewManager({ losers = [], allLosers = [], filters = {} }) {
                     {/* Honesty banner */}
                     <div className="border border-[hsl(var(--warning)/0.3)] bg-[hsl(var(--warning)/0.04)] clip-bevel p-2.5 flex items-start gap-2">
                         <Info className="w-3.5 h-3.5 text-[hsl(var(--warning))] shrink-0 mt-0.5" />
-                        <p className="text-[10px] font-mono text-[hsl(var(--text-2))] leading-relaxed">
+                        <p className="text-[10px] font-ui text-[hsl(var(--text-2))] leading-relaxed">
                             <span className="text-[hsl(var(--warning))] font-semibold">Candidates only — not confirmed false losers.</span>{" "}
                             Definitive detection requires post-stop continuation data
                             (<code className="text-[hsl(var(--accent-secondary))]">mae</code>,{" "}
@@ -223,13 +223,13 @@ export function ViewManager({ losers = [], allLosers = [], filters = {} }) {
                     </div>
 
                     {falseLosserCandidates.length === 0 ? (
-                        <p className="text-[10px] font-mono text-muted-lab">
+                        <p className="text-[10px] font-ui text-muted-lab">
                             No candidates detected in current data. Candidates require: fast stopout (&lt;10 min),
                             marginal OB breach (100–110%), or close-confirmed without full breach.
                         </p>
                     ) : (
                         <>
-                            <p className="text-[10.5px] font-mono text-[hsl(var(--text-2))]">
+                            <p className="text-[10.5px] font-ui text-[hsl(var(--text-2))]">
                                 {falseLosserCandidates.length} trade{falseLosserCandidates.length !== 1 ? "s" : ""} with false loser signals
                                 detected from {allLosers.length} total losses.
                             </p>
@@ -242,22 +242,22 @@ export function ViewManager({ losers = [], allLosers = [], filters = {} }) {
                                     >
                                         <div className="flex items-center gap-2 flex-wrap">
                                             <AlertTriangle className="w-3 h-3 text-[hsl(var(--warning))] shrink-0" />
-                                            <span className="text-[10.5px] font-mono text-white">
+                                            <span className="text-[10.5px] font-code text-white">
                                                 {c.entry ? String(c.entry).slice(0, 16) : "—"}
                                             </span>
                                             <Pill tone={c.direction === "long" ? "success" : c.direction === "short" ? "danger" : "muted"}>
                                                 {c.direction.toUpperCase()}
                                             </Pill>
                                             <Pill tone="muted">{c.session}</Pill>
-                                            <span className="text-[10px] font-mono text-[hsl(var(--danger))]">{c.r.toFixed(2)}R</span>
+                                            <span className="text-[10px] font-num text-[hsl(var(--danger))]">{c.r.toFixed(2)}R</span>
                                             {c.severity != null && (
-                                                <span className="text-[9px] font-mono text-muted-lab">sev {c.severity.toFixed(1)}</span>
+                                                <span className="text-[9px] font-num text-muted-lab">sev {c.severity.toFixed(1)}</span>
                                             )}
                                         </div>
 
                                         <div className="space-y-0.5">
                                             {c.signals.map((sig, si) => (
-                                                <div key={si} className="flex items-start gap-1.5 text-[9.5px] font-mono">
+                                                <div key={si} className="flex items-start gap-1.5 text-[9.5px] font-ui">
                                                     <span className="text-[hsl(var(--accent-secondary))] shrink-0">
                                                         {SIGNAL_TYPE_LABELS[sig.type] ?? sig.type}:
                                                     </span>

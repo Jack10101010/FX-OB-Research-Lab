@@ -24,7 +24,7 @@ import { safeLabel, safeTone } from "../shared/failuresFormatters";
 function RunsTestPanel({ result }) {
     if (!result.valid) {
         return (
-            <div className="p-4 text-[10.5px] font-mono text-muted-lab">{result.reason}</div>
+            <div className="p-4 text-[10.5px] font-ui text-muted-lab">{result.reason}</div>
         );
     }
 
@@ -35,16 +35,16 @@ function RunsTestPanel({ result }) {
         <div className="p-4 space-y-3">
             <div className="grid grid-cols-3 gap-3 text-center">
                 <div>
-                    <div className="text-[9px] font-mono text-muted-lab uppercase tracking-wider">Runs</div>
+                    <div className="text-[9px] font-ui text-muted-lab uppercase tracking-wider">Runs</div>
                     <div className="font-display text-[20px] font-semibold text-white">{result.runs}</div>
-                    <div className="text-[9.5px] font-mono text-muted-lab">exp: {result.expectedRuns}</div>
+                    <div className="text-[9.5px] font-ui text-muted-lab">exp: {result.expectedRuns}</div>
                 </div>
                 <div>
-                    <div className="text-[9px] font-mono text-muted-lab uppercase tracking-wider">Z-Stat</div>
+                    <div className="text-[9px] font-ui text-muted-lab uppercase tracking-wider">Z-Stat</div>
                     <div className="font-display text-[20px] font-semibold text-white">{result.zStat}</div>
                 </div>
                 <div>
-                    <div className="text-[9px] font-mono text-muted-lab uppercase tracking-wider">p-value</div>
+                    <div className="text-[9px] font-ui text-muted-lab uppercase tracking-wider">p-value</div>
                     <div className={`font-display text-[20px] font-semibold ${result.pValue < 0.05 ? "text-[hsl(var(--warning))]" : "text-white"}`}>
                         {result.pValue}
                     </div>
@@ -59,7 +59,7 @@ function RunsTestPanel({ result }) {
                 {result.pValue < 0.05 && <Pill tone="warning">p &lt; 0.05</Pill>}
             </div>
 
-            <p className="text-[10.5px] font-mono text-[hsl(var(--text-2))] leading-relaxed">{result.verdict}</p>
+            <p className="text-[10.5px] font-ui text-[hsl(var(--text-2))] leading-relaxed">{result.verdict}</p>
         </div>
     );
 }
@@ -68,7 +68,7 @@ function RunsTestPanel({ result }) {
 
 function SequencePanel({ dep }) {
     if (!dep) {
-        return <div className="p-4 text-[10.5px] font-mono text-muted-lab">Requires ≥ 4 trades.</div>;
+        return <div className="p-4 text-[10.5px] font-ui text-muted-lab">Requires ≥ 4 trades.</div>;
     }
 
     const { pLossAfterWin, pLossAfterLoss, ratio, interpretation } = dep;
@@ -78,13 +78,13 @@ function SequencePanel({ dep }) {
         <div className="p-4 space-y-3">
             <div className="grid grid-cols-2 gap-3 text-center">
                 <div>
-                    <div className="text-[9px] font-mono text-muted-lab uppercase tracking-wider">P(Loss | Win)</div>
+                    <div className="text-[9px] font-ui text-muted-lab uppercase tracking-wider">P(Loss | Win)</div>
                     <div className="font-display text-[22px] font-semibold text-white tabular-nums">
                         {pLossAfterWin != null ? `${pLossAfterWin}%` : "—"}
                     </div>
                 </div>
                 <div>
-                    <div className="text-[9px] font-mono text-muted-lab uppercase tracking-wider">P(Loss | Loss)</div>
+                    <div className="text-[9px] font-ui text-muted-lab uppercase tracking-wider">P(Loss | Loss)</div>
                     <div className={`font-display text-[22px] font-semibold tabular-nums ${isCluster ? "text-[hsl(var(--warning))]" : "text-white"}`}>
                         {pLossAfterLoss != null ? `${pLossAfterLoss}%` : "—"}
                     </div>
@@ -96,12 +96,12 @@ function SequencePanel({ dep }) {
                     <Pill tone={isCluster ? "warning" : ratio < 0.7 ? "success" : "muted"}>
                         ×{ratio} multiplier
                     </Pill>
-                    <span className="text-[9.5px] font-mono text-muted-lab">after-loss vs after-win loss probability</span>
+                    <span className="text-[9.5px] font-ui text-muted-lab">after-loss vs after-win loss probability</span>
                 </div>
             )}
 
             {interpretation && (
-                <p className="text-[10.5px] font-mono text-[hsl(var(--text-2))] leading-relaxed">{interpretation}</p>
+                <p className="text-[10.5px] font-ui text-[hsl(var(--text-2))] leading-relaxed">{interpretation}</p>
             )}
         </div>
     );
@@ -127,7 +127,7 @@ export function StreakAnalysis({ losers = [], allLosers = [], allTrades = [] }) 
         { key: "length",     label: "Length",  sortable: true },
         {
             key: "totalR", label: "Total R", sortable: true,
-            render: r => <span className="font-mono text-[hsl(var(--danger))]">{r.totalR}R</span>,
+            render: r => <span className="font-num text-[hsl(var(--danger))]">{r.totalR}R</span>,
             sortValue: r => r.totalR,
         },
         {
@@ -203,7 +203,7 @@ export function StreakAnalysis({ losers = [], allLosers = [], allTrades = [] }) 
                             maxHeight="240px"
                         />
                     ) : (
-                        <div className="p-4 text-[10.5px] font-mono text-muted-lab">No losing streaks found.</div>
+                        <div className="p-4 text-[10.5px] font-ui text-muted-lab">No losing streaks found.</div>
                     )}
                 </NeonPanel>
 
@@ -223,7 +223,7 @@ export function StreakAnalysis({ losers = [], allLosers = [], allTrades = [] }) 
             {streakContext.length > 0 && (
                 <NeonPanel title="Streak Context — Session & Direction Breakdown">
                     <div className="p-4 space-y-2">
-                        <p className="text-[10.5px] font-mono text-[hsl(var(--text-2))] leading-relaxed">
+                        <p className="text-[10.5px] font-ui text-[hsl(var(--text-2))] leading-relaxed">
                             What conditions dominated inside each losing streak?
                             Dominated = one session or direction accounted for ≥ 70% of the streak.
                         </p>
@@ -236,9 +236,9 @@ export function StreakAnalysis({ losers = [], allLosers = [], allTrades = [] }) 
                                         onClick={() => setExpandedStreak(prev => prev === zone.rank ? null : zone.rank)}
                                         className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-[hsl(var(--panel))] transition-colors"
                                     >
-                                        <span className="text-[10px] font-mono text-muted-lab w-4 shrink-0">#{zone.rank}</span>
-                                        <span className="text-[11px] font-mono text-white font-medium">{zone.length} losses</span>
-                                        <span className="text-[10px] font-mono text-[hsl(var(--danger))]">{zone.totalR.toFixed(1)}R</span>
+                                        <span className="text-[10px] font-num text-muted-lab w-4 shrink-0">#{zone.rank}</span>
+                                        <span className="text-[11px] font-num text-white font-medium">{zone.length} losses</span>
+                                        <span className="text-[10px] font-num text-[hsl(var(--danger))]">{zone.totalR.toFixed(1)}R</span>
 
                                         {/* Dominant conditions */}
                                         <div className="flex-1 flex flex-wrap gap-1 items-center">
@@ -251,12 +251,12 @@ export function StreakAnalysis({ losers = [], allLosers = [], allTrades = [] }) 
                                                 </Pill>
                                             )}
                                             {!zone.sessionDominated && !zone.directionDominated && (
-                                                <span className="text-[9.5px] font-mono text-muted-lab">Mixed conditions</span>
+                                                <span className="text-[9.5px] font-ui text-muted-lab">Mixed conditions</span>
                                             )}
                                         </div>
 
                                         {zone.avgHourUTC != null && (
-                                            <span className="text-[9.5px] font-mono text-muted-lab shrink-0">
+                                            <span className="text-[9.5px] font-ui text-muted-lab shrink-0">
                                                 avg {String(Math.round(zone.avgHourUTC)).padStart(2, "0")}:00 UTC
                                             </span>
                                         )}
@@ -270,12 +270,12 @@ export function StreakAnalysis({ losers = [], allLosers = [], allTrades = [] }) 
                                     {expandedStreak === zone.rank && (
                                         <div className="px-3 pb-3 pt-1 border-t border-[hsl(var(--border-soft))] grid grid-cols-2 gap-4">
                                             <div>
-                                                <div className="text-[9px] font-mono text-muted-lab uppercase tracking-wider mb-1.5">Sessions</div>
+                                                <div className="text-[9px] font-ui text-muted-lab uppercase tracking-wider mb-1.5">Sessions</div>
                                                 <div className="space-y-0.5">
                                                     {Object.entries(zone.sessions)
                                                         .sort((a, b) => b[1] - a[1])
                                                         .map(([sess, cnt]) => (
-                                                            <div key={sess} className="flex items-center gap-2 text-[10px] font-mono">
+                                                            <div key={sess} className="flex items-center gap-2 text-[10px] font-ui">
                                                                 <span className="text-[hsl(var(--text-2))] w-20 truncate">{sess}</span>
                                                                 <span className="text-white">{cnt}</span>
                                                                 <span className="text-muted-lab">({((cnt / zone.length) * 100).toFixed(0)}%)</span>
@@ -285,12 +285,12 @@ export function StreakAnalysis({ losers = [], allLosers = [], allTrades = [] }) 
                                                 </div>
                                             </div>
                                             <div>
-                                                <div className="text-[9px] font-mono text-muted-lab uppercase tracking-wider mb-1.5">Directions</div>
+                                                <div className="text-[9px] font-ui text-muted-lab uppercase tracking-wider mb-1.5">Directions</div>
                                                 <div className="space-y-0.5">
                                                     {Object.entries(zone.directions)
                                                         .sort((a, b) => b[1] - a[1])
                                                         .map(([dir, cnt]) => (
-                                                            <div key={dir} className="flex items-center gap-2 text-[10px] font-mono">
+                                                            <div key={dir} className="flex items-center gap-2 text-[10px] font-ui">
                                                                 <span className={`w-16 ${dir === "long" ? "text-[hsl(var(--success))]" : dir === "short" ? "text-[hsl(var(--danger))]" : "text-muted-lab"}`}>
                                                                     {dir.toUpperCase()}
                                                                 </span>

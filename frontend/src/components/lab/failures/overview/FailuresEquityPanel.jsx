@@ -18,6 +18,7 @@ import {
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { archetypeColour, archetypeLabel } from "../shared/failuresRegistry";
 import { buildFailuresEquityCurveData } from "../shared/failuresAnalytics";
+import { CHART_NUM_FONT } from "@/lib/chartStyles";
 
 // ── Archetype colour map ──────────────────────────────────────────────────────
 
@@ -57,7 +58,7 @@ const TT_STYLE = {
     background: "hsl(var(--panel-2))",
     border: "1px solid hsl(var(--accent-primary) / 0.3)",
     borderRadius: 2,
-    fontFamily: "JetBrains Mono, monospace",
+    fontFamily: CHART_NUM_FONT,
     fontSize: 11,
     padding: "8px 10px",
 };
@@ -102,12 +103,12 @@ function ArchetypeLegend({ archetypesPresent }) {
         <div className="flex flex-wrap gap-x-3 gap-y-1 px-4 pb-3">
             <div className="flex items-center gap-1.5">
                 <div className="w-2 h-2 rounded-full" style={{ background: WIN_DOT_COLOR, opacity: 0.8 }} />
-                <span className="text-[9.5px] font-mono text-muted-lab">Win</span>
+                <span className="text-[9.5px] font-ui text-muted-lab">Win</span>
             </div>
             {archetypesPresent.map(id => (
                 <div key={id} className="flex items-center gap-1.5">
                     <div className="w-2 h-2 rounded-full" style={{ background: archetypeColour(id) }} />
-                    <span className="text-[9.5px] font-mono text-muted-lab">{archetypeLabel(id)}</span>
+                    <span className="text-[9.5px] font-ui text-muted-lab">{archetypeLabel(id)}</span>
                 </div>
             ))}
         </div>
@@ -190,13 +191,13 @@ export function FailuresEquityPanel({ allTrades = [] }) {
                         domain={[0, curveData.length - 1]}
                         ticks={xTicks}
                         tickFormatter={v => labelMap[v] ?? ""}
-                        tick={{ fill: "hsl(var(--muted))", fontFamily: "JetBrains Mono", fontSize: 9.5 }}
+                        tick={{ fill: "hsl(var(--muted))", fontFamily: CHART_NUM_FONT, fontSize: 9.5 }}
                         axisLine={false}
                         tickLine={false}
                     />
                     <YAxis
                         domain={yDomain}
-                        tick={{ fill: "hsl(var(--muted))", fontFamily: "JetBrains Mono", fontSize: 9.5 }}
+                        tick={{ fill: "hsl(var(--muted))", fontFamily: CHART_NUM_FONT, fontSize: 9.5 }}
                         tickFormatter={v => `${v}R`}
                         axisLine={false}
                         tickLine={false}

@@ -71,36 +71,36 @@ function ArchetypeCard({ archetypeId, stats, total, promoted, onPromote }) {
                 {/* Header */}
                 <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                        <div className="text-[9.5px] font-mono uppercase tracking-[0.16em] text-muted-lab">Archetype</div>
+                        <div className="text-[9.5px] font-ui uppercase tracking-[0.16em] text-muted-lab">Archetype</div>
                         <div className="font-display font-semibold text-[13px] leading-tight mt-0.5 truncate" style={{ color: colour }}>
                             {archetypeLabel(archetypeId)}
                         </div>
                     </div>
                     <div className="text-right shrink-0">
                         <div className="font-display text-[24px] font-semibold text-white leading-none">{stats.count}</div>
-                        <div className="text-[9.5px] font-mono text-muted-lab">{pct}% of losses</div>
+                        <div className="text-[9.5px] font-ui text-muted-lab">{pct}% of losses</div>
                     </div>
                 </div>
 
                 {/* Description */}
-                <p className="text-[10.5px] font-mono text-[hsl(var(--text-2))] leading-relaxed flex-1">{arch.description}</p>
+                <p className="text-[10.5px] font-ui text-[hsl(var(--text-2))] leading-relaxed flex-1">{arch.description}</p>
 
                 {/* Metrics grid */}
                 <div className="grid grid-cols-3 gap-1.5 text-center">
                     <div className="bg-[hsl(var(--panel-2))] clip-bevel-sm p-1.5">
-                        <div className="text-[8.5px] font-mono text-muted-lab uppercase">Avg R</div>
-                        <div className={`font-mono text-[12px] font-semibold ${stats.avgR < 0 ? "text-[hsl(var(--danger))]" : "text-[hsl(var(--success))]"}`}>
+                        <div className="text-[8.5px] font-ui text-muted-lab uppercase">Avg R</div>
+                        <div className={`font-num text-[12px] font-semibold ${stats.avgR < 0 ? "text-[hsl(var(--danger))]" : "text-[hsl(var(--success))]"}`}>
                             {stats.avgR >= 0 ? "+" : ""}{stats.avgR}R
                         </div>
                     </div>
                     <div className="bg-[hsl(var(--panel-2))] clip-bevel-sm p-1.5">
-                        <div className="text-[8.5px] font-mono text-muted-lab uppercase">Avg Sev</div>
-                        <div className="font-mono text-[12px] font-semibold text-white">
+                        <div className="text-[8.5px] font-ui text-muted-lab uppercase">Avg Sev</div>
+                        <div className="font-num text-[12px] font-semibold text-white">
                             {stats.avgSeverity != null ? stats.avgSeverity.toFixed(1) : "—"}
                         </div>
                     </div>
                     <div className="bg-[hsl(var(--panel-2))] clip-bevel-sm p-1.5">
-                        <div className="text-[8.5px] font-mono text-muted-lab uppercase">N</div>
+                        <div className="text-[8.5px] font-ui text-muted-lab uppercase">N</div>
                         <Pill tone={confidenceTone(stats.sampleConfidence)} className="text-[8px] mt-0.5">
                             {safeLabel(stats.sampleConfidence)}
                         </Pill>
@@ -109,11 +109,11 @@ function ArchetypeCard({ archetypeId, stats, total, promoted, onPromote }) {
 
                 {/* Classification confidence + top session */}
                 <div className="flex flex-wrap gap-1.5 items-center">
-                    <span className="text-[9px] font-mono text-muted-lab">Conf:</span>
+                    <span className="text-[9px] font-ui text-muted-lab">Conf:</span>
                     <Pill tone={confidenceTone(topConfTier)}>{confidenceLabel(topConfTier)}</Pill>
                     {topSession && (
                         <>
-                            <span className="text-[9px] font-mono text-muted-lab ml-1">Top:</span>
+                            <span className="text-[9px] font-ui text-muted-lab ml-1">Top:</span>
                             <Pill tone="muted">{topSession}</Pill>
                         </>
                     )}
@@ -123,7 +123,7 @@ function ArchetypeCard({ archetypeId, stats, total, promoted, onPromote }) {
                 <div className="border-t border-[hsl(var(--border-soft))] pt-2.5 space-y-2">
                     <div className="flex items-start gap-1.5">
                         <Lightbulb className="w-3 h-3 text-[hsl(var(--accent-secondary))] shrink-0 mt-0.5" />
-                        <span className="text-[10px] font-mono text-[hsl(var(--text-2))] leading-relaxed">{mainHypo}</span>
+                        <span className="text-[10px] font-ui text-[hsl(var(--text-2))] leading-relaxed">{mainHypo}</span>
                     </div>
                     <button
                         type="button"
@@ -136,7 +136,7 @@ function ArchetypeCard({ archetypeId, stats, total, promoted, onPromote }) {
                             ["failures-lab", archetypeId],
                         )}
                         className={cn(
-                            "w-full flex items-center justify-center gap-1.5 py-1.5 text-[9.5px] font-mono uppercase tracking-wider border clip-bevel-sm transition-colors",
+                            "w-full flex items-center justify-center gap-1.5 py-1.5 text-[9.5px] font-ui uppercase tracking-wider border clip-bevel-sm transition-colors",
                             isPromoted
                                 ? "border-[hsl(var(--success)/0.4)] text-[hsl(var(--success))] bg-[hsl(var(--success)/0.05)] cursor-default"
                                 : stats.count === 0
@@ -173,7 +173,7 @@ export function FailureDNA({ losers = [], allLosers = [], config = {} }) {
     if (!source.length) {
         return (
             <NeonPanel title="DNA & Archetypes" className="m-6">
-                <div className="p-10 text-center text-[11px] font-mono text-muted-lab">No failure data in current cohort</div>
+                <div className="p-10 text-center text-[11px] font-ui text-muted-lab">No failure data in current cohort</div>
             </NeonPanel>
         );
     }
@@ -182,7 +182,7 @@ export function FailureDNA({ losers = [], allLosers = [], config = {} }) {
         <div className="p-6 space-y-4">
             <div>
                 <h2 className="font-display text-[14px] font-semibold text-white">Failure DNA & Archetypes</h2>
-                <p className="text-[10.5px] font-mono text-muted-lab mt-0.5">
+                <p className="text-[10.5px] font-ui text-muted-lab mt-0.5">
                     {source.length} losses classified across {ARCHETYPES.length} archetypes · promote patterns directly to HypothesisLab
                 </p>
             </div>
@@ -203,7 +203,7 @@ export function FailureDNA({ losers = [], allLosers = [], config = {} }) {
                             <div key={arch.id} className="clip-bevel p-[1px] bg-gradient-to-br from-[hsl(var(--border-soft))] to-[hsl(var(--border-soft))] opacity-40">
                                 <div className="clip-bevel bg-[hsl(var(--panel))] p-4">
                                     <div className="font-display text-[12px] text-[hsl(var(--text-2))]">{archetypeLabel(arch.id)}</div>
-                                    <div className="text-[10px] font-mono text-muted-lab mt-1.5">0 instances in cohort</div>
+                                    <div className="text-[10px] font-ui text-muted-lab mt-1.5">0 instances in cohort</div>
                                 </div>
                             </div>
                         )

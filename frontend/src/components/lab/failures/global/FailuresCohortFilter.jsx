@@ -80,12 +80,12 @@ export function FailuresCohortFilter({
 
                 <div className="ml-auto flex items-center gap-2">
                     {hasActiveFilters ? (
-                        <span className="text-[10px] font-mono text-[hsl(var(--text-2))]">
+                        <span className="text-[10px] font-ui text-[hsl(var(--text-2))]">
                             <span className="text-white">{filteredLosers}</span>
                             <span className="text-muted-lab"> / {totalLosers} losers</span>
                         </span>
                     ) : (
-                        <span className="text-[10px] font-mono text-muted-lab">
+                        <span className="text-[10px] font-ui text-muted-lab">
                             {totalLosers} losers
                         </span>
                     )}

@@ -92,16 +92,16 @@ export function SessionFailures({ losers = [], allLosers = [], allTrades = [] })
                         const shortPct = total > 0 ? round1((dirs.short / total) * 100) : null;
                         return (
                             <div key={sess.session} className="bg-[hsl(var(--panel-2))] clip-bevel-sm p-2.5 space-y-1.5">
-                                <div className="text-[10px] font-mono text-[hsl(var(--accent-primary))] uppercase tracking-wider font-semibold">
+                                <div className="text-[10px] font-ui text-[hsl(var(--accent-primary))] uppercase tracking-wider font-semibold">
                                     {sess.session}
                                 </div>
                                 <div className="flex items-center gap-1.5">
-                                    <span className="text-[9.5px] font-mono text-[hsl(var(--success))]">L: {dirs.long}</span>
-                                    {longPct != null && <span className="text-[8.5px] font-mono text-muted-lab">({longPct}%)</span>}
+                                    <span className="text-[9.5px] font-num text-[hsl(var(--success))]">L: {dirs.long}</span>
+                                    {longPct != null && <span className="text-[8.5px] font-num text-muted-lab">({longPct}%)</span>}
                                 </div>
                                 <div className="flex items-center gap-1.5">
-                                    <span className="text-[9.5px] font-mono text-[hsl(var(--danger))]">S: {dirs.short}</span>
-                                    {shortPct != null && <span className="text-[8.5px] font-mono text-muted-lab">({shortPct}%)</span>}
+                                    <span className="text-[9.5px] font-num text-[hsl(var(--danger))]">S: {dirs.short}</span>
+                                    {shortPct != null && <span className="text-[8.5px] font-num text-muted-lab">({shortPct}%)</span>}
                                 </div>
                             </div>
                         );
@@ -115,9 +115,9 @@ export function SessionFailures({ losers = [], allLosers = [], allTrades = [] })
                     <div className="p-3 flex flex-wrap gap-2">
                         {archSummary.map(({ session, archetype, count }) => (
                             <div key={session} className="flex items-center gap-2 px-3 py-1.5 border border-[hsl(var(--border-soft))] clip-bevel-sm">
-                                <span className="text-[10px] font-mono text-[hsl(var(--accent-primary))]">{session}:</span>
+                                <span className="text-[10px] font-ui text-[hsl(var(--accent-primary))]">{session}:</span>
                                 <Pill tone="muted">{archetypeLabel(archetype)}</Pill>
-                                <span className="text-[9.5px] font-mono text-muted-lab">×{count}</span>
+                                <span className="text-[9.5px] font-num text-muted-lab">×{count}</span>
                             </div>
                         ))}
                     </div>

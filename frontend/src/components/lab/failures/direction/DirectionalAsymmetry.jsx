@@ -16,9 +16,9 @@ function Stat({ label, value, sub, danger = false, warning = false }) {
     const cls = danger ? "text-[hsl(var(--danger))]" : warning ? "text-[hsl(var(--warning))]" : "text-white";
     return (
         <div>
-            <div className="text-[9.5px] font-mono text-muted-lab uppercase tracking-wider">{label}</div>
+            <div className="text-[9.5px] font-ui text-muted-lab uppercase tracking-wider">{label}</div>
             <div className={`font-display text-[18px] font-semibold tabular-nums mt-0.5 ${cls}`}>{value}</div>
-            {sub && <div className="text-[9.5px] font-mono text-muted-lab mt-0.5">{sub}</div>}
+            {sub && <div className="text-[9.5px] font-ui text-muted-lab mt-0.5">{sub}</div>}
         </div>
     );
 }
@@ -27,7 +27,7 @@ function DirCard({ label, stat, accentClass }) {
     if (!stat) {
         return (
             <NeonPanel title={label}>
-                <div className="p-4 text-[10.5px] font-mono text-muted-lab">No {label.toLowerCase()} trades in dataset</div>
+                <div className="p-4 text-[10.5px] font-ui text-muted-lab">No {label.toLowerCase()} trades in dataset</div>
             </NeonPanel>
         );
     }
@@ -38,7 +38,7 @@ function DirCard({ label, stat, accentClass }) {
 
     return (
         <NeonPanel title={label} action={
-            <span className={`text-[10px] font-mono ${accentClass}`}>{stat.lossRate}% loss rate</span>
+            <span className={`text-[10px] font-num ${accentClass}`}>{stat.lossRate}% loss rate</span>
         }>
             <div className="p-4 space-y-4">
                 <div className="grid grid-cols-2 gap-3">
@@ -50,24 +50,24 @@ function DirCard({ label, stat, accentClass }) {
                 </div>
 
                 <div className="space-y-1.5">
-                    <div className="text-[9.5px] font-mono text-muted-lab uppercase tracking-wider">Top Archetype</div>
+                    <div className="text-[9.5px] font-ui text-muted-lab uppercase tracking-wider">Top Archetype</div>
                     <Pill tone="muted">{archetypeLabel(stat.topArchetype)}</Pill>
                 </div>
 
                 <div className="space-y-1.5">
-                    <div className="text-[9.5px] font-mono text-muted-lab uppercase tracking-wider">Worst 5 Losses</div>
+                    <div className="text-[9.5px] font-ui text-muted-lab uppercase tracking-wider">Worst 5 Losses</div>
                     <div className="flex flex-wrap gap-1">
                         {stat.worst5.length ? stat.worst5.map((r, i) => (
-                            <span key={i} className="text-[10px] font-mono text-[hsl(var(--danger))] bg-[hsl(var(--danger)/0.08)] border border-[hsl(var(--danger)/0.3)] px-1.5 py-0.5 clip-bevel-sm">
+                            <span key={i} className="text-[10px] font-num text-[hsl(var(--danger))] bg-[hsl(var(--danger)/0.08)] border border-[hsl(var(--danger)/0.3)] px-1.5 py-0.5 clip-bevel-sm">
                                 {r.toFixed(1)}R
                             </span>
-                        )) : <span className="text-muted-lab text-[10px] font-mono">—</span>}
+                        )) : <span className="text-muted-lab text-[10px] font-ui">—</span>}
                     </div>
                 </div>
 
                 <div className="flex items-center gap-2">
                     <Pill tone={confTone}>{safeLabel(stat.sampleConfidence)}</Pill>
-                    <span className="text-[9.5px] font-mono text-muted-lab">n={stat.count}</span>
+                    <span className="text-[9.5px] font-ui text-muted-lab">n={stat.count}</span>
                 </div>
             </div>
         </NeonPanel>
@@ -94,10 +94,10 @@ export function DirectionalAsymmetry({ losers = [], allLosers = [], allTrades = 
                 <div className="border border-[hsl(var(--warning)/0.4)] bg-[hsl(var(--warning)/0.05)] clip-bevel p-3 flex items-start gap-3">
                     <AlertTriangle className="w-4 h-4 text-[hsl(var(--warning))] shrink-0 mt-0.5" />
                     <div>
-                        <span className="text-[hsl(var(--warning))] font-mono text-[11px] font-semibold">
+                        <span className="text-[hsl(var(--warning))] font-ui text-[11px] font-semibold">
                             {worseDir} trades are {asymmetry.toFixed(0)}pp worse
                         </span>
-                        <span className="text-[hsl(var(--text-2))] font-mono text-[10.5px]">
+                        <span className="text-[hsl(var(--text-2))] font-ui text-[10.5px]">
                             {" "}than the opposite direction — material directional asymmetry detected.
                         </span>
                     </div>
@@ -121,10 +121,10 @@ export function DirectionalAsymmetry({ losers = [], allLosers = [], allTrades = 
                             { metric: "Expectancy", longV: `${l.expectancy}R`, shortV: `${s.expectancy}R` },
                         ].map(({ metric, longV, shortV }) => (
                             <div key={metric} className="px-2">
-                                <div className="text-[9px] font-mono uppercase tracking-wider text-muted-lab mb-1">{metric}</div>
-                                <div className="text-[10.5px] font-mono text-[hsl(var(--success))]">{longV}</div>
-                                <div className="text-[9px] font-mono text-muted-lab my-0.5">vs</div>
-                                <div className="text-[10.5px] font-mono text-[hsl(var(--danger))]">{shortV}</div>
+                                <div className="text-[9px] font-ui uppercase tracking-wider text-muted-lab mb-1">{metric}</div>
+                                <div className="text-[10.5px] font-num text-[hsl(var(--success))]">{longV}</div>
+                                <div className="text-[9px] font-ui text-muted-lab my-0.5">vs</div>
+                                <div className="text-[10.5px] font-num text-[hsl(var(--danger))]">{shortV}</div>
                             </div>
                         ))}
                     </div>

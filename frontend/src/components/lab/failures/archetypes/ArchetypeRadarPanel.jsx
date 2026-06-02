@@ -13,6 +13,7 @@ import { Pill } from "@/components/lab/DataTable";
 import { archetypeColour, archetypeLabel, sampleConfidence } from "../shared/failuresRegistry";
 import { buildArchetypeRadarData } from "../shared/failuresAnalytics";
 import { safeLabel, confidenceTone } from "../shared/failuresFormatters";
+import { CHART_NUM_FONT, CHART_UI_FONT } from "@/lib/chartStyles";
 
 // ── Tooltip ───────────────────────────────────────────────────────────────────
 
@@ -20,7 +21,7 @@ const TT_STYLE = {
     background: "hsl(var(--panel-2))",
     border: "1px solid hsl(var(--border-soft))",
     borderRadius: 2,
-    fontFamily: "JetBrains Mono, monospace",
+    fontFamily: CHART_NUM_FONT,
     fontSize: 10,
     padding: "6px 10px",
 };
@@ -59,14 +60,14 @@ function RadarCard({ data, total }) {
                 {/* Header */}
                 <div className="flex items-start justify-between gap-2">
                     <div>
-                        <div className="text-[9px] font-mono text-muted-lab uppercase tracking-wider">Fingerprint</div>
+                        <div className="text-[9px] font-ui text-muted-lab uppercase tracking-wider">Fingerprint</div>
                         <div className="font-display font-semibold text-[12px] leading-snug" style={{ color: colour }}>
                             {label}
                         </div>
                     </div>
                     <div className="text-right">
                         <div className="font-display text-[20px] font-semibold text-white leading-none">{count}</div>
-                        <div className="text-[9px] font-mono text-muted-lab">{pct}%</div>
+                        <div className="text-[9px] font-num text-muted-lab">{pct}%</div>
                     </div>
                 </div>
 
@@ -84,7 +85,7 @@ function RadarCard({ data, total }) {
                             tick={{
                                 fill: "hsl(var(--muted))",
                                 fontSize: 8.5,
-                                fontFamily: "JetBrains Mono, monospace",
+                                fontFamily: CHART_UI_FONT,
                             }}
                         />
                         <PolarRadiusAxis
@@ -108,7 +109,7 @@ function RadarCard({ data, total }) {
                 {/* Axis summary */}
                 <div className="space-y-0.5">
                     {axes.map(a => (
-                        <div key={a.axis} className="flex items-center gap-2 text-[9px] font-mono">
+                        <div key={a.axis} className="flex items-center gap-2 text-[9px] font-ui">
                             <span className="text-muted-lab w-24 shrink-0">{a.axis}</span>
                             <div className="flex-1 h-1 bg-[hsl(var(--panel-2))] rounded-full overflow-hidden">
                                 <div
@@ -143,7 +144,7 @@ export function ArchetypeRadarPanel({ losers = [], allLosers = [] }) {
     return (
         <NeonPanel title="Archetype Fingerprints" tone="secondary">
             <div className="p-4">
-                <p className="text-[10px] font-mono text-[hsl(var(--text-2))] mb-4 leading-relaxed">
+                <p className="text-[10px] font-ui text-[hsl(var(--text-2))] mb-4 leading-relaxed">
                     Radar fingerprint per archetype across five dimensions: severity score, R magnitude,
                     session concentration, directional skew, and frequency. All axes normalised 0–100.
                 </p>

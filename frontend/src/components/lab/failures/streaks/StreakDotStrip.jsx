@@ -8,6 +8,7 @@ import React, { useMemo, useState, useRef } from "react";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { archetypeColour, archetypeLabel } from "../shared/failuresRegistry";
 import { buildTradeDotStrip } from "../shared/failuresAnalytics";
+import { CHART_NUM_FONT } from "@/lib/chartStyles";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -41,7 +42,7 @@ function DotTooltip({ dot, x, y, containerRef }) {
         border: "1px solid hsl(var(--accent-primary) / 0.3)",
         borderRadius: 2,
         padding: "6px 10px",
-        fontFamily: "JetBrains Mono, monospace",
+        fontFamily: CHART_NUM_FONT,
         fontSize: 10,
         minWidth: 140,
         whiteSpace: "nowrap",
@@ -111,7 +112,7 @@ export function StreakDotStrip({ allTrades = [] }) {
     return (
         <NeonPanel title="Trade Sequence Strip">
             <div ref={containerRef} className="relative px-4 pb-4 pt-3 overflow-x-auto">
-                <p className="text-[9.5px] font-mono text-muted-lab mb-2">
+                <p className="text-[9.5px] font-ui text-muted-lab mb-2">
                     {n} trades chronologically. Loss dots rise and grow with streak depth. Hover for details.
                 </p>
 
@@ -186,15 +187,15 @@ export function StreakDotStrip({ allTrades = [] }) {
                 <div className="flex gap-4 mt-2">
                     <div className="flex items-center gap-1.5">
                         <div className="w-2 h-2 rounded-full opacity-55" style={{ background: WIN_COLOR }} />
-                        <span className="text-[9px] font-mono text-muted-lab">Win</span>
+                        <span className="text-[9px] font-ui text-muted-lab">Win</span>
                     </div>
                     <div className="flex items-center gap-1.5">
                         <div className="w-2.5 h-2.5 rounded-full" style={{ background: "hsl(var(--danger) / 0.7)" }} />
-                        <span className="text-[9px] font-mono text-muted-lab">Loss (archetype-coloured)</span>
+                        <span className="text-[9px] font-ui text-muted-lab">Loss (archetype-coloured)</span>
                     </div>
                     <div className="flex items-center gap-1.5">
                         <div className="w-2 h-4 rounded-sm opacity-10" style={{ background: "hsl(var(--danger))" }} />
-                        <span className="text-[9px] font-mono text-muted-lab">Streak zone</span>
+                        <span className="text-[9px] font-ui text-muted-lab">Streak zone</span>
                     </div>
                 </div>
 

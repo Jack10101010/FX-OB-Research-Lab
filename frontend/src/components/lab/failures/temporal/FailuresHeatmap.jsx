@@ -64,7 +64,7 @@ export function FailuresHeatmap({ allTrades = [] }) {
                             <div
                                 key={h}
                                 style={{ width: CELL_W, flexShrink: 0 }}
-                                className="text-center text-[8.5px] font-mono text-muted-lab pb-1.5"
+                                className="text-center text-[8.5px] font-ui text-muted-lab pb-1.5"
                             >
                                 {String(h).padStart(2, "0")}
                             </div>
@@ -79,7 +79,7 @@ export function FailuresHeatmap({ allTrades = [] }) {
                             {/* Day label */}
                             <div
                                 style={{ width: 36, flexShrink: 0 }}
-                                className="text-[9px] font-mono text-muted-lab pr-1.5 text-right"
+                                className="text-[9px] font-ui text-muted-lab pr-1.5 text-right"
                             >
                                 {dayLabel}
                             </div>
@@ -115,7 +115,7 @@ export function FailuresHeatmap({ allTrades = [] }) {
                                         {hasData && (
                                             <span
                                                 style={{ color: cellTextColor(lossRate, hasData) }}
-                                                className="text-[8.5px] font-mono tabular-nums leading-none select-none"
+                                                className="text-[8.5px] font-num tabular-nums leading-none select-none"
                                             >
                                                 {lossRate}%
                                             </span>
@@ -129,7 +129,7 @@ export function FailuresHeatmap({ allTrades = [] }) {
 
                 {/* Colour scale legend */}
                 <div className="flex items-center gap-3 mt-3 pt-2 border-t border-[hsl(var(--border-soft))]">
-                    <span className="text-[9px] font-mono text-muted-lab">Loss rate:</span>
+                    <span className="text-[9px] font-ui text-muted-lab">Loss rate:</span>
                     {[
                         { label: "0%",   bg: cellBg(0, true)  },
                         { label: "<20%", bg: cellBg(15, true)  },
@@ -140,15 +140,15 @@ export function FailuresHeatmap({ allTrades = [] }) {
                     ].map(({ label, bg }) => (
                         <div key={label} className="flex items-center gap-1">
                             <div className="w-3 h-3 clip-bevel-sm" style={{ background: bg }} />
-                            <span className="text-[8.5px] font-mono text-muted-lab">{label}</span>
+                            <span className="text-[8.5px] font-ui text-muted-lab">{label}</span>
                         </div>
                     ))}
-                    <span className="text-[9px] font-mono text-muted-lab ml-auto">UTC hours</span>
+                    <span className="text-[9px] font-ui text-muted-lab ml-auto">UTC hours</span>
                 </div>
 
                 {/* Hover tooltip */}
                 {tooltip && (
-                    <div className="mt-2 px-3 py-2 border border-[hsl(var(--accent-primary)/0.3)] clip-bevel-sm bg-[hsl(var(--panel-2))] text-[10.5px] font-mono">
+                    <div className="mt-2 px-3 py-2 border border-[hsl(var(--accent-primary)/0.3)] clip-bevel-sm bg-[hsl(var(--panel-2))] text-[10.5px] font-ui">
                         <span className="text-white font-semibold">{tooltip.dayLabel} {String(tooltip.h).padStart(2,"0")}:00 UTC</span>
                         <span className="text-muted-lab ml-3">{tooltip.cell.lossCount} losses / {tooltip.cell.totalCount} trades</span>
                         <span className="ml-3" style={{ color: cellTextColor(tooltip.cell.lossRate, true) }}>

@@ -42,7 +42,7 @@ function NoDataState() {
             </div>
             <div>
                 <p className="font-display text-[15px] text-white">No trade data loaded</p>
-                <p className="text-[11px] font-mono text-[hsl(var(--text-2))] mt-1.5 max-w-xs leading-relaxed">
+                <p className="text-[11px] font-ui text-[hsl(var(--text-2))] mt-1.5 max-w-xs leading-relaxed">
                     Import a backtest run from the Projects page to begin your failure forensics session.
                 </p>
             </div>

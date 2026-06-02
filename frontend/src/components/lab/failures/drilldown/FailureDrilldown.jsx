@@ -42,39 +42,39 @@ function DetailPanel({ row }) {
 
     return (
         <div className="mx-6 mb-4 border border-[hsl(var(--border-soft))] clip-bevel bg-[hsl(var(--panel-2))] p-4 space-y-3">
-            <div className="text-[9.5px] font-mono uppercase tracking-[0.16em] text-muted-lab">
+            <div className="text-[9.5px] font-ui uppercase tracking-[0.16em] text-muted-lab">
                 Trade {String(row.id).slice(0, 16)} — Detail
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 <div>
-                    <div className="text-[9px] font-mono text-muted-lab uppercase tracking-wider mb-1">Archetype</div>
+                    <div className="text-[9px] font-ui text-muted-lab uppercase tracking-wider mb-1">Archetype</div>
                     <Pill tone={archetypeTone(row.archetype)}>{archetypeLabel(row.archetype)}</Pill>
                 </div>
                 <div>
-                    <div className="text-[9px] font-mono text-muted-lab uppercase tracking-wider mb-1">Classifier Confidence</div>
+                    <div className="text-[9px] font-ui text-muted-lab uppercase tracking-wider mb-1">Classifier Confidence</div>
                     <Pill tone={confidenceTone(row.confidence)}>{confidenceLabel(row.confidence)}</Pill>
                 </div>
                 <div>
-                    <div className="text-[9px] font-mono text-muted-lab uppercase tracking-wider mb-1">Severity</div>
+                    <div className="text-[9px] font-ui text-muted-lab uppercase tracking-wider mb-1">Severity</div>
                     {row.severity != null
                         ? <Pill tone={severityTone(row.severity)}>{severityLabel(row.severity)} · {row.severity.toFixed(1)}</Pill>
                         : <Pill tone="muted">—</Pill>
                     }
                 </div>
                 <div>
-                    <div className="text-[9px] font-mono text-muted-lab uppercase tracking-wider mb-1">Duration</div>
-                    <div className="text-[11px] font-mono text-white">{fmtDuration(durMins)}</div>
+                    <div className="text-[9px] font-ui text-muted-lab uppercase tracking-wider mb-1">Duration</div>
+                    <div className="text-[11px] font-num text-white">{fmtDuration(durMins)}</div>
                 </div>
                 {matchedCriteria.length > 0 && (
                     <div className="col-span-2">
-                        <div className="text-[9px] font-mono text-muted-lab uppercase tracking-wider mb-1">Matched Criteria</div>
-                        <div className="text-[10.5px] font-mono text-[hsl(var(--text-2))]">{matchedCriteria.join(", ")}</div>
+                        <div className="text-[9px] font-ui text-muted-lab uppercase tracking-wider mb-1">Matched Criteria</div>
+                        <div className="text-[10.5px] font-ui text-[hsl(var(--text-2))]">{matchedCriteria.join(", ")}</div>
                     </div>
                 )}
                 {manualTag && (
                     <div>
-                        <div className="text-[9px] font-mono text-muted-lab uppercase tracking-wider mb-1">Manual Tag</div>
+                        <div className="text-[9px] font-ui text-muted-lab uppercase tracking-wider mb-1">Manual Tag</div>
                         <Pill tone="secondary">{manualTag}</Pill>
                     </div>
                 )}
@@ -83,10 +83,10 @@ function DetailPanel({ row }) {
             {/* Severity breakdown */}
             {sevComp && (
                 <div>
-                    <div className="text-[9px] font-mono text-muted-lab uppercase tracking-wider mb-1.5">Severity Components</div>
+                    <div className="text-[9px] font-ui text-muted-lab uppercase tracking-wider mb-1.5">Severity Components</div>
                     <div className="flex flex-wrap gap-2">
                         {Object.entries(sevComp).map(([k, v]) => (
-                            <span key={k} className="text-[9.5px] font-mono px-2 py-0.5 border border-[hsl(var(--border-soft))] clip-bevel-sm text-[hsl(var(--text-2))] bg-[hsl(var(--panel))]">
+                            <span key={k} className="text-[9.5px] font-ui px-2 py-0.5 border border-[hsl(var(--border-soft))] clip-bevel-sm text-[hsl(var(--text-2))] bg-[hsl(var(--panel))]">
                                 {k}: <span className="text-white font-semibold">{v}</span>
                             </span>
                         ))}
@@ -97,8 +97,8 @@ function DetailPanel({ row }) {
             {/* Manual note */}
             {manualNote && (
                 <div>
-                    <div className="text-[9px] font-mono text-muted-lab uppercase tracking-wider mb-1">Note</div>
-                    <p className="text-[10.5px] font-mono text-[hsl(var(--text-2))] leading-relaxed">{manualNote}</p>
+                    <div className="text-[9px] font-ui text-muted-lab uppercase tracking-wider mb-1">Note</div>
+                    <p className="text-[10.5px] font-ui text-[hsl(var(--text-2))] leading-relaxed">{manualNote}</p>
                 </div>
             )}
         </div>
@@ -142,7 +142,7 @@ export function FailureDrilldown({ losers = [], allLosers = [] }) {
     const columns = [
         {
             key: "id", label: "ID", sortable: false,
-            render: r => <span className="font-mono text-[9.5px] text-muted-lab">{String(r.id).slice(0, 12)}</span>,
+            render: r => <span className="font-code text-[9.5px] text-muted-lab">{String(r.id).slice(0, 12)}</span>,
         },
         { key: "datetime", label: "Date / Time", sortable: false },
         {
@@ -204,7 +204,7 @@ export function FailureDrilldown({ losers = [], allLosers = [] }) {
                     onChange={e => setSearch(e.target.value)}
                     className="flex-1 max-w-md"
                 />
-                <span className="text-[10px] font-mono text-muted-lab shrink-0">
+                <span className="text-[10px] font-num text-muted-lab shrink-0">
                     {filtered.length} / {rows.length} trades
                 </span>
             </div>
