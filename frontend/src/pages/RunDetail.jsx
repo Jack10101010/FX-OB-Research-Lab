@@ -22,7 +22,7 @@ import {
     normalizeFundingChallengeSettings,
     simulateFundingChallenge,
 } from "@/components/lab/account/fundingChallenge";
-import { FolderKanban, Map as MapIcon, GitCompareArrows, TrendingUp, Hash, Activity, Target, AlertTriangle, ShieldCheck, Edit3 } from "lucide-react";
+import { FolderKanban, Map as MapIcon, GitCompareArrows, TrendingUp, Hash, Activity, Target, AlertTriangle, ShieldCheck, Edit3, ChevronDown } from "lucide-react";
 import { BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import {
     isPerformanceTrade,
@@ -34,7 +34,7 @@ import {
 import { TradeSanityStrip } from "@/components/lab/TradeSanityStrip";
 // RW-2: scenario-aware result-view selector (display-only; analytics wired in RW-3).
 import { useTradeUniverse } from "@/data/useTradeUniverse";
-import { buildAvailableOptions, collectAllEntryKeys } from "@/data/tradeUniverse";
+import { buildAvailableOptions, collectAllEntryKeys, entryTradesByMode, buildCanonicalKey } from "@/data/tradeUniverse";
 
 // RB-8a/8b: account config lives in the global store (state.accountSettings),
 // read/written via useResultsLens (lens.accountSettings / lens.setAccountSettings)
@@ -267,10 +267,15 @@ export default function RunDetail() {
                 : String(family).replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
             (thresholdsByFamily[family] || []).forEach((threshold) => {
                 const ftKey = `${family}::${threshold}`;
-                (fillModesByFamilyThreshold[ftKey] || []).forEach((fillMode) => {
+                const ftModes = fillModesByFamilyThreshold[ftKey] || [];
+                // Track which fill modes already have an explicit option so we
+                // do not create duplicates when injecting virtual Same/Next below.
+                const ftModeSet = new Set(ftModes);
+                ftModes.forEach((fillMode) => {
                     const threshStr = threshold != null ? ` ${threshold}%` : "";
-                    const fillStr = fillMode === "next" ? " · Next"
-                        : fillMode === "same" ? " · Same"
+                    // RW-9: expanded labels for candle-fill clarity.
+                    const fillStr = fillMode === "next" ? " · Next candle"
+                        : fillMode === "same" ? " · Same candle"
                         : fillMode === "both" ? " · Both"
                         : "";
                     views.push({
@@ -280,6 +285,43 @@ export default function RunDetail() {
                         threshold,
                         fillMode: fillMode === "both" ? null : (fillMode || null),
                     });
+
+                    // RW-9: when a bare/combined option exists ("both"), inject virtual
+                    // "Same candle" and "Next candle" options immediately after so the
+                    // user can inspect each fill mode explicitly. selectTrades already
+                    // handles this split via `filled_on_trigger_candle` filtering — we
+                    // only need to confirm the combined pool has that field populated,
+                    // and that explicit _same/_next keys don't already cover the mode.
+                    if (fillMode === "both") {
+                        const bareKey = buildCanonicalKey(family, threshold, null);
+                        const combinedPool = entryTradesByMode(runData || {})[bareKey] || [];
+                        const hasSplitData = combinedPool.some(
+                            (t) => t.filled_on_trigger_candle !== undefined
+                                || t.filledOnTriggerCandle !== undefined,
+                        );
+                        if (hasSplitData) {
+                            if (!ftModeSet.has("same")) {
+                                views.push({
+                                    key: `${family}_${threshold}_same`,
+                                    label: `${familyLabel}${threshStr} · Same candle`,
+                                    family,
+                                    threshold,
+                                    fillMode: "same",
+                                    fromCombinedPool: true,
+                                });
+                            }
+                            if (!ftModeSet.has("next")) {
+                                views.push({
+                                    key: `${family}_${threshold}_next`,
+                                    label: `${familyLabel}${threshStr} · Next candle`,
+                                    family,
+                                    threshold,
+                                    fillMode: "next",
+                                    fromCombinedPool: true,
+                                });
+                            }
+                        }
+                    }
                 });
             });
         });
@@ -352,6 +394,7 @@ export default function RunDetail() {
     const [activeResultsTab,      setActiveResultsTab]      = React.useState("config");
     const [resultsLayoutMode,     setResultsLayoutMode]     = React.useState("tabbed");
     const [runDetailSettingsOpen, setRunDetailSettingsOpen] = React.useState(false);
+    const [accountViewOpen, setAccountViewOpen] = React.useState(false);
     // RB-8a/8b: account config is the single store slice, read via the lens.
     const accountSettings = lens.accountSettings;
     const [fundingSettings, setFundingSettings] = React.useState(loadFundingChallengeSettings);
@@ -365,9 +408,9 @@ export default function RunDetail() {
     }, [fundingSettings]);
     const accountModeEnabled = accountSettings.mode !== "r_only";
     const accountModeOptions = [
-        { value: "fixed_dollar", label: "Fixed dollar risk" },
-        { value: "initial_equity_pct", label: "% of initial balance" },
         { value: "current_equity_pct", label: "% of current equity" },
+        { value: "initial_equity_pct", label: "% of initial balance" },
+        { value: "fixed_dollar", label: "Fixed dollar risk" },
     ];
     const patchAccountSettings = React.useCallback((patch) => {
         lens.setAccountSettings(patch); // store normalizes, merges, persists, notifies
@@ -428,7 +471,7 @@ export default function RunDetail() {
 
     // displayTrades is now a direct alias for tradesForRun. It is kept so that
     // existing analytics memos (MONTHLY, R_DIST_V2, filteredLedgerRows, etc.)
-    // require no renaming. isScenarioView is kept for the banner / noTrades check.
+    // require no renaming. isScenarioView is kept for the active banner and scope chip.
     const isScenarioView = Boolean(resultView?.family && resultView.family !== "baseline");
     const displayTrades = tradesForRun;
 
@@ -1221,6 +1264,25 @@ export default function RunDetail() {
 
             <RunConfigStrip run={runData} />
 
+            {/* Research context notice — shown only when a non-baseline Result View
+                is selected. Makes clear that the project comparison strip (deltaRows)
+                still uses the raw baseline run data, even though page analytics have
+                switched to the scenario. deltaRows intentionally stays on runData.trades
+                because it compares run configuration/parameters against a reference run,
+                not the entry model scenario. */}
+            {isScenarioView && (
+                <div className={[
+                    "px-6 mb-1 text-[10.5px] font-ui leading-relaxed",
+                    hasSelectedUniverseTrades
+                        ? "text-[hsl(var(--text-2))]"
+                        : "text-[hsl(var(--warning))]",
+                ].join(" ")}>
+                    {hasSelectedUniverseTrades
+                        ? `Research context: page analytics are viewing ${universe?.label || resultView?.family}. Project comparison strip still uses baseline/reference run data.`
+                        : "Research context: selected scenario is unavailable, so page analytics and comparison context are using baseline fallback data."}
+                </div>
+            )}
+
             <ResearchStrip
                 project={linkedProject}
                 projectId={projectId}
@@ -1232,66 +1294,115 @@ export default function RunDetail() {
                 runs={RUNS}
             />
 
-            {/* Scope chip — surfaces the active variant, Results Basis, and
-                Account View. See scopeChip derivation above. */}
+            {/* Result View + Scope — single compact bar replacing the old
+                separate scope-chip div and ResultViewSelector panel. */}
             <div className="px-6 mb-2">
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 py-0.5 text-[10.5px] opacity-75">
-                    {scopeChip.isIndexOnly ? (
-                        <ScopeRow label="Status">
-                            <Pill tone="warning">Index-only metadata</Pill>
-                        </ScopeRow>
-                    ) : (
-                        <>
-                            <ScopeRow label="Universe">
-                                {isScenarioView && universe?.universeType === "scenario" ? (
-                                    <Pill tone="success">
-                                        {resultViewOptions.find(
-                                            (o) => o.family === resultView?.family
-                                                && o.threshold === resultView?.threshold
-                                                && (o.fillMode ?? null) === (resultView?.fillMode ?? null),
-                                        )?.label || "Scenario view"}
-                                    </Pill>
-                                ) : (
-                                    <Pill tone="primary">Baseline reference</Pill>
-                                )}
-                            </ScopeRow>
+                {scopeChip.isIndexOnly ? (
+                    <div className="flex items-center gap-1.5 px-1 py-0.5">
+                        <ScopeRow label="Status"><Pill tone="warning">Index-only metadata</Pill></ScopeRow>
+                    </div>
+                ) : (
+                    <>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                            {/* Result view pills (only when scenarios exist) */}
+                            {resultViewOptions.length > 1 && resultViewOptions.map((opt) => {
+                                const isActive = opt.family === "baseline"
+                                    ? (!resultView?.family || resultView.family === "baseline")
+                                    : (resultView?.family === opt.family
+                                        && resultView?.threshold === opt.threshold
+                                        && resultView?.fillMode === opt.fillMode);
+                                return (
+                                    <button
+                                        key={opt.key}
+                                        type="button"
+                                        title={opt.fromCombinedPool ? "Split from combined trigger pool" : undefined}
+                                        onClick={() => setResultView({ family: opt.family, threshold: opt.threshold, fillMode: opt.fillMode })}
+                                        className={[
+                                            "px-2 py-[2px] text-[11px] font-ui tracking-[0.02em]",
+                                            "border clip-bevel-sm transition-colors select-none whitespace-nowrap",
+                                            isActive
+                                                ? "bg-[hsl(var(--accent-primary)/0.15)] border-[hsl(var(--accent-primary)/0.55)] text-[hsl(var(--accent-primary))]"
+                                                : "bg-transparent border-[hsl(var(--border-soft))] text-[hsl(var(--text-muted))] hover:border-[hsl(var(--accent-primary)/0.4)] hover:text-[hsl(var(--text-base))]",
+                                        ].join(" ")}
+                                    >
+                                        {opt.label}
+                                    </button>
+                                );
+                            })}
+                            {/* Divider before scope metadata */}
+                            {resultViewOptions.length > 1 && (
+                                <span className="w-px h-3 bg-[hsl(var(--border-soft)/0.6)] mx-0.5 shrink-0" />
+                            )}
+                            {/* Scope metadata — compact inline chips */}
                             <ScopeRow label="Variant">
-                                <Pill tone="muted">{scopeChip.variantLabel || "Primary variant"}</Pill>
+                                <Pill tone="muted">{scopeChip.variantLabel || "Primary"}</Pill>
                             </ScopeRow>
-                            <ScopeRow label="Results Basis">
+                            <ScopeRow label="Basis">
                                 <Pill tone="muted">{scopeChip.globalBasisLabel}</Pill>
-                                <span className="text-[10px] text-muted-lab">global default</span>
                             </ScopeRow>
-                            <ScopeRow label="Account View">
+                            <ScopeRow label="Account">
                                 <Pill tone={scopeChip.accountSimulation ? "secondary" : "muted"}>
-                                    {scopeChip.accountSimulation ? "Account simulation" : "R · source of truth"}
+                                    {scopeChip.accountSimulation ? "Sim" : "R"}
                                 </Pill>
                                 {scopeChip.accountViewSub && (
-                                    <span className="text-[10px] text-muted-lab">{scopeChip.accountViewSub}</span>
+                                    <span className="text-[9.5px] text-muted-lab opacity-70">{scopeChip.accountViewSub}</span>
                                 )}
                             </ScopeRow>
-                        </>
-                    )}
-                </div>
+                            {/* Scenario trade count */}
+                            {isScenarioView && universe?.trades && (
+                                <span className="text-[9.5px] text-muted-lab opacity-55 ml-1">
+                                    {universe.trades.length} trades
+                                </span>
+                            )}
+                        </div>
+                        {/* RW-9: note when Same/Next candle options are derived from a combined
+                            trigger pool rather than from explicit _same/_next export keys. */}
+                        {resultViewOptions.some((o) => o.fromCombinedPool) && (
+                            <div className="mt-0.5 text-[9px] font-ui text-[hsl(var(--text-muted))] opacity-55">
+                                Same/Next split from combined trigger pool.
+                            </div>
+                        )}
+                        {/* Baseline parity audit — dev only, renders on baseline path where
+                            baselineParityAudit is non-null. Hidden in production and on any
+                            scenario view (isScenarioView is mutually exclusive with non-null audit). */}
+                        {process.env.NODE_ENV !== "production" && !isScenarioView && baselineParityAudit && (
+                            <div className={[
+                                "mt-1 text-[9.5px] font-ui",
+                                baselineParityAudit.match
+                                    ? "text-[hsl(var(--text-muted))] opacity-60"
+                                    : "text-[hsl(var(--warning))]",
+                            ].join(" ")}>
+                                Parity: {baselineParityAudit.match ? "✓ verified" : "⚠ mismatch"}
+                                {" "}· legacy {baselineParityAudit.legacyCount} / universe {baselineParityAudit.universeCount}
+                            </div>
+                        )}
+                        {/* Scenario warnings — only when present */}
+                        {isScenarioView && (() => {
+                            const warnings = (universe?.warnings || []).filter(
+                                (w) => w?.code === "FILL_MODE_COERCED" || w?.code === "BOTH_UNAVAILABLE_NO_COMBINED",
+                            );
+                            return warnings.length > 0 ? (
+                                <div className="flex flex-wrap gap-1.5 mt-1">
+                                    {warnings.map((w) => (
+                                        <span
+                                            key={w.code}
+                                            className={[
+                                                "px-1.5 py-0.5 text-[9.5px] border clip-bevel-sm",
+                                                w.code === "FILL_MODE_COERCED"
+                                                    ? "border-[hsl(var(--accent-secondary)/0.45)] text-[hsl(var(--accent-secondary))]"
+                                                    : "border-[hsl(var(--warning)/0.45)] text-[hsl(var(--warning))]",
+                                            ].join(" ")}
+                                            title={w.code}
+                                        >
+                                            {w.message}
+                                        </span>
+                                    ))}
+                                </div>
+                            ) : null;
+                        })()}
+                    </>
+                )}
             </div>
-
-            {/* Result View selector — lets the user switch between the baseline
-                reference and any entry-model scenario. tradesForRun (and therefore
-                all KPI / equity / monthly / R-dist / ledger / account sections)
-                reflects whichever result view is currently selected. */}
-            {!scopeChip.isIndexOnly && (
-                <ResultViewSelector
-                    options={resultViewOptions}
-                    resultView={resultView}
-                    universe={universe}
-                    baselineParityAudit={baselineParityAudit}
-                    onSelect={(opt) => setResultView({
-                        family: opt.family,
-                        threshold: opt.threshold,
-                        fillMode: opt.fillMode,
-                    })}
-                />
-            )}
 
             {/* Active Result View banner — only shown when a non-baseline view is
                 selected. Gives the user a persistent reminder that analytics are
@@ -1306,36 +1417,36 @@ export default function RunDetail() {
                     ].join(" ")}>
                         {hasSelectedUniverseTrades ? (
                             <>
-                                <span className="text-[9px] font-ui uppercase tracking-widest text-[hsl(var(--accent-primary)/0.8)]">
+                                <span className="text-[9px] font-ui uppercase tracking-[0.08em] text-[hsl(var(--accent-primary)/0.8)]">
                                     Viewing
                                 </span>
                                 <span className="font-ui text-[10.5px] font-semibold text-[hsl(var(--accent-primary))]">
                                     {universe?.label || resultView?.family}
                                 </span>
                                 <span className="inline-flex items-baseline gap-1.5">
-                                    <span className="text-[9px] font-ui uppercase tracking-widest text-muted-lab">Trades</span>
+                                    <span className="text-[9px] font-ui uppercase tracking-[0.08em] text-muted-lab">Trades</span>
                                     <span className="font-ui text-[10.5px] font-semibold text-[hsl(var(--text-base))]">
                                         {selectedUniverseTrades.length}
                                     </span>
                                 </span>
                                 <span className="inline-flex items-baseline gap-1.5">
-                                    <span className="text-[9px] font-ui uppercase tracking-widest text-muted-lab">Baseline</span>
+                                    <span className="text-[9px] font-ui uppercase tracking-[0.08em] text-muted-lab">Baseline</span>
                                     <span className="font-ui text-[10.5px] text-[hsl(var(--text-2))]">
                                         {Array.isArray(legacyTradesForRun) ? legacyTradesForRun.length : 0}
                                     </span>
                                 </span>
-                                {(universe?.sourceFile) && (
-                                    <span className="inline-flex items-baseline gap-1.5" title={universe.sourceFile}>
-                                        <span className="text-[9px] font-ui uppercase tracking-widest text-muted-lab">Source</span>
-                                        <span className="font-code text-[9.5px] text-muted-lab" style={{ maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                            {universe.sourceFile.length > 48 ? `…${universe.sourceFile.slice(-45)}` : universe.sourceFile}
-                                        </span>
+                                <span className="inline-flex items-baseline gap-1.5" title={universe?.sourceFile || undefined}>
+                                    <span className="text-[9px] font-ui uppercase tracking-[0.08em] text-muted-lab">Source</span>
+                                    <span className="font-code text-[9.5px] text-muted-lab" style={{ maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                        {universe?.sourceFile
+                                            ? (universe.sourceFile.length > 48 ? `…${universe.sourceFile.slice(-45)}` : universe.sourceFile)
+                                            : "resolved universe"}
                                     </span>
-                                )}
+                                </span>
                             </>
                         ) : (
                             <>
-                                <span className="text-[9px] font-ui uppercase tracking-widest text-[hsl(var(--warning)/0.8)]">
+                                <span className="text-[9px] font-ui uppercase tracking-[0.08em] text-[hsl(var(--warning)/0.8)]">
                                     Fallback
                                 </span>
                                 <span className="font-ui text-[10.5px] font-semibold text-[hsl(var(--warning))]">
@@ -1371,88 +1482,124 @@ export default function RunDetail() {
                 </div>
             )}
 
-            <div className="px-6 mb-4">
-                <div className="flex flex-wrap items-end gap-2 border border-[hsl(var(--border-soft)/0.7)] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm px-3 py-2">
-                    <div className="mr-1">
-                        <div className="text-[9px] font-ui uppercase tracking-widest text-muted-lab opacity-70">Account View</div>
-                        <div className="text-[11px] text-[hsl(var(--text-2))]">R remains the source of truth.</div>
-                    </div>
-                    <label className="min-w-[118px]">
-                        <span className="mb-1 block text-[9px] font-ui uppercase tracking-widest text-muted-lab">Unit</span>
-                        <NeonSelect
-                            value={accountModeEnabled ? "account" : "r_only"}
-                            onChange={(value) => {
-                                patchAccountSettings({
-                                    mode: value === "account"
-                                        ? (accountSettings.mode === "r_only" ? "current_equity_pct" : accountSettings.mode)
-                                        : "r_only",
-                                });
-                            }}
-                            options={[
-                                { value: "r_only", label: "R" },
-                                { value: "account", label: "Account" },
-                            ]}
-                        />
-                    </label>
-                    {accountModeEnabled && (
-                        <>
-                            <label className="min-w-[190px]">
-                                <span className="mb-1 block text-[9px] font-ui uppercase tracking-widest text-muted-lab">Account Mode</span>
-                                <NeonSelect
-                                    value={accountSettings.mode}
-                                    onChange={(value) => {
-                                        // When switching to fixed-dollar mode, default risk amount
-                                        // to 10% of the starting balance as a sensible starting point.
-                                        const patch = { mode: value };
-                                        if (value === "fixed_dollar") {
-                                            patch.fixedRiskAmount = Math.round(accountSettings.startingBalance * 0.1);
-                                        }
-                                        patchAccountSettings(patch);
-                                    }}
-                                    options={accountModeOptions}
-                                />
-                            </label>
-                            <label className="w-[92px]">
-                                <span className="mb-1 block text-[9px] font-ui uppercase tracking-widest text-muted-lab">Currency</span>
-                                <NeonInput
-                                    value={accountSettings.currency}
-                                    onChange={(event) => patchAccountSettings({ currency: event.target.value })}
-                                />
-                            </label>
-                            <label className="w-[140px]">
-                                <span className="mb-1 block text-[9px] font-ui uppercase tracking-widest text-muted-lab">Starting Balance</span>
-                                <NeonInput
-                                    type="number"
-                                    value={accountSettings.startingBalance}
-                                    onChange={(event) => patchAccountSettings({ startingBalance: event.target.value })}
-                                />
-                            </label>
-                            {accountSettings.mode === "fixed_dollar" ? (
-                                <label className="w-[130px]">
-                                    <span className="mb-1 block text-[9px] font-ui uppercase tracking-widest text-muted-lab">Risk Amount</span>
-                                    <NeonInput
-                                        type="number"
-                                        value={accountSettings.fixedRiskAmount}
-                                        onChange={(event) => patchAccountSettings({ fixedRiskAmount: event.target.value })}
-                                    />
-                                </label>
-                            ) : (
-                                <label className="w-[100px]">
-                                    <span className="mb-1 block text-[9px] font-ui uppercase tracking-widest text-muted-lab">Risk %</span>
-                                    <NeonInput
-                                        type="number"
-                                        value={accountSettings.riskPct}
-                                        onChange={(event) => patchAccountSettings({ riskPct: event.target.value })}
-                                    />
-                                </label>
-                            )}
-                            <div className="basis-full text-[10.5px] leading-relaxed text-muted-lab">
-                                Account KPIs use all valid trades. Equity chart follows current chart filters.
-                                {accountAuditLine ? ` ${accountAuditLine}.` : ""}
-                            </div>
-                        </>
-                    )}
+            {/* Account/funding sequence notice — shown only when a non-baseline
+                Result View is selected. Account simulation and funding challenge
+                are sequence-dependent: trade order determines equity path and
+                phase-pass timing. This notice clarifies which trade sequence is
+                driving the numbers below. Compact — the main active banner above
+                already covers the broader scenario context. */}
+            {isScenarioView && (
+                <div className={[
+                    "px-6 mb-3 text-[10.5px] font-ui leading-relaxed",
+                    hasSelectedUniverseTrades
+                        ? "text-[hsl(var(--text-2))]"
+                        : "text-[hsl(var(--warning))]",
+                ].join(" ")}>
+                    {hasSelectedUniverseTrades
+                        ? "Account and funding metrics are calculated from the selected Result View trade sequence. Scenario views use a filtered subset of baseline trades in their original chronological order."
+                        : "Scenario unavailable for this run. Account and funding metrics are using baseline fallback data."}
                 </div>
+            )}
+
+            {/* Account View — collapsible. Toggle row shows current mode summary;
+                expand to edit unit, mode, currency, balance, risk. */}
+            <div className="px-6 mb-3">
+                <button
+                    type="button"
+                    onClick={() => setAccountViewOpen((v) => !v)}
+                    className="w-full flex items-center gap-2 group py-0.5"
+                    aria-expanded={accountViewOpen}
+                >
+                    <span className="text-[9px] font-ui uppercase tracking-widest text-muted-lab shrink-0">Account View</span>
+                    <span className="text-[10.5px] text-[hsl(var(--text-2))] truncate">
+                        {accountModeEnabled
+                            ? `${accountModeOptions.find((o) => o.value === accountSettings.mode)?.label ?? accountSettings.mode} · ${accountSettings.currency} · ${Number(accountSettings.startingBalance).toLocaleString()}`
+                            : "R only · click to enable account simulation"}
+                    </span>
+                    {accountModeEnabled && accountAuditLine && (
+                        <span className="text-[9.5px] text-muted-lab opacity-55 shrink-0 hidden sm:inline">· {accountAuditLine}</span>
+                    )}
+                    <ChevronDown className={`w-3 h-3 text-muted-lab opacity-40 ml-auto shrink-0 transition-transform duration-200 ${accountViewOpen ? "rotate-180" : ""}`} />
+                </button>
+                {accountViewOpen && (
+                    <div className="mt-2 flex flex-wrap items-end gap-2 border border-[hsl(var(--border-soft)/0.6)] bg-[hsl(var(--panel-2)/0.25)] clip-bevel-sm px-3 py-2.5">
+                        <label className="min-w-[118px]">
+                            <span className="mb-1 block text-[9px] font-ui uppercase tracking-widest text-muted-lab">Unit</span>
+                            <NeonSelect
+                                value={accountModeEnabled ? "account" : "r_only"}
+                                onChange={(value) => {
+                                    patchAccountSettings({
+                                        mode: value === "account"
+                                            ? (accountSettings.mode === "r_only" ? "current_equity_pct" : accountSettings.mode)
+                                            : "r_only",
+                                    });
+                                }}
+                                options={[
+                                    { value: "r_only", label: "R" },
+                                    { value: "account", label: "Account" },
+                                ]}
+                            />
+                        </label>
+                        {accountModeEnabled && (
+                            <>
+                                <label className="min-w-[190px]">
+                                    <span className="mb-1 block text-[9px] font-ui uppercase tracking-widest text-muted-lab">Account Mode</span>
+                                    <NeonSelect
+                                        value={accountSettings.mode}
+                                        onChange={(value) => {
+                                            // When switching to fixed-dollar mode, default risk amount
+                                            // to 10% of the starting balance as a sensible starting point.
+                                            const patch = { mode: value };
+                                            if (value === "fixed_dollar") {
+                                                patch.fixedRiskAmount = Math.round(accountSettings.startingBalance * 0.1);
+                                            }
+                                            patchAccountSettings(patch);
+                                        }}
+                                        options={accountModeOptions}
+                                    />
+                                </label>
+                                <label className="w-[92px]">
+                                    <span className="mb-1 block text-[9px] font-ui uppercase tracking-widest text-muted-lab">Currency</span>
+                                    <NeonInput
+                                        value={accountSettings.currency}
+                                        onChange={(event) => patchAccountSettings({ currency: event.target.value })}
+                                    />
+                                </label>
+                                <label className="w-[140px]">
+                                    <span className="mb-1 block text-[9px] font-ui uppercase tracking-widest text-muted-lab">Starting Balance</span>
+                                    <NeonInput
+                                        type="number"
+                                        value={accountSettings.startingBalance}
+                                        onChange={(event) => patchAccountSettings({ startingBalance: event.target.value })}
+                                    />
+                                </label>
+                                {accountSettings.mode === "fixed_dollar" ? (
+                                    <label className="w-[130px]">
+                                        <span className="mb-1 block text-[9px] font-ui uppercase tracking-widest text-muted-lab">Risk Amount</span>
+                                        <NeonInput
+                                            type="number"
+                                            value={accountSettings.fixedRiskAmount}
+                                            onChange={(event) => patchAccountSettings({ fixedRiskAmount: event.target.value })}
+                                        />
+                                    </label>
+                                ) : (
+                                    <label className="w-[100px]">
+                                        <span className="mb-1 block text-[9px] font-ui uppercase tracking-widest text-muted-lab">Risk %</span>
+                                        <NeonInput
+                                            type="number"
+                                            value={accountSettings.riskPct}
+                                            onChange={(event) => patchAccountSettings({ riskPct: event.target.value })}
+                                        />
+                                    </label>
+                                )}
+                                <div className="basis-full text-[10px] leading-relaxed text-muted-lab">
+                                    Account KPIs use all valid trades. Equity chart follows current chart filters.
+                                    {accountAuditLine ? ` ${accountAuditLine}.` : ""}
+                                </div>
+                            </>
+                        )}
+                    </div>
+                )}
             </div>
 
             <div className="px-6 mb-4">
@@ -2434,112 +2581,6 @@ export default function RunDetail() {
     );
 }
 
-// ── ResultViewSelector ────────────────────────────────────────────────────────
-// Pill-based Result View selector for Run Workspace. Renders nothing when there
-// is only one view (baseline only), so runs with no entry scenarios are
-// unaffected. When a scenario is selected and has trades, the parent component
-// routes all analytics (KPIs, equity, ledger, distributions) through displayTrades
-// (universe.trades) instead of the baseline tradesForRun.
-function ResultViewSelector({ options, resultView, universe, baselineParityAudit, onSelect }) {
-    // No scenarios available — render nothing; page looks exactly as before.
-    if (!options || options.length <= 1) return null;
-
-    const selectedFamily = resultView?.family ?? "baseline";
-    const isScenarioSelected = selectedFamily && selectedFamily !== "baseline";
-    const noTrades = isScenarioSelected && (!universe?.trades || universe.trades.length === 0);
-
-    // Truncate long source filenames so the strip doesn't overflow.
-    const rawSource = universe?.sourceFile || null;
-    const sourceLabel = rawSource
-        ? (rawSource.length > 52 ? `…${rawSource.slice(-49)}` : rawSource)
-        : null;
-
-    const userFacingWarnings = (universe?.warnings || []).filter(
-        (w) => w?.code === "FILL_MODE_COERCED" || w?.code === "BOTH_UNAVAILABLE_NO_COMBINED",
-    );
-
-    return (
-        <div className="px-6 mb-3">
-            <div className="border border-[hsl(var(--border-soft)/0.7)] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm px-3 py-2 flex flex-col gap-1.5">
-
-                {/* Row 1 — label + selectable pills */}
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                    <span className="text-[9px] font-ui uppercase tracking-widest text-muted-lab shrink-0">
-                        Result View
-                    </span>
-                    <div className="flex flex-wrap items-center gap-1.5">
-                        {options.map((opt) => {
-                            const isActive = opt.family === "baseline"
-                                ? (!selectedFamily || selectedFamily === "baseline")
-                                : (resultView?.family === opt.family
-                                    && resultView?.threshold === opt.threshold
-                                    && resultView?.fillMode === opt.fillMode);
-                            return (
-                                <button
-                                    key={opt.key}
-                                    type="button"
-                                    onClick={() => onSelect(opt)}
-                                    className={[
-                                        "px-2.5 py-[3px] text-[10px] font-ui uppercase tracking-wider",
-                                        "border clip-bevel-sm transition-colors select-none whitespace-nowrap",
-                                        isActive
-                                            ? "bg-[hsl(var(--accent-primary)/0.15)] border-[hsl(var(--accent-primary)/0.55)] text-[hsl(var(--accent-primary))]"
-                                            : "bg-transparent border-[hsl(var(--border-soft))] text-[hsl(var(--text-muted))] hover:border-[hsl(var(--accent-primary)/0.4)] hover:text-[hsl(var(--text-base))]",
-                                    ].join(" ")}
-                                >
-                                    {opt.label}
-                                </button>
-                            );
-                        })}
-                    </div>
-                </div>
-
-                {/* Compact status line — trades count + scenario type inline */}
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 opacity-55 text-[9.5px] font-ui">
-                    <span className={universe?.universeType === "scenario" ? "text-[hsl(var(--success))]" : ""}>
-                        {universe?.universeType === "scenario" ? "Scenario" : "Baseline"}
-                    </span>
-                    <span>{universe?.trades?.length ?? 0} trades</span>
-                    {sourceLabel && (
-                        <span className="font-code truncate max-w-[260px]" title={rawSource}>{sourceLabel}</span>
-                    )}
-                    {userFacingWarnings.map((w) => (
-                        <span
-                            key={w.code}
-                            className={[
-                                "px-1.5 py-0.5 border clip-bevel-sm opacity-100",
-                                w.code === "FILL_MODE_COERCED"
-                                    ? "border-[hsl(var(--accent-secondary)/0.45)] text-[hsl(var(--accent-secondary))]"
-                                    : "border-[hsl(var(--warning)/0.45)] text-[hsl(var(--warning))]",
-                            ].join(" ")}
-                            title={w.code}
-                        >
-                            {w.message}
-                        </span>
-                    ))}
-                    {/* RW-3A dev-only parity note */}
-                    {process.env.NODE_ENV !== "production" && baselineParityAudit && (
-                        <span className={baselineParityAudit.match ? "" : "text-[hsl(var(--warning))] opacity-100"}>
-                            {baselineParityAudit.match
-                                ? `✓ parity OK (${baselineParityAudit.universeCount})`
-                                : `⚠ parity mismatch ${baselineParityAudit.legacyCount}≠${baselineParityAudit.universeCount}`
-                            }
-                        </span>
-                    )}
-                </div>
-
-                {/* Scenario unavailable — no trades resolved for the selected key */}
-                {noTrades && (
-                    <div className="text-[11px] font-ui text-[hsl(var(--warning))]">
-                        ⚠ Scenario unavailable for this run — analytics are showing baseline fallback data.
-                    </div>
-                )}
-
-            </div>
-        </div>
-    );
-}
-
 function ConfigGroup({ title, children, paddingClassName = "p-3" }) {
     return (
         <div className={`clip-bevel-sm border border-[hsl(var(--border-soft)/0.65)] bg-[hsl(var(--panel-2)/0.28)] ${paddingClassName}`}>
@@ -2639,7 +2680,7 @@ function variantLabel(v) {
 function ScopeRow({ label, children }) {
     return (
         <span className="inline-flex items-center gap-1.5">
-            <span className="text-[9px] font-ui uppercase tracking-widest text-muted-lab">
+            <span className="text-[9.5px] font-ui uppercase tracking-[0.08em] text-muted-lab">
                 {label}
             </span>
             {children}

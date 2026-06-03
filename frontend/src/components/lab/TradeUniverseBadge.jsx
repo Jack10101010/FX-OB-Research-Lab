@@ -148,7 +148,7 @@ function BadgeCell({ label, value, tone = "default", mono = false, subtle = fals
                     : "text-[hsl(var(--text-base))]";
     return (
         <div className="flex items-baseline gap-1.5" title={title}>
-            <span className="text-[9px] font-ui uppercase tracking-widest text-[hsl(var(--text-muted))]">
+            <span className="text-[9.5px] font-ui uppercase tracking-[0.08em] text-[hsl(var(--text-muted))]">
                 {label}
             </span>
             <span

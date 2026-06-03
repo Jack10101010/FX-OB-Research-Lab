@@ -264,7 +264,6 @@
         font-weight: 600;
         line-height: 1;
         letter-spacing: 0.02em;
-        text-transform: uppercase;
         font-variant-numeric: tabular-nums;
         font-feature-settings: "zero" 0, "ss01" 0, "ss02" 0, "cv01" 0;
     }
