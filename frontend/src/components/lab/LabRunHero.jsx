@@ -55,6 +55,10 @@ export function LabRunHero({
     // a compact card in the right column. Left shows only label + title + description.
     // Default "inline" preserves existing behaviour for all other pages.
     infoCardPosition = "inline",
+    // Optional panel rendered below the action buttons in the right column.
+    // Lets pages (e.g. OrderBlockLab) co-locate RunConfigStrip + UniverseBadge
+    // alongside the title without pulling them out into a separate stacked row.
+    sidePanel = null,
 }) {
     const dataDriven = useDataDrivenMode({
         titleFallback,
@@ -104,7 +108,8 @@ export function LabRunHero({
         || badges.length > 0
         || showTradeCountBadge
         || (showOpenProject && projectId)
-        || (showDefaultStatusBadges && (hasRun || projectId)),
+        || (showDefaultStatusBadges && (hasRun || projectId))
+        || sidePanel,
     );
 
     return (
@@ -155,20 +160,27 @@ export function LabRunHero({
                       to the original structure, zero layout change for other pages.
                     "right": flex-col with action buttons above the info card. */}
                 {showRail && !infoRight && (
-                    <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-                        {showOpenProject && projectId && <OpenProjectLink projectId={projectId} />}
-                        {showDefaultStatusBadges && hasRun && <HeroBadge tone="primary">Imported</HeroBadge>}
-                        {showDefaultStatusBadges && hasRun && <HeroBadge tone="success">Active Run</HeroBadge>}
-                        {showDefaultStatusBadges && projectId && <HeroBadge tone="secondary">Project Active</HeroBadge>}
-                        {showTradeCountBadge && (
-                            <HeroBadge tone="muted">{tradeCount} trades</HeroBadge>
-                        )}
-                        {badges.map((badge, index) => (
-                            <HeroBadge key={badge.key ?? `${badge.tone}-${index}`} tone={badge.tone}>
-                                {badge.label}
-                            </HeroBadge>
-                        ))}
-                        {actions}
+                    <div className={cn(
+                        sidePanel
+                            ? "flex flex-col gap-3 shrink-0 lg:items-end lg:max-w-[400px] w-full"
+                            : "flex flex-wrap items-center gap-2 lg:justify-end",
+                    )}>
+                        <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                            {showOpenProject && projectId && <OpenProjectLink projectId={projectId} />}
+                            {showDefaultStatusBadges && hasRun && <HeroBadge tone="primary">Imported</HeroBadge>}
+                            {showDefaultStatusBadges && hasRun && <HeroBadge tone="success">Active Run</HeroBadge>}
+                            {showDefaultStatusBadges && projectId && <HeroBadge tone="secondary">Project Active</HeroBadge>}
+                            {showTradeCountBadge && (
+                                <HeroBadge tone="muted">{tradeCount} trades</HeroBadge>
+                            )}
+                            {badges.map((badge, index) => (
+                                <HeroBadge key={badge.key ?? `${badge.tone}-${index}`} tone={badge.tone}>
+                                    {badge.label}
+                                </HeroBadge>
+                            ))}
+                            {actions}
+                        </div>
+                        {sidePanel && <div className="w-full">{sidePanel}</div>}
                     </div>
                 )}
                 {infoRight && (

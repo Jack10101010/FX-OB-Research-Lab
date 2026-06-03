@@ -315,6 +315,7 @@ export function CanonicalBucketTable({
             )}
             <NeonPanel
                 title={titleNode}
+                className={popOpen ? "z-50" : undefined}
                 action={controlsPopover ? (
                     // ── Compact popover mode ───────────────────────────────────────
                     // All controls (heatmap, compare, bucket count) live inside a
@@ -371,10 +372,9 @@ export function CanonicalBucketTable({
                                                 <div key={key} className="flex items-center justify-between gap-2">
                                                     <div className="flex items-center gap-1">
                                                         <span className="text-[10px] font-ui text-[hsl(var(--text-2))]">{label}</span>
-                                                        <Info
-                                                            className="w-2.5 h-2.5 text-muted-lab cursor-help shrink-0"
-                                                            title={info}
-                                                        />
+                                                        <span title={info} className="cursor-help inline-flex items-center">
+                                                            <Info className="w-2.5 h-2.5 text-muted-lab shrink-0" />
+                                                        </span>
                                                     </div>
                                                     <button
                                                         type="button"

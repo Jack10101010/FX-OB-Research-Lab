@@ -214,10 +214,9 @@ export default function OrderBlockLab() {
                 activeRunId={activeRunId}
                 tradeCount={trades.length}
                 variant={ACTIVE_TRADE_VARIANT}
-                infoCardPosition="right"
+                showDefaultStatusBadges={false}
                 actions={(
                     <>
-                        <HeroBadge tone="secondary">{trades.length} trades</HeroBadge>
                         <button
                             type="button"
                             onClick={() => setReportOpen(true)}
@@ -374,6 +373,9 @@ export default function OrderBlockLab() {
                 def={analytics.bucketDefs.creationHour}
                 renderers={OBL_BUCKET_RENDERERS}
                 onDrill={r => handleEdgeDrill("Creation Hour", r)}
+                hideResultsBasis
+                hideChip
+                basisFooter
                 controlsPopover
             />
             <TableCompareShell
@@ -382,6 +384,9 @@ export default function OrderBlockLab() {
                 currentRows={analytics.dayOfWeekRows}
                 bucketDef={analytics.bucketDefs.dayOfWeek}
                 onDrill={r => handleEdgeDrill("Day of Week", r)}
+                hideResultsBasis
+                hideChip
+                basisFooter
                 controlsPopover
                 {...compareProps("dayOfWeek")}
             />
@@ -399,6 +404,9 @@ export default function OrderBlockLab() {
                 currentRows={analytics.widthRows}
                 bucketDef={analytics.bucketDefs.width}
                 onDrill={r => handleEdgeDrill("OB Width", r)}
+                hideResultsBasis
+                hideChip
+                basisFooter
                 controlsPopover
                 {...compareProps("width")}
             />
@@ -409,6 +417,9 @@ export default function OrderBlockLab() {
                 bucketDef={analytics.bucketDefs.age}
                 onDrill={r => handleEdgeDrill("OB Age", r)}
                 compact
+                hideResultsBasis
+                hideChip
+                basisFooter
                 controlsPopover
                 {...compareProps("age")}
             />
@@ -419,6 +430,9 @@ export default function OrderBlockLab() {
                 bucketDef={analytics.bucketDefs.penetration}
                 onDrill={r => handleEdgeDrill("Penetration Depth", r)}
                 compact
+                hideResultsBasis
+                hideChip
+                basisFooter
                 controlsPopover
                 {...compareProps("penetration")}
             />
@@ -450,6 +464,9 @@ export default function OrderBlockLab() {
                 bucketDef={analytics.bucketDefs.fastStopout}
                 onDrill={r => handleEdgeDrill("Fast Stopout", r)}
                 compact
+                hideResultsBasis
+                hideChip
+                basisFooter
                 controlsPopover
                 {...compareProps("fastStopout")}
             />
@@ -460,6 +477,9 @@ export default function OrderBlockLab() {
                 bucketDef={analytics.bucketDefs.distanceBeforeFill}
                 onDrill={r => handleEdgeDrill("Distance Before Fill", r)}
                 compact
+                hideResultsBasis
+                hideChip
+                basisFooter
                 controlsPopover
                 {...compareProps("distanceBeforeFill")}
             />
@@ -1384,8 +1404,7 @@ function ReportModal({ reportText, onClose }) {
 // ─── Variant Selector ─────────────────────────────────────────────────────────
 
 function VariantSelector({ variants, value }) {
-    if (!variants?.length) return null;
-    if (variants.length === 1) return <Pill tone="muted">{variantLabel(variants[0])}</Pill>;
+    if (!variants?.length || variants.length === 1) return null;
     return (
         <NeonSelect
             testId="oblab-variant"
