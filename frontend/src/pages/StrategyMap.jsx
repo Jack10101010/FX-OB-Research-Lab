@@ -556,8 +556,7 @@ export default function StrategyMap() {
             <LabRunHero
                 pageLabel="Strategy Map"
                 title={heroTitle}
-                runLine={`Run: ${getRunDisplayName(bundle || activeRunMeta || { id: runId })} · ${heroSymbol} · ${heroTf} · ${heroTrades ?? "—"} trades`}
-                configLine={`${heroSymbol} · ${heroTf} · RR ${Number.isFinite(heroRr) ? heroRr.toFixed(1) : "—"}`}
+                runLine={`Run: ${getRunDisplayName(bundle || activeRunMeta || { id: runId })} · ${heroTrades ?? "—"} trades`}
                 dateRangeLine={heroDateRange || "—"}
                 actions={
                     (runId || projectId) ? (

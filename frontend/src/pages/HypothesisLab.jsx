@@ -235,7 +235,7 @@ export default function HypothesisLab() {
             <LabRunHero
                 pageLabel="Hypothesis Lab"
                 title={ACTIVE_RUN?.id || "No active run"}
-                runLine={`${ACTIVE_RUN?.symbol || "Symbol"} · ${ACTIVE_RUN?.detectionTf || "TF"} · ${variantLabel(ACTIVE_TRADE_VARIANT)}`}
+                runLine={variantLabel(ACTIVE_TRADE_VARIANT)}
                 description="Combine imported run insights into quick research estimates before promoting them to exact Python tests."
                 actions={(
                     <div className="flex items-center gap-2">

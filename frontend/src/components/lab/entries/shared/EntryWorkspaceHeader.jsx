@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { LabRunHero } from "@/components/lab/LabRunHero";
 import { RunConfigStrip } from "@/components/lab/RunConfigStrip";
 import { HeroBadge, NeonButton } from "@/components/lab/controls";
-import { compactTimeframe, getRunDisplayName, useDataset } from "@/data/store";
+import { getRunDisplayName, useDataset } from "@/data/store";
 import { variantLabel } from "../analytics/entryFormatters";
 
 export function EntryWorkspaceHeader({ trades, activeVariant, exactRows }) {
@@ -14,8 +14,6 @@ export function EntryWorkspaceHeader({ trades, activeVariant, exactRows }) {
     const projectName  = ACTIVE_PROJECT?.name || "";
     const projectId    = ACTIVE_PROJECT?.id || null;
     const runName      = activeRun ? getRunDisplayName(activeRun) : "";
-    const symbol       = activeRun?.symbol || ACTIVE_RUN?.symbol || "—";
-    const timeframe    = compactTimeframe(activeRun?.detectionTf || ACTIVE_RUN?.detectionTf);
     const hasExact     = exactRows?.some(r => r.exact && !r.isBaseline);
     const modelCount   = exactRows?.filter(r => r.exact && !r.isBaseline).length ?? 0;
 
@@ -26,8 +24,6 @@ export function EntryWorkspaceHeader({ trades, activeVariant, exactRows }) {
                 title={projectName || runName || "No run selected"}
                 runLine={[
                     runName && projectName ? `Run: ${runName}` : null,
-                    symbol,
-                    timeframe,
                     trades.length ? `${trades.length} trades` : null,
                     variantLabel(activeVariant),
                 ].filter(Boolean).join(" · ")}

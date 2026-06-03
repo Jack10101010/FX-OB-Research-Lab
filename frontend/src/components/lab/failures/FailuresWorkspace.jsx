@@ -152,10 +152,6 @@ export function FailuresWorkspace() {
                 pageLabel="Failures Lab"
                 title={activeRun ? getRunDisplayName(activeRun) : "Failure Research Workspace"}
                 runLine={`${trades.length} trades · ${scoredLosers.length} losses`}
-                configLine={[
-                    activeRun?.symbol || config?.symbol,
-                    activeRun?.detectionTf || config?.detection_tf || config?.detectionTf,
-                ].filter(Boolean).join(" · ")}
                 description="Failure forensics across losing trades, invalidation patterns, sessions, streaks, and prevention candidates."
                 className="mt-4 mb-0"
             />

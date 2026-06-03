@@ -186,22 +186,6 @@ export function buildLabHeroContent({
         run?.config?.detectionTf,
         activeSummary?.detectionTf,
     ));
-    const executionTf = compactTimeframe(readFirst(
-        run?.executionTf,
-        run?.summary?.executionTf,
-        run?.summary?.execution_tf,
-        run?.config?.execution_timeframe,
-        run?.config?.execution_tf,
-        run?.config?.executionTf,
-        activeSummary?.executionTf,
-    ));
-    const rr = readFirst(
-        run?.rr,
-        run?.summary?.rr,
-        run?.config?.rr_multiple,
-        run?.config?.rrMultiple,
-        activeSummary?.rr,
-    );
     const entryDepthPct = readNumber(run?.config?.ob_entry_depth_pct, run?.config?.obEntryDepthPct, run?.obEntryDepthPct);
     const entryBufferPips = readNumber(run?.config?.entry_buffer_pips, run?.config?.entry_buffer, run?.config?.entryBuffer, run?.entryBuffer);
     const stopBufferPips = readNumber(run?.config?.stop_buffer_pips, run?.config?.stop_buffer, run?.config?.stopBuffer, run?.stopBuffer);
@@ -212,13 +196,9 @@ export function buildLabHeroContent({
     const monthSpan = formatHeroMonthSpan(heroDateRange);
     const dateRangeLine = dateRange && monthSpan ? `${dateRange} • ${monthSpan}` : dateRange;
     const runLine = hasRun
-        ? [`Run: ${runName || "Active run"}`, symbol, detectionTf, `${tradeCount} trades`].filter(isMeaningful).join(" · ")
+        ? [`Run: ${runName || "Active run"}`, `${tradeCount} trades`].filter(isMeaningful).join(" · ")
         : "No active run selected. Import or run a backtest to populate this page.";
     const configParts = [
-        symbol,
-        detectionTf,
-        executionTf && executionTf !== detectionTf ? `Exec ${executionTf}` : null,
-        rr != null && rr !== "" ? `RR ${rr}` : null,
         structureFilter ? `Structure ${formatStructureFilter(structureFilter)}` : null,
         entryDepthPct != null ? `Entry Depth ${formatPercent(entryDepthPct)}` : null,
         entryBufferPips != null ? `Entry Buffer ${formatPips(entryBufferPips)}` : null,
