@@ -33,9 +33,10 @@ export function EquityCurvePanel({ exactRows, tradesByMode, activeVariant }) {
         if (!curves.length) return;
         const curveModes = curves.map(c => c.mode);
         const selectedList = Array.isArray(selectedModes) ? selectedModes : [];
-        const valid = selectedList.filter(mode => curveModes.includes(mode));
+        const valid    = selectedList.filter(mode => curveModes.includes(mode));
+        const newModes = curveModes.filter(m => !selectedList.includes(m));
         if (!valid.length) setSelectedModes(curveModes);
-        else if (valid.length !== selectedList.length) setSelectedModes(valid);
+        else if (valid.length !== selectedList.length || newModes.length > 0) setSelectedModes([...valid, ...newModes]);
     }, [curves, selectedModes, setSelectedModes]);
 
     const selected = useMemo(() => new Set(Array.isArray(selectedModes) ? selectedModes : []), [selectedModes]);
