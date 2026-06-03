@@ -82,7 +82,9 @@ export default function StrategyBuilder() {
         triggeredEdgeThresholds: "25",
         triggeredEdgeEntryLevelPct: 0,
         triggeredEdgeSameCandleMode: "both",
+        triggeredEdgeDelays: [0, 1],
         triggeredEdgeCancelOnRetrace: false,
+        triggeredEdgeCancelOnFirstFailedTag: false,
         triggeredEdgeCancelRetracePips: 0,
         triggeredEdgeCancelRetraceObPct: 0,
         entryMode: "single",
@@ -802,18 +804,24 @@ export default function StrategyBuilder() {
                                                 onChange={(e) => set("triggeredEdgeEntryLevelPct")(Number(e.target.value))}
                                             />
                                         </Field>
-                                        <Field label="Entry Delay After Trigger" hint="0 = same candle · 1 = next candle" className="col-span-2">
+                                        <Field label="Entry Delay After Trigger" hint="0 = same · 1 = next · 2/3 = deferred" className="col-span-2">
                                             <div className="flex gap-2">
-                                                {[{ v: "same", label: "0 · Same" }, { v: "next", label: "1 · Next" }].map(({ v, label }) => {
-                                                    const cur = cfg.triggeredEdgeSameCandleMode || "both";
-                                                    const active = cur === "both" || cur === v;
+                                                {[{ d: 0, label: "0 · Same" }, { d: 1, label: "1 · Next" }, { d: 2, label: "2" }, { d: 3, label: "3" }].map(({ d, label }) => {
+                                                    const delays = Array.isArray(cfg.triggeredEdgeDelays) ? cfg.triggeredEdgeDelays : [0, 1];
+                                                    const active = delays.includes(d);
                                                     return (
                                                         <button
-                                                            key={v}
+                                                            key={d}
                                                             type="button"
                                                             onClick={() => {
-                                                                if (cur === "both") set("triggeredEdgeSameCandleMode")(v === "same" ? "next" : "same");
-                                                                else if (cur !== v) set("triggeredEdgeSameCandleMode")("both");
+                                                                const next = active
+                                                                    ? delays.filter((x) => x !== d)
+                                                                    : [...delays, d].sort((a, b) => a - b);
+                                                                if (next.length === 0) return;
+                                                                const hasZero = next.includes(0);
+                                                                const hasOne  = next.includes(1);
+                                                                const legacyMode = hasZero && hasOne ? "both" : hasZero ? "same" : hasOne ? "next" : "both";
+                                                                setCfg((c) => ({ ...c, triggeredEdgeDelays: next, triggeredEdgeSameCandleMode: legacyMode }));
                                                             }}
                                                             className={[
                                                                 "px-3 py-1.5 text-[10.5px] font-ui uppercase tracking-[0.08em] clip-bevel-sm border transition-colors",
@@ -845,6 +853,13 @@ export default function StrategyBuilder() {
                                                 </Field>
                                             </>
                                         )}
+                                        <div className="col-span-2 flex items-center justify-between border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
+                                            <div>
+                                                <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Cancel on first failed tag</div>
+                                                <div className="text-[10.5px] text-muted-lab">Cancel if OB taps but price fails to reach trigger within 1 candle.</div>
+                                            </div>
+                                            <NeonToggle checked={Boolean(cfg.triggeredEdgeCancelOnFirstFailedTag)} onChange={set("triggeredEdgeCancelOnFirstFailedTag")} />
+                                        </div>
                                     </div>
                                 </div>
                             )}
@@ -958,18 +973,24 @@ export default function StrategyBuilder() {
                                         <Field label="Entry Level %" hint="0 is the OB edge.">
                                             <NeonInput type="number" min="0" max="100" step="1" value={cfg.triggeredEdgeEntryLevelPct} onChange={(e) => set("triggeredEdgeEntryLevelPct")(Number(e.target.value))} />
                                         </Field>
-                                        <Field label="Entry Delay After Trigger" hint="0 = same candle · 1 = next candle" className="col-span-2">
+                                        <Field label="Entry Delay After Trigger" hint="0 = same · 1 = next · 2/3 = deferred" className="col-span-2">
                                             <div className="flex gap-2">
-                                                {[{ v: "same", label: "0 · Same" }, { v: "next", label: "1 · Next" }].map(({ v, label }) => {
-                                                    const cur = cfg.triggeredEdgeSameCandleMode || "both";
-                                                    const active = cur === "both" || cur === v;
+                                                {[{ d: 0, label: "0 · Same" }, { d: 1, label: "1 · Next" }, { d: 2, label: "2" }, { d: 3, label: "3" }].map(({ d, label }) => {
+                                                    const delays = Array.isArray(cfg.triggeredEdgeDelays) ? cfg.triggeredEdgeDelays : [0, 1];
+                                                    const active = delays.includes(d);
                                                     return (
                                                         <button
-                                                            key={v}
+                                                            key={d}
                                                             type="button"
                                                             onClick={() => {
-                                                                if (cur === "both") set("triggeredEdgeSameCandleMode")(v === "same" ? "next" : "same");
-                                                                else if (cur !== v) set("triggeredEdgeSameCandleMode")("both");
+                                                                const next = active
+                                                                    ? delays.filter((x) => x !== d)
+                                                                    : [...delays, d].sort((a, b) => a - b);
+                                                                if (next.length === 0) return;
+                                                                const hasZero = next.includes(0);
+                                                                const hasOne  = next.includes(1);
+                                                                const legacyMode = hasZero && hasOne ? "both" : hasZero ? "same" : hasOne ? "next" : "both";
+                                                                setCfg((c) => ({ ...c, triggeredEdgeDelays: next, triggeredEdgeSameCandleMode: legacyMode }));
                                                             }}
                                                             className={[
                                                                 "px-3 py-1.5 text-[10.5px] font-ui uppercase tracking-[0.08em] clip-bevel-sm border transition-colors",
@@ -1001,6 +1022,13 @@ export default function StrategyBuilder() {
                                                 </Field>
                                             </>
                                         )}
+                                        <div className="col-span-2 flex items-center justify-between border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
+                                            <div>
+                                                <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Cancel on first failed tag</div>
+                                                <div className="text-[10.5px] text-muted-lab">Cancel if OB taps but price fails to reach trigger within 1 candle.</div>
+                                            </div>
+                                            <NeonToggle checked={Boolean(cfg.triggeredEdgeCancelOnFirstFailedTag)} onChange={set("triggeredEdgeCancelOnFirstFailedTag")} />
+                                        </div>
                                     </div>
                                 )}
                             </div>
@@ -1061,8 +1089,9 @@ export default function StrategyBuilder() {
                         <StatusMeta k="Penetration thresholds" v={(sanityConfig.entry_penetration_thresholds || []).join(", ") || "—"} />
                         <StatusMeta k="Batch entry penetration" v={sanityConfig.batch_entry_penetration ? "On" : "Off"} />
                         <StatusMeta k="Triggered-edge triggers" v={(sanityConfig.triggered_edge_trigger_thresholds || []).join(", ") || "—"} />
-                        <StatusMeta k="Triggered-edge entry delay" v={formatTriggeredEdgeModes(sanityConfig.triggered_edge_same_candle_modes)} />
+                        <StatusMeta k="Triggered-edge entry delay" v={formatTriggeredEdgeDelays(sanityConfig.triggered_edge_candle_delays, sanityConfig.triggered_edge_same_candle_modes)} />
                         <StatusMeta k="Triggered-edge retrace cancel" v={formatTriggeredEdgeRetraceCancel(sanityConfig)} />
+                        <StatusMeta k="First failed tag cancel" v={sanityConfig.triggered_edge_cancel_on_first_failed_tag ? "On" : "Off"} />
                         <StatusMeta k="Limit Placement Depth" v={formatPercentValue(sanityConfig.ob_entry_depth_pct)} />
                         <StatusMeta k="Entry Buffer" v={formatPipValue(sanityConfig.entry_buffer_pips)} />
                         <StatusMeta k="Stop Buffer" v={formatPipValue(sanityConfig.stop_buffer_pips)} />
@@ -1260,7 +1289,8 @@ function buildBacktesterConfig(cfg) {
     // ── Entry model fields: Single vs Research Export ─────────────────────
     let entryModels, obEntryDepthPct, entryPenetrationThresholds, batchEntryPenetration,
         teThresholds, teEntryLevelPct, teSameCandleModes, teCandleDelays,
-        teCancelOnRetrace, teCancelRetracePips, teCancelRetraceObPct;
+        teCancelOnRetrace, teCancelRetracePips, teCancelRetraceObPct,
+        teCancelOnFirstFailedTag;
 
     const isSingle = cfg.entryMode === "single";
 
@@ -1279,6 +1309,7 @@ function buildBacktesterConfig(cfg) {
             teCancelOnRetrace = false;
             teCancelRetracePips = 0;
             teCancelRetraceObPct = 0;
+            teCancelOnFirstFailedTag = false;
         } else if (model === "triggered_edge") {
             const thr = Number(cfg.singleTriggeredEdgeThreshold ?? 25);
             entryModels = ["triggered_edge"];
@@ -1288,10 +1319,13 @@ function buildBacktesterConfig(cfg) {
             teThresholds = Number.isFinite(thr) && thr > 0 && thr < 100 ? [thr] : [25];
             teEntryLevelPct = clampNumber(cfg.triggeredEdgeEntryLevelPct, 0, 100, 0);
             teSameCandleModes = triggeredEdgeSameCandleModes(cfg.triggeredEdgeSameCandleMode);
-            teCandleDelays = triggeredEdgeCandleDelays(teSameCandleModes);
+            teCandleDelays = Array.isArray(cfg.triggeredEdgeDelays) && cfg.triggeredEdgeDelays.length
+                ? [...cfg.triggeredEdgeDelays].sort((a, b) => a - b)
+                : triggeredEdgeCandleDelays(teSameCandleModes);
             teCancelOnRetrace = Boolean(cfg.triggeredEdgeCancelOnRetrace);
             teCancelRetracePips = Math.max(0, Number(cfg.triggeredEdgeCancelRetracePips) || 0);
             teCancelRetraceObPct = Math.max(0, Number(cfg.triggeredEdgeCancelRetraceObPct) || 0);
+            teCancelOnFirstFailedTag = Boolean(cfg.triggeredEdgeCancelOnFirstFailedTag);
         } else {
             // baseline
             entryModels = ["baseline"];
@@ -1305,6 +1339,7 @@ function buildBacktesterConfig(cfg) {
             teCancelOnRetrace = false;
             teCancelRetracePips = 0;
             teCancelRetraceObPct = 0;
+            teCancelOnFirstFailedTag = false;
         }
     } else {
         // Research Export — existing multi-model behavior
@@ -1322,10 +1357,13 @@ function buildBacktesterConfig(cfg) {
         teThresholds = teEnabled ? teRawThresholds : [];
         teEntryLevelPct = teEnabled ? clampNumber(cfg.triggeredEdgeEntryLevelPct, 0, 100, 0) : 0;
         teSameCandleModes = teEnabled ? triggeredEdgeSameCandleModes(cfg.triggeredEdgeSameCandleMode) : [];
-        teCandleDelays = triggeredEdgeCandleDelays(teSameCandleModes);
+        teCandleDelays = teEnabled && Array.isArray(cfg.triggeredEdgeDelays) && cfg.triggeredEdgeDelays.length
+            ? [...cfg.triggeredEdgeDelays].sort((a, b) => a - b)
+            : triggeredEdgeCandleDelays(teSameCandleModes);
         teCancelOnRetrace = teEnabled ? Boolean(cfg.triggeredEdgeCancelOnRetrace) : false;
         teCancelRetracePips = teEnabled ? Math.max(0, Number(cfg.triggeredEdgeCancelRetracePips) || 0) : 0;
         teCancelRetraceObPct = teEnabled ? Math.max(0, Number(cfg.triggeredEdgeCancelRetraceObPct) || 0) : 0;
+        teCancelOnFirstFailedTag = teEnabled ? Boolean(cfg.triggeredEdgeCancelOnFirstFailedTag) : false;
     }
 
     const config = {
@@ -1360,6 +1398,7 @@ function buildBacktesterConfig(cfg) {
         triggered_edge_cancel_on_retrace: teCancelOnRetrace,
         triggered_edge_cancel_retrace_pips: teCancelRetracePips,
         triggered_edge_cancel_retrace_ob_pct: teCancelRetraceObPct,
+        triggered_edge_cancel_on_first_failed_tag: teCancelOnFirstFailedTag,
         protection_modes: ["baseline"],
         session_filter_enabled: Boolean(cfg.sessionFilter),
         allowed_sessions: allowedSessions,
@@ -1694,6 +1733,22 @@ function formatTriggeredEdgeModes(modes) {
     return values.join(", ");
 }
 
+function formatTriggeredEdgeDelays(delays, legacyModes) {
+    // Prefer the new numeric array field
+    if (Array.isArray(delays) && delays.length) {
+        const sorted = [...delays].sort((a, b) => a - b);
+        if (sorted.length === 1) {
+            const d = sorted[0];
+            if (d === 0) return "Delay 0 (same)";
+            if (d === 1) return "Delay 1 (next)";
+            return `Delay ${d}`;
+        }
+        return `Delays ${sorted.join("+")}`;
+    }
+    // Fallback to legacy string array
+    return formatTriggeredEdgeModes(legacyModes);
+}
+
 function formatTriggeredEdgeRetraceCancel(config) {
     if (!config?.triggered_edge_cancel_on_retrace) return "Off";
     const pips = formatPipValue(config.triggered_edge_cancel_retrace_pips);
@@ -1767,9 +1822,11 @@ const LOAD_FIELD_LABELS = {
     triggeredEdgeThresholds: "triggered edge trigger thresholds",
     triggeredEdgeEntryLevelPct: "triggered edge entry level",
     triggeredEdgeSameCandleMode: "triggered edge entry delay",
+    triggeredEdgeDelays: "triggered edge delays",
     triggeredEdgeCancelOnRetrace: "triggered edge retrace cancel",
     triggeredEdgeCancelRetracePips: "triggered edge retrace cancel pips",
     triggeredEdgeCancelRetraceObPct: "triggered edge retrace cancel OB %",
+    triggeredEdgeCancelOnFirstFailedTag: "triggered edge first-failed-tag cancel",
     entryMode: "entry mode",
     selectedEntryModel: "selected entry model",
     singlePenetrationPct: "single penetration threshold",
@@ -1830,9 +1887,17 @@ function buildRunConfigLoadReport(current, run) {
     applyFirstPresent(patch, source, "triggeredEdgeThresholds", ["triggered_edge_trigger_thresholds", "triggeredEdgeTriggerThresholds"], mapConfigEntryThresholds);
     applyFirstPresent(patch, source, "triggeredEdgeEntryLevelPct", ["triggered_edge_entry_level_pct", "triggeredEdgeEntryLevelPct"], toNumber);
     applyFirstPresent(patch, source, "triggeredEdgeSameCandleMode", ["triggered_edge_same_candle_modes", "triggeredEdgeSameCandleModes"], mapConfigTriggeredEdgeSameCandleMode);
+    applyFirstPresent(patch, source, "triggeredEdgeDelays", ["triggered_edge_candle_delays", "triggeredEdgeDelays"],
+        (v) => (Array.isArray(v) && v.length ? v.map(Number).filter((n) => Number.isFinite(n)) : null));
+    // Derive triggeredEdgeDelays from legacy mode when new field is absent
+    if (!patch.triggeredEdgeDelays?.length) {
+        const mode = patch.triggeredEdgeSameCandleMode;
+        patch.triggeredEdgeDelays = mode === "same" ? [0] : mode === "next" ? [1] : [0, 1];
+    }
     applyFirstPresent(patch, source, "triggeredEdgeCancelOnRetrace", ["triggered_edge_cancel_on_retrace", "triggeredEdgeCancelOnRetrace"], toBool);
     applyFirstPresent(patch, source, "triggeredEdgeCancelRetracePips", ["triggered_edge_cancel_retrace_pips", "triggeredEdgeCancelRetracePips"], toNumber);
     applyFirstPresent(patch, source, "triggeredEdgeCancelRetraceObPct", ["triggered_edge_cancel_retrace_ob_pct", "triggeredEdgeCancelRetraceObPct"], toNumber);
+    applyFirstPresent(patch, source, "triggeredEdgeCancelOnFirstFailedTag", ["triggered_edge_cancel_on_first_failed_tag", "triggeredEdgeCancelOnFirstFailedTag"], toBool);
     if ("entryResearchExports" in patch || "entryPenetrationThresholds" in patch) {
         patch.entryResearchExportMode = mapConfigEntryResearchExportMode(source.entry_models || source.entryModels, source);
     }

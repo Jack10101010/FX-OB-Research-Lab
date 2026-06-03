@@ -728,10 +728,10 @@ function normalizeEntryModeKey(value) {
         // Penetration: integer threshold → canonical p-form (e.g. 25 → 25p0).
         .replace(/^entry_penetration_(\d+)$/, "entry_penetration_$1p0")
         // Triggered Edge: integer threshold → canonical p-form, preserving the
-        // optional _same/_next fill-mode suffix so the resolver's canonical keys
-        // (entry_triggered_edge_25p0[_same|_next]) match. Already-p-form keys
-        // (e.g. 25p0, 25p0_next) don't match \d+ here and pass through unchanged.
-        .replace(/^entry_triggered_edge_(\d+)(_same|_next)?$/, "entry_triggered_edge_$1p0$2");
+        // optional _same/_next/_d2/_d3 fill-mode suffix so the resolver's canonical
+        // keys (entry_triggered_edge_25p0[_same|_next|_d2|_d3]) match. Already-p-form
+        // keys (e.g. 25p0, 25p0_next, 25p0_d2) don't match \d+ here and pass through.
+        .replace(/^entry_triggered_edge_(\d+)(_same|_next|_d\d+)?$/, "entry_triggered_edge_$1p0$2");
 }
 
 function newsDateRange(events) {

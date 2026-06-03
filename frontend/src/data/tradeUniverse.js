@@ -133,6 +133,8 @@ export function fillModeFromKey(key) {
     const k = String(key || "");
     if (/_same$/i.test(k)) return "same";
     if (/_next$/i.test(k)) return "next";
+    const dm = k.match(/_d(\d+)$/i);
+    if (dm) return `d${dm[1]}`;   // "_d2" → "d2", "_d3" → "d3", etc.
     return null;
 }
 
@@ -262,7 +264,8 @@ export function buildAvailableOptions(allKeys = []) {
             const fillMode = fillModeFromKey(key);
             const ftKey = `${family}::${threshold}`;
             if (!fillModesByFamilyThreshold[ftKey]) fillModesByFamilyThreshold[ftKey] = new Set();
-            if (fillMode === "same" || fillMode === "next") {
+            if (fillMode === "same" || fillMode === "next"
+                    || (typeof fillMode === "string" && fillMode.startsWith("d"))) {
                 fillModesByFamilyThreshold[ftKey].add(fillMode);
             } else {
                 combinedFlagByFamilyThreshold[ftKey] = true;
@@ -271,7 +274,7 @@ export function buildAvailableOptions(allKeys = []) {
         }
     }
 
-    const FILL_ORDER = ["both", "same", "next"];
+    const FILL_ORDER = ["both", "same", "next", "d2", "d3", "d4"];
     const sortFillModes = (modes) => [...modes].sort(
         (a, b) => FILL_ORDER.indexOf(a) - FILL_ORDER.indexOf(b),
     );
@@ -302,6 +305,7 @@ export function buildCanonicalKey(family, threshold, fillMode) {
     if (!thresholdPart) return null;
     const base = `entry_${family}_${thresholdPart}`;
     if (fillMode === "same" || fillMode === "next") return `${base}_${fillMode}`;
+    if (typeof fillMode === "string" && fillMode.startsWith("d")) return `${base}_${fillMode}`;
     return base; // both / null
 }
 
@@ -333,7 +337,7 @@ export function resolveHierarchy(scenario, legacyEntryModelHint, allKeys, availa
             };
         }
         const familyKeys = allKeys.filter((k) => familyFromKey(k) === family);
-        const combinedKey = familyKeys.find((k) => !/_same$|_next$/.test(k));
+        const combinedKey = familyKeys.find((k) => !/_same$|_next$|_d\d+$/.test(k));
         const autoKey = combinedKey || familyKeys[0] || null;
         const autoThreshold = autoKey ? extractThreshold(autoKey) : null;
         const requestedFillMode = scenario.fillMode !== undefined

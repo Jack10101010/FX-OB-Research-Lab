@@ -294,6 +294,8 @@ export default function RunDetail() {
                     const fillStr = fillMode === "next" ? " · Next candle"
                         : fillMode === "same" ? " · Same candle"
                         : fillMode === "both" ? " · Both"
+                        : fillMode === "d2"   ? " · Delay +2"
+                        : fillMode === "d3"   ? " · Delay +3"
                         : "";
                     views.push({
                         key: `${family}_${threshold}_${fillMode ?? "both"}`,
@@ -352,6 +354,8 @@ export default function RunDetail() {
             { fillMode: null,   displayLabel: "Both" },
             { fillMode: "same", displayLabel: "Same candle" },
             { fillMode: "next", displayLabel: "Next candle" },
+            { fillMode: "d2",   displayLabel: "Delay +2" },
+            { fillMode: "d3",   displayLabel: "Delay +3" },
         ];
         const groups = [];
         const baselineOpt = resultViewOptions.find((o) => o.family === "baseline");
@@ -402,7 +406,11 @@ export default function RunDetail() {
         if (fam === "penetration") return thr != null ? `Penetration ${thr}%` : "Penetration";
         if (fam === "triggered_edge") {
             const base = thr != null ? `Triggered Edge ${thr}%` : "Triggered Edge";
-            const mode = fm === "same" ? " · Same Candle" : fm === "next" ? " · Next Candle" : " · Both";
+            const mode = fm === "same" ? " · Same Candle"
+                       : fm === "next" ? " · Next Candle"
+                       : fm === "d2"   ? " · Delay +2"
+                       : fm === "d3"   ? " · Delay +3"
+                       : " · Both";
             return base + mode;
         }
         return activeResultViewOption?.label || String(fam).replace(/_/g, " ");
@@ -1407,6 +1415,8 @@ export default function RunDetail() {
                                 { fillMode: null,   label: "Both" },
                                 { fillMode: "same", label: "Same candle" },
                                 { fillMode: "next", label: "Next candle" },
+                                { fillMode: "d2",   label: "Delay +2" },
+                                { fillMode: "d3",   label: "Delay +3" },
                             ];
 
                             const showThresholdRow = selModel !== "baseline";
@@ -1429,6 +1439,8 @@ export default function RunDetail() {
                             const modeChipLabel = !isScenarioView ? "Standard edge"
                                 : resultView?.fillMode === "same" ? "Same candle"
                                 : resultView?.fillMode === "next" ? "Next candle"
+                                : resultView?.fillMode === "d2"   ? "Delay +2"
+                                : resultView?.fillMode === "d3"   ? "Delay +3"
                                 : "Both";
                             const analyticsChipLabel = !isScenarioView ? "Baseline trades"
                                 : hasSelectedUniverseTrades ? "Scenario trades"
@@ -1443,7 +1455,11 @@ export default function RunDetail() {
                                 if (fam === "penetration") return thr != null ? `Penetration ${thr}%` : "Penetration";
                                 if (fam === "triggered_edge") {
                                     const base = thr != null ? `Triggered Edge ${thr}%` : "Triggered Edge";
-                                    const mode = selFillMode === "same" ? " · Same Candle" : selFillMode === "next" ? " · Next Candle" : " · Both";
+                                    const mode = selFillMode === "same" ? " · Same Candle"
+                                               : selFillMode === "next" ? " · Next Candle"
+                                               : selFillMode === "d2"   ? " · Delay +2"
+                                               : selFillMode === "d3"   ? " · Delay +3"
+                                               : " · Both";
                                     return base + mode;
                                 }
                                 return identityLabel;
