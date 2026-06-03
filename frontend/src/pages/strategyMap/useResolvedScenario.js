@@ -343,6 +343,13 @@ function buildTriggeredEdgeOverlays(trades = [], obs = []) {
             triggerPrice,
             entryPrice,
             badgeState,
+            // ── Ghost tracking (Phase 0 — observational only) ─────────────────
+            // All default to null; absent on old bundles.
+            ghost_candidate: truthyFlag(trade.ghost_candidate) || truthyFlag(trade.ghostCandidate) || false,
+            ghost_outcome: String(trade.ghost_outcome || trade.ghostOutcome || ""),
+            ghost_r: numericOrNull(trade.ghost_r ?? trade.ghostR),
+            ghost_fill_session: String(trade.ghost_fill_session || trade.ghostFillSession || ""),
+            ghost_fill_delay_candles: numericOrNull(trade.ghost_fill_delay_candles ?? trade.ghostFillDelayCandles),
         });
     }
     return out;

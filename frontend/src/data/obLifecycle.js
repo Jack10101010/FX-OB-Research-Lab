@@ -241,5 +241,27 @@ export function deriveOBLifecycle(ob, trade, lastCandleTime) {
         rResult: numeric(trade?.r ?? trade?.pnl_r ?? trade?.rResult),
         time0: startTime,
         time1: rightTime ?? startTime,
+        // ── Ghost tracking (Phase 0 — observational only) ────────────────────
+        // Trade fields take precedence over OB fields (trades carry more detail).
+        // ...ob spread already passes through OB-level ghost_* — these explicit
+        // assignments add trade-level fields and fill gaps if the OB omits them.
+        ghost_candidate: trade?.ghost_candidate ?? ob?.ghost_candidate ?? null,
+        ghostCandidate: trade?.ghost_candidate ?? ob?.ghost_candidate ?? null,
+        ghost_trigger_reached: trade?.ghost_trigger_reached ?? ob?.ghost_trigger_reached ?? null,
+        ghostTriggerReached: trade?.ghost_trigger_reached ?? ob?.ghost_trigger_reached ?? null,
+        ghost_fill: trade?.ghost_fill ?? ob?.ghost_fill ?? null,
+        ghostFill: trade?.ghost_fill ?? ob?.ghost_fill ?? null,
+        ghost_outcome: trade?.ghost_outcome || ob?.ghost_outcome || "",
+        ghostOutcome: trade?.ghost_outcome || ob?.ghost_outcome || "",
+        ghost_r: numeric(trade?.ghost_r ?? ob?.ghost_r),
+        ghostR: numeric(trade?.ghost_r ?? ob?.ghost_r),
+        ghost_mae: numeric(trade?.ghost_mae ?? null),
+        ghostMae: numeric(trade?.ghost_mae ?? null),
+        ghost_mfe: numeric(trade?.ghost_mfe ?? null),
+        ghostMfe: numeric(trade?.ghost_mfe ?? null),
+        ghost_fill_delay_candles: numeric(trade?.ghost_fill_delay_candles ?? null),
+        ghostFillDelayCandles: numeric(trade?.ghost_fill_delay_candles ?? null),
+        ghost_fill_session: trade?.ghost_fill_session || ob?.ghost_fill_session || "",
+        ghostFillSession: trade?.ghost_fill_session || ob?.ghost_fill_session || "",
     };
 }

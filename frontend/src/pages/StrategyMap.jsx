@@ -54,6 +54,11 @@ const DEFAULT_LAYERS = {
     cancelledSetups: true,
     // OB Details callout overlay
     obDetails: false,
+    // Ghost tracking overlays (Phase 0 — observational, all off by default)
+    ghostCandidateMarkers: false,
+    ghostFillMarkers: false,
+    ghostWinMarkers: false,
+    ghostLossMarkers: false,
 };
 
 const DEFAULT_UI_SETTINGS = {
@@ -170,6 +175,11 @@ export default function StrategyMap() {
     const [showTriggeredEdgeBadges, setShowTriggeredEdgeBadges] = useState(initialUi.layers.triggeredEdgeBadges);
     const [showCancelledSetups, setShowCancelledSetups] = useState(initialUi.layers.cancelledSetups);
     const [showObDetails, setShowObDetails] = useState(initialUi.layers.obDetails ?? false);
+    // Ghost tracking overlay toggles (Phase 0 — all off by default)
+    const [showGhostCandidateMarkers, setShowGhostCandidateMarkers] = useState(initialUi.layers.ghostCandidateMarkers ?? false);
+    const [showGhostFillMarkers, setShowGhostFillMarkers] = useState(initialUi.layers.ghostFillMarkers ?? false);
+    const [showGhostWinMarkers, setShowGhostWinMarkers] = useState(initialUi.layers.ghostWinMarkers ?? false);
+    const [showGhostLossMarkers, setShowGhostLossMarkers] = useState(initialUi.layers.ghostLossMarkers ?? false);
     const [sessionSettings, setSessionSettings] = useState(initialUi.sessionSettings);
     const [tradeQuery, setTradeQuery] = useState("");
     const [tradeOutcomeFilter, setTradeOutcomeFilter] = useState("All");
@@ -310,6 +320,7 @@ export default function StrategyMap() {
         })
     ), [activeTrades, tradeQuery, tradeOutcomeFilter, tradeDirectionFilter, tradeStructureFilter]);
     const hasTriggeredEdgeTrades = triggeredEdgeOverlays.length > 0;
+    const hasGhostData = triggeredEdgeOverlays.some(ov => ov.ghost_candidate === true);
     const newsEventsAvailable = useMemo(() => buildStrategyMapNewsEvents(bundle, summary, selectedVariant), [bundle, summary, selectedVariant]);
     const newsEvents = showNewsEvents ? newsEventsAvailable : [];
     const sessionRanges = useMemo(() => (
@@ -359,6 +370,10 @@ export default function StrategyMap() {
         setShowTriggeredEdgeBadges(defaults.layers.triggeredEdgeBadges);
         setShowCancelledSetups(defaults.layers.cancelledSetups);
         setShowObDetails(defaults.layers.obDetails ?? false);
+        setShowGhostCandidateMarkers(defaults.layers.ghostCandidateMarkers ?? false);
+        setShowGhostFillMarkers(defaults.layers.ghostFillMarkers ?? false);
+        setShowGhostWinMarkers(defaults.layers.ghostWinMarkers ?? false);
+        setShowGhostLossMarkers(defaults.layers.ghostLossMarkers ?? false);
         setSelectedEntryModelByRun(defaults.selectedEntryModelByRun || {});
         setSessionSettings(defaults.sessionSettings);
         saveStrategyMapUi(defaults);
@@ -398,6 +413,10 @@ export default function StrategyMap() {
                 triggeredEdgeBadges: showTriggeredEdgeBadges,
                 cancelledSetups: showCancelledSetups,
                 obDetails: showObDetails,
+                ghostCandidateMarkers: showGhostCandidateMarkers,
+                ghostFillMarkers: showGhostFillMarkers,
+                ghostWinMarkers: showGhostWinMarkers,
+                ghostLossMarkers: showGhostLossMarkers,
             },
             sessionSettings,
         });
@@ -428,6 +447,10 @@ export default function StrategyMap() {
         showTriggeredEdgeBadges,
         showCancelledSetups,
         showObDetails,
+        showGhostCandidateMarkers,
+        showGhostFillMarkers,
+        showGhostWinMarkers,
+        showGhostLossMarkers,
         sessionSettings,
     ]);
 
@@ -655,6 +678,14 @@ export default function StrategyMap() {
                                         <Toggle label="Cancelled Setups" checked={showCancelledSetups} onChange={setShowCancelledSetups} dot="secondary" />
                                     </>
                                 )}
+                                {hasGhostData && (
+                                    <>
+                                        <Toggle label="👁 Candidates" checked={showGhostCandidateMarkers} onChange={setShowGhostCandidateMarkers} dot="muted" />
+                                        <Toggle label="👁 Ghost Fill" checked={showGhostFillMarkers} onChange={setShowGhostFillMarkers} dot="muted" />
+                                        <Toggle label="👁 Ghost Win" checked={showGhostWinMarkers} onChange={setShowGhostWinMarkers} dot="success" />
+                                        <Toggle label="👁 Ghost Loss" checked={showGhostLossMarkers} onChange={setShowGhostLossMarkers} dot="danger" />
+                                    </>
+                                )}
                                 <Pill tone="muted">Chart time: UTC</Pill>
                                 <Pill tone="muted">{displayCandles.length} candles</Pill>
                                 <Pill tone="muted">{chartTradeMarkers.length} markers</Pill>
@@ -708,6 +739,10 @@ export default function StrategyMap() {
                             showTriggeredEdgeBadges={showTriggeredEdgeBadges}
                             showCancelledSetups={showCancelledSetups}
                             showObDetails={showObDetails}
+                            showGhostCandidateMarkers={showGhostCandidateMarkers}
+                            showGhostFillMarkers={showGhostFillMarkers}
+                            showGhostWinMarkers={showGhostWinMarkers}
+                            showGhostLossMarkers={showGhostLossMarkers}
                             onSelectTrade={(id) => {
                                 if (id == null) { setSelectedTradeId(null); return; }
                                 const incomingKey = rrLookupKey(id);

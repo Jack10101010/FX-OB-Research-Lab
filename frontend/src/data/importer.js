@@ -263,6 +263,19 @@ export function parseOrderBlocksCSV(text) {
             obOriginMinutesFromNews: numOrNull(pick(r, "ob_origin_minutes_from_news", "obOriginMinutesFromNews")),
             obDetectionMinutesFromNews: numOrNull(pick(r, "ob_detection_minutes_from_news", "obDetectionMinutesFromNews")),
             hasNewsCreatedTagFields,
+            // ── Ghost tracking (Phase 0 — observational only) ────────────────────
+            ghost_candidate: boolOrNull(pick(r, "ghost_candidate", "ghostCandidate")),
+            ghostCandidate: boolOrNull(pick(r, "ghost_candidate", "ghostCandidate")),
+            ghost_trigger_reached: boolOrNull(pick(r, "ghost_trigger_reached", "ghostTriggerReached")),
+            ghostTriggerReached: boolOrNull(pick(r, "ghost_trigger_reached", "ghostTriggerReached")),
+            ghost_fill: boolOrNull(pick(r, "ghost_fill", "ghostFill")),
+            ghostFill: boolOrNull(pick(r, "ghost_fill", "ghostFill")),
+            ghost_outcome: String(pick(r, "ghost_outcome", "ghostOutcome") || ""),
+            ghostOutcome: String(pick(r, "ghost_outcome", "ghostOutcome") || ""),
+            ghost_r: numOrNull(pick(r, "ghost_r", "ghostR")),
+            ghostR: numOrNull(pick(r, "ghost_r", "ghostR")),
+            ghost_fill_session: String(pick(r, "ghost_fill_session", "ghostFillSession") || ""),
+            ghostFillSession: String(pick(r, "ghost_fill_session", "ghostFillSession") || ""),
         };
     });
 }
@@ -471,6 +484,26 @@ export function parseTradesCSV(text) {
             news_flatten_target_time: String(pick(r, "news_flatten_target_time") || ""),
             news_flatten_late: boolOrNull(pick(r, "news_flatten_late")),
             news_flatten_minutes_before_blackout: numOrNull(pick(r, "news_flatten_minutes_before_blackout")),
+            // ── Ghost tracking (Phase 0 — observational only) ────────────────────
+            // All fields default to null when absent; old bundles load unchanged.
+            ghost_candidate: boolOrNull(pick(r, "ghost_candidate", "ghostCandidate")),
+            ghostCandidate: boolOrNull(pick(r, "ghost_candidate", "ghostCandidate")),
+            ghost_trigger_reached: boolOrNull(pick(r, "ghost_trigger_reached", "ghostTriggerReached")),
+            ghostTriggerReached: boolOrNull(pick(r, "ghost_trigger_reached", "ghostTriggerReached")),
+            ghost_fill: boolOrNull(pick(r, "ghost_fill", "ghostFill")),
+            ghostFill: boolOrNull(pick(r, "ghost_fill", "ghostFill")),
+            ghost_outcome: String(pick(r, "ghost_outcome", "ghostOutcome") || ""),
+            ghostOutcome: String(pick(r, "ghost_outcome", "ghostOutcome") || ""),
+            ghost_r: numOrNull(pick(r, "ghost_r", "ghostR")),
+            ghostR: numOrNull(pick(r, "ghost_r", "ghostR")),
+            ghost_mae: numOrNull(pick(r, "ghost_mae", "ghostMae")),
+            ghostMae: numOrNull(pick(r, "ghost_mae", "ghostMae")),
+            ghost_mfe: numOrNull(pick(r, "ghost_mfe", "ghostMfe")),
+            ghostMfe: numOrNull(pick(r, "ghost_mfe", "ghostMfe")),
+            ghost_fill_delay_candles: numOrNull(pick(r, "ghost_fill_delay_candles", "ghostFillDelayCandles")),
+            ghostFillDelayCandles: numOrNull(pick(r, "ghost_fill_delay_candles", "ghostFillDelayCandles")),
+            ghost_fill_session: String(pick(r, "ghost_fill_session", "ghostFillSession") || ""),
+            ghostFillSession: String(pick(r, "ghost_fill_session", "ghostFillSession") || ""),
         };
     });
 }
@@ -1118,6 +1151,17 @@ export async function ingestRunBundle(fileList) {
         news_flattened_r: sm.news_flattened_r ?? null,
         news_flatten_late_count: sm.news_flatten_late_count ?? null,
         news_debug: sm.news_debug ?? null,
+        // ── Ghost tracking aggregates (Phase 0 — observational only) ─────────
+        // All default to null so old bundles load without change.
+        ghost_candidates_total: sm.ghost_candidates_total ?? sm.ghostCandidatesTotal ?? null,
+        ghost_wins: sm.ghost_wins ?? sm.ghostWins ?? null,
+        ghost_losses: sm.ghost_losses ?? sm.ghostLosses ?? null,
+        ghost_breakevens: sm.ghost_breakevens ?? sm.ghostBreakevens ?? null,
+        ghost_protection_exits: sm.ghost_protection_exits ?? sm.ghostProtectionExits ?? null,
+        ghost_unfilled: sm.ghost_unfilled ?? sm.ghostUnfilled ?? null,
+        ghost_never_triggered: sm.ghost_never_triggered ?? sm.ghostNeverTriggered ?? null,
+        ghost_net_r: sm.ghost_net_r ?? sm.ghostNetR ?? null,
+        ghost_avg_r: sm.ghost_avg_r ?? sm.ghostAvgR ?? null,
         sourceFiles,
     };
 

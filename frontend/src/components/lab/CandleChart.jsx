@@ -283,6 +283,11 @@ export function CandleChart({
     showCancelledSetups = true,
     // OB Details callout overlay (compact badge per OB box, off by default)
     showObDetails = false,
+    // Ghost tracking overlay props (Phase 0 — observational, all off by default)
+    showGhostCandidateMarkers = false,
+    showGhostFillMarkers = false,
+    showGhostWinMarkers = false,
+    showGhostLossMarkers = false,
 }) {
     const containerRef = useRef(null);
     const chartRef = useRef(null);
@@ -1103,6 +1108,65 @@ export function CandleChart({
             .filter(Boolean);
     })();
 
+    // ── Ghost tracking: badge chips for Phase 0 observational overlays ───────
+    // Rendered on top of existing triggered-edge overlays. Each badge shows
+    // what would have happened if the OB had not been cancelled.
+    // All four toggles share one computation — they filter by outcome category.
+    const ghostBadgeShapes = (() => {
+        const anyGhost = showGhostCandidateMarkers || showGhostFillMarkers || showGhostWinMarkers || showGhostLossMarkers;
+        if (!anyGhost || !triggeredEdgeOverlays?.length || !overlays?.length) return [];
+        const obPixelMap = new Map();
+        for (const ob of overlays) {
+            const key = obLookupKey(ob.obId || ob.ob_id || ob.id);
+            if (key) obPixelMap.set(key, ob);
+        }
+        const GHOST_OUTCOME_LABEL = {
+            WIN: "G:WIN", LOSS: "G:LOSS", BE: "G:BE", BREAKEVEN: "G:BE",
+            PROTECTION_EXIT: "G:PROT", UNFILLED: "G:UNFILL",
+            NEVER_TRIGGERED: "G:NO-TRIG", INVALIDATED: "G:INVAL",
+        };
+        const GHOST_OUTCOME_COLOR = {
+            WIN:             { bg: "rgba(22, 163, 74, 0.75)",   text: "rgba(255,255,255,0.96)" },
+            LOSS:            { bg: "rgba(239, 68, 68, 0.75)",   text: "rgba(255,255,255,0.96)" },
+            BE:              { bg: "rgba(107, 114, 128, 0.70)", text: "rgba(255,255,255,0.92)" },
+            BREAKEVEN:       { bg: "rgba(107, 114, 128, 0.70)", text: "rgba(255,255,255,0.92)" },
+            PROTECTION_EXIT: { bg: "rgba(245, 158, 11, 0.75)", text: "rgba(255,255,255,0.96)" },
+            UNFILLED:        { bg: "rgba(100, 116, 139, 0.65)", text: "rgba(255,255,255,0.88)" },
+            NEVER_TRIGGERED: { bg: "rgba(100, 116, 139, 0.65)", text: "rgba(255,255,255,0.88)" },
+            INVALIDATED:     { bg: "rgba(139, 92, 246, 0.70)",  text: "rgba(255,255,255,0.92)" },
+        };
+        const out = [];
+        for (const ov of triggeredEdgeOverlays) {
+            if (!ov.ghost_candidate) continue;
+            const outcome = String(ov.ghost_outcome || "").toUpperCase();
+            const isWin = outcome === "WIN";
+            const isLoss = outcome === "LOSS";
+            const isFill = isWin || isLoss || outcome === "BE" || outcome === "BREAKEVEN" || outcome === "PROTECTION_EXIT";
+            // Apply visibility filters
+            if (!showGhostCandidateMarkers) {
+                if (showGhostFillMarkers && !isFill) continue;
+                if (showGhostWinMarkers && !isWin) continue;
+                if (showGhostLossMarkers && !isLoss) continue;
+                if (!showGhostFillMarkers && !showGhostWinMarkers && !showGhostLossMarkers) continue;
+            }
+            const key = obLookupKey(ov.obId);
+            const obPx = key ? obPixelMap.get(key) : null;
+            if (!obPx) continue;
+            const label = GHOST_OUTCOME_LABEL[outcome] || "G:?";
+            const color = GHOST_OUTCOME_COLOR[outcome] || { bg: "rgba(100,116,139,0.65)", text: "rgba(255,255,255,0.88)" };
+            out.push({
+                id: `ghost-badge-${ov.tradeId || ov.obId}`,
+                left: obPx.left + obPx.width,
+                top: obPx.top + 18, // offset below the triggered-edge badge
+                label,
+                color,
+                ghostR: ov.ghost_r,
+                tradeId: ov.tradeId,
+            });
+        }
+        return out;
+    })();
+
     // ── Phase 2: clickable trade-marker dots ──────────────────────────────────
     // Lightweight DOM dots rendered at each trade's fill candle. Respects the
     // existing showLongs / showShorts / showWins / showLosses layer toggles.
@@ -1211,6 +1275,32 @@ export function CandleChart({
                         />
                     );
                 })}
+                {/* Ghost tracking: outcome badge chips (Phase 0 — observational) */}
+                {ghostBadgeShapes.map((b) => (
+                    <div
+                        key={b.id}
+                        className="absolute pointer-events-none select-none"
+                        style={{
+                            left: b.left + 1,
+                            top: b.top,
+                            background: b.color.bg,
+                            color: b.color.text,
+                            fontSize: 7,
+                            fontFamily: "var(--font-ui)",
+                            fontWeight: 600,
+                            letterSpacing: "0.06em",
+                            textTransform: "uppercase",
+                            padding: "1px 3px",
+                            borderRadius: 0,
+                            whiteSpace: "nowrap",
+                            zIndex: 14,
+                            border: "1px dashed rgba(255,255,255,0.35)",
+                            opacity: 0.9,
+                        }}
+                    >
+                        {b.label}{b.ghostR != null ? ` ${b.ghostR >= 0 ? "+" : ""}${b.ghostR.toFixed(1)}R` : ""}
+                    </div>
+                ))}
                 {/* Phase 2: clickable trade-marker dots */}
                 {tradeMarkerShapes.map((dot) => (
                     <TradeMarkerDot

@@ -15,6 +15,7 @@ import { LifecyclePanel, FutureModelsPanel, ResearchBacklogPanel } from "./Lifec
 import { TriggeredEdgeFunnelPanel } from "./TriggeredEdgeFunnelPanel";
 import { SameNextCandlePanel }    from "./SameNextCandlePanel";
 import { CancelReasonPanel }      from "./CancelReasonPanel";
+import { GhostOutcomePanel }      from "./GhostOutcomePanel";
 import { buildAllModelCurves }    from "../analytics/equityCurveAnalytics";
 import { PROFILE_KEYS }           from "../analytics/entryRegistry";
 
@@ -103,6 +104,11 @@ export function ModelAnalysis({
         return buildAllModelCurves(exactRows, tradesByMode, activeVariant);
     }, [exactRows, tradesByMode, activeVariant]);
 
+    // Ghost data presence check — drives Trigger Behavior tier visibility.
+    const hasGhostData = useMemo(() => {
+        return (trades || []).some(t => t?.ghost_candidate === true);
+    }, [trades]);
+
     // Phase 2: Lifecycle row — controls Tier 1.5 visibility.
     //
     // Three-way selection rule:
@@ -163,6 +169,22 @@ export function ModelAnalysis({
                     />
                     <CancelReasonPanel row={lifecycleRow} />
                 </div>
+            )}
+
+            {/* Trigger Behavior tier — ghost outcomes, shown only when:
+                (a) we are in a triggered-edge lifecycle context AND
+                (b) ghost_candidate trades are present in the dataset.
+                Phase 0: observational data only — no cancellation logic. */}
+            {lifecycleRow && hasGhostData && (
+                <>
+                    <TierDivider
+                        label="Trigger Behavior"
+                        sub="Ghost outcome distribution · observational only"
+                    />
+                    <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+                        <GhostOutcomePanel trades={trades} />
+                    </div>
+                </>
             )}
 
             {/* ── Section divider ───────────────────────────────────────── */}
