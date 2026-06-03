@@ -4,14 +4,17 @@ import { LabRunHero } from "@/components/lab/LabRunHero";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { DataTable, Pill } from "@/components/lab/DataTable";
 import { Field, NeonInput, NeonSelect, NeonButton } from "@/components/lab/controls";
-import { createResearchProject, setActiveProjectId, useDataset } from "@/data/store";
-import { CheckCircle2, FolderOpen, FolderPlus, Play, Target } from "lucide-react";
+import { createResearchProject, deleteProject, setActiveProjectId, updateResearchProject, useDataset } from "@/data/store";
+import { Check, CheckCircle2, Edit3, FolderOpen, FolderPlus, Play, Target, Trash2, X } from "lucide-react";
 
 export default function Projects() {
     const { PROJECTS, activeProjectId } = useDataset();
     const [symbol, setSymbol] = useState("EURUSD");
     const [timeframe, setTimeframe] = useState("M15");
     const [name, setName] = useState("");
+    // PROJECTS-1B: inline rename state
+    const [editingProjectId, setEditingProjectId] = useState("");
+    const [editProjectName, setEditProjectName] = useState("");
 
     const defaultName = `${symbol} ${timeframe} Research`;
     const rows = useMemo(() => PROJECTS || [], [PROJECTS]);
@@ -24,6 +27,35 @@ export default function Projects() {
         });
         setName("");
         setActiveProjectId(project.id);
+    };
+
+    const startRenameProject = (event, project) => {
+        event?.preventDefault();
+        event?.stopPropagation();
+        setEditingProjectId(project.id);
+        setEditProjectName(project.name || "");
+    };
+    const cancelRenameProject = (event) => {
+        event?.preventDefault();
+        event?.stopPropagation();
+        setEditingProjectId("");
+        setEditProjectName("");
+    };
+    const saveRenameProject = (event) => {
+        event?.preventDefault();
+        event?.stopPropagation();
+        const trimmed = editProjectName.trim();
+        if (!editingProjectId || !trimmed) return;
+        updateResearchProject(editingProjectId, { name: trimmed });
+        setEditingProjectId("");
+        setEditProjectName("");
+    };
+    const handleDeleteProject = (event, project) => {
+        event?.preventDefault();
+        event?.stopPropagation();
+        if (!window.confirm("Delete project? Runs will be unassigned but not deleted.")) return;
+        if (editingProjectId === project.id) cancelRenameProject();
+        deleteProject(project.id);
     };
 
     return (
@@ -84,12 +116,55 @@ export default function Projects() {
                         testId="projects-table"
                         rowKey="id"
                         columns={[
-                            { key: "name", label: "Project", render: (project) => (
-                                <span className="inline-flex items-center gap-2">
-                                    <span className="text-[hsl(var(--accent-primary))]">{project.name}</span>
-                                    {project.id === activeProjectId && <Pill tone="success">Active</Pill>}
-                                </span>
-                            ) },
+                            { key: "name", label: "Project", render: (project) => {
+                                const isEditing = editingProjectId === project.id;
+                                if (isEditing) {
+                                    return (
+                                        <span className="flex items-center gap-1.5 min-w-[220px]">
+                                            <NeonInput
+                                                value={editProjectName}
+                                                onChange={(e) => setEditProjectName(e.target.value)}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === "Enter") { e.preventDefault(); saveRenameProject(); }
+                                                    if (e.key === "Escape") { e.preventDefault(); cancelRenameProject(); }
+                                                }}
+                                                className="h-7 min-w-[180px]"
+                                                autoFocus
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={saveRenameProject}
+                                                className="grid place-items-center w-7 h-7 clip-bevel-sm border border-[hsl(var(--success)/0.55)] text-[hsl(var(--success))] bg-[hsl(var(--success)/0.08)]"
+                                                aria-label="Save project name"
+                                            >
+                                                <Check className="w-3.5 h-3.5" />
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={cancelRenameProject}
+                                                className="grid place-items-center w-7 h-7 clip-bevel-sm border border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))]"
+                                                aria-label="Cancel rename"
+                                            >
+                                                <X className="w-3.5 h-3.5" />
+                                            </button>
+                                        </span>
+                                    );
+                                }
+                                return (
+                                    <span className="group/pname inline-flex items-center gap-2">
+                                        <span className="text-[hsl(var(--accent-primary))]">{project.name}</span>
+                                        {project.id === activeProjectId && <Pill tone="success">Active</Pill>}
+                                        <button
+                                            type="button"
+                                            onClick={(e) => startRenameProject(e, project)}
+                                            className="grid place-items-center w-6 h-6 opacity-0 group-hover/pname:opacity-100 clip-bevel-sm border border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:border-[hsl(var(--accent-secondary))] hover:text-white transition-opacity"
+                                            aria-label="Rename project"
+                                        >
+                                            <Edit3 className="w-3.5 h-3.5" />
+                                        </button>
+                                    </span>
+                                );
+                            } },
                             { key: "symbol", label: "Symbol" },
                             { key: "timeframe", label: "TF" },
                             { key: "status", label: "Status", render: (project) => <Pill tone={project.status === "validated" ? "success" : "muted"}>{project.status}</Pill> },
@@ -124,6 +199,15 @@ export default function Projects() {
                                         <Target className="w-3 h-3" />
                                         {project.baselineRunId ? "Open Builder" : "Create Baseline"}
                                     </Link>
+                                    <button
+                                        type="button"
+                                        onClick={(e) => handleDeleteProject(e, project)}
+                                        className="grid place-items-center w-7 h-7 clip-bevel-sm border border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:border-[hsl(var(--danger)/0.65)] hover:text-[hsl(var(--danger))]"
+                                        aria-label="Delete project"
+                                        title="Delete project. Runs will be unassigned but not deleted."
+                                    >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
                                 </div>
                             ) },
                         ]}

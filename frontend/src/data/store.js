@@ -1386,6 +1386,51 @@ export function updateResearchProject(projectId, patch) {
     notify();
 }
 
+// PROJECTS-1B: delete a project and unlink its runs without deleting them.
+// Clears run.projectId / run.summary.projectId for every run that was assigned
+// to this project, removes the project from state.projects, resets
+// activeProjectId when it matched, then persists both the run index and the
+// projects blob.
+export function deleteProject(projectId) {
+    if (!projectId || !state.projects[projectId]) return;
+
+    // Unlink all runs that belonged to this project.
+    const nextRuns = Object.fromEntries(
+        Object.entries(state.runs).map(([id, run]) => {
+            const assignedId = run.projectId || run.summary?.projectId || null;
+            if (assignedId !== projectId) return [id, run];
+            return [id, {
+                ...run,
+                projectId: null,
+                summary: run.summary ? { ...run.summary, projectId: null } : run.summary,
+            }];
+        })
+    );
+
+    // Remove the project entry.
+    const nextProjects = { ...state.projects };
+    delete nextProjects[projectId];
+
+    // Reset active project if it was the one being deleted.
+    const nextActiveProjectId = state.activeProjectId === projectId ? null : state.activeProjectId;
+
+    state = {
+        ...state,
+        runs: nextRuns,
+        projects: nextProjects,
+        activeProjectId: nextActiveProjectId,
+    };
+
+    try {
+        if (nextActiveProjectId == null) localStorage.removeItem(LS_ACTIVE_PROJECT);
+        else localStorage.setItem(LS_ACTIVE_PROJECT, nextActiveProjectId);
+    } catch { /* noop */ }
+
+    persistRuns();
+    persistProjects();
+    notify();
+}
+
 // WF-4: append a single research finding to a project. Reuses the existing
 // findings model so notes captured from Run Workspace render identically in
 // ProjectDetail. Returns the created entry, or null when the project/input is

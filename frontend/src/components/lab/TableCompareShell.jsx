@@ -129,6 +129,12 @@ export function TableCompareShell({
     // Side B wiring (caller-supplied, keeps page concerns out of the shell)
     resolveCompared,
     buildRows,
+    // Compact header opts — passed through to CanonicalBucketTable unchanged.
+    eyebrow = null,
+    hideChip = false,
+    hideResultsBasis = false,
+    basisFooter = false,
+    controlsPopover = false,
 }) {
     const { RUNS, activeRunId } = useDataset();
     const lens = useResultsLens();
@@ -283,6 +289,11 @@ export function TableCompareShell({
                 onDrill={onDrill}
                 compact={compact}
                 headerAction={compareControl}
+                eyebrow={eyebrow}
+                hideChip={hideChip}
+                hideResultsBasis={hideResultsBasis}
+                basisFooter={basisFooter}
+                controlsPopover={controlsPopover}
             />
 
             {mode !== MODE_NONE && (

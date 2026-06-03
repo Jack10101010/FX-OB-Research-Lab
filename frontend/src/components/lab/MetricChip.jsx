@@ -31,6 +31,7 @@ export function MetricChip({
     onClick,
     className,
     valueClassName,
+    subClassName,
     testId,
 }) {
     const sz = SIZE_STYLES[size] || SIZE_STYLES.default;
@@ -55,6 +56,11 @@ export function MetricChip({
                 className,
             )}
         >
+            {onClick && (
+                <div className="absolute top-1.5 right-1.5 z-10 w-3.5 h-3.5 rounded-full border border-[hsl(var(--accent-primary)/0.45)] text-[hsl(var(--accent-primary))] grid place-items-center text-[7px] font-bold leading-none pointer-events-none select-none opacity-50 group-hover:opacity-100 transition-opacity duration-200">
+                    i
+                </div>
+            )}
             <div
                 className={cn(
                     "clip-bevel p-[1px] transition-all duration-300",
@@ -84,7 +90,7 @@ export function MetricChip({
                             {sparkline && <MiniSpark data={sparkline} tone={tone} size={size} />}
                         </div>
                         {sub && (
-                            <div className={cn("font-display text-muted-lab mt-1 leading-snug", sz.sub)}>
+                            <div className={cn("font-display text-muted-lab mt-1 leading-snug", sz.sub, subClassName)}>
                                 {sub}
                             </div>
                         )}

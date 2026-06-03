@@ -51,6 +51,10 @@ export function LabRunHero({
     showOpenProject = true,
     showDefaultStatusBadges = true,
     showTradeCountBadge = false,
+    // When "right", the run/config/date info rows move from the left column into
+    // a compact card in the right column. Left shows only label + title + description.
+    // Default "inline" preserves existing behaviour for all other pages.
+    infoCardPosition = "inline",
 }) {
     const dataDriven = useDataDrivenMode({
         titleFallback,
@@ -91,8 +95,12 @@ export function LabRunHero({
     const projectId = dataDriven ? derived?.projectId : null;
     const hasRun = dataDriven ? derived?.hasRun : false;
 
+    const infoRight = infoCardPosition === "right";
+    const hasInfoRows = !!(runLine || configLine || dateRangeLine);
+
     const showRail = Boolean(
-        actions
+        (infoRight && hasInfoRows)
+        || actions
         || badges.length > 0
         || showTradeCountBadge
         || (showOpenProject && projectId)
@@ -105,6 +113,9 @@ export function LabRunHero({
             className={cn("mx-6 mb-5 px-1 py-4", className)}
         >
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                {/* Left column — always shows label + title + description.
+                    Info rows (runLine/configLine/dateRangeLine) are shown here
+                    only when infoCardPosition is "inline" (default). */}
                 <div className="min-w-0">
                     {pageLabel && (
                         <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[hsl(var(--accent-secondary))]">
@@ -117,17 +128,17 @@ export function LabRunHero({
                             {title}
                         </h1>
                     )}
-                    {runLine && (
+                    {!infoRight && runLine && (
                         <div className="mt-2 text-[13px] font-medium text-[hsl(var(--accent-primary))]">
                             {runLine}
                         </div>
                     )}
-                    {configLine && (
+                    {!infoRight && configLine && (
                         <div className="mt-1 text-[12px] leading-relaxed text-[hsl(var(--text-2))]">
                             {configLine}
                         </div>
                     )}
-                    {dateRangeLine && (
+                    {!infoRight && dateRangeLine && (
                         <div className="text-[12px] leading-relaxed text-[hsl(var(--text-3))]">
                             {dateRangeLine}
                         </div>
@@ -138,7 +149,12 @@ export function LabRunHero({
                         </div>
                     )}
                 </div>
-                {showRail && (
+
+                {/* Right column — two variants depending on infoCardPosition.
+                    "inline" (default): flat flex row of action buttons — identical
+                      to the original structure, zero layout change for other pages.
+                    "right": flex-col with action buttons above the info card. */}
+                {showRail && !infoRight && (
                     <div className="flex flex-wrap items-center gap-2 lg:justify-end">
                         {showOpenProject && projectId && <OpenProjectLink projectId={projectId} />}
                         {showDefaultStatusBadges && hasRun && <HeroBadge tone="primary">Imported</HeroBadge>}
@@ -153,6 +169,46 @@ export function LabRunHero({
                             </HeroBadge>
                         ))}
                         {actions}
+                    </div>
+                )}
+                {infoRight && (
+                    <div className="flex flex-col gap-3 lg:items-end shrink-0">
+                        {/* Action buttons row */}
+                        <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                            {showOpenProject && projectId && <OpenProjectLink projectId={projectId} />}
+                            {showDefaultStatusBadges && hasRun && <HeroBadge tone="primary">Imported</HeroBadge>}
+                            {showDefaultStatusBadges && hasRun && <HeroBadge tone="success">Active Run</HeroBadge>}
+                            {showDefaultStatusBadges && projectId && <HeroBadge tone="secondary">Project Active</HeroBadge>}
+                            {showTradeCountBadge && (
+                                <HeroBadge tone="muted">{tradeCount} trades</HeroBadge>
+                            )}
+                            {badges.map((badge, index) => (
+                                <HeroBadge key={badge.key ?? `${badge.tone}-${index}`} tone={badge.tone}>
+                                    {badge.label}
+                                </HeroBadge>
+                            ))}
+                            {actions}
+                        </div>
+                        {/* Info card */}
+                        {hasInfoRows && (
+                            <div className="clip-bevel-sm border border-[hsl(var(--border-soft)/0.7)] bg-[hsl(var(--panel-2)/0.35)] px-3 py-2.5 flex flex-col gap-1 max-w-xs xl:max-w-sm w-full">
+                                {runLine && (
+                                    <div className="text-[11px] font-medium text-[hsl(var(--accent-primary))] leading-snug break-words">
+                                        {runLine}
+                                    </div>
+                                )}
+                                {configLine && (
+                                    <div className="text-[10.5px] leading-relaxed text-[hsl(var(--text-2))]">
+                                        {configLine}
+                                    </div>
+                                )}
+                                {dateRangeLine && (
+                                    <div className="text-[10.5px] text-[hsl(var(--text-3))]">
+                                        {dateRangeLine}
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                 )}
             </div>

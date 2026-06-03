@@ -502,6 +502,11 @@ function RunNameCell({ run, editingId, editName, setEditName, startRename, delet
         run.sourceOutputFolder || run.outputFolder ? `Folder: ${run.sourceOutputFolder || run.outputFolder}` : null,
     ].filter(Boolean).join("\n");
     const isEditing = editingId === storeId;
+    // RUNS-2: infer entry mode from config fields available on the index row.
+    const entryModels = Array.isArray(run.config?.entry_models) ? run.config.entry_models : [];
+    const isScenarioBatch = entryModels.length > 1
+        || (Array.isArray(run.config?.entry_penetration_thresholds) && run.config.entry_penetration_thresholds.length > 1)
+        || (Array.isArray(run.config?.triggered_edge_thresholds) && run.config.triggered_edge_thresholds.length > 1);
     if (isEditing) {
         return (
             <span className="flex items-center gap-1.5 min-w-[260px]">
@@ -545,13 +550,9 @@ function RunNameCell({ run, editingId, editName, setEditName, startRename, delet
     return (
         <span className="group/name inline-flex items-center gap-1.5" title={identityTitle}>
             <Link to={`/runs/${encodeURIComponent(storeId)}`} className="text-[hsl(var(--accent-primary))] hover:text-white">{label}</Link>
-            {run.hasFullData
-                ? <Pill tone="success">{run.storageMode === "indexeddb_full" ? "IndexedDB full data" : "Memory full data"}</Pill>
-                : <Pill tone="warning">Index only</Pill>}
-            {run.autoReloadStatus === "loading" && <Pill tone="secondary">Auto-loading</Pill>}
+            {/* RUNS-2: only show research-relevant chips; storage internals removed */}
+            {isScenarioBatch && <Pill tone="secondary">Scenario Batch</Pill>}
             {run.autoReloadStatus === "failed" && <Pill tone="warning">Auto-load failed</Pill>}
-            {run.reloadAvailable && run.autoReloadStatus !== "loading" && run.autoReloadStatus !== "failed" && <Pill tone="secondary">Auto-load on open</Pill>}
-            {run.candlesStorage === "indexeddb" && <Pill tone="secondary">Candles stored</Pill>}
             {run._source === "imported" && !run.hasCandles && !run.candlesStorage && <Pill tone="muted">No candles</Pill>}
             {run._source === "imported" && (
                 <>

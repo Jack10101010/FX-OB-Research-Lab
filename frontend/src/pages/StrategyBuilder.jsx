@@ -706,15 +706,15 @@ export default function StrategyBuilder() {
                         <Segment
                             options={[
                                 { value: "single", label: "Single Model" },
-                                { value: "research", label: "Research Export" },
+                                { value: "research", label: "Scenario Batch" },
                             ]}
                             value={cfg.entryMode}
                             onChange={set("entryMode")}
                         />
                         <div className="mt-2 text-[10.5px] text-muted-lab">
                             {cfg.entryMode === "single"
-                                ? "One active entry model, plus baseline reference output."
-                                : "Multiple entry models run in one pass. Each model exports a separate scenario CSV for comparison."}
+                                ? "Run one entry model. The baseline reference output is always included."
+                                : "Export baseline plus multiple penetration and/or triggered-edge result views in one run. Each becomes a selectable Result View in Run Workspace."}
                         </div>
                     </div>
 
@@ -734,7 +734,10 @@ export default function StrategyBuilder() {
                             {/* Baseline */}
                             {cfg.selectedEntryModel === "baseline" && (
                                 <div className="mt-3 border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
-                                    <Field label="Baseline Entry Depth">
+                                    <div className="mb-2 text-[10.5px] text-muted-lab">
+                                        Standard resting limit at the OB edge or selected depth. This is the run&apos;s baseline reference output used for scenario comparisons.
+                                    </div>
+                                    <Field label="Limit Placement Depth">
                                         <Segment
                                             options={[
                                                 { value: 0, label: "Edge" },
@@ -748,7 +751,7 @@ export default function StrategyBuilder() {
                                         />
                                     </Field>
                                     <div className="mt-2 text-[10.5px] text-muted-lab">
-                                        Shifts the resting limit order deeper into the OB. Applies only to Baseline Edge.
+                                        Moves the resting limit deeper into the OB. Changes the baseline reference configuration for this run — does not create separate scenario result views.
                                     </div>
                                 </div>
                             )}
@@ -756,7 +759,10 @@ export default function StrategyBuilder() {
                             {/* Penetration */}
                             {cfg.selectedEntryModel === "entry_penetration" && (
                                 <div className="mt-3 border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
-                                    <Field label="Entry Threshold %">
+                                    <div className="mb-3 text-[10.5px] text-muted-lab">
+                                        Conditional depth entry. Only enters when price first reaches the penetration threshold inside the OB. Produces a separate scenario result view — the baseline reference is always included for comparison. Not the same as Limit Placement Depth.
+                                    </div>
+                                    <Field label="Penetration Threshold %">
                                         <NeonInput
                                             type="number"
                                             min="1"
@@ -766,9 +772,6 @@ export default function StrategyBuilder() {
                                             onChange={(e) => set("singlePenetrationPct")(Number(e.target.value))}
                                         />
                                     </Field>
-                                    <div className="mt-2 text-[10.5px] text-muted-lab">
-                                        Enter directly at this fixed depth into the OB on first touch.
-                                    </div>
                                 </div>
                             )}
 
@@ -776,7 +779,7 @@ export default function StrategyBuilder() {
                             {cfg.selectedEntryModel === "triggered_edge" && (
                                 <div className="mt-3 border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
                                     <div className="text-[10.5px] text-muted-lab mb-3">
-                                        Price must reach the trigger depth to arm the trade. The limit order then sits at Entry Level % where 0 = OB edge.
+                                        Arms the trade only after price reaches the trigger threshold, then places a limit at the configured entry level. Entry delay controls when the order can arm after the trigger.
                                     </div>
                                     <div className="grid grid-cols-2 gap-3">
                                         <Field label="Trigger Threshold %">
@@ -799,16 +802,31 @@ export default function StrategyBuilder() {
                                                 onChange={(e) => set("triggeredEdgeEntryLevelPct")(Number(e.target.value))}
                                             />
                                         </Field>
-                                        <Field label="Same-Candle Behavior" className="col-span-2">
-                                            <NeonSelect
-                                                value={cfg.triggeredEdgeSameCandleMode}
-                                                onChange={set("triggeredEdgeSameCandleMode")}
-                                                options={[
-                                                    { value: "same", label: "Same candle only" },
-                                                    { value: "next", label: "Next candle only" },
-                                                    { value: "both", label: "Both" },
-                                                ]}
-                                            />
+                                        <Field label="Entry Delay After Trigger" hint="0 = same candle · 1 = next candle" className="col-span-2">
+                                            <div className="flex gap-2">
+                                                {[{ v: "same", label: "0 · Same" }, { v: "next", label: "1 · Next" }].map(({ v, label }) => {
+                                                    const cur = cfg.triggeredEdgeSameCandleMode || "both";
+                                                    const active = cur === "both" || cur === v;
+                                                    return (
+                                                        <button
+                                                            key={v}
+                                                            type="button"
+                                                            onClick={() => {
+                                                                if (cur === "both") set("triggeredEdgeSameCandleMode")(v === "same" ? "next" : "same");
+                                                                else if (cur !== v) set("triggeredEdgeSameCandleMode")("both");
+                                                            }}
+                                                            className={[
+                                                                "px-3 py-1.5 text-[10.5px] font-ui uppercase tracking-[0.08em] clip-bevel-sm border transition-colors",
+                                                                active
+                                                                    ? "border-[hsl(var(--accent-primary)/0.7)] bg-[hsl(var(--accent-primary)/0.12)] text-[hsl(var(--accent-primary))]"
+                                                                    : "border-[hsl(var(--border-soft))] bg-transparent text-[hsl(var(--text-2)/0.5)] hover:text-[hsl(var(--text-2))]",
+                                                            ].join(" ")}
+                                                        >
+                                                            {label}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
                                         </Field>
                                         <div className="col-span-2 flex items-center justify-between border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
                                             <div>
@@ -833,14 +851,14 @@ export default function StrategyBuilder() {
                         </div>
                     )}
 
-                    {/* ── Research Export ──────────────────────────────── */}
+                    {/* ── Scenario Batch ───────────────────────────────── */}
                     {cfg.entryMode === "research" && (
                         <div className="space-y-3">
-                            {/* Baseline Entry Depth */}
+                            {/* A · Baseline Limit Placement Depth */}
                             <div className="border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
                                 <div className="mb-2">
-                                    <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab">Baseline Entry Depth</div>
-                                    <div className="text-[10px] text-muted-lab">Applies to Baseline Edge only.</div>
+                                    <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab">A · Baseline Limit Placement Depth</div>
+                                    <div className="text-[10px] text-muted-lab">Sets the resting limit depth for the baseline reference output. Does not create scenario result views.</div>
                                 </div>
                                 <Segment
                                     options={[
@@ -855,12 +873,12 @@ export default function StrategyBuilder() {
                                 />
                             </div>
 
-                            {/* B · Penetration Entries */}
+                            {/* B · Penetration Scenario Result Views */}
                             <div className="border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
                                 <div className="mb-2 flex items-center justify-between">
                                     <div>
-                                        <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab">B · Penetration Entries</div>
-                                        <div className="text-[10px] text-muted-lab">Enters at threshold depth on first OB touch. Exports one CSV per threshold.</div>
+                                        <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab">B · Penetration Scenario Views</div>
+                                        <div className="text-[10px] text-muted-lab">Conditional depth entry — only enters when price first reaches the threshold. Each threshold exports a separate scenario result view alongside the baseline reference.</div>
                                     </div>
                                     <NeonToggle
                                         checked={Boolean(cfg.entryResearchExports)}
@@ -923,12 +941,12 @@ export default function StrategyBuilder() {
                                 )}
                             </div>
 
-                            {/* C · Triggered Edge Entries */}
+                            {/* C · Triggered Edge Scenario Result Views */}
                             <div className="border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
                                 <div className="flex items-center justify-between">
                                     <div>
-                                        <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab">C · Triggered Edge Entries</div>
-                                        <div className="text-[10px] text-muted-lab">Arms at trigger threshold, then places limit at OB edge or configured entry level. Exports one CSV per threshold × candle mode.</div>
+                                        <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab">C · Triggered Edge Scenario Views</div>
+                                        <div className="text-[10px] text-muted-lab">Arms only after price reaches the trigger threshold, then places a limit at the configured entry level. Entry delay controls when the order arms after the trigger. Exports one result view per threshold × delay.</div>
                                     </div>
                                     <NeonToggle checked={Boolean(cfg.triggeredEdgeEntries)} onChange={set("triggeredEdgeEntries")} />
                                 </div>
@@ -940,16 +958,31 @@ export default function StrategyBuilder() {
                                         <Field label="Entry Level %" hint="0 is the OB edge.">
                                             <NeonInput type="number" min="0" max="100" step="1" value={cfg.triggeredEdgeEntryLevelPct} onChange={(e) => set("triggeredEdgeEntryLevelPct")(Number(e.target.value))} />
                                         </Field>
-                                        <Field label="Same-Candle Behavior" className="col-span-2">
-                                            <NeonSelect
-                                                value={cfg.triggeredEdgeSameCandleMode}
-                                                onChange={set("triggeredEdgeSameCandleMode")}
-                                                options={[
-                                                    { value: "same", label: "Same candle only" },
-                                                    { value: "next", label: "Next candle only" },
-                                                    { value: "both", label: "Both" },
-                                                ]}
-                                            />
+                                        <Field label="Entry Delay After Trigger" hint="0 = same candle · 1 = next candle" className="col-span-2">
+                                            <div className="flex gap-2">
+                                                {[{ v: "same", label: "0 · Same" }, { v: "next", label: "1 · Next" }].map(({ v, label }) => {
+                                                    const cur = cfg.triggeredEdgeSameCandleMode || "both";
+                                                    const active = cur === "both" || cur === v;
+                                                    return (
+                                                        <button
+                                                            key={v}
+                                                            type="button"
+                                                            onClick={() => {
+                                                                if (cur === "both") set("triggeredEdgeSameCandleMode")(v === "same" ? "next" : "same");
+                                                                else if (cur !== v) set("triggeredEdgeSameCandleMode")("both");
+                                                            }}
+                                                            className={[
+                                                                "px-3 py-1.5 text-[10.5px] font-ui uppercase tracking-[0.08em] clip-bevel-sm border transition-colors",
+                                                                active
+                                                                    ? "border-[hsl(var(--accent-primary)/0.7)] bg-[hsl(var(--accent-primary)/0.12)] text-[hsl(var(--accent-primary))]"
+                                                                    : "border-[hsl(var(--border-soft))] bg-transparent text-[hsl(var(--text-2)/0.5)] hover:text-[hsl(var(--text-2))]",
+                                                            ].join(" ")}
+                                                        >
+                                                            {label}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
                                         </Field>
                                         <div className="col-span-2 flex items-center justify-between border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
                                             <div>
@@ -1020,7 +1053,7 @@ export default function StrategyBuilder() {
                         <StatusMeta k="Plan passes" v={sanityRun.total_passes ?? generatedPlan.totalPasses ?? "—"} />
                         <StatusMeta k="Entry passes" v={sanityRun.scenario_plan_summary?.entry ?? generatedPlan.entry ?? "—"} />
                         <StatusMeta k="Protection passes" v={sanityRun.scenario_plan_summary?.protection ?? generatedPlan.protection ?? "—"} />
-                        <StatusMeta k="Entry Mode" v={cfg.entryMode === "single" ? "Single Model" : "Research Export"} />
+                        <StatusMeta k="Entry Mode" v={cfg.entryMode === "single" ? "Single Model" : "Scenario Batch"} />
                         {cfg.entryMode === "single" && (
                             <StatusMeta k="Active Entry Model" v={{ baseline: "Baseline Edge", entry_penetration: "Penetration", triggered_edge: "Triggered Edge" }[cfg.selectedEntryModel] || cfg.selectedEntryModel} />
                         )}
@@ -1028,9 +1061,9 @@ export default function StrategyBuilder() {
                         <StatusMeta k="Penetration thresholds" v={(sanityConfig.entry_penetration_thresholds || []).join(", ") || "—"} />
                         <StatusMeta k="Batch entry penetration" v={sanityConfig.batch_entry_penetration ? "On" : "Off"} />
                         <StatusMeta k="Triggered-edge triggers" v={(sanityConfig.triggered_edge_trigger_thresholds || []).join(", ") || "—"} />
-                        <StatusMeta k="Triggered-edge candle mode" v={formatTriggeredEdgeModes(sanityConfig.triggered_edge_same_candle_modes)} />
+                        <StatusMeta k="Triggered-edge entry delay" v={formatTriggeredEdgeModes(sanityConfig.triggered_edge_same_candle_modes)} />
                         <StatusMeta k="Triggered-edge retrace cancel" v={formatTriggeredEdgeRetraceCancel(sanityConfig)} />
-                        <StatusMeta k="Baseline Entry Depth" v={formatPercentValue(sanityConfig.ob_entry_depth_pct)} />
+                        <StatusMeta k="Limit Placement Depth" v={formatPercentValue(sanityConfig.ob_entry_depth_pct)} />
                         <StatusMeta k="Entry Buffer" v={formatPipValue(sanityConfig.entry_buffer_pips)} />
                         <StatusMeta k="Stop Buffer" v={formatPipValue(sanityConfig.stop_buffer_pips)} />
                         <StatusMeta k="Verify Limit" v={formatTickValue(sanityConfig.verify_limit_ticks)} />
@@ -1226,7 +1259,7 @@ function buildBacktesterConfig(cfg) {
 
     // ── Entry model fields: Single vs Research Export ─────────────────────
     let entryModels, obEntryDepthPct, entryPenetrationThresholds, batchEntryPenetration,
-        teThresholds, teEntryLevelPct, teSameCandleModes,
+        teThresholds, teEntryLevelPct, teSameCandleModes, teCandleDelays,
         teCancelOnRetrace, teCancelRetracePips, teCancelRetraceObPct;
 
     const isSingle = cfg.entryMode === "single";
@@ -1242,6 +1275,7 @@ function buildBacktesterConfig(cfg) {
             teThresholds = [];
             teEntryLevelPct = 0;
             teSameCandleModes = [];
+            teCandleDelays = [];
             teCancelOnRetrace = false;
             teCancelRetracePips = 0;
             teCancelRetraceObPct = 0;
@@ -1254,6 +1288,7 @@ function buildBacktesterConfig(cfg) {
             teThresholds = Number.isFinite(thr) && thr > 0 && thr < 100 ? [thr] : [25];
             teEntryLevelPct = clampNumber(cfg.triggeredEdgeEntryLevelPct, 0, 100, 0);
             teSameCandleModes = triggeredEdgeSameCandleModes(cfg.triggeredEdgeSameCandleMode);
+            teCandleDelays = triggeredEdgeCandleDelays(teSameCandleModes);
             teCancelOnRetrace = Boolean(cfg.triggeredEdgeCancelOnRetrace);
             teCancelRetracePips = Math.max(0, Number(cfg.triggeredEdgeCancelRetracePips) || 0);
             teCancelRetraceObPct = Math.max(0, Number(cfg.triggeredEdgeCancelRetraceObPct) || 0);
@@ -1266,6 +1301,7 @@ function buildBacktesterConfig(cfg) {
             teThresholds = [];
             teEntryLevelPct = 0;
             teSameCandleModes = [];
+            teCandleDelays = [];
             teCancelOnRetrace = false;
             teCancelRetracePips = 0;
             teCancelRetraceObPct = 0;
@@ -1286,6 +1322,7 @@ function buildBacktesterConfig(cfg) {
         teThresholds = teEnabled ? teRawThresholds : [];
         teEntryLevelPct = teEnabled ? clampNumber(cfg.triggeredEdgeEntryLevelPct, 0, 100, 0) : 0;
         teSameCandleModes = teEnabled ? triggeredEdgeSameCandleModes(cfg.triggeredEdgeSameCandleMode) : [];
+        teCandleDelays = triggeredEdgeCandleDelays(teSameCandleModes);
         teCancelOnRetrace = teEnabled ? Boolean(cfg.triggeredEdgeCancelOnRetrace) : false;
         teCancelRetracePips = teEnabled ? Math.max(0, Number(cfg.triggeredEdgeCancelRetracePips) || 0) : 0;
         teCancelRetraceObPct = teEnabled ? Math.max(0, Number(cfg.triggeredEdgeCancelRetraceObPct) || 0) : 0;
@@ -1319,6 +1356,7 @@ function buildBacktesterConfig(cfg) {
         triggered_edge_trigger_thresholds: teThresholds,
         triggered_edge_entry_level_pct: teEntryLevelPct,
         triggered_edge_same_candle_modes: teSameCandleModes,
+        triggered_edge_candle_delays: teCandleDelays,
         triggered_edge_cancel_on_retrace: teCancelOnRetrace,
         triggered_edge_cancel_retrace_pips: teCancelRetracePips,
         triggered_edge_cancel_retrace_ob_pct: teCancelRetraceObPct,
@@ -1367,6 +1405,13 @@ function triggeredEdgeSameCandleModes(value) {
     if (value === "same") return ["same_candle"];
     if (value === "next") return ["next_candle"];
     return ["same_candle", "next_candle"];
+}
+
+function triggeredEdgeCandleDelays(modes) {
+    const delays = [];
+    if (modes.includes("same_candle")) delays.push(0);
+    if (modes.includes("next_candle")) delays.push(1);
+    return delays;
 }
 
 function entryThresholdsForMode(mode, customValue) {
@@ -1643,9 +1688,9 @@ function formatTriggeredEdgeModes(modes) {
     if (!values.length) return "—";
     const hasSame = values.includes("same_candle");
     const hasNext = values.includes("next_candle");
-    if (hasSame && hasNext) return "Same + next";
-    if (hasSame) return "Same candle";
-    if (hasNext) return "Next candle";
+    if (hasSame && hasNext) return "Delay 0+1 (same + next)";
+    if (hasSame) return "Delay 0 (same candle)";
+    if (hasNext) return "Delay 1 (next candle)";
     return values.join(", ");
 }
 
@@ -1721,7 +1766,7 @@ const LOAD_FIELD_LABELS = {
     triggeredEdgeEntries: "triggered edge entries",
     triggeredEdgeThresholds: "triggered edge trigger thresholds",
     triggeredEdgeEntryLevelPct: "triggered edge entry level",
-    triggeredEdgeSameCandleMode: "triggered edge same-candle mode",
+    triggeredEdgeSameCandleMode: "triggered edge entry delay",
     triggeredEdgeCancelOnRetrace: "triggered edge retrace cancel",
     triggeredEdgeCancelRetracePips: "triggered edge retrace cancel pips",
     triggeredEdgeCancelRetraceObPct: "triggered edge retrace cancel OB %",

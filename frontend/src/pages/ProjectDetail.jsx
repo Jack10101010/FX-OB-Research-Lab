@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { Link, Navigate, useParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { PageHeader } from "@/components/lab/AppShell";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { MetricChip } from "@/components/lab/MetricChip";
@@ -7,9 +7,11 @@ import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
 import { Field, NeonButton, NeonInput, NeonSelect } from "@/components/lab/controls";
 import {
     ArrowRight,
+    Check,
     CheckSquare,
     Crosshair,
     Download,
+    Edit3,
     FileText,
     GitCompareArrows,
     Map as MapIcon,
@@ -18,6 +20,7 @@ import {
     Radio,
     Rocket,
     Square,
+    Trash2,
     X,
 } from "lucide-react";
 import { getSidecarRun, getSidecarRunBundle, startSidecarRun } from "@/data/sidecarClient";
@@ -27,6 +30,7 @@ import {
     addRunBundle,
     assignRunToProject,
     compactTimeframe,
+    deleteProject,
     getRunDisplayName,
     getUniqueRunDisplayName,
     setActiveProjectId,
@@ -77,10 +81,14 @@ const DEFAULT_PROTECTION_CONFIGS = [
 
 export default function ProjectDetail() {
     const { projectId } = useParams();
+    const navigate = useNavigate();
     const { PROJECTS, RUNS, activeProjectId, activeRunId, getRunData } = useDataset();
     const decodedId = decodeURIComponent(projectId || "");
     const project = PROJECTS.find((p) => p.id === decodedId);
     const [sweepOpen, setSweepOpen] = useState(false);
+    // PROJECTS-1B: rename / delete state
+    const [isRenamingProject, setIsRenamingProject] = useState(false);
+    const [renameName, setRenameName] = useState("");
     const [sweepType, setSweepType] = useState("RR Sweep");
     const [sweepSourceRunId, setSweepSourceRunId] = useState("");
     const [sweepNote, setSweepNote] = useState("");
@@ -109,6 +117,20 @@ export default function ProjectDetail() {
     const final = runById(projectRuns, project.finalRunId);
 
     const setActive = () => setActiveProjectId(project.id);
+    // PROJECTS-1B: rename handlers
+    const startRename = () => { setRenameName(project.name || ""); setIsRenamingProject(true); };
+    const cancelRename = () => { setIsRenamingProject(false); setRenameName(""); };
+    const saveRename = () => {
+        const trimmed = renameName.trim();
+        if (trimmed) updateResearchProject(decodedId, { name: trimmed });
+        cancelRename();
+    };
+    // PROJECTS-1B: delete handler — navigates away since the project will no longer exist
+    const handleDeleteProject = () => {
+        if (!window.confirm("Delete project? Runs will be unassigned but not deleted.")) return;
+        deleteProject(decodedId);
+        navigate("/projects");
+    };
     const exportFinalConfig = () => {
         const finalData = getRunData(project.finalRunId);
         const config = finalData?.config;
@@ -376,11 +398,63 @@ export default function ProjectDetail() {
                 subtitle={`${project.symbol || "—"} · ${project.timeframe || "—"} · ${project.status || "active"}`}
                 actions={
                     <>
+                        {/* PROJECTS-1B: inline rename controls */}
+                        {isRenamingProject ? (
+                            <span className="inline-flex items-center gap-1.5">
+                                <NeonInput
+                                    value={renameName}
+                                    onChange={(e) => setRenameName(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter") { e.preventDefault(); saveRename(); }
+                                        if (e.key === "Escape") { e.preventDefault(); cancelRename(); }
+                                    }}
+                                    className="h-8 min-w-[200px]"
+                                    autoFocus
+                                />
+                                <button
+                                    type="button"
+                                    onClick={saveRename}
+                                    className="grid place-items-center w-8 h-8 clip-bevel-sm border border-[hsl(var(--success)/0.55)] text-[hsl(var(--success))] bg-[hsl(var(--success)/0.08)]"
+                                    aria-label="Save project name"
+                                >
+                                    <Check className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={cancelRename}
+                                    className="grid place-items-center w-8 h-8 clip-bevel-sm border border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))]"
+                                    aria-label="Cancel rename"
+                                >
+                                    <X className="w-3.5 h-3.5" />
+                                </button>
+                            </span>
+                        ) : (
+                            <button
+                                type="button"
+                                onClick={startRename}
+                                className="grid place-items-center w-8 h-8 clip-bevel-sm border border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:border-[hsl(var(--accent-secondary))] hover:text-white"
+                                aria-label="Rename project"
+                                title="Rename project"
+                            >
+                                <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                        )}
                         <NeonButton icon={Radio} tone={isActive ? "success" : "secondary"} onClick={setActive}>
                             {isActive ? "Active Project" : "Set Active"}
                         </NeonButton>
                         <Link to="/strategy" onClick={setActive}><NeonButton icon={Play} tone="primary">Open Builder</NeonButton></Link>
                         <Link to="/runs"><NeonButton tone="ghost">Open Runs</NeonButton></Link>
+                        {/* PROJECTS-1B: delete button */}
+                        <button
+                            type="button"
+                            onClick={handleDeleteProject}
+                            disabled={sweepRun?.status === "running"}
+                            className="grid place-items-center w-8 h-8 clip-bevel-sm border border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:border-[hsl(var(--danger)/0.65)] hover:text-[hsl(var(--danger))] disabled:opacity-40 disabled:cursor-not-allowed"
+                            aria-label="Delete project"
+                            title="Delete project. Runs will be unassigned but not deleted."
+                        >
+                            <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                     </>
                 }
             />

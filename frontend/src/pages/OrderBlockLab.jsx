@@ -10,6 +10,7 @@ import { setSelectedTradeVariant, getTradeUniverse } from "@/data/store";
 import { useTradeUniverse } from "@/data/useTradeUniverse";
 import { useResultsLens } from "@/data/useResultsLens";
 import { TradeUniverseBadge } from "@/components/lab/TradeUniverseBadge";
+import { OBLabTabShell } from "@/components/lab/OBLabTabShell";
 // Phase RB-4 — all OrderBlockLab bucket tables route through the shared
 // basis-aware CanonicalBucketTable (frozen RB-3.2 contract).
 import { CanonicalBucketTable } from "@/components/lab/CanonicalBucketTable";
@@ -100,6 +101,17 @@ export default function OrderBlockLab() {
     const lens = useResultsLens(); // TC-6/EDGE-2 — basis/account context for Edge Explorer drill payloads
     // Phase 2G — universeWarnings filtering moved into TradeUniverseBadge.
 
+    // Tab state — persisted to localStorage
+    const [activeTab, setActiveTab] = React.useState(() => {
+        try { return localStorage.getItem("oblab-active-tab-v1") || "model-analysis"; }
+        catch { return "model-analysis"; }
+    });
+
+    const handleTabChange = React.useCallback((key) => {
+        setActiveTab(key);
+        try { localStorage.setItem("oblab-active-tab-v1", key); } catch {}
+    }, []);
+
     // Filter state — persisted to localStorage
     const [filters, setFilters] = React.useState(() => {
         try { return { ...FILTER_DEFAULTS, ...JSON.parse(localStorage.getItem("oblab-filters") || "{}") }; }
@@ -182,8 +194,16 @@ export default function OrderBlockLab() {
         },
     }), [filteredTrades, universe, filters, analytics]);
 
-    return (
-        <div className="pb-16">
+    // ── Tab content definitions ───────────────────────────────────────────────
+    // Workflow-based tabs mirroring the Entries Research Workspace pattern.
+    // Each tab answers a distinct researcher question rather than grouping
+    // by data category.
+
+    // Persistent header — LabRunHero + RunConfigStrip + TradeUniverseBadge only.
+    // KPI chips and InsightCallouts belong in Tab 1 (Model Analysis) where they
+    // serve as the verdict surface, not in the always-visible navigation band.
+    const tabHeader = (
+        <>
             <LabRunHero
                 pageLabel="Order Block Lab"
                 titleFallback="Order Block Lab"
@@ -194,6 +214,7 @@ export default function OrderBlockLab() {
                 activeRunId={activeRunId}
                 tradeCount={trades.length}
                 variant={ACTIVE_TRADE_VARIANT}
+                infoCardPosition="right"
                 actions={(
                     <>
                         <HeroBadge tone="secondary">{trades.length} trades</HeroBadge>
@@ -209,19 +230,35 @@ export default function OrderBlockLab() {
                     </>
                 )}
             />
-
             <RunConfigStrip run={activeRun} />
-
-            {/* Universe / source badge — shared component. Placement preserved.
-                Warnings filtered inside the component (Phase 2G). */}
             {activeRunId && (
                 <TradeUniverseBadge
                     universe={universe}
+                    compact
                     className="px-6 mt-2 mb-3"
                 />
             )}
+        </>
+    );
 
-            {/* ── KPI Chips ─────────────────────────────────────────────── */}
+    // FilterBar — rendered by OBLabTabShell between the sticky tab bar and tab
+    // content; applies globally across all tabs.
+    const filterBarNode = (
+        <FilterBar
+            filters={filters}
+            onUpdate={updateFilter}
+            onClear={clearFilters}
+            totalTrades={trades.length}
+            filteredCount={filteredTrades.length}
+        />
+    );
+
+    // ── Tab 1: Model Analysis ─────────────────────────────────────────────────
+    // Goal: "Does this OB model produce edge? Which structural slice carries it?"
+    // Primary decision surface — complete verdict in a single tab.
+    const tabModelAnalysis = (
+        <div className="px-6 mt-4 space-y-4">
+            {/* KPI strip — verdict numbers */}
             <div className="kpi-strip">
                 <MetricChip label="Linked Trades" value={String(analytics.linkedCount)} sub="with OB data" tone="primary" icon={Boxes} />
                 <MetricChip label="Unlinked Trades" value={String(analytics.unlinkedCount)} sub="limited OB research" tone={analytics.unlinkedCount ? "danger" : "muted"} icon={AlertTriangle} />
@@ -231,129 +268,271 @@ export default function OrderBlockLab() {
                 <MetricChip label="Active Run" value={activeRunId ? "Imported" : "No Run"} sub={isFiltered ? `${filteredTrades.length}/${trades.length} filtered` : (trades.length ? `${trades.length} trades` : "No trades")} tone={isFiltered ? "warning" : "secondary"} icon={Activity} />
             </div>
 
-            {/* ── Auto-Insights ─────────────────────────────────────────── */}
+            {/* Auto-generated insights */}
             {insights.length > 0 && <InsightCallouts insights={insights} />}
 
-            {/* ── Filter Bar ────────────────────────────────────────────── */}
-            <FilterBar filters={filters} onUpdate={updateFilter} onClear={clearFilters} totalTrades={trades.length} filteredCount={filteredTrades.length} />
+            {/* Research Safety warning */}
+            {analytics.lowSampleBuckets > 0 && (
+                <NeonPanel title="Research Safety" tone="secondary" action={<Pill tone="warning">{analytics.lowSampleBuckets} LOW SAMPLE BUCKETS</Pill>}>
+                    <div className="flex items-start gap-2 text-[11.5px] font-ui text-[hsl(var(--warning))]">
+                        <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                        <span>Every bucket shows sample count. Treat buckets below {LOW_SAMPLE_N} trades as directional only. Click any bucket row to inspect its trade list.</span>
+                    </div>
+                </NeonPanel>
+            )}
 
-            <div className="px-6 mt-4 space-y-4">
-
-                {/* ── Research Safety ──────────────────────────────────── */}
-                {analytics.lowSampleBuckets > 0 && (
-                    <NeonPanel title="Research Safety" tone="secondary" action={<Pill tone="warning">{analytics.lowSampleBuckets} LOW SAMPLE BUCKETS</Pill>}>
-                        <div className="flex items-start gap-2 text-[11.5px] font-ui text-[hsl(var(--warning))]">
-                            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                            <span>Every bucket shows sample count. Treat buckets below {LOW_SAMPLE_N} trades as directional only. Click any bucket row to inspect its trade list.</span>
-                        </div>
-                    </NeonPanel>
+            {/* Structural Quality + Session Performance — 2×2 grid.
+                Row 1: BOS vs CHoCH · Long vs Short (structure type verdict)
+                Row 2: Origin Session · Created/Detection Session (session breakdown)
+                Controls (heatmap, compare, basis) hidden behind a popover icon to
+                reduce header clutter on laptop-width viewports. */}
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                <TableCompareShell
+                    testId="oblab-structural-quality-bos-vs-choch"
+                    eyebrow="Structural Quality"
+                    title="BOS vs CHoCH"
+                    currentRows={analytics.structureRows}
+                    bucketDef={analytics.bucketDefs.structure}
+                    onDrill={r => handleEdgeDrill("Structure", r)}
+                    hideResultsBasis
+                    hideChip
+                    basisFooter
+                    controlsPopover
+                    {...compareProps("structure")}
+                />
+                <TableCompareShell
+                    testId="oblab-structural-quality-long-vs-short"
+                    eyebrow="Structural Quality"
+                    title="Long vs Short"
+                    currentRows={analytics.directionRows}
+                    bucketDef={analytics.bucketDefs.direction}
+                    onDrill={r => handleEdgeDrill("Direction", r)}
+                    hideResultsBasis
+                    hideChip
+                    basisFooter
+                    controlsPopover
+                    {...compareProps("direction")}
+                />
+                <TableCompareShell
+                    testId="oblab-origin-session-performance"
+                    eyebrow="Session Performance"
+                    title="Origin Session"
+                    currentRows={analytics.originSessionRows}
+                    bucketDef={analytics.bucketDefs.originSession}
+                    onDrill={r => handleEdgeDrill("Origin Session", r)}
+                    hideResultsBasis
+                    hideChip
+                    basisFooter
+                    controlsPopover
+                    {...compareProps("originSession")}
+                />
+                {/* Created Session — groups trades by the session in which the OB
+                    was detected (obDetectionTime). Distinct from Origin Session which
+                    uses obOriginSession / obOriginTime. Shows unavailable state when
+                    obDetectionTime is absent from the run. */}
+                {analytics.detectionFieldAvailable ? (
+                    <TableCompareShell
+                        testId="oblab-created-session-performance"
+                        eyebrow="Session Performance"
+                        title="Created Session"
+                        currentRows={analytics.createdSessionRows}
+                        bucketDef={analytics.bucketDefs.createdSession}
+                        onDrill={r => handleEdgeDrill("Created Session", r)}
+                        hideResultsBasis
+                        hideChip
+                        basisFooter
+                        controlsPopover
+                        {...compareProps("createdSession")}
+                    />
+                ) : (
+                    <div className="flex flex-col gap-1.5">
+                        <NeonPanel
+                            title={(
+                                <span className="flex flex-col leading-none gap-0.5">
+                                    <span className="text-[9px] font-ui tracking-widest text-[hsl(var(--text-muted))] normal-case opacity-75">Session Performance</span>
+                                    <span>Created Session</span>
+                                </span>
+                            )}
+                            action={<Pill tone="muted">UNAVAILABLE</Pill>}
+                        >
+                            <p className="py-5 text-center text-[11.5px] text-muted-lab">
+                                Created session data unavailable —{" "}
+                                <span className="font-code text-[10.5px] text-[hsl(var(--text-2))]">obDetectionTime</span>{" "}
+                                not present in this run.
+                            </p>
+                        </NeonPanel>
+                    </div>
                 )}
-
-                {/* ── Row 1: Structure · Direction · Origin Session ──────── */}
-                <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-                    <TableCompareShell
-                        testId="oblab-structural-quality-bos-vs-choch"
-                        title="Structural Quality · BOS vs CHoCH"
-                        currentRows={analytics.structureRows}
-                        bucketDef={analytics.bucketDefs.structure}
-                        onDrill={r => handleEdgeDrill("Structure", r)}
-                        {...compareProps("structure")}
-                    />
-                    <TableCompareShell
-                        testId="oblab-structural-quality-long-vs-short"
-                        title="Structural Quality · Long vs Short"
-                        currentRows={analytics.directionRows}
-                        bucketDef={analytics.bucketDefs.direction}
-                        onDrill={r => handleEdgeDrill("Direction", r)}
-                        {...compareProps("direction")}
-                    />
-                    <TableCompareShell
-                        testId="oblab-origin-session-performance"
-                        title="Origin Session Performance"
-                        currentRows={analytics.originSessionRows}
-                        bucketDef={analytics.bucketDefs.originSession}
-                        onDrill={r => handleEdgeDrill("Origin Session", r)}
-                        {...compareProps("originSession")}
-                    />
-                </div>
-
-                {/* ── Full-width bucket panels ───────────────────────────── */}
-                <CanonicalBucketTable testId="oblab-ob-creation-hour-performance" title="OB Creation Hour Performance" rawRows={analytics.creationHourRows} trades={filteredTrades} def={analytics.bucketDefs.creationHour} renderers={OBL_BUCKET_RENDERERS} onDrill={r => handleEdgeDrill("Creation Hour", r)} />
-                <NewsCreatedObPanel analytics={analytics} onDrill={r => handleEdgeDrill("News-Created OB Trades", r)} />
-                <NewsCreatedObPopulationPanel analysis={obPopulationAnalytics} />
-                <TableCompareShell
-                    testId="oblab-ob-width-analysis"
-                    title="OB Width Analysis"
-                    currentRows={analytics.widthRows}
-                    bucketDef={analytics.bucketDefs.width}
-                    onDrill={r => handleEdgeDrill("OB Width", r)}
-                    {...compareProps("width")}
-                />
-                <TableCompareShell
-                    testId="oblab-ob-age-time-to-fill"
-                    title="OB Age / Time-to-Fill"
-                    currentRows={analytics.ageRows}
-                    bucketDef={analytics.bucketDefs.age}
-                    onDrill={r => handleEdgeDrill("OB Age", r)}
-                    compact
-                    {...compareProps("age")}
-                />
-                <TableCompareShell
-                    testId="oblab-penetration-depth-analysis"
-                    title="Penetration Depth Analysis"
-                    currentRows={analytics.penetrationRows}
-                    bucketDef={analytics.bucketDefs.penetration}
-                    onDrill={r => handleEdgeDrill("Penetration Depth", r)}
-                    compact
-                    {...compareProps("penetration")}
-                />
-                <TableCompareShell
-                    testId="oblab-day-of-week-performance"
-                    title="Day of Week Performance"
-                    currentRows={analytics.dayOfWeekRows}
-                    bucketDef={analytics.bucketDefs.dayOfWeek}
-                    onDrill={r => handleEdgeDrill("Day of Week", r)}
-                    {...compareProps("dayOfWeek")}
-                />
-
-                {/* ── Row: Breach + Stopout + Distance ──────────────────── */}
-                <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-                    <CatastrophicBreachPanel analysis={analytics.catastrophicBreach} onDrill={handleEdgeDrill} />
-                    <TableCompareShell
-                        testId="oblab-fast-stopout-analysis"
-                        title="Fast Stopout Analysis"
-                        currentRows={analytics.fastStopoutRows}
-                        bucketDef={analytics.bucketDefs.fastStopout}
-                        onDrill={r => handleEdgeDrill("Fast Stopout", r)}
-                        compact
-                        {...compareProps("fastStopout")}
-                    />
-                    <TableCompareShell
-                        testId="oblab-distance-before-fill"
-                        title="Distance Before Fill"
-                        currentRows={analytics.distanceBeforeFillRows}
-                        bucketDef={analytics.bucketDefs.distanceBeforeFill}
-                        onDrill={r => handleEdgeDrill("Distance Before Fill", r)}
-                        compact
-                        {...compareProps("distanceBeforeFill")}
-                    />
-                </div>
-
-                {/* ── Session Matrix ────────────────────────────────────── */}
-                <SessionMatrix matrix={analytics.sessionMatrix} />
-
-                {/* ── Temporal Analytics ───────────────────────────────── */}
-                <TemporalAnalytics rollingExpectancy={analytics.rollingExpectancy} equityCurves={analytics.equityCurves} />
-
-                {/* ── Failure Lab ───────────────────────────────────────── */}
-                <FailureLab losses={analytics.worstLosses} wins={analytics.bestWins} />
-
-                {/* ── Field Completeness ────────────────────────────────── */}
-                <FieldCompletenessPanel rows={analytics.fieldCompleteness} totalTrades={filteredTrades.length} />
-
-                {/* ── Research Backlog ──────────────────────────────────── */}
-                <ResearchBacklog />
             </div>
+
+            {/* Timing breakdowns */}
+            <CanonicalBucketTable
+                testId="oblab-ob-creation-hour-performance"
+                title="OB Creation Hour Performance"
+                rawRows={analytics.creationHourRows}
+                trades={filteredTrades}
+                def={analytics.bucketDefs.creationHour}
+                renderers={OBL_BUCKET_RENDERERS}
+                onDrill={r => handleEdgeDrill("Creation Hour", r)}
+                controlsPopover
+            />
+            <TableCompareShell
+                testId="oblab-day-of-week-performance"
+                title="Day of Week Performance"
+                currentRows={analytics.dayOfWeekRows}
+                bucketDef={analytics.bucketDefs.dayOfWeek}
+                onDrill={r => handleEdgeDrill("Day of Week", r)}
+                controlsPopover
+                {...compareProps("dayOfWeek")}
+            />
+        </div>
+    );
+
+    // ── Tab 2: Edge Discovery ─────────────────────────────────────────────────
+    // Goal: "What OB characteristics define the winning setup? Build a filter profile."
+    // All sections answer: "what kind of OB should I be targeting?"
+    const tabEdgeDiscovery = (
+        <div className="px-6 mt-4 space-y-4">
+            <TableCompareShell
+                testId="oblab-ob-width-analysis"
+                title="OB Width Analysis"
+                currentRows={analytics.widthRows}
+                bucketDef={analytics.bucketDefs.width}
+                onDrill={r => handleEdgeDrill("OB Width", r)}
+                controlsPopover
+                {...compareProps("width")}
+            />
+            <TableCompareShell
+                testId="oblab-ob-age-time-to-fill"
+                title="OB Age / Time-to-Fill"
+                currentRows={analytics.ageRows}
+                bucketDef={analytics.bucketDefs.age}
+                onDrill={r => handleEdgeDrill("OB Age", r)}
+                compact
+                controlsPopover
+                {...compareProps("age")}
+            />
+            <TableCompareShell
+                testId="oblab-penetration-depth-analysis"
+                title="Penetration Depth Analysis"
+                currentRows={analytics.penetrationRows}
+                bucketDef={analytics.bucketDefs.penetration}
+                onDrill={r => handleEdgeDrill("Penetration Depth", r)}
+                compact
+                controlsPopover
+                {...compareProps("penetration")}
+            />
+            {/* Session Matrix — where do OBs form vs where do they fill? */}
+            <SessionMatrix matrix={analytics.sessionMatrix} />
+            {/* News OB panels — collapsed by default; relevant when investigating
+                whether news proximity is a characteristic to filter on */}
+            <NewsCreatedObPanel
+                analytics={analytics}
+                onDrill={r => handleEdgeDrill("News-Created OB Trades", r)}
+            />
+            <NewsCreatedObPopulationPanel
+                analysis={obPopulationAnalytics}
+            />
+        </div>
+    );
+
+    // ── Tab 3: Failure Lab ────────────────────────────────────────────────────
+    // Goal: "What breaks this model? Where is the loss concentration?"
+    // FailureLab is first — it is the primary section on this tab.
+    const tabFailureLab = (
+        <div className="px-6 mt-4 space-y-4">
+            <FailureLab losses={analytics.worstLosses} wins={analytics.bestWins} />
+            <CatastrophicBreachPanel analysis={analytics.catastrophicBreach} onDrill={handleEdgeDrill} />
+            <TableCompareShell
+                testId="oblab-fast-stopout-analysis"
+                title="Fast Stopout Analysis"
+                currentRows={analytics.fastStopoutRows}
+                bucketDef={analytics.bucketDefs.fastStopout}
+                onDrill={r => handleEdgeDrill("Fast Stopout", r)}
+                compact
+                controlsPopover
+                {...compareProps("fastStopout")}
+            />
+            <TableCompareShell
+                testId="oblab-distance-before-fill"
+                title="Distance Before Fill"
+                currentRows={analytics.distanceBeforeFillRows}
+                bucketDef={analytics.bucketDefs.distanceBeforeFill}
+                onDrill={r => handleEdgeDrill("Distance Before Fill", r)}
+                compact
+                controlsPopover
+                {...compareProps("distanceBeforeFill")}
+            />
+        </div>
+    );
+
+    // ── Tab 4: Robustness ─────────────────────────────────────────────────────
+    // Goal: "Is this edge stable across time? Is the data trustworthy?"
+    // TemporalAnalytics is the primary section — expanded by default here.
+    const tabRobustness = (
+        <div className="px-6 mt-4 space-y-4">
+            <TemporalAnalytics
+                rollingExpectancy={analytics.rollingExpectancy}
+                equityCurves={analytics.equityCurves}
+            />
+            <FieldCompletenessPanel rows={analytics.fieldCompleteness} totalTrades={filteredTrades.length} />
+            <ResearchBacklog />
+        </div>
+    );
+
+    // ── Tab 5: Promotion Desk (placeholder) ───────────────────────────────────
+    // Goal: "What parameter changes am I committing to? Structured decision record."
+    // Full Promotion Desk system not yet built — placeholder shown for tab
+    // consistency with Entries Research Workspace.
+    const tabPromotion = (
+        <div className="px-6 mt-4">
+            <NeonPanel
+                title="Promotion Desk"
+                action={<Pill tone="muted">COMING SOON</Pill>}
+            >
+                <div className="py-8 flex flex-col items-center justify-center gap-3 text-center">
+                    <div className="text-[13px] font-ui text-[hsl(var(--text-2))]">
+                        Promotion Desk is under construction.
+                    </div>
+                    <div className="text-[11px] text-muted-lab max-w-sm leading-relaxed">
+                        This tab will provide a structured decision surface for committing to
+                        parameter changes and filter refinements based on evidence from
+                        Model Analysis, Edge Discovery, and Failure Lab.
+                    </div>
+                    <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2 w-full max-w-lg">
+                        {[
+                            "Decision cards · approve / reject / watch",
+                            "Auto-populated evidence brief from analytics",
+                            "Export decisions to research report",
+                        ].map(item => (
+                            <div key={item} className="clip-bevel-sm border border-[hsl(var(--border-soft)/0.5)] bg-[hsl(var(--panel-2)/0.3)] px-3 py-2 text-[10.5px] text-muted-lab">
+                                {item}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </NeonPanel>
+        </div>
+    );
+
+    const TABS = [
+        { key: "model-analysis", label: "Model Analysis",  short: "Analysis",   content: tabModelAnalysis   },
+        { key: "edge-discovery", label: "Edge Discovery",  short: "Discovery",  content: tabEdgeDiscovery   },
+        { key: "failure-lab",    label: "Failure Lab",     short: "Failures",   content: tabFailureLab      },
+        { key: "robustness",     label: "Robustness",      short: "Robustness", content: tabRobustness      },
+        { key: "promotion",      label: "Promotion Desk",  short: "Promotion",  content: tabPromotion       },
+    ];
+
+    return (
+        <div className="pb-16">
+            <OBLabTabShell
+                header={tabHeader}
+                filterBar={filterBarNode}
+                tabs={TABS}
+                activeTab={activeTab}
+                onTabChange={handleTabChange}
+                hasActiveFilters={isFiltered}
+            />
 
             {edgeDrill && (
                 <EdgeExplorerPanel
@@ -491,7 +670,7 @@ const NEWS_OB_COLUMNS = [
     { key: "directionSplit",      label: "L/S",        align: "right", render: (r) => `${r.longCount || 0}/${r.shortCount || 0}` },
 ];
 
-function NewsCreatedObPanel({ analytics, onDrill }) {
+function NewsCreatedObPanel({ analytics, onDrill, defaultCollapsed = false }) {
     if (!analytics.newsFieldAvailable) {
         return (
             <NeonPanel
@@ -507,7 +686,6 @@ function NewsCreatedObPanel({ analytics, onDrill }) {
 
     return (
         <NeonPanel
-            collapsible
             title="News-Created OB Trade Performance"
             action={<Pill tone="warning">{analytics.newsCreatedTaggedCount} TAGGED</Pill>}
         >
@@ -558,7 +736,7 @@ const OB_POPULATION_COLUMNS = [
     { key: "avgAgeHours",       label: "Avg Age",       align: "right", render: (r) => formatAgeHours(r.avgAgeHours) },
 ];
 
-function NewsCreatedObPopulationPanel({ analysis }) {
+function NewsCreatedObPopulationPanel({ analysis, defaultCollapsed = false }) {
     if (!analysis?.hasOrderBlocks) {
         return (
             <NeonPanel
@@ -588,7 +766,6 @@ function NewsCreatedObPopulationPanel({ analysis }) {
 
     return (
         <NeonPanel
-            collapsible
             title="News-Created OB Population"
             action={<Pill tone="secondary">{analysis.totalCount} DETECTED OBS</Pill>}
         >
@@ -802,7 +979,6 @@ function SessionMatrix({ matrix }) {
 
     return (
         <NeonPanel
-            collapsible
             title="Timing · Origin Session × Fill Session"
             action={(
                 <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
@@ -937,7 +1113,6 @@ function FailureLab({ losses, wins }) {
 
     return (
         <NeonPanel
-            collapsible
             title={tab === "losses" ? "Failure Lab · Worst Losing Trades" : "Winner Lab · Best Winning Trades"}
             action={(
                 <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
@@ -968,7 +1143,6 @@ function FailureLab({ losses, wins }) {
 function CatastrophicBreachPanel({ analysis, onDrill }) {
     return (
         <NeonPanel
-            collapsible
             title="Loss Analytics · Catastrophic Failures"
             action={<Pill tone={analysis.breachCount ? "danger" : "muted"}>{formatPct(analysis.breachPct)} FAILURE</Pill>}
         >
@@ -997,14 +1171,14 @@ function CatastrophicBreachPanel({ analysis, onDrill }) {
 
 // ─── Temporal Analytics ───────────────────────────────────────────────────────
 
-function TemporalAnalytics({ rollingExpectancy, equityCurves }) {
+function TemporalAnalytics({ rollingExpectancy, equityCurves, defaultCollapsed = true }) {
     const hasRolling = rollingExpectancy?.length >= 5;
     const hasCurves = equityCurves && (equityCurves.all?.length >= 5 || equityCurves.bos?.length >= 3 || equityCurves.choch?.length >= 3);
 
     if (!hasRolling && !hasCurves) return null;
 
     return (
-        <NeonPanel collapsible defaultCollapsed title="Temporal Analytics · Equity & Rolling Performance" action={<Pill tone="muted">Time Series</Pill>}>
+        <NeonPanel title="Temporal Analytics · Equity & Rolling Performance" action={<Pill tone="muted">Time Series</Pill>}>
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                 {hasRolling && (
                     <div>
@@ -1117,8 +1291,6 @@ function FieldCompletenessPanel({ rows, totalTrades }) {
 
     return (
         <NeonPanel
-            collapsible
-            defaultCollapsed
             title="Data Quality · OB Field Completeness"
             action={<Pill tone="muted"><Database className="w-2.5 h-2.5 inline mr-1" />{totalTrades} TRADES</Pill>}
         >
@@ -1153,7 +1325,7 @@ function FieldCompletenessPanel({ rows, totalTrades }) {
 
 function ResearchBacklog() {
     return (
-        <NeonPanel collapsible defaultCollapsed title="Research Backlog · Future Capabilities" action={<Pill tone="muted">{RESEARCH_BACKLOG_ITEMS.length} IDEAS</Pill>}>
+        <NeonPanel title="Research Backlog · Future Capabilities" action={<Pill tone="muted">{RESEARCH_BACKLOG_ITEMS.length} IDEAS</Pill>}>
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5" data-testid="oblab-research-backlog">
                 {RESEARCH_BACKLOG_ITEMS.map((item) => (
                     <div key={item.title} className="border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] clip-bevel-sm px-3 py-2.5">
@@ -1302,6 +1474,7 @@ function buildOrderBlockAnalytics(trades) {
         structure:          { labelFn: t => t.structure || "Limited Data", order: ["BOS", "CHoCH", "Limited Data"] },
         direction:          { labelFn: t => t.direction || "Limited Data", order: ["Long", "Short", "Limited Data"] },
         originSession:      { labelFn: originSessionForTrade, order: SESSION_COLUMNS },
+        createdSession:     { labelFn: detectionSessionForTrade, order: SESSION_COLUMNS },
         creationHour:       { labelFn: creationHourLabel, order: null },
         width:              { labelFn: widthBucket, order: ["0-2 pips", "2-5 pips", "5-10 pips", "10+ pips", "Limited Data"] },
         age:                { labelFn: ageBucket, order: ["same session / <4h", "4-12h", "12-24h", "1-3d", "3-7d", "7-14d", "14d+", "Limited Data"] },
@@ -1313,6 +1486,10 @@ function buildOrderBlockAnalytics(trades) {
     const structureRows          = bucketRows(trades, bucketDefs.structure.labelFn, bucketDefs.structure.order);
     const directionRows          = bucketRows(trades, bucketDefs.direction.labelFn, bucketDefs.direction.order);
     const originSessionRows      = bucketRows(trades, bucketDefs.originSession.labelFn, bucketDefs.originSession.order);
+    const createdSessionRows     = bucketRows(trades, bucketDefs.createdSession.labelFn, bucketDefs.createdSession.order);
+    // detectionFieldAvailable: true when any trade carries obDetectionTime; the
+    // Created Session card shows an honest unavailable state when this is false.
+    const detectionFieldAvailable = trades.some(t => t?.obDetectionTime != null && t.obDetectionTime !== "");
     const creationHourRows       = bucketRows(trades, bucketDefs.creationHour.labelFn);
     const widthRows              = bucketRows(trades, bucketDefs.width.labelFn, bucketDefs.width.order);
     const ageRows                = bucketRows(trades, bucketDefs.age.labelFn, bucketDefs.age.order);
@@ -1355,7 +1532,7 @@ function buildOrderBlockAnalytics(trades) {
 
     return {
         linkedCount, unlinkedCount, lowSampleBuckets, bestBucket, worstBucket,
-        structureRows, directionRows, originSessionRows, creationHourRows,
+        structureRows, directionRows, originSessionRows, createdSessionRows, detectionFieldAvailable, creationHourRows,
         widthRows, ageRows, penetrationRows, catastrophicBreach,
         fastStopoutRows, distanceBeforeFillRows, dayOfWeekRows,
         newsFieldAvailable, newsCreatedRows, newsComparisonRows, newsComparison, newsCreatedTaggedCount,
@@ -1963,6 +2140,18 @@ function fillSessionForTrade(trade) {
     return normalizeSession(trade?.fillSession)
         || normalizeSession(trade?.entrySession)
         || deriveSessionFromTimestamp(trade?.entry)
+        || "Unknown";
+}
+
+// detectionSessionForTrade — session when the algorithm first detected/tagged this OB.
+// Distinct from originSessionForTrade which prioritises the pre-existing obOriginSession
+// field (the price-structure candle session). Here we specifically prioritise
+// obDetectionTime so runs that set detection time separately from origin time get
+// distinct session buckets.
+function detectionSessionForTrade(trade) {
+    return deriveSessionFromTimestamp(trade?.obDetectionTime)
+        || normalizeSession(trade?.obOriginSession)
+        || deriveSessionFromTimestamp(trade?.obOriginTime)
         || "Unknown";
 }
 

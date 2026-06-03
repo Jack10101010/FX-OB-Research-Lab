@@ -15,6 +15,7 @@ export function DataTable({
     heatmap = false,
     defaultSortKey = null,
     defaultSortDir = "desc",
+    totalsRow = null,
 }) {
     const [sortKey, setSortKey] = React.useState(defaultSortKey);
     const [sortDir, setSortDir] = React.useState(defaultSortDir);
@@ -147,6 +148,27 @@ export function DataTable({
                         );
                     })}
                 </tbody>
+                {totalsRow && (
+                    <tfoot>
+                        <tr><td colSpan={columns.length} className="p-0 h-px bg-[hsl(var(--border-soft)/0.55)]" /></tr>
+                        <tr className="bg-[hsl(var(--panel-2)/0.5)]">
+                            {columns.map((col) => (
+                                <td
+                                    key={col.key}
+                                    className={cn(
+                                        cellPad,
+                                        col.align === "right" && "text-right",
+                                        col.align === "center" && "text-center",
+                                        col.mono === true ? "font-num" : "font-display",
+                                        "align-middle tabular-nums leading-snug whitespace-nowrap font-semibold text-[hsl(var(--text-1))]",
+                                    )}
+                                >
+                                    {col.render ? col.render(totalsRow, -1) : totalsRow[col.key]}
+                                </td>
+                            ))}
+                        </tr>
+                    </tfoot>
+                )}
             </table>
         </div>
     );
