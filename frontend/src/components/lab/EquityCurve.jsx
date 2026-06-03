@@ -125,8 +125,9 @@ function dotFill(point, showNews) {
     }
     if (fundingMarker)                                                  return "hsl(var(--warning))";
     if (showNews && newsAction)                                         return "hsl(var(--warning))";
+    if (outcome.includes("FLATTEN"))                                    return "hsl(var(--warning))";
     if (outcome === "WIN")                                              return "hsl(var(--accent-primary))";
-    if (outcome === "LOSS")                                             return "hsl(var(--bear))";
+    if (outcome === "LOSS" || tradeR < -0.005)                         return "hsl(var(--bear))";
     if (outcome.includes("SESSION_FILTERED") || outcome.includes("MISSED")) return "hsl(var(--warning) / 0.65)";
     if (Math.abs(tradeR) < 0.005)                                       return "hsl(var(--muted))";
     if (tradeR > 0)                                                     return "hsl(var(--accent-primary))";
