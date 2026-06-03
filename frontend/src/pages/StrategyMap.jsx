@@ -1028,9 +1028,13 @@ function formatEntryModelKey(value) {
     const key = String(value || "").trim();
     const penetration = key.match(/^entry_penetration_([0-9]+(?:p[0-9]+)?)/i);
     if (penetration) return `Penetration ${formatModelPct(penetration[1])}`;
-    const triggered = key.match(/^entry_triggered_edge_([0-9]+(?:p[0-9]+)?)(?:_(same|next))?/i);
+    const triggered = key.match(/^entry_triggered_edge_([0-9]+(?:p[0-9]+)?)(?:_(same|next|d\d+))?/i);
     if (triggered) {
-        const mode = triggered[2] === "same" ? "Same" : triggered[2] === "next" ? "Next" : "";
+        const rawMode = triggered[2] || "";
+        const mode = rawMode === "same" ? "Same"
+                   : rawMode === "next" ? "Next"
+                   : /^d(\d+)$/i.test(rawMode) ? `Delay +${rawMode.slice(1)}`
+                   : "";
         return ["Triggered Edge", formatModelPct(triggered[1]), mode].filter(Boolean).join(" · ");
     }
     if (key === "entry_baseline" || key === "baseline") return "Baseline";

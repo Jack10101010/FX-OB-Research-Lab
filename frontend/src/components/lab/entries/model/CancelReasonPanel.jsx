@@ -96,6 +96,7 @@ export function CancelReasonPanel({ row }) {
         cancelledAfterTrigger,
         retraceCancelCount,
         neverTriggeredCount,
+        firstFailedTagCount,
     } = funnel;
 
     // Compute armed-but-unfilled: setups that triggered but didn't fill and
@@ -156,6 +157,15 @@ export function CancelReasonPanel({ row }) {
                         count={cancelledAfterTrigger}
                         base={eligible}
                         dotColor="--danger"
+                    />
+                )}
+                {isFiniteNumber(firstFailedTagCount) && num(firstFailedTagCount) > 0 && (
+                    <CancelRow
+                        label="First failed tag"
+                        count={firstFailedTagCount}
+                        base={eligible}
+                        dotColor="--warning"
+                        dimmed
                     />
                 )}
                 {isFiniteNumber(retraceCancelCount) && num(retraceCancelCount) > 0 && (

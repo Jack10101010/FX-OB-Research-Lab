@@ -152,6 +152,8 @@ function scenarioOptionLabel(family, threshold, fillMode) {
     const thresh = threshold != null ? ` ${threshold}%` : "";
     const fill = fillMode === "same" ? " · Same"
                : fillMode === "next" ? " · Next"
+               : (typeof fillMode === "string" && /^d(\d+)$/i.test(fillMode))
+                   ? ` · Delay +${fillMode.slice(1)}`
                : "";
     if (family === "triggered_edge") return `Triggered Edge${thresh}${fill}`;
     if (family === "penetration")    return `Penetration${thresh}${fill}`;

@@ -163,6 +163,7 @@ export function TriggeredEdgeFunnelPanel({ row }) {
         cancelledAfterTrigger,
         retraceCancelCount,
         neverTriggeredCount,
+        firstFailedTagCount,
         triggerRate,
         fillAfterTriggerRate,
         avgTriggerToEntry,
@@ -266,6 +267,15 @@ export function TriggeredEdgeFunnelPanel({ row }) {
                         count={cancelledAfterTrigger}
                         base={eligible}
                         colorVar="--danger"
+                        dimmed
+                    />
+                )}
+                {isFiniteNumber(firstFailedTagCount) && firstFailedTagCount > 0 && (
+                    <FunnelBar
+                        label="First failed tag"
+                        count={firstFailedTagCount}
+                        base={eligible}
+                        colorVar="--warning"
                         dimmed
                     />
                 )}

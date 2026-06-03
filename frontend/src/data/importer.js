@@ -412,6 +412,8 @@ export function parseTradesCSV(text) {
             edgeRevisitTime: String(pick(r, "edge_revisit_time", "edgeRevisitTime") || ""),
             trigger_to_entry_minutes: numOrNull(pick(r, "trigger_to_entry_minutes", "triggerToEntryMinutes")),
             triggerToEntryMinutes: numOrNull(pick(r, "trigger_to_entry_minutes", "triggerToEntryMinutes")),
+            fill_delay_candles: numOrNull(pick(r, "fill_delay_candles", "fillDelayCandles")),
+            fillDelayCandles: numOrNull(pick(r, "fill_delay_candles", "fillDelayCandles")),
             cancelled_before_entry: boolOrNull(pick(r, "cancelled_before_entry", "cancelledBeforeEntry")),
             cancelledBeforeEntry: boolOrNull(pick(r, "cancelled_before_entry", "cancelledBeforeEntry")),
             cancel_reason: String(pick(r, "cancel_reason", "cancelReason") || ""),

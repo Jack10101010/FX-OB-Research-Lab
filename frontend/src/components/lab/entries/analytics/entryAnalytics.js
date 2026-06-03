@@ -211,14 +211,34 @@ export function buildTriggeredEdgeFunnel(trades) {
         (!t.triggerTime  || t.triggerTime  === "")
     );
 
-    const sameCandle = filled.filter(t =>
-        t.filled_on_trigger_candle === true ||
-        t.filledOnTriggerCandle   === true
+    // First-failed-tag: pre-trigger cancel when OB was tapped but threshold not reached.
+    const firstFailedTag = list.filter(t =>
+        (t.cancel_reason || t.cancelReason) === "first_failed_tag"
     );
-    const nextCandle = filled.filter(t =>
-        t.filled_on_trigger_candle === false ||
-        t.filledOnTriggerCandle   === false
-    );
+
+    // Same/next candle: prefer fill_delay_candles (actual measured delta) if present,
+    // fall back to filled_on_trigger_candle boolean for older exports.
+    const sameCandle = filled.filter(t => {
+        const d = t.fill_delay_candles ?? t.fillDelayCandles;
+        if (d != null && Number.isFinite(Number(d))) return Number(d) === 0;
+        return t.filled_on_trigger_candle === true || t.filledOnTriggerCandle === true;
+    });
+    const nextCandle = filled.filter(t => {
+        const d = t.fill_delay_candles ?? t.fillDelayCandles;
+        if (d != null && Number.isFinite(Number(d))) return Number(d) >= 1;
+        return t.filled_on_trigger_candle === false || t.filledOnTriggerCandle === false;
+    });
+
+    // Per-delay fill counts bucketed from fill_delay_candles.
+    // Keys: "0", "1", "2", "3", "4+" — only keys with count > 0 present.
+    const fillsByDelay = {};
+    for (const t of filled) {
+        const raw = t.fill_delay_candles ?? t.fillDelayCandles;
+        if (raw == null || !Number.isFinite(Number(raw))) continue;
+        const n = Number(raw);
+        const key = n >= 4 ? "4+" : String(n);
+        fillsByDelay[key] = (fillsByDelay[key] || 0) + 1;
+    }
 
     const triggerToEntryValues = filled
         .map(t => {
@@ -241,8 +261,10 @@ export function buildTriggeredEdgeFunnel(trades) {
         cancelledAfterTrigger: cancelledAfterTrigger.length,
         retraceCancelCount:    retraceCancel.length,
         neverTriggeredCount:   neverTriggered.length,
+        firstFailedTagCount:   firstFailedTag.length,
         sameCandle:            sameCandle.length,
         nextCandle:            nextCandle.length,
+        fillsByDelay,
         avgTriggerToEntry,
         // TODO: add neverTappedCount, invalidatedCount when the exporter exposes them.
     };
