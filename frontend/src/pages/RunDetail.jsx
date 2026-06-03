@@ -1279,11 +1279,8 @@ export default function RunDetail() {
             <LabRunHero
                 pageLabel="Run Workspace"
                 title={displayName}
-                runLine={`Run: ${displayName} · ${runSymbol} · ${runTf} · ${totalTradeRows || Number(run.trades) || 0} trades`}
+                runLine={`Run: ${displayName} · ${totalTradeRows || Number(run.trades) || 0} trades`}
                 configLine={[
-                    runSymbol,
-                    runTf,
-                    `RR ${Number.isFinite(runRr) ? runRr.toFixed(1) : "—"}`,
                     structureFilter ? `Structure ${formatStructureFilterValue(structureFilter)}` : null,
                     entryDepthPct != null ? `Entry Depth ${formatPercentValue(entryDepthPct)}` : null,
                     entryBufferPips != null ? `Entry Buffer ${formatPipValue(entryBufferPips)}` : null,
