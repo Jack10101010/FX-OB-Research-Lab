@@ -323,6 +323,7 @@ export function resolveHierarchy(scenario, legacyEntryModelHint, allKeys, availa
     const coerceFillMode = (family, threshold, requested) => {
         if (family === "baseline") return null;
         if (requested === "same" || requested === "next") return requested;
+        if (typeof requested === "string" && requested.startsWith("d")) return requested;
         if (hasCombined(family, threshold)) return null;
         return safeFillModeWhenNoCombined(modesFor(family, threshold));
     };
