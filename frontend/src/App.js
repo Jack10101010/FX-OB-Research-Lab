@@ -25,6 +25,7 @@ import ComparisonLab from "@/pages/ComparisonLab";
 import WalkForwardLab from "@/pages/WalkForwardLab";
 import HypothesisLab from "@/pages/HypothesisLab";
 import FailuresLab from "@/pages/FailuresLab";
+import SessionLab from "@/pages/SessionLab";
 import ParityDebugger from "@/pages/ParityDebugger";
 import MonteCarlo from "@/pages/MonteCarlo";
 import Settings from "@/pages/Settings";
@@ -70,6 +71,7 @@ function App() {
                         <Route path="/walk-forward" element={withRouteBoundary(<WalkForwardLab />)} />
                         <Route path="/hypothesis-lab" element={withRouteBoundary(<HypothesisLab />)} />
                         <Route path="/failures-lab" element={withRouteBoundary(<FailuresLab />)} />
+                        <Route path="/session-lab" element={withRouteBoundary(<SessionLab />)} />
                         <Route path="/parity" element={withRouteBoundary(<ParityDebugger />)} />
                         <Route path="/monte-carlo" element={withRouteBoundary(<MonteCarlo />)} />
                         <Route path="/settings" element={withRouteBoundary(<Settings />)} />

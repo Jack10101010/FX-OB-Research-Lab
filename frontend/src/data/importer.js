@@ -576,6 +576,8 @@ function enrichTradesWithOrderBlocks(trades, obLookup, pipSize) {
             ob_detection_news_window: trade.ob_detection_news_window || ob?.ob_detection_news_window || false,
             obOriginNewsWindow: trade.obOriginNewsWindow || ob?.obOriginNewsWindow || false,
             obDetectionNewsWindow: trade.obDetectionNewsWindow || ob?.obDetectionNewsWindow || false,
+            obOriginSession: ob?.obOriginSession || trade.obOriginSession || "",
+            obDetectionSession: ob?.obDetectionSession || trade.obDetectionSession || "",
             obCreatedDuringNews: trade.obCreatedDuringNews || ob?.obCreatedDuringNews || false,
             obDetectedDuringNews: trade.obDetectedDuringNews || ob?.obDetectedDuringNews || false,
             ob_origin_news_event: trade.ob_origin_news_event || ob?.ob_origin_news_event || "",

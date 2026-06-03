@@ -5,7 +5,7 @@ import {
     FlaskConical, GitCompareArrows, ShieldCheck, Dices, Settings as Cog,
     Beaker, Boxes, ChevronRight, MonitorCog, Lock, CalendarRange, ShieldAlert,
     MousePointerClick, TestTubeDiagonal, Newspaper, FolderKanban,
-    BookOpen, ChevronLeft, Microscope, Lightbulb,
+    BookOpen, ChevronLeft, Microscope, Lightbulb, Clock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme, THEMES } from "@/context/ThemeContext";
@@ -43,6 +43,7 @@ const NAV_GROUPS = [
             { to: "/news-lab",        label: "News Lab",        icon: Newspaper },
             { to: "/trade-inspector", label: "Trade Inspector", icon: Crosshair },
             { to: "/failures-lab",    label: "Failures Lab",    icon: Microscope },
+            { to: "/session-lab",     label: "Session Lab",     icon: Clock },
         ],
     },
     {
