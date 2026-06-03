@@ -369,24 +369,27 @@ export function CanonicalBucketTable({
                                         <div className="flex flex-col gap-1.5 border-t border-[hsl(var(--border-soft)/0.4)] pt-2.5">
                                             <span className="text-[10px] font-ui uppercase tracking-widest text-muted-lab">Columns</span>
                                             {COL_TOGGLES.map(({ key, label, info }) => (
-                                                <div key={key} className="flex items-center justify-between gap-2">
-                                                    <div className="flex items-center gap-1">
-                                                        <span className="text-[10px] font-ui text-[hsl(var(--text-2))]">{label}</span>
-                                                        <span title={info} className="cursor-help inline-flex items-center">
-                                                            <Info className="w-2.5 h-2.5 text-muted-lab shrink-0" />
-                                                        </span>
+                                                <div key={key} className="flex flex-col gap-1 group">
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <div className="flex items-center gap-1">
+                                                            <span className="text-[10px] font-ui text-[hsl(var(--text-2))]">{label}</span>
+                                                            <Info className="w-2.5 h-2.5 text-muted-lab shrink-0 cursor-help" />
+                                                        </div>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => toggleCol(key)}
+                                                            className={`clip-bevel-sm border px-2 py-0.5 text-[10px] inline-flex items-center gap-1 transition-colors ${
+                                                                colVisibility[key]
+                                                                    ? "border-[hsl(var(--accent-primary)/0.5)] bg-[hsl(var(--accent-primary)/0.10)] text-[hsl(var(--accent-primary))]"
+                                                                    : "border-[hsl(var(--border-soft))] text-muted-lab hover:text-white"
+                                                            }`}
+                                                        >
+                                                            {colVisibility[key] ? "On" : "Off"}
+                                                        </button>
                                                     </div>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => toggleCol(key)}
-                                                        className={`clip-bevel-sm border px-2 py-0.5 text-[10px] inline-flex items-center gap-1 transition-colors ${
-                                                            colVisibility[key]
-                                                                ? "border-[hsl(var(--accent-primary)/0.5)] bg-[hsl(var(--accent-primary)/0.10)] text-[hsl(var(--accent-primary))]"
-                                                                : "border-[hsl(var(--border-soft))] text-muted-lab hover:text-white"
-                                                        }`}
-                                                    >
-                                                        {colVisibility[key] ? "On" : "Off"}
-                                                    </button>
+                                                    <p className="hidden group-hover:block text-[9.5px] font-ui text-muted-lab leading-snug">
+                                                        {info}
+                                                    </p>
                                                 </div>
                                             ))}
                                         </div>
