@@ -203,41 +203,37 @@ export default function OrderBlockLab() {
     // KPI chips and InsightCallouts belong in Tab 1 (Model Analysis) where they
     // serve as the verdict surface, not in the always-visible navigation band.
     const tabHeader = (
-        <>
-            <LabRunHero
-                pageLabel="Order Block Lab"
-                titleFallback="Order Block Lab"
-                description="Deep order block research using linked trades."
-                activeProject={ACTIVE_PROJECT}
-                activeRun={activeRun}
-                activeSummary={ACTIVE_RUN}
-                activeRunId={activeRunId}
-                tradeCount={trades.length}
-                variant={ACTIVE_TRADE_VARIANT}
-                showDefaultStatusBadges={false}
-                actions={(
-                    <>
-                        <button
-                            type="button"
-                            onClick={() => setReportOpen(true)}
-                            className="inline-flex items-center gap-2 rounded-md border border-[hsl(var(--accent-primary)/0.45)] bg-[hsl(var(--accent-primary)/0.10)] px-3 py-1.5 text-[12px] font-medium text-[hsl(var(--accent-primary))] transition-colors hover:bg-[hsl(var(--accent-primary)/0.16)]"
-                        >
-                            <FileText className="w-3.5 h-3.5" />
-                            Generate Report
-                        </button>
-                        <VariantSelector variants={AVAILABLE_TRADE_VARIANTS} value={ACTIVE_TRADE_VARIANT} />
-                    </>
-                )}
-            />
-            <RunConfigStrip run={activeRun} />
-            {activeRunId && (
-                <TradeUniverseBadge
-                    universe={universe}
-                    compact
-                    className="px-6 mt-2 mb-3"
-                />
+        <LabRunHero
+            pageLabel="Order Block Lab"
+            titleFallback="Order Block Lab"
+            description="Deep order block research using linked trades."
+            activeProject={ACTIVE_PROJECT}
+            activeRun={activeRun}
+            activeSummary={ACTIVE_RUN}
+            activeRunId={activeRunId}
+            tradeCount={trades.length}
+            variant={ACTIVE_TRADE_VARIANT}
+            showDefaultStatusBadges={false}
+            actions={(
+                <>
+                    <button
+                        type="button"
+                        onClick={() => setReportOpen(true)}
+                        className="inline-flex items-center gap-2 rounded-md border border-[hsl(var(--accent-primary)/0.45)] bg-[hsl(var(--accent-primary)/0.10)] px-3 py-1.5 text-[12px] font-medium text-[hsl(var(--accent-primary))] transition-colors hover:bg-[hsl(var(--accent-primary)/0.16)]"
+                    >
+                        <FileText className="w-3.5 h-3.5" />
+                        Generate Report
+                    </button>
+                    <VariantSelector variants={AVAILABLE_TRADE_VARIANTS} value={ACTIVE_TRADE_VARIANT} />
+                </>
             )}
-        </>
+            sidePanel={activeRunId ? (
+                <div className="flex flex-col gap-2">
+                    <RunConfigStrip run={activeRun} className="mx-0 mb-0" />
+                    <TradeUniverseBadge universe={universe} compact />
+                </div>
+            ) : null}
+        />
     );
 
     // FilterBar — rendered by OBLabTabShell between the sticky tab bar and tab
@@ -263,8 +259,6 @@ export default function OrderBlockLab() {
                 <MetricChip label="Unlinked Trades" value={String(analytics.unlinkedCount)} sub="limited OB research" tone={analytics.unlinkedCount ? "danger" : "muted"} icon={AlertTriangle} />
                 <MetricChip label="Best Bucket" value={analytics.bestBucket ? formatR(analytics.bestBucket.netR) : "—"} sub={analytics.bestBucket?.label || "Limited Data"} tone="primary" icon={TrendingUp} />
                 <MetricChip label="Worst Bucket" value={analytics.worstBucket ? formatR(analytics.worstBucket.netR) : "—"} sub={analytics.worstBucket?.label || "Limited Data"} tone={analytics.worstBucket?.netR < 0 ? "danger" : "muted"} icon={TrendingDown} />
-                <MetricChip label="Variant" value={variantShort(ACTIVE_TRADE_VARIANT)} sub="selected trades" tone="secondary" icon={GitBranch} />
-                <MetricChip label="Active Run" value={activeRunId ? "Imported" : "No Run"} sub={isFiltered ? `${filteredTrades.length}/${trades.length} filtered` : (trades.length ? `${trades.length} trades` : "No trades")} tone={isFiltered ? "warning" : "secondary"} icon={Activity} />
             </div>
 
             {/* Auto-generated insights */}
