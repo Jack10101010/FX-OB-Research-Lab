@@ -38,6 +38,8 @@ import { TradeSanityStrip } from "@/components/lab/TradeSanityStrip";
 // RW-2: scenario-aware result-view selector (display-only; analytics wired in RW-3).
 import { useTradeUniverse } from "@/data/useTradeUniverse";
 import { buildAvailableOptions, collectAllEntryKeys, entryTradesByMode, buildCanonicalKey } from "@/data/tradeUniverse";
+// RW-4A: directional scenario label formatter
+import { formatDirectionalScenarioLabel } from "@/components/lab/entries/analytics/entryFormatters";
 
 // RB-8a/8b: account config lives in the global store (state.accountSettings),
 // read/written via useResultsLens (lens.accountSettings / lens.setAccountSettings)
@@ -345,6 +347,20 @@ export default function RunDetail() {
                 });
             });
         });
+        // RW-4A: directional backend scenarios (bundle.directionalResults silo)
+        const drMeta = runData?.directionalResults?.scenarioMeta || {};
+        Object.entries(drMeta).forEach(([storageKey, meta]) => {
+            const scenarioId = meta?.scenarioId || storageKey.replace(/^[^_]+__/, "");
+            views.push({
+                key: `directional_${storageKey}`,
+                label: formatDirectionalScenarioLabel(scenarioId),
+                family: "directional",
+                directionalStorageKey: storageKey,
+                executionMode: meta?.executionMode || null,
+                threshold: null,
+                fillMode: null,
+            });
+        });
         return views;
     }, [runData]);
 
@@ -384,6 +400,20 @@ export default function RunDetail() {
             });
             groups.push({ groupKey: gKey, groupLabel: `${familyLabel}${threshStr}`, slots });
         });
+        // RW-4A: directional scenarios group
+        const directionalOpts = resultViewOptions.filter((o) => o.family === "directional");
+        if (directionalOpts.length > 0) {
+            groups.push({
+                groupKey: "directional",
+                groupLabel: "Directional Scenarios",
+                slots: directionalOpts.map((opt) => ({
+                    fillMode: null,
+                    displayLabel: opt.label,
+                    available: true,
+                    opt,
+                })),
+            });
+        }
         return groups;
     }, [resultViewOptions]);
 
@@ -392,9 +422,11 @@ export default function RunDetail() {
         return resultViewOptions.find((opt) => (
             opt.family === "baseline"
                 ? !isScenario
-                : resultView?.family === opt.family
-                    && resultView?.threshold === opt.threshold
-                    && resultView?.fillMode === opt.fillMode
+                : resultView?.family === "directional"
+                    ? opt.family === "directional" && opt.directionalStorageKey === resultView?.directionalStorageKey
+                    : resultView?.family === opt.family
+                        && resultView?.threshold === opt.threshold
+                        && resultView?.fillMode === opt.fillMode
         )) || null;
     }, [resultViewOptions, resultView]);
     // Readable label for the trade breakdown modal header
@@ -403,6 +435,11 @@ export default function RunDetail() {
         const thr = resultView?.threshold;
         const fm  = resultView?.fillMode;
         if (!fam || fam === "baseline") return "Baseline Reference";
+        if (fam === "directional") {
+            const sk = resultView?.directionalStorageKey || "";
+            const scenarioId = sk.replace(/^[^_]+__/, "");
+            return formatDirectionalScenarioLabel(scenarioId) || "Directional Scenario";
+        }
         if (fam === "penetration") return thr != null ? `Penetration ${thr}%` : "Penetration";
         if (fam === "triggered_edge") {
             const base = thr != null ? `Triggered Edge ${thr}%` : "Triggered Edge";
@@ -555,7 +592,15 @@ export default function RunDetail() {
     // tradesForRun falls back to legacyTradesForRun so the page never goes blank.
     // obStats / deltaRows stay pinned to runData.trades and runData.orderBlocks —
     // those are intentionally outside the result-view routing.
-    const selectedUniverseTrades = Array.isArray(universe?.trades) ? universe.trades : [];
+    // RW-4A: directional backend scenario — bypass universe, read directly from bundle.directionalResults
+    const isDirectionalView = resultView?.family === "directional";
+    const directionalStorageKey = isDirectionalView ? (resultView?.directionalStorageKey || null) : null;
+    const directionalTrades = isDirectionalView
+        ? (runData?.directionalResults?.tradesByScenario?.[directionalStorageKey] || [])
+        : [];
+    const selectedUniverseTrades = isDirectionalView
+        ? directionalTrades
+        : (Array.isArray(universe?.trades) ? universe.trades : []);
     const hasSelectedUniverseTrades = selectedUniverseTrades.length > 0;
     const tradesForRun = hasSelectedUniverseTrades ? selectedUniverseTrades : legacyTradesForRun;
 
@@ -1433,6 +1478,7 @@ export default function RunDetail() {
                                 ? (activeResultViewOption?.label || "Baseline Reference")
                                 : (activeResultViewOption?.label || universe?.label || String(resultView?.family || ""));
                             const modelChipLabel = !isScenarioView ? "Baseline"
+                                : resultView?.family === "directional" ? "Directional"
                                 : resultView?.family === "penetration" ? "Penetration"
                                 : resultView?.family === "triggered_edge" ? "Triggered Edge"
                                 : String(resultView?.family || "").replace(/_/g, " ").replace(/\w/g, (c) => c.toUpperCase());
@@ -1443,6 +1489,7 @@ export default function RunDetail() {
                                 : resultView?.fillMode === "d3"   ? "Delay +3"
                                 : "Both";
                             const analyticsChipLabel = !isScenarioView ? "Baseline trades"
+                                : isDirectionalView ? (hasSelectedUniverseTrades ? "Backend · Split-pass" : "Baseline fallback")
                                 : hasSelectedUniverseTrades ? "Scenario trades"
                                 : "Baseline fallback";
                             const isUnavailable = isScenarioView && !hasSelectedUniverseTrades;
@@ -1452,6 +1499,11 @@ export default function RunDetail() {
                                 if (!isScenarioView) return "Baseline Reference";
                                 const fam = resultView?.family;
                                 const thr = resultView?.threshold;
+                                if (fam === "directional") {
+                                    const sk = resultView?.directionalStorageKey || "";
+                                    const scenarioId = sk.replace(/^[^_]+__/, "");
+                                    return formatDirectionalScenarioLabel(scenarioId) || identityLabel;
+                                }
                                 if (fam === "penetration") return thr != null ? `Penetration ${thr}%` : "Penetration";
                                 if (fam === "triggered_edge") {
                                     const base = thr != null ? `Triggered Edge ${thr}%` : "Triggered Edge";
@@ -1577,6 +1629,37 @@ export default function RunDetail() {
                                                     })}
                                                 </div>
                                             )}
+                                            {/* RW-4A: Directional Backend Scenarios */}
+                                            {(() => {
+                                                const dirOpts = resultViewOptions.filter((o) => o.family === "directional");
+                                                if (!dirOpts.length) return null;
+                                                return (
+                                                    <div className="mt-2 pt-2 border-t border-[hsl(var(--border-soft)/0.2)]">
+                                                        <span className="text-[9.5px] font-ui uppercase tracking-[0.07em] text-[hsl(var(--text-2)/0.65)] block mb-1.5">Directional Scenarios</span>
+                                                        <div className="flex flex-wrap items-center gap-2">
+                                                            {dirOpts.map((opt) => {
+                                                                const isActive = isDirectionalView && directionalStorageKey === opt.directionalStorageKey;
+                                                                return (
+                                                                    <button
+                                                                        key={opt.key}
+                                                                        type="button"
+                                                                        onClick={() => setResultView({
+                                                                            family: "directional",
+                                                                            directionalStorageKey: opt.directionalStorageKey,
+                                                                            threshold: null,
+                                                                            fillMode: null,
+                                                                        })}
+                                                                        className={[btnBase, isActive ? btnActive : btnIdle].join(" ")}
+                                                                        title={opt.executionMode ? `Execution: ${opt.executionMode.replace(/_/g, " ")}` : undefined}
+                                                                    >
+                                                                        {opt.label}
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })()}
                                             {/* Scope chips */}
                                             <div className="flex flex-wrap items-center gap-2 mt-2.5 pt-2 border-t border-[hsl(var(--border-soft)/0.25)]">
                                                 <ScopeRow label="Variant">
@@ -1655,17 +1738,28 @@ export default function RunDetail() {
                                                     </span>
                                                 </div>
                                             </div>
-                                            {/* Scenario baseline count */}
+                                            {/* Scenario baseline count / directional source info */}
                                             {isScenarioView && hasSelectedUniverseTrades && (
                                                 <div className="text-[10px] text-[hsl(var(--text-2)/0.55)]">
-                                                    Baseline: <span className="tabular-nums text-[hsl(var(--text-2))]">{Array.isArray(legacyTradesForRun) ? legacyTradesForRun.length : 0}</span>
-                                                    {activeResultViewOption?.fromCombinedPool && (
-                                                        <span className="ml-1.5 opacity-55">split from combined pool</span>
+                                                    {isDirectionalView ? (
+                                                        <>
+                                                            <span className="text-[hsl(var(--text-2))]">Backend · Split-pass</span>
+                                                            {activeResultViewOption?.executionMode && (
+                                                                <span className="ml-1.5 opacity-55">· {activeResultViewOption.executionMode.replace(/_/g, " ")}</span>
+                                                            )}
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            Baseline: <span className="tabular-nums text-[hsl(var(--text-2))]">{Array.isArray(legacyTradesForRun) ? legacyTradesForRun.length : 0}</span>
+                                                            {activeResultViewOption?.fromCombinedPool && (
+                                                                <span className="ml-1.5 opacity-55">split from combined pool</span>
+                                                            )}
+                                                        </>
                                                     )}
                                                 </div>
                                             )}
-                                            {/* Warnings */}
-                                            {isScenarioView && (() => {
+                                            {/* Warnings (entry model scenarios only; directional bypasses universe) */}
+                                            {isScenarioView && !isDirectionalView && (() => {
                                                 const warnings = (universe?.warnings || []).filter(
                                                     (w) => w?.code === "FILL_MODE_COERCED" || w?.code === "BOTH_UNAVAILABLE_NO_COMBINED",
                                                 );
