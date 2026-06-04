@@ -37,7 +37,7 @@ import {
 import { TradeSanityStrip } from "@/components/lab/TradeSanityStrip";
 // RW-2: scenario-aware result-view selector (display-only; analytics wired in RW-3).
 import { useTradeUniverse } from "@/data/useTradeUniverse";
-import { buildAvailableOptions, collectAllEntryKeys, entryTradesByMode, buildCanonicalKey } from "@/data/tradeUniverse";
+import { buildAvailableOptions, collectAllEntryKeys, entryTradesByMode, buildCanonicalKey, derivePrimaryResultView } from "@/data/tradeUniverse";
 // RW-4A: directional scenario label formatter
 import { formatDirectionalScenarioLabel } from "@/components/lab/entries/analytics/entryFormatters";
 
@@ -247,15 +247,31 @@ export default function RunDetail() {
     // Isolated from the global SCENARIO so a stale Strategy Map selection for
     // a different run never corrupts Run Workspace. Bootstraps from the global
     // scenario only when it explicitly targets this run.
+    //
+    // Priority: A. explicit global SCENARIO for this run
+    //           B. derivePrimaryResultView (config-intent aware)
+    //           C. baseline fallback
+    function getInitialResultView(bundle) {
+        return derivePrimaryResultView(bundle) ?? {
+            family: "baseline",
+            threshold: null,
+            fillMode: null,
+            directionalStorageKey: null,
+        };
+    }
     const [resultView, setResultView] = React.useState(() => {
         if (SCENARIO?.runId === runId && SCENARIO?.family && SCENARIO.family !== "baseline") {
             return { family: SCENARIO.family, threshold: SCENARIO.threshold, fillMode: SCENARIO.fillMode };
         }
-        return { family: "baseline", threshold: null, fillMode: null };
+        return getInitialResultView(runData);
     });
-    // Reset to baseline whenever the user switches to a different run.
+    // Reset to primary result view whenever the user switches to a different run.
     React.useEffect(() => {
-        setResultView({ family: "baseline", threshold: null, fillMode: null });
+        if (SCENARIO?.runId === runId && SCENARIO?.family && SCENARIO.family !== "baseline") {
+            setResultView({ family: SCENARIO.family, threshold: SCENARIO.threshold, fillMode: SCENARIO.fillMode });
+        } else {
+            setResultView(getInitialResultView(runData));
+        }
     }, [runId]); // eslint-disable-line react-hooks/exhaustive-deps
     // Resolve the selected universe. Drives selector labels, metadata, warnings,
     // and — via displayTrades — all analytics sections (KPIs, equity, ledger).
