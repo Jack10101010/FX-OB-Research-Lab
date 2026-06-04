@@ -303,14 +303,55 @@ export default function StrategyMap() {
         showRrTools,
     });
 
+    // ── Directional scenario bypass ───────────────────────────────────────────
+    // When a directional backend scenario is selected, we bypass the entry-model
+    // resolution chain entirely — useResolvedScenario doesn't know about
+    // family:"directional" and falls back to baseline. All overrides live here.
+    const isDirectionalMode = SCENARIO?.family === "directional";
+    const directionalStorageKey = isDirectionalMode ? (SCENARIO?.directionalStorageKey || null) : null;
+
+    const directionalAvailableScenarios = useMemo(() => {
+        const dr = bundle?.directionalResults;
+        if (!dr?.scenarioMeta) return [];
+        return Object.entries(dr.scenarioMeta)
+            .map(([sk, meta]) => ({
+                storageKey: sk,
+                meta,
+                label: formatDirectionalScenarioLabel(
+                    meta?.scenarioId || sk.replace(/^[^_]+__/, ""),
+                ),
+            }))
+            .sort((a, b) => a.label.localeCompare(b.label));
+    }, [bundle]);
+
+    const directionalTrades = useMemo(() => {
+        if (!isDirectionalMode || !directionalStorageKey) return [];
+        return bundle?.directionalResults?.tradesByScenario?.[directionalStorageKey] || [];
+    }, [isDirectionalMode, bundle, directionalStorageKey]);
+
+    // Patch resolvedScenario.trades so ScenarioSelector's sanity strip reflects
+    // the directional trade set rather than baseline.
+    const resolvedScenarioForSelector = useMemo(() => {
+        if (!isDirectionalMode) return resolvedScenario;
+        return { ...resolvedScenario, trades: directionalTrades };
+    }, [isDirectionalMode, resolvedScenario, directionalTrades]);
+
     // Resolver aliases — these replace the equivalent useMemo chains below.
     // CandleChart props and all render code remain unchanged.
-    const activeTrades = resolvedScenario.trades;
+    // Directional mode overrides trades, markers, overlays, and stats.
+    const activeTrades = isDirectionalMode ? directionalTrades : resolvedScenario.trades;
     const chartObBoxes = resolvedScenario.orderBlocks;
-    const chartTradeMarkers = resolvedScenario.tradeMarkers;
-    const rrTools = resolvedScenario.rrTools;
-    const triggeredEdgeOverlays = resolvedScenario.triggeredEdgeOverlays;
-    const runStats = resolvedScenario.stats;
+    const chartTradeMarkers = isDirectionalMode ? directionalTrades : resolvedScenario.tradeMarkers;
+    const rrTools = isDirectionalMode ? [] : resolvedScenario.rrTools;
+    const triggeredEdgeOverlays = isDirectionalMode ? [] : resolvedScenario.triggeredEdgeOverlays;
+    const runStats = isDirectionalMode
+        ? buildRunStats(
+            directionalTrades,
+            summary,
+            bundle,
+            bundle?.directionalResults?.scenarioMeta?.[directionalStorageKey]?.executionMode || null,
+          )
+        : resolvedScenario.stats;
 
     const filteredTrades = useMemo(() => (
         filterStrategyTrades(activeTrades, {
@@ -645,7 +686,8 @@ export default function StrategyMap() {
                     )}
                     <div className="mb-3">
                         <ScenarioSelector
-                            resolvedScenario={resolvedScenario}
+                            resolvedScenario={resolvedScenarioForSelector}
+                            directionalScenarios={directionalAvailableScenarios}
                             onScenarioChange={(patch) => {
                                 setScenario(patch);
                                 setSelectedTradeId(null);

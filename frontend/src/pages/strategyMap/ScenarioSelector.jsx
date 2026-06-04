@@ -113,8 +113,9 @@ function buildViewingLabel(resolvedFamily, resolvedThreshold, resolvedFillMode) 
  * @param {Function} onScenarioChange  (patch) => void  — wraps setScenario()
  * @param {Function} onVariantChange   (variant) => void
  */
-export function ScenarioSelector({ resolvedScenario, onScenarioChange, onVariantChange }) {
+export function ScenarioSelector({ resolvedScenario, onScenarioChange, onVariantChange, directionalScenarios = [] }) {
     const {
+        scenario,
         resolvedFamily,
         resolvedThreshold,
         resolvedFillMode,
@@ -136,7 +137,16 @@ export function ScenarioSelector({ resolvedScenario, onScenarioChange, onVariant
     // didn't understand protected / unfilled / news-flatten and so disagreed
     // with the rest of the app on the row-vs-fill count and PF denominator.
     const sanity = React.useMemo(() => summarizeTradeSanity(trades || []), [trades]);
-    const viewLabel = buildViewingLabel(resolvedFamily, resolvedThreshold, resolvedFillMode);
+
+    // ── Directional scenario support ─────────────────────────────────────────
+    const isDirectionalMode = scenario?.family === "directional";
+    const activeDirectionalStorageKey = scenario?.directionalStorageKey;
+    const activeDirectionalLabel = directionalScenarios.find(
+        (s) => s.storageKey === activeDirectionalStorageKey,
+    )?.label;
+    const viewLabel = isDirectionalMode
+        ? `Viewing: Directional · ${activeDirectionalLabel || "—"}`
+        : buildViewingLabel(resolvedFamily, resolvedThreshold, resolvedFillMode);
 
     const showThreshold = resolvedFamily && resolvedFamily !== "baseline" && availableThresholds.length > 0;
     // Only render fill-mode pills that have backing CSVs. Strip "both" when no
@@ -241,6 +251,27 @@ export function ScenarioSelector({ resolvedScenario, onScenarioChange, onVariant
                         ))}
                     </div>
                 )}
+
+                {/* Directional Scenarios — backend split-pass, separate from entry models */}
+                {directionalScenarios.length > 0 && (
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[9px] font-ui uppercase tracking-wider text-[hsl(var(--text-muted))]">
+                            Directional
+                        </span>
+                        {directionalScenarios.map(({ storageKey, label }) => (
+                            <PillBtn
+                                key={storageKey}
+                                active={isDirectionalMode && activeDirectionalStorageKey === storageKey}
+                                onClick={() => onScenarioChange({
+                                    family: "directional",
+                                    directionalStorageKey: storageKey,
+                                })}
+                            >
+                                {label}
+                            </PillBtn>
+                        ))}
+                    </div>
+                )}
             </div>
 
             {/* ── Row 2: viewing label + Both-unavailable note ── */}
@@ -248,7 +279,7 @@ export function ScenarioSelector({ resolvedScenario, onScenarioChange, onVariant
                 <span className="text-[10px] font-ui text-[hsl(var(--text-muted))] shrink-0">
                     {viewLabel}
                 </span>
-                {bothUnavailableReason && (
+                {!isDirectionalMode && bothUnavailableReason && (
                     <span
                         className="text-[10px] font-ui text-[hsl(var(--accent-secondary))]"
                         title="Same and Next were exported as separate CSVs; merging them would double-count each OB."
@@ -262,14 +293,16 @@ export function ScenarioSelector({ resolvedScenario, onScenarioChange, onVariant
             {/* ── Row 3: universe / source badge ──
                 Compact identifier that always tells the user which CSV is
                 actually driving the chart, list and sanity strip below. */}
-            {universeSource && (
+            {(universeSource || isDirectionalMode) && (
                 <UniverseBadge
-                    universe={universeSource.universe}
-                    modelLabel={resolvedContextLabel({
-                        resolvedFamily, resolvedThreshold, resolvedFillMode,
-                    })}
+                    universe={isDirectionalMode ? "directional" : universeSource.universe}
+                    modelLabel={isDirectionalMode
+                        ? (activeDirectionalLabel || "Directional Scenario")
+                        : resolvedContextLabel({ resolvedFamily, resolvedThreshold, resolvedFillMode })}
                     variant={resolvedPositionVariant}
-                    source={universeSource.filename || universeSource.modelKey}
+                    source={isDirectionalMode
+                        ? (activeDirectionalStorageKey || "—")
+                        : (universeSource?.filename || universeSource?.modelKey)}
                 />
             )}
 
@@ -289,10 +322,16 @@ export function ScenarioSelector({ resolvedScenario, onScenarioChange, onVariant
 // ---------------------------------------------------------------------------
 function UniverseBadge({ universe, modelLabel, variant, source }) {
     const isScenario = universe === "scenario";
+    const isDirectional = universe === "directional";
+    const universeLabel = isDirectional
+        ? "Directional split-pass"
+        : isScenario
+            ? "Scenario trades"
+            : "Baseline reference";
+    const universeTone = isDirectional ? "primary" : isScenario ? "success" : "muted";
     return (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border border-[hsl(var(--border-soft)/0.7)] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm px-2.5 py-1.5">
-            <BadgeCell label="Universe" value={isScenario ? "Scenario trades" : "Baseline reference"}
-                       tone={isScenario ? "success" : "muted"} />
+            <BadgeCell label="Universe" value={universeLabel} tone={universeTone} />
             <BadgeCell label="Model" value={modelLabel} />
             {variant && <BadgeCell label="Variant" value={variantShortLabel(variant)} />}
             {source && (
