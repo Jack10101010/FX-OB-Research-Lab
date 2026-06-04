@@ -8,6 +8,7 @@ import { NeonSelect, NeonButton } from "@/components/lab/controls";
 import { getRunDisplayName, compactTimeframe, useDataset, addProjectFinding, getTradeUniverse } from "@/data/store";
 import { useTradeUniverse } from "@/data/useTradeUniverse";
 import { collectAllEntryKeys, buildAvailableOptions } from "@/data/tradeUniverse";
+import { formatDirectionalScenarioLabel } from "@/components/lab/entries/analytics/entryFormatters";
 import { TradeUniverseBadge } from "@/components/lab/TradeUniverseBadge";
 // RB-8d: canonical Results Basis summaries replace the deprecated lib/metrics.
 import { toCanonicalSummaryRow, maxDrawdownFromCurve } from "@/data/resultsBasis";
@@ -195,8 +196,11 @@ export default function ComparisonLab() {
     // Reset to baseline whenever the set of compared runs changes.
     useEffect(() => { setGlobalScenario(null); }, [ids]);
 
-    const effectiveScenario = globalScenario || BASELINE_SCENARIO_OVERRIDE;
-    const isScenarioMode    = Boolean(globalScenario?.family && globalScenario.family !== "baseline");
+    const effectiveScenario     = globalScenario || BASELINE_SCENARIO_OVERRIDE;
+    const isScenarioMode        = Boolean(globalScenario?.family && globalScenario.family !== "baseline");
+    // Directional parallel path — bypasses the entryResults / universe chain entirely.
+    const isDirectionalMode     = globalScenario?.family === "directional";
+    const directionalStorageKey = isDirectionalMode ? (globalScenario?.directionalStorageKey || null) : null;
 
     // Resolve a TradeUniverse for each slot against the same effective scenario.
     const slotUniverses = useMemo(
@@ -209,10 +213,16 @@ export default function ComparisonLab() {
     // that fall back to baseline are EXCLUDED from the verdict/deltas so a single
     // comparison never mixes scenario numbers against baseline-fallback numbers.
     // Baseline mode: every slot is comparable.
-    const slotHasScenario = (idx) =>
-        isScenarioMode
-        && slotUniverses[idx]?.universeType === "scenario"
-        && (slotUniverses[idx]?.trades?.length || 0) > 0;
+    // Directional mode: check bundle.directionalResults directly (bypasses universe chain).
+    const slotHasScenario = (idx) => {
+        if (!isScenarioMode) return false;
+        if (isDirectionalMode) {
+            const bundle = getRunData(runs[idx]?.id);
+            return (bundle?.directionalResults?.tradesByScenario?.[directionalStorageKey]?.length || 0) > 0;
+        }
+        return slotUniverses[idx]?.universeType === "scenario"
+            && (slotUniverses[idx]?.trades?.length || 0) > 0;
+    };
     const slotComparable = (idx) => !isScenarioMode || slotHasScenario(idx);
     const scenarioCoverage = (() => {
         if (!isScenarioMode) return { present: runs.length, total: runs.length, missingRunIds: [] };
@@ -221,7 +231,7 @@ export default function ComparisonLab() {
     })();
     const hasPartialScenarioCoverage = isScenarioMode && scenarioCoverage.missingRunIds.length > 0;
 
-    // Union of scenario keys found across all selected runs (for the selector).
+    // Union of scenario keys found across all selected runs (for the entry-model selector).
     const allAvailableOptions = useMemo(() => {
         const allKeys = new Set(["baseline"]);
         runs.forEach((r) => {
@@ -230,6 +240,26 @@ export default function ComparisonLab() {
             collectAllEntryKeys(bundle, bundle.trades || []).forEach((k) => allKeys.add(k));
         });
         return buildAvailableOptions([...allKeys]);
+    }, [runs, getRunData]);
+
+    // Directional scenario options — union across all selected runs.
+    const directionalScenarioOptions = useMemo(() => {
+        const seen = new Set();
+        const opts = [];
+        runs.forEach((r) => {
+            const bundle = getRunData(r.id);
+            const meta = bundle?.directionalResults?.scenarioMeta || {};
+            Object.entries(meta).forEach(([storageKey, m]) => {
+                if (seen.has(storageKey)) return;
+                seen.add(storageKey);
+                const scenarioId = m?.scenarioId || storageKey.replace(/^[^_]+__/, "");
+                opts.push({
+                    value: JSON.stringify({ family: "directional", directionalStorageKey: storageKey }),
+                    label: formatDirectionalScenarioLabel(scenarioId),
+                });
+            });
+        });
+        return opts.sort((a, b) => a.label.localeCompare(b.label));
     }, [runs, getRunData]);
 
     // Flat list of string-serialised options for the NeonSelect.
@@ -254,8 +284,13 @@ export default function ComparisonLab() {
                 }
             }
         }
+        // Append directional backend scenarios as a clearly-labelled group at the bottom.
+        // "Long X / Short Y" labels are visually distinct from entry-model labels.
+        if (directionalScenarioOptions.length > 0) {
+            opts.push(...directionalScenarioOptions);
+        }
         return opts;
-    }, [allAvailableOptions]);
+    }, [allAvailableOptions, directionalScenarioOptions]);
 
     const selectedScenarioValue = globalScenario ? JSON.stringify(globalScenario) : "";
     const handleScenarioChange  = (v) => {
@@ -265,8 +300,12 @@ export default function ComparisonLab() {
 
     // Best-effort label for the active scenario (used in chips + finding titles).
     const activeScenarioLabel = isScenarioMode
-        ? (slotUniverses.find((u) => u?.universeType === "scenario" && u.trades.length > 0)?.label
-           || scenarioOptionLabel(globalScenario?.family, globalScenario?.threshold, globalScenario?.fillMode))
+        ? isDirectionalMode
+            ? formatDirectionalScenarioLabel(
+                (directionalStorageKey || "").replace(/^[^_]+__/, ""),
+              ) || "Directional Scenario"
+            : (slotUniverses.find((u) => u?.universeType === "scenario" && u.trades.length > 0)?.label
+               || scenarioOptionLabel(globalScenario?.family, globalScenario?.threshold, globalScenario?.fillMode))
         : "Baseline";
 
     // ── 3C: per-slot analysis views ──────────────────────────────────────────
@@ -277,13 +316,37 @@ export default function ComparisonLab() {
     // missing scenario. In baseline mode analysisTrades = bundle.trades throughout.
     const slotViews = useMemo(
         () => runs.map((r, idx) => {
-            const bundle          = getRunData(r.id);
-            const universe        = slotUniverses[idx];
+            const bundle         = getRunData(r.id);
+            const universe       = slotUniverses[idx];
+            const baselineTrades = bundle?.trades     || [];
+            const baselineCurve  = bundle?.equityCurve || [];
+
+            // ── Directional path ────────────────────────────────────────────────
+            // Bypasses the entryResults / universe chain entirely. Reads directly
+            // from bundle.directionalResults so the existing resolution hierarchy
+            // (resolveTradeUniverse, collectAllEntryKeys) is untouched.
+            if (isDirectionalMode && directionalStorageKey) {
+                const dr = bundle?.directionalResults;
+                const directionalTrades = dr?.tradesByScenario?.[directionalStorageKey] || [];
+                const hasDirectional    = directionalTrades.length > 0;
+                const prebuiltCurve     = dr?.equityCurveByScenario?.[directionalStorageKey] || null;
+                const analysisTrades    = hasDirectional ? directionalTrades : baselineTrades;
+                const analysisCurve     = hasDirectional
+                    ? (prebuiltCurve?.length ? prebuiltCurve : rebuildEquityCurve(directionalTrades))
+                    : baselineCurve;
+                return {
+                    bundle, universe,
+                    missingScenario: !hasDirectional,
+                    scenarioTrades:  directionalTrades,
+                    baselineTrades,  baselineCurve,
+                    analysisTrades,  analysisCurve,
+                };
+            }
+
+            // ── Entry-model path (baseline / penetration / triggered-edge) ───────
             const missingScenario = isScenarioMode
                 && Boolean(universe?.warnings?.some((w) => w.code === "NO_TRADES_FOR_SCENARIO"));
-            const scenarioTrades  = universe?.trades  || [];
-            const baselineTrades  = bundle?.trades    || [];
-            const baselineCurve   = bundle?.equityCurve || [];
+            const scenarioTrades  = universe?.trades || [];
             const analysisTrades  = isScenarioMode && !missingScenario
                 ? scenarioTrades
                 : baselineTrades;
@@ -292,7 +355,7 @@ export default function ComparisonLab() {
                 : baselineCurve;
             return { bundle, universe, missingScenario, scenarioTrades, baselineTrades, baselineCurve, analysisTrades, analysisCurve };
         }),
-        [runs, getRunData, slotUniverses, isScenarioMode],
+        [runs, getRunData, slotUniverses, isScenarioMode, isDirectionalMode, directionalStorageKey],
     );
 
     // ── RB-8d: Results Basis context. ────────────────────────────────────────
@@ -639,12 +702,18 @@ export default function ComparisonLab() {
                                             : (runs[idx]?.netR || 0);
                                     })()} />
                                 </div>
-                                {/* 3C: per-slot scenario presence / missing chip */}
+                                {/* 3C / 4D: per-slot scenario presence / missing chip */}
                                 {isScenarioMode && (() => {
                                     const sv = slotViews[idx];
                                     if (sv?.missingScenario) return (
                                         <div className="mt-1 text-[10px] font-ui text-[hsl(var(--warning))] leading-snug">
                                             ⚠ No {activeScenarioLabel} data — showing baseline
+                                        </div>
+                                    );
+                                    // Directional: universe type won't be "scenario"; check scenarioTrades directly.
+                                    if (isDirectionalMode && sv?.scenarioTrades?.length > 0) return (
+                                        <div className="mt-1">
+                                            <Pill tone="success">{activeScenarioLabel} · {sv.scenarioTrades.length} trades</Pill>
                                         </div>
                                     );
                                     if (sv?.universe?.universeType === "scenario" && sv.scenarioTrades.length > 0) return (
