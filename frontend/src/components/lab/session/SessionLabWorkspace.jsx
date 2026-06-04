@@ -34,6 +34,8 @@ import {
     filterByDirection,
 } from "./analytics/sessionAnalytics";
 import { SESSION_KEYS, SESSION_DEFINITIONS, SESSION_COLOR_ROLES, getSessionDef } from "./config/sessionConfig";
+import { buildMixedDirectionSimulation } from "../entries/analytics/entryAnalytics";
+import { entryTradesByMode } from "../../../data/tradeUniverse";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -185,9 +187,293 @@ function PreviewPanel({ comparison, onReset }) {
     );
 }
 
+// ── Asymmetric Entry Preview ──────────────────────────────────────────────────
+
+const MIN_DIRECTION_N_PREVIEW = 15;
+
+function formatEntryModelKey(key) {
+    if (!key || key === "baseline" || key === "entry_baseline") return "Baseline";
+
+    const threshMatch = key.match(/entry_(?:triggered_edge|penetration)_(\d+p\d+)/i);
+    const threshold = threshMatch
+        ? threshMatch[1].replace("p", ".").replace(/\.0$/, "") + "%"
+        : null;
+
+    if (key.startsWith("entry_penetration")) {
+        return threshold ? `Penetration ${threshold}` : "Penetration";
+    }
+    if (key.startsWith("entry_triggered_edge")) {
+        const base = threshold ? `TE ${threshold}` : "TE";
+        if (/_same$/i.test(key)) return `${base} · Same`;
+        if (/_next$/i.test(key)) return `${base} · Next`;
+        const dm = key.match(/_d(\d+)$/i);
+        if (dm) return `${base} · Delay +${dm[1]}`;
+        return base;
+    }
+    // Fallback: readable-ize
+    return key
+        .replace(/^entry_/, "")
+        .replace(/_/g, " ")
+        .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function AsymmetricEntryPreview({ bundle, activeVariant }) {
+    const tradesByMode = useMemo(() => entryTradesByMode(bundle), [bundle]);
+
+    const availableKeys = useMemo(() => {
+        if (!tradesByMode) return [];
+        const prefix = `${activeVariant}__`;
+        const keys = new Set();
+        Object.keys(tradesByMode).forEach((k) => {
+            if (k.startsWith(prefix)) {
+                keys.add(k.slice(prefix.length));
+            } else if (k.startsWith("entry_") || k === "baseline" || k === "entry_baseline") {
+                keys.add(k);
+            }
+        });
+        return [...keys].sort();
+    }, [tradesByMode, activeVariant]);
+
+    const defaultLongKey = useMemo(
+        () => availableKeys.find((k) => /entry_triggered_edge.*_d2$/.test(k))
+              || availableKeys[0]
+              || "entry_baseline",
+        [availableKeys],
+    );
+
+    const defaultShortKey = useMemo(
+        () => availableKeys.find((k) => /entry_triggered_edge.*_next$/.test(k))
+              || availableKeys[0]
+              || "entry_baseline",
+        [availableKeys],
+    );
+
+    const [show, setShow]         = useState(false);
+    const [longKey, setLongKey]   = useState(defaultLongKey);
+    const [shortKey, setShortKey] = useState(defaultShortKey);
+
+    // Sync selections when availableKeys loads or activeVariant changes
+    useEffect(() => {
+        setLongKey((prev) => (availableKeys.includes(prev) ? prev : defaultLongKey));
+        setShortKey((prev) => (availableKeys.includes(prev) ? prev : defaultShortKey));
+    }, [availableKeys, defaultLongKey, defaultShortKey]);
+
+    const preview = useMemo(() => {
+        if (!show || !longKey || !shortKey) return null;
+        return buildMixedDirectionSimulation({
+            longModelKey:  longKey,
+            shortModelKey: shortKey,
+            tradesByMode,
+            activeVariant,
+        });
+    }, [show, longKey, shortKey, tradesByMode, activeVariant]);
+
+    const isOnePD  = activeVariant === "one_per_direction";
+    const hasKeys  = availableKeys.length > 0;
+
+    return (
+        <div className="border border-[hsl(var(--border-soft))] clip-bevel-sm">
+            {/* Toggle header */}
+            <button
+                type="button"
+                onClick={() => setShow((p) => !p)}
+                className={cn(
+                    "w-full flex items-center gap-2 px-4 py-2.5 text-left transition-colors",
+                    show
+                        ? "bg-[hsl(var(--accent-primary)/0.07)] border-b border-[hsl(var(--border-soft))]"
+                        : "hover:bg-[hsl(var(--surface-1)/0.5)]",
+                )}
+            >
+                <Power className={cn(
+                    "w-3.5 h-3.5 shrink-0",
+                    show ? "text-[hsl(var(--accent-primary))]" : "text-muted-lab",
+                )} />
+                <span className={cn(
+                    "text-[10.5px] font-ui uppercase tracking-wider",
+                    show ? "text-[hsl(var(--accent-primary))]" : "text-muted-lab",
+                )}>
+                    Asymmetric Entry Preview
+                </span>
+                <span className="text-[10px] font-ui text-muted-lab ml-0.5">
+                    — preview longs &amp; shorts with different entry models
+                </span>
+                <span className={cn(
+                    "ml-auto text-[9px] font-ui uppercase tracking-wider",
+                    show ? "text-[hsl(var(--accent-primary))]" : "text-muted-lab",
+                )}>
+                    {show ? "Hide" : "Show"}
+                </span>
+            </button>
+
+            {show && (
+                <div className="px-4 py-3 space-y-3">
+                    {/* Caveat banner */}
+                    <div className="px-3 py-2 border border-[hsl(var(--warning)/0.4)] bg-[hsl(var(--warning)/0.06)] clip-bevel-sm text-[10px] font-ui text-[hsl(var(--warning))] leading-relaxed">
+                        <span className="font-semibold uppercase tracking-wider">Approximate</span>
+                        {" — post-hoc merge, not a true backtest. Conflict rules may differ for single-position / multi-position modes."}
+                        {isOnePD && (
+                            <span className="ml-2 text-[hsl(var(--success))] font-semibold">
+                                ✓ Exact for one-per-direction mode.
+                            </span>
+                        )}
+                    </div>
+
+                    {!hasKeys ? (
+                        <p className="text-[11px] font-ui text-muted-lab">
+                            No entry scenario CSVs found in this run. Import a run with entry model scenarios to use this feature.
+                        </p>
+                    ) : (
+                        <>
+                            {/* Model selectors */}
+                            <div className="grid grid-cols-2 gap-3">
+                                {[
+                                    { id: "long",  label: "Longs use",  value: longKey,  onChange: setLongKey },
+                                    { id: "short", label: "Shorts use", value: shortKey, onChange: setShortKey },
+                                ].map(({ id, label, value, onChange }) => (
+                                    <div key={id} className="flex flex-col gap-1">
+                                        <span className="text-[9px] font-ui uppercase tracking-wider text-muted-lab">
+                                            {label}
+                                        </span>
+                                        <select
+                                            value={value}
+                                            onChange={(e) => onChange(e.target.value)}
+                                            className="bg-[hsl(var(--surface-1))] border border-[hsl(var(--border-mid))] text-[11px] font-ui text-[hsl(var(--text))] px-2 py-1.5 clip-bevel-sm focus:outline-none focus:border-[hsl(var(--accent-primary)/0.6)]"
+                                        >
+                                            {availableKeys.map((k) => (
+                                                <option key={k} value={k}>
+                                                    {formatEntryModelKey(k)}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                ))}
+                            </div>
+
+                            {/* Results */}
+                            {preview && (
+                                preview.totalN === 0 ? (
+                                    <p className="text-[11px] font-ui text-muted-lab">
+                                        No matching trades found for this combination.
+                                    </p>
+                                ) : (
+                                    <div className="space-y-2">
+                                        {/* Low-N warning */}
+                                        {preview.lowN && (
+                                            <div className="px-3 py-1.5 border border-[hsl(var(--warning)/0.35)] bg-[hsl(var(--warning)/0.05)] clip-bevel-sm">
+                                                <span className="text-[10px] font-ui text-[hsl(var(--warning))]">
+                                                    Low sample size — one side has fewer than {MIN_DIRECTION_N_PREVIEW} trades. Stats unreliable.
+                                                </span>
+                                            </div>
+                                        )}
+
+                                        {/* Metrics grid */}
+                                        <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-10 gap-3">
+                                            {[
+                                                {
+                                                    label: "Combined Net R",
+                                                    value: fmtR(preview.stats.netR),
+                                                    cls: preview.stats.netR >= 0
+                                                        ? "text-[hsl(var(--success))]"
+                                                        : "text-[hsl(var(--danger))]",
+                                                    bold: true,
+                                                },
+                                                {
+                                                    label: "Long Net R",
+                                                    value: fmtR(preview.longNetR),
+                                                    cls: preview.longNetR >= 0
+                                                        ? "text-[hsl(var(--success))]"
+                                                        : "text-[hsl(var(--danger))]",
+                                                },
+                                                {
+                                                    label: "Short Net R",
+                                                    value: fmtR(preview.shortNetR),
+                                                    cls: preview.shortNetR >= 0
+                                                        ? "text-[hsl(var(--success))]"
+                                                        : "text-[hsl(var(--danger))]",
+                                                },
+                                                {
+                                                    label: "Trades",
+                                                    value: `${preview.totalN}`,
+                                                    cls: "text-[hsl(var(--text))]",
+                                                },
+                                                {
+                                                    label: "Long N",
+                                                    value: `${preview.longN}`,
+                                                    cls: preview.longN >= MIN_DIRECTION_N_PREVIEW
+                                                        ? "text-[hsl(var(--text))]"
+                                                        : "text-[hsl(var(--warning))]",
+                                                },
+                                                {
+                                                    label: "Short N",
+                                                    value: `${preview.shortN}`,
+                                                    cls: preview.shortN >= MIN_DIRECTION_N_PREVIEW
+                                                        ? "text-[hsl(var(--text))]"
+                                                        : "text-[hsl(var(--warning))]",
+                                                },
+                                                {
+                                                    label: "Win Rate",
+                                                    value: preview.stats.winRate != null
+                                                        ? `${Number(preview.stats.winRate).toFixed(1)}%`
+                                                        : "—",
+                                                    cls: "text-[hsl(var(--text))]",
+                                                },
+                                                {
+                                                    label: "Expectancy",
+                                                    value: preview.stats.expectancy != null
+                                                        ? `${Number(preview.stats.expectancy).toFixed(2)}R`
+                                                        : "—",
+                                                    cls: preview.stats.expectancy >= 0
+                                                        ? "text-[hsl(var(--success))]"
+                                                        : "text-[hsl(var(--danger))]",
+                                                },
+                                                {
+                                                    label: "Profit Factor",
+                                                    value: preview.stats.profitFactor != null
+                                                        ? Number(preview.stats.profitFactor).toFixed(2)
+                                                        : "—",
+                                                    cls: "text-[hsl(var(--text))]",
+                                                },
+                                                {
+                                                    label: "Max DD",
+                                                    value: preview.stats.maxDD != null
+                                                        ? `${Number(preview.stats.maxDD).toFixed(2)}R`
+                                                        : "—",
+                                                    cls: "text-[hsl(var(--danger))]",
+                                                },
+                                            ].map(({ label, value, cls, bold }) => (
+                                                <div key={label} className="flex flex-col gap-0.5">
+                                                    <span className="text-[9px] font-ui uppercase tracking-wider text-muted-lab">
+                                                        {label}
+                                                    </span>
+                                                    <span className={cn(
+                                                        "text-[13px] font-num tabular-nums leading-tight",
+                                                        bold && "font-semibold",
+                                                        cls,
+                                                    )}>
+                                                        {value}
+                                                    </span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )
+                            )}
+                        </>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
+
 // ── SessionLabWorkspace ───────────────────────────────────────────────────────
 
 export function SessionLabWorkspace({ trades, bundle }) {
+    // ── Active variant (for asymmetric preview) ──────────────────────────────
+    const activeVariant = bundle?.primaryVariant
+        || bundle?.activeVariant
+        || "single_position";
+
     // ── Global direction toggle ──────────────────────────────────────────────
     const [direction, setDirection] = useState(() => {
         try {
@@ -339,6 +625,9 @@ export function SessionLabWorkspace({ trades, bundle }) {
             {rulesActive && (
                 <PreviewPanel comparison={previewComparison} onReset={resetRules} />
             )}
+
+            {/* Asymmetric entry preview */}
+            <AsymmetricEntryPreview bundle={bundle} activeVariant={activeVariant} />
 
             {/* Session card grid */}
             {!hasAnyTrades ? (

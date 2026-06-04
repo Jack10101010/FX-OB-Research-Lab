@@ -91,6 +91,18 @@ export default function StrategyBuilder() {
         selectedEntryModel: "baseline",
         singlePenetrationPct: 25,
         singleTriggeredEdgeThreshold: 25,
+        // ── Directional entry assignment (Phase 2 config foundation) ──────
+        directionalEntryMode: "symmetric",
+        longEntryEnabled: true,
+        longEntryModel: "triggered_edge",
+        longPenetrationPct: 25,
+        longTriggeredEdgeThreshold: 25,
+        longTriggeredEdgeDelays: [0, 1],
+        shortEntryEnabled: true,
+        shortEntryModel: "triggered_edge",
+        shortPenetrationPct: 25,
+        shortTriggeredEdgeThreshold: 25,
+        shortTriggeredEdgeDelays: [0, 1],
         monteCarlo: false,
         };
     });
@@ -1037,6 +1049,60 @@ export default function StrategyBuilder() {
                 </NeonPanel>
                 </BuilderFocusCard>
 
+                {/* ── Entry Assignment panel ──────────────────────────────────── */}
+                <BuilderFocusCard id="entry-assignment" activeId={activeBuilderCard} onActivate={setActiveBuilderCard}>
+                <NeonPanel title="Entry Assignment">
+                    <div className="mb-3">
+                        <Segment
+                            options={[
+                                { value: "symmetric", label: "Symmetric" },
+                                { value: "asymmetric", label: "Asymmetric" },
+                            ]}
+                            value={cfg.directionalEntryMode}
+                            onChange={set("directionalEntryMode")}
+                        />
+                        <div className="mt-2 text-[10.5px] text-muted-lab">
+                            {cfg.directionalEntryMode === "symmetric"
+                                ? "Longs and shorts use the same entry model from the Entry Mode panel above."
+                                : "Assign separate entry models for long and short trades."}
+                        </div>
+                    </div>
+                    {cfg.directionalEntryMode === "asymmetric" && (
+                        <div className="space-y-3">
+                            <div className="flex items-start gap-2 border border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.07)] clip-bevel-sm px-3 py-2">
+                                <ShieldAlert className="w-3.5 h-3.5 shrink-0 mt-0.5 text-[hsl(var(--warning))]" />
+                                <div className="text-[10.5px] text-[hsl(var(--warning))]">
+                                    Config foundation only — directional entry fields are emitted for the backtester, but true mixed-direction simulation requires backend Phase 3 support. Use Session Lab Asymmetric Preview for approximate research until then.
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <DirectionalEntryCard
+                                    label="Long Entries"
+                                    enabled={cfg.longEntryEnabled}
+                                    entryModel={cfg.longEntryModel}
+                                    penetrationPct={cfg.longPenetrationPct}
+                                    triggeredEdgeThreshold={cfg.longTriggeredEdgeThreshold}
+                                    triggeredEdgeDelays={cfg.longTriggeredEdgeDelays}
+                                    onChange={(suffix, value) => set(`long${suffix}`)(value)}
+                                />
+                                <DirectionalEntryCard
+                                    label="Short Entries"
+                                    enabled={cfg.shortEntryEnabled}
+                                    entryModel={cfg.shortEntryModel}
+                                    penetrationPct={cfg.shortPenetrationPct}
+                                    triggeredEdgeThreshold={cfg.shortTriggeredEdgeThreshold}
+                                    triggeredEdgeDelays={cfg.shortTriggeredEdgeDelays}
+                                    onChange={(suffix, value) => set(`short${suffix}`)(value)}
+                                />
+                            </div>
+                            <div className="text-[10px] text-muted-lab border border-[hsl(var(--border-soft))] clip-bevel-sm px-3 py-2">
+                                Session-specific long/short rules will build on this structure later.
+                            </div>
+                        </div>
+                    )}
+                </NeonPanel>
+                </BuilderFocusCard>
+
                 <BuilderFocusCard id="advanced" activeId={activeBuilderCard} onActivate={setActiveBuilderCard} className="flex-1">
                 <NeonPanel title="Advanced" className="flex-1">
                     <div className="grid grid-cols-2 gap-3">
@@ -1124,6 +1190,13 @@ export default function StrategyBuilder() {
                         <StatusMeta k="News flatten late" v={sanityRun.news_flatten_late_count ?? "—"} />
                         <StatusMeta k={sanityRun.duration_seconds != null ? "Duration" : "Elapsed"} v={formatSeconds(sanityRun.duration_seconds ?? sanityRun.elapsed_seconds)} />
                         <StatusMeta k="Imported run id" v={sanityRun.importedRunId || "—"} />
+                        <StatusMeta k="Directional entry mode" v={sanityConfig.directional_entry_mode || cfg.directionalEntryMode || "symmetric"} />
+                        {(sanityConfig.directional_entry_mode === "asymmetric" || cfg.directionalEntryMode === "asymmetric") && (
+                            <>
+                                <StatusMeta k="Long entry" v={formatDirEntryLabel(cfg.longEntryEnabled, cfg.longEntryModel, cfg.longPenetrationPct, cfg.longTriggeredEdgeThreshold, cfg.longTriggeredEdgeDelays)} />
+                                <StatusMeta k="Short entry" v={formatDirEntryLabel(cfg.shortEntryEnabled, cfg.shortEntryModel, cfg.shortPenetrationPct, cfg.shortTriggeredEdgeThreshold, cfg.shortTriggeredEdgeDelays)} />
+                            </>
+                        )}
                     </div>
                 </NeonPanel>
                 </BuilderFocusCard>
@@ -1366,6 +1439,29 @@ function buildBacktesterConfig(cfg) {
         teCancelOnFirstFailedTag = teEnabled ? Boolean(cfg.triggeredEdgeCancelOnFirstFailedTag) : false;
     }
 
+    // ── Directional entry assignment (Phase 2) ─────────────────────────────────
+    const isAsymmetric = cfg.directionalEntryMode === "asymmetric";
+    const longDelays = Array.isArray(cfg.longTriggeredEdgeDelays) && cfg.longTriggeredEdgeDelays.length
+        ? [...cfg.longTriggeredEdgeDelays].sort((a, b) => a - b) : [0, 1];
+    const shortDelays = Array.isArray(cfg.shortTriggeredEdgeDelays) && cfg.shortTriggeredEdgeDelays.length
+        ? [...cfg.shortTriggeredEdgeDelays].sort((a, b) => a - b) : [0, 1];
+    const directionalEntryConfig = isAsymmetric ? {
+        long: {
+            enabled: Boolean(cfg.longEntryEnabled),
+            entry_model: cfg.longEntryModel || "triggered_edge",
+            penetration_pct: Number(cfg.longPenetrationPct ?? 25),
+            triggered_edge_threshold: Number(cfg.longTriggeredEdgeThreshold ?? 25),
+            triggered_edge_delays: longDelays,
+        },
+        short: {
+            enabled: Boolean(cfg.shortEntryEnabled),
+            entry_model: cfg.shortEntryModel || "triggered_edge",
+            penetration_pct: Number(cfg.shortPenetrationPct ?? 25),
+            triggered_edge_threshold: Number(cfg.shortTriggeredEdgeThreshold ?? 25),
+            triggered_edge_delays: shortDelays,
+        },
+    } : null;
+
     const config = {
         symbol: cfg.symbol || "EURUSD",
         candle_file: normalizeCandleFile(cfg.dataFile),
@@ -1399,6 +1495,17 @@ function buildBacktesterConfig(cfg) {
         triggered_edge_cancel_retrace_pips: teCancelRetracePips,
         triggered_edge_cancel_retrace_ob_pct: teCancelRetraceObPct,
         triggered_edge_cancel_on_first_failed_tag: teCancelOnFirstFailedTag,
+        // ── Directional entry (Phase 2 — backend Phase 3 required for true simulation) ──
+        directional_entry_mode: cfg.directionalEntryMode || "symmetric",
+        ...(directionalEntryConfig ? { directional_entry_config: directionalEntryConfig } : {}),
+        ...(isAsymmetric ? {
+            long_entry_models: cfg.longEntryEnabled ? [cfg.longEntryModel || "triggered_edge"] : [],
+            short_entry_models: cfg.shortEntryEnabled ? [cfg.shortEntryModel || "triggered_edge"] : [],
+            long_triggered_edge_delays: longDelays,
+            short_triggered_edge_delays: shortDelays,
+            long_entry_penetration_thresholds: cfg.longEntryModel === "entry_penetration" ? [Number(cfg.longPenetrationPct ?? 25)] : [],
+            short_entry_penetration_thresholds: cfg.shortEntryModel === "entry_penetration" ? [Number(cfg.shortPenetrationPct ?? 25)] : [],
+        } : {}),
         protection_modes: ["baseline"],
         session_filter_enabled: Boolean(cfg.sessionFilter),
         allowed_sessions: allowedSessions,
@@ -1832,6 +1939,17 @@ const LOAD_FIELD_LABELS = {
     singlePenetrationPct: "single penetration threshold",
     singleTriggeredEdgeThreshold: "single triggered-edge threshold",
     monteCarlo: "Monte Carlo",
+    directionalEntryMode: "directional entry mode",
+    longEntryEnabled: "long entry enabled",
+    longEntryModel: "long entry model",
+    longPenetrationPct: "long penetration threshold",
+    longTriggeredEdgeThreshold: "long triggered-edge threshold",
+    longTriggeredEdgeDelays: "long triggered-edge delays",
+    shortEntryEnabled: "short entry enabled",
+    shortEntryModel: "short entry model",
+    shortPenetrationPct: "short penetration threshold",
+    shortTriggeredEdgeThreshold: "short triggered-edge threshold",
+    shortTriggeredEdgeDelays: "short triggered-edge delays",
 };
 
 function buildRunConfigLoadReport(current, run) {
@@ -1911,6 +2029,42 @@ function buildRunConfigLoadReport(current, run) {
         }
     }
     applyFirstPresent(patch, source, "monteCarlo", ["monte_carlo", "monteCarlo", "monte_carlo_enabled"], toBool);
+    // ── Directional entry recall ────────────────────────────────────────────
+    applyFirstPresent(patch, source, "directionalEntryMode", ["directional_entry_mode", "directionalEntryMode"],
+        (v) => ["symmetric", "asymmetric"].includes(v) ? v : null);
+    const longDirCfg = source?.directional_entry_config?.long;
+    if (longDirCfg) {
+        if (longDirCfg.enabled != null) patch.longEntryEnabled = toBool(longDirCfg.enabled);
+        if (longDirCfg.entry_model) patch.longEntryModel = longDirCfg.entry_model;
+        if (longDirCfg.penetration_pct != null) { const v = toNumber(longDirCfg.penetration_pct); if (v != null) patch.longPenetrationPct = v; }
+        if (longDirCfg.triggered_edge_threshold != null) { const v = toNumber(longDirCfg.triggered_edge_threshold); if (v != null) patch.longTriggeredEdgeThreshold = v; }
+        if (Array.isArray(longDirCfg.triggered_edge_delays) && longDirCfg.triggered_edge_delays.length)
+            patch.longTriggeredEdgeDelays = longDirCfg.triggered_edge_delays.map(Number).filter(Number.isFinite);
+    }
+    const shortDirCfg = source?.directional_entry_config?.short;
+    if (shortDirCfg) {
+        if (shortDirCfg.enabled != null) patch.shortEntryEnabled = toBool(shortDirCfg.enabled);
+        if (shortDirCfg.entry_model) patch.shortEntryModel = shortDirCfg.entry_model;
+        if (shortDirCfg.penetration_pct != null) { const v = toNumber(shortDirCfg.penetration_pct); if (v != null) patch.shortPenetrationPct = v; }
+        if (shortDirCfg.triggered_edge_threshold != null) { const v = toNumber(shortDirCfg.triggered_edge_threshold); if (v != null) patch.shortTriggeredEdgeThreshold = v; }
+        if (Array.isArray(shortDirCfg.triggered_edge_delays) && shortDirCfg.triggered_edge_delays.length)
+            patch.shortTriggeredEdgeDelays = shortDirCfg.triggered_edge_delays.map(Number).filter(Number.isFinite);
+    }
+    // Flat recall overrides nested (newer configs may only carry flat fields)
+    applyFirstPresent(patch, source, "longEntryEnabled", ["long_entry_enabled", "longEntryEnabled"], toBool);
+    applyFirstPresent(patch, source, "longEntryModel", ["long_entry_model", "longEntryModel"]);
+    applyFirstPresent(patch, source, "longPenetrationPct", ["long_entry_penetration_thresholds", "longPenetrationPct"],
+        (v) => Array.isArray(v) && v.length ? toNumber(v[0]) : toNumber(v));
+    applyFirstPresent(patch, source, "longTriggeredEdgeThreshold", ["long_triggered_edge_threshold", "longTriggeredEdgeThreshold"], toNumber);
+    applyFirstPresent(patch, source, "longTriggeredEdgeDelays", ["long_triggered_edge_delays", "longTriggeredEdgeDelays"],
+        (v) => Array.isArray(v) && v.length ? v.map(Number).filter(Number.isFinite) : null);
+    applyFirstPresent(patch, source, "shortEntryEnabled", ["short_entry_enabled", "shortEntryEnabled"], toBool);
+    applyFirstPresent(patch, source, "shortEntryModel", ["short_entry_model", "shortEntryModel"]);
+    applyFirstPresent(patch, source, "shortPenetrationPct", ["short_entry_penetration_thresholds", "shortPenetrationPct"],
+        (v) => Array.isArray(v) && v.length ? toNumber(v[0]) : toNumber(v));
+    applyFirstPresent(patch, source, "shortTriggeredEdgeThreshold", ["short_triggered_edge_threshold", "shortTriggeredEdgeThreshold"], toNumber);
+    applyFirstPresent(patch, source, "shortTriggeredEdgeDelays", ["short_triggered_edge_delays", "shortTriggeredEdgeDelays"],
+        (v) => Array.isArray(v) && v.length ? v.map(Number).filter(Number.isFinite) : null);
 
     Object.keys(patch).forEach((field) => loaded.add(field));
     const missingFields = Object.keys(LOAD_FIELD_LABELS)
@@ -2232,6 +2386,7 @@ function ConfigScopeRibbon({ cfg }) {
     const rr = Number(cfg.rr);
     const chips = [
         model,
+        cfg.directionalEntryMode === "asymmetric" ? "ASYMMETRIC" : null,
         structureChipLabel(cfg.structure).toUpperCase(),
         directionChipLabel(cfg.direction).toUpperCase(),
         Number.isFinite(rr) ? `RR ${rr}` : null,
@@ -2257,6 +2412,97 @@ function StatusMeta({ k, v }) {
         <div className="border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.28)] clip-bevel-sm px-3 py-2">
             <div className="control-label text-[9.5px] font-ui uppercase tracking-wider text-muted-lab">{k}</div>
             <div className="mt-1 text-[11px] font-code text-[hsl(var(--text-2))] break-all">{String(v ?? "—")}</div>
+        </div>
+    );
+}
+
+function formatDirEntryLabel(enabled, model, penetrationPct, triggeredEdgeThreshold, delays) {
+    if (!enabled) return "Disabled";
+    if (model === "baseline") return "Baseline";
+    if (model === "entry_penetration") return `Penetration ${penetrationPct}%`;
+    if (model === "triggered_edge") {
+        const delayArr = Array.isArray(delays) ? delays : [0, 1];
+        const delayLabel = delayArr.map((d) => d === 0 ? "Same" : d === 1 ? "Next" : `+${d}`).join(" / ");
+        return `TE ${triggeredEdgeThreshold}% · ${delayLabel}`;
+    }
+    return model || "—";
+}
+
+function DirectionalEntryCard({ label, enabled, entryModel, penetrationPct, triggeredEdgeThreshold, triggeredEdgeDelays, onChange }) {
+    const delays = Array.isArray(triggeredEdgeDelays) ? triggeredEdgeDelays : [0, 1];
+    return (
+        <div className="border border-[hsl(var(--border-soft))] clip-bevel-sm p-3 space-y-3">
+            <div className="flex items-center justify-between">
+                <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">{label}</div>
+                <NeonToggle checked={enabled} onChange={(val) => onChange("EntryEnabled", val)} />
+            </div>
+            {enabled && (
+                <>
+                    <Segment
+                        options={[
+                            { value: "baseline", label: "Baseline" },
+                            { value: "entry_penetration", label: "Penetration" },
+                            { value: "triggered_edge", label: "TE" },
+                        ]}
+                        value={entryModel}
+                        onChange={(val) => onChange("EntryModel", val)}
+                    />
+                    {entryModel === "entry_penetration" && (
+                        <Field label="Penetration %">
+                            <NeonInput
+                                type="number"
+                                min="1"
+                                max="99"
+                                step="1"
+                                value={penetrationPct}
+                                onChange={(e) => onChange("PenetrationPct", Number(e.target.value))}
+                            />
+                        </Field>
+                    )}
+                    {entryModel === "triggered_edge" && (
+                        <div className="space-y-2">
+                            <Field label="Trigger Threshold %">
+                                <NeonInput
+                                    type="number"
+                                    min="1"
+                                    max="99"
+                                    step="1"
+                                    value={triggeredEdgeThreshold}
+                                    onChange={(e) => onChange("TriggeredEdgeThreshold", Number(e.target.value))}
+                                />
+                            </Field>
+                            <Field label="Entry Delay" hint="0=same · 1=next · 2/3=deferred">
+                                <div className="flex gap-1.5">
+                                    {[{ d: 0, label: "0·S" }, { d: 1, label: "1·N" }, { d: 2, label: "2" }, { d: 3, label: "3" }].map(({ d, label }) => {
+                                        const active = delays.includes(d);
+                                        return (
+                                            <button
+                                                key={d}
+                                                type="button"
+                                                onClick={() => {
+                                                    const next = active
+                                                        ? delays.filter((x) => x !== d)
+                                                        : [...delays, d].sort((a, b) => a - b);
+                                                    if (next.length === 0) return;
+                                                    onChange("TriggeredEdgeDelays", next);
+                                                }}
+                                                className={[
+                                                    "px-2 py-1 text-[10px] font-ui uppercase tracking-[0.08em] clip-bevel-sm border transition-colors",
+                                                    active
+                                                        ? "border-[hsl(var(--accent-primary)/0.7)] bg-[hsl(var(--accent-primary)/0.12)] text-[hsl(var(--accent-primary))]"
+                                                        : "border-[hsl(var(--border-soft))] bg-transparent text-[hsl(var(--text-2)/0.5)] hover:text-[hsl(var(--text-2))]",
+                                                ].join(" ")}
+                                            >
+                                                {label}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </Field>
+                        </div>
+                    )}
+                </>
+            )}
         </div>
     );
 }
