@@ -9,7 +9,9 @@ import ImpactOnRun from "./components/ImpactOnRun";
 import HelpLegend from "./components/HelpLegend";
 import SessionSettingsModal from "./components/SessionSettingsModal";
 import { SESSION_LIST } from "./mockData";
+import { useDataset } from "../../data/store";
 import { useTradeUniverse } from "../../data/useTradeUniverse";
+import { derivePrimaryResultView } from "../../data/tradeUniverse";
 import {
   buildDefaultSessionRules,
   applySessionRules,
@@ -38,7 +40,12 @@ const V1_TO_CANONICAL = {
 };
 
 export default function SessionLabPage() {
-  const { trades: allTrades = [] } = useTradeUniverse();
+  // Phase D: derive trades from the run's primary result view, not global SCENARIO.
+  const dataset = useDataset();
+  const runId = dataset.ACTIVE_RUN?.id ?? null;
+  const bundle = runId ? dataset.getRunData(runId) : null;
+  const primaryScenario = useMemo(() => derivePrimaryResultView(bundle), [bundle]);
+  const { trades: allTrades = [] } = useTradeUniverse(runId, primaryScenario);
   const hasRealData = Array.isArray(allTrades) && allTrades.length > 0;
 
   // Rule state for real data (keyed by canonical session name)
@@ -246,24 +253,24 @@ export default function SessionLabPage() {
 
         <VisualSummaryStrip visualData={visualData} />
 
-        {/* Deep Dive: 3-column layout — content / quick controls / impact */}
-        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_240px_300px] 2xl:grid-cols-[minmax(0,1fr)_280px_360px] gap-6">
-          <DeepDive
-            session={selected}
-            activeTab={activeTab}
-            setActiveTab={setActiveTab}
-            overviewData={overviewData}
-            directionData={directionData}
-            structureData={structureData}
-            timeAnalysisData={timeAnalysisData}
-            entryModelData={entryModelData}
-          />
-          <div className="xl:sticky xl:top-6 xl:self-start">
-            <QuickControls session={selected} onToggle={toggleSessionField} />
+        {/* Deep Dive: top row = Deep Dive + Quick Controls; Impact full width below */}
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_264px] 2xl:grid-cols-[minmax(0,1fr)_300px] gap-6">
+            <DeepDive
+              session={selected}
+              activeTab={activeTab}
+              setActiveTab={setActiveTab}
+              overviewData={overviewData}
+              directionData={directionData}
+              structureData={structureData}
+              timeAnalysisData={timeAnalysisData}
+              entryModelData={entryModelData}
+            />
+            <div className="xl:sticky xl:top-6 xl:self-start">
+              <QuickControls session={selected} onToggle={toggleSessionField} />
+            </div>
           </div>
-          <div className="xl:sticky xl:top-6 xl:self-start">
-            <ImpactOnRun />
-          </div>
+          <ImpactOnRun />
         </div>
 
         <HelpLegend />

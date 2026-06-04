@@ -11,20 +11,27 @@
  *   - delegates all layout to SessionLabWorkspace
  */
 
-import React from "react";
+import React, { useMemo } from "react";
 import { Clock } from "lucide-react";
 import { useDataset } from "@/data/store";
 import { useTradeUniverse } from "@/data/useTradeUniverse";
+import { derivePrimaryResultView } from "@/data/tradeUniverse";
 import { ImportZone } from "@/components/lab/ImportZone";
 import { PageHeader } from "@/components/lab/AppShell";
 import { SessionLabWorkspace } from "@/components/lab/session/SessionLabWorkspace";
 
 export default function SessionLab() {
     const dataset = useDataset();
-    const universe = useTradeUniverse();
-
     const hasRun = Boolean(dataset.ACTIVE_RUN?.id);
-    const bundle = hasRun ? dataset.getRunData(dataset.ACTIVE_RUN.id) : null;
+    const runId = hasRun ? dataset.ACTIVE_RUN.id : null;
+    const bundle = hasRun ? dataset.getRunData(runId) : null;
+
+    // Phase D: derive scenario from bundle instead of inheriting global SCENARIO.
+    // derivePrimaryResultView returns null for baseline-only runs → useTradeUniverse
+    // falls back to baseline naturally (scenarioOverride=null → store SCENARIO ignored).
+    const primaryScenario = useMemo(() => derivePrimaryResultView(bundle), [bundle]);
+
+    const universe = useTradeUniverse(runId, primaryScenario);
     const trades = universe?.trades || [];
 
     if (!hasRun) {
