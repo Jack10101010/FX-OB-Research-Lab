@@ -16,6 +16,7 @@ const tooltipStyle = {
 };
 
 function StructCard({ name, data, color }) {
+  const positive = data.netR >= 0;
   return (
     <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-4">
       <div className="flex items-center justify-between mb-3">
@@ -25,11 +26,13 @@ function StructCard({ name, data, color }) {
         </div>
         <button className="text-[10px] text-[hsl(var(--accent-primary))] hover:opacity-80 font-num uppercase tracking-wider">Include</button>
       </div>
-      <div className="font-display text-4xl font-bold tabular text-[#22C55E]">{fmtR(data.netR, 2)}</div>
+      <div className={`font-display text-4xl font-bold tabular ${positive ? "text-[#22C55E]" : "text-[#EF4444]"}`}>
+        {fmtR(data.netR, 2)}
+      </div>
       <div className="grid grid-cols-4 gap-2 mt-3 text-xs">
         <Sm label="Trades" value={data.trades} />
         <Sm label="WR" value={`${data.wr}%`} />
-        <Sm label="PF" value={data.pf} />
+        <Sm label="PF" value={data.pf ?? "∞"} />
         <Sm label="Max DD" value={`${data.dd}R`} tone="neg" />
       </div>
     </div>
@@ -46,14 +49,24 @@ function Sm({ label, value, tone }) {
   );
 }
 
-export default function StructureLab() {
-  const [bosOn, setBosOn] = useState(true);
+export default function StructureLab({ structureData }) {
+  const [bosOn,   setBosOn]   = useState(true);
   const [chochOn, setChochOn] = useState(true);
 
+  // Real data when available, mock fallback otherwise
+  const bos    = structureData?.bos    ?? STRUCTURE_LAB.bos;
+  const choch  = structureData?.choch  ?? STRUCTURE_LAB.choch;
+  const matrix = structureData?.matrix ?? STRUCTURE_LAB.matrix;
+  // overTime: always use mock — Phase C will add time-series
+  const overTime = STRUCTURE_LAB.overTime;
+
   const donut = [
-    { name: "BOS",   value: STRUCTURE_LAB.bos.trades,   color: "#3B82F6" },
-    { name: "CHoCH", value: STRUCTURE_LAB.choch.trades, color: "#A855F7" },
+    { name: "BOS",   value: bos.trades,   color: "#3B82F6" },
+    { name: "CHoCH", value: choch.trades, color: "#A855F7" },
   ];
+  const donutTotal  = bos.trades + choch.trades;
+  const bosPercent  = donutTotal > 0 ? ((bos.trades   / donutTotal) * 100).toFixed(1) : "0.0";
+  const chochPercent = donutTotal > 0 ? ((choch.trades / donutTotal) * 100).toFixed(1) : "0.0";
 
   return (
     <div className="space-y-5">
@@ -67,8 +80,8 @@ export default function StructureLab() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <StructCard name="BOS" data={STRUCTURE_LAB.bos} color="#3B82F6" />
-        <StructCard name="CHoCH" data={STRUCTURE_LAB.choch} color="#A855F7" />
+        <StructCard name="BOS"   data={bos}   color="#3B82F6" />
+        <StructCard name="CHoCH" data={choch} color="#A855F7" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -86,7 +99,7 @@ export default function StructureLab() {
                 </PieChart>
               </ResponsiveContainer>
               <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                <span className="font-num tabular text-2xl font-bold text-[hsl(var(--text))]">27</span>
+                <span className="font-num tabular text-2xl font-bold text-[hsl(var(--text))]">{donutTotal}</span>
                 <span className="text-[9px] text-muted-lab uppercase tracking-wider font-num">Total Trades</span>
               </div>
             </div>
@@ -94,18 +107,18 @@ export default function StructureLab() {
               <li className="flex items-center gap-2">
                 <span className="h-2.5 w-2.5 rounded-sm bg-[#3B82F6]" />
                 <span className="text-[hsl(var(--text))] font-medium">BOS</span>
-                <span className="ml-auto text-[hsl(var(--text-2))] font-num">17 (63.0%)</span>
+                <span className="ml-auto text-[hsl(var(--text-2))] font-num">{bos.trades} ({bosPercent}%)</span>
               </li>
               <li className="flex items-center gap-2">
                 <span className="h-2.5 w-2.5 rounded-sm bg-[#A855F7]" />
                 <span className="text-[hsl(var(--text))] font-medium">CHoCH</span>
-                <span className="ml-auto text-[hsl(var(--text-2))] font-num">10 (37.0%)</span>
+                <span className="ml-auto text-[hsl(var(--text-2))] font-num">{choch.trades} ({chochPercent}%)</span>
               </li>
             </ul>
           </div>
         </div>
 
-        {/* Net R over time */}
+        {/* Net R over time — mock data (Phase C) */}
         <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-4">
           <div className="flex items-baseline justify-between mb-3">
             <SectionLabel>Net R by Structure Over Time</SectionLabel>
@@ -116,12 +129,12 @@ export default function StructureLab() {
           </div>
           <div className="h-44">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={STRUCTURE_LAB.overTime} margin={{ top: 8, right: 12, bottom: 0, left: -16 }}>
+              <LineChart data={overTime} margin={{ top: 8, right: 12, bottom: 0, left: -16 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#223142" />
                 <XAxis dataKey="t" tick={{ fill: "#64748B", fontSize: 9, fontFamily: "IBM Plex Mono" }} axisLine={{ stroke: "#223142" }} tickLine={false} interval={2} />
                 <YAxis tick={{ fill: "#64748B", fontSize: 9, fontFamily: "IBM Plex Mono" }} axisLine={false} tickLine={false} width={28} />
                 <Tooltip contentStyle={tooltipStyle} />
-                <Line type="monotone" dataKey="bos" stroke="#3B82F6" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="bos"   stroke="#3B82F6" strokeWidth={2} dot={false} />
                 <Line type="monotone" dataKey="choch" stroke="#A855F7" strokeWidth={2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
@@ -129,7 +142,7 @@ export default function StructureLab() {
         </div>
       </div>
 
-      {/* 2x2 Matrix */}
+      {/* 2×2 Matrix */}
       <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-4">
         <SectionLabel className="mb-3">Structure Breakdown by Direction</SectionLabel>
         <div className="overflow-hidden rounded-md border border-[hsl(var(--border-soft))]">
@@ -145,15 +158,19 @@ export default function StructureLab() {
               </tr>
             </thead>
             <tbody>
-              {STRUCTURE_LAB.matrix.map((r) => (
+              {matrix.map((r) => (
                 <tr key={`${r.dir}-${r.struct}`} className="border-t border-[hsl(var(--border-soft))]/60 hover:bg-[hsl(var(--panel-2))]/40">
                   <td className="px-3 py-1.5 text-[hsl(var(--text))]">
-                    <span className="font-num"><span className={r.dir === "Long" ? "text-[#22C55E]" : "text-[#EF4444]"}>{r.dir}</span> · <span className={r.struct === "BOS" ? "text-[#3B82F6]" : "text-[#A855F7]"}>{r.struct}</span></span>
+                    <span className="font-num">
+                      <span className={r.dir === "Long" ? "text-[#22C55E]" : "text-[#EF4444]"}>{r.dir}</span>
+                      {" · "}
+                      <span className={r.struct === "BOS" ? "text-[#3B82F6]" : "text-[#A855F7]"}>{r.struct}</span>
+                    </span>
                   </td>
                   <td className={`px-2 py-1.5 font-num text-right ${r.netR >= 0 ? "text-[#22C55E]" : "text-[#EF4444]"}`}>{fmtR(r.netR, 2)}</td>
                   <td className="px-2 py-1.5 font-num text-right text-[hsl(var(--text))]">{r.trades}</td>
                   <td className="px-2 py-1.5 font-num text-right text-[hsl(var(--text))]">{r.wr}%</td>
-                  <td className="px-2 py-1.5 font-num text-right text-[hsl(var(--text))]">{r.pf}</td>
+                  <td className="px-2 py-1.5 font-num text-right text-[hsl(var(--text))]">{r.pf ?? "∞"}</td>
                   <td className="px-3 py-1.5 font-num text-right text-[#EF4444]">{r.dd}R</td>
                 </tr>
               ))}

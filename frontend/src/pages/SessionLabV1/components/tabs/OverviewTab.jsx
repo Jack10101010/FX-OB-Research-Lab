@@ -15,16 +15,19 @@ const tooltipStyle = {
   padding: "6px 10px",
 };
 
-export default function OverviewTab({ session }) {
-  const dd = DEEP_DIVE_LONDON;
-  const m = dd.metrics;
+export default function OverviewTab({ session, overviewData }) {
+  const dd = overviewData ?? DEEP_DIVE_LONDON;
+  const m  = dd.metrics;
 
-  // merge equity datasets
+  // Merge equity datasets; allSessionsEquity may be empty → "all" line will be null
+  const allEq = dd.allSessionsEquity ?? [];
   const merged = dd.equity.map((e, i) => ({
-    t: e.t,
+    t:       e.t,
     session: e.v,
-    all: dd.allSessionsEquity[i]?.v ?? null,
+    all:     allEq[i]?.v ?? null,
   }));
+
+  const netRPos = m.netR >= 0;
 
   return (
     <div className="space-y-5">
@@ -32,13 +35,13 @@ export default function OverviewTab({ session }) {
       <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] px-4 py-4">
         <SectionLabel className="mb-3">Session Overview</SectionLabel>
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-x-4 gap-y-3">
-          <Metric label="Net R" value={`+${m.netR}R`} tone="pos" testId="metric-net-r" />
-          <Metric label="Win Rate" value={`${m.wr}%`} tone="pos" />
-          <Metric label="Expectancy (R)" value={`+${m.expectancy}R`} tone="pos" />
-          <Metric label="Profit Factor" value={m.pf} tone="pos" />
-          <Metric label="Max Drawdown" value={`${m.dd}R`} tone="neg" />
-          <Metric label="Trades" value={m.trades} tone="cyan" />
-          <Metric label="Avg R / Trade" value={`+${m.avgR}R`} tone="pos" />
+          <Metric label="Net R"            value={`${netRPos ? "+" : ""}${m.netR}R`} tone={netRPos ? "pos" : "neg"} testId="metric-net-r" />
+          <Metric label="Win Rate"         value={`${m.wr}%`}                        tone="pos" />
+          <Metric label="Expectancy (R)"   value={`${m.expectancy >= 0 ? "+" : ""}${m.expectancy}R`} tone={m.expectancy >= 0 ? "pos" : "neg"} />
+          <Metric label="Profit Factor"    value={m.pf ?? "∞"}                       tone="pos" />
+          <Metric label="Max Drawdown"     value={`${m.dd}R`}                        tone="neg" />
+          <Metric label="Trades"           value={m.trades}                          tone="cyan" />
+          <Metric label="Avg R / Trade"    value={`${m.avgR >= 0 ? "+" : ""}${m.avgR}R`} tone={m.avgR >= 0 ? "pos" : "neg"} />
           <Metric label="Avg Time in Trade" value={m.avgTime} />
         </div>
       </div>
@@ -63,6 +66,7 @@ export default function OverviewTab({ session }) {
                   tick={{ fill: "#64748B", fontSize: 10, fontFamily: "IBM Plex Mono" }}
                   axisLine={{ stroke: "#223142" }}
                   tickLine={false}
+                  interval="preserveStartEnd"
                 />
                 <YAxis
                   tick={{ fill: "#64748B", fontSize: 10, fontFamily: "IBM Plex Mono" }}
@@ -78,6 +82,7 @@ export default function OverviewTab({ session }) {
                   strokeWidth={1.5}
                   strokeDasharray="4 4"
                   dot={false}
+                  connectNulls={false}
                 />
                 <Line
                   type="monotone"
@@ -117,11 +122,11 @@ export default function OverviewTab({ session }) {
                     <td className="px-3 py-1.5 text-[hsl(var(--text-2))]">{row.cat}</td>
                     <td className="px-2 py-1.5 font-num text-[hsl(var(--text))]">{row.best}</td>
                     <td className={`px-2 py-1.5 font-num text-right ${row.bestR >= 0 ? "text-[#22C55E]" : "text-[#EF4444]"}`}>
-                      {fmtR(row.bestR, 2)}
+                      {row.best === "—" ? "—" : fmtR(row.bestR, 2)}
                     </td>
                     <td className="px-2 py-1.5 font-num text-[hsl(var(--text))]">{row.worst}</td>
                     <td className={`px-3 py-1.5 font-num text-right ${row.worstR >= 0 ? "text-[#22C55E]" : "text-[#EF4444]"}`}>
-                      {row.worstR === 0 ? "—" : fmtR(row.worstR, 2)}
+                      {row.worst === "—" || row.worstR === 0 ? "—" : fmtR(row.worstR, 2)}
                     </td>
                   </tr>
                 ))}

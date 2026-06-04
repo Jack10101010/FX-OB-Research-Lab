@@ -4,7 +4,10 @@
  * Converts real app trade data into the same shapes used by mockData.js so
  * that V1 prototype components need zero internal changes.
  *
- * All three functions are side-effect-free and safe inside useMemo.
+ * Phase A: buildSessionListFromTrades, buildImpactSummaryFromTrades, buildVisualSummaryFromTrades
+ * Phase B: buildOverviewDataFromSessionTrades, buildDirectionLabData, buildStructureLabData
+ *
+ * All functions are side-effect-free and safe inside useMemo.
  *
  * DO NOT add React imports or side effects here.
  */
@@ -14,10 +17,13 @@ import {
   buildSessionProfiles,
   buildSessionEquityCurve,
   buildCardSnapshot,
+  buildSessionBreakdowns,
   resolveSession,
   normalizeDirection,
   normalizeStructure,
   getR,
+  isWin,
+  isLoss,
   computePreviewComparison,
   SESSION_BREAKDOWN_DEFS,
 } from "../../../components/lab/session/analytics/sessionAnalytics";
@@ -294,4 +300,226 @@ export function buildVisualSummaryFromTrades(allTrades) {
     .slice(0, 8);
 
   return { netRBySession, tradesByDirection, tradesByStructure, topEntryModel };
+}
+
+// ─── Phase B internal helpers ─────────────────────────────────────────────────
+
+/** Compute core metrics for an arbitrary pre-filtered trade slice. */
+function computeSideMetrics(trades) {
+  if (!trades.length) return null;
+  const wins    = trades.filter(isWin).length;
+  const losses  = trades.filter(isLoss).length;
+  const decided = wins + losses;
+  const netR    = Number(trades.reduce((s, t) => s + getR(t), 0).toFixed(2));
+  const wr      = decided > 0 ? Number(((wins / decided) * 100).toFixed(1)) : 0;
+  const grossWin  = trades.filter((t) => getR(t) > 0).reduce((s, t) => s + getR(t), 0);
+  const grossLoss = trades.filter((t) => getR(t) < 0).reduce((s, t) => s + Math.abs(getR(t)), 0);
+  const pf  = grossLoss > 0 ? Number((grossWin / grossLoss).toFixed(2)) : null;
+  const exp = Number((netR / trades.length).toFixed(3));
+  let peak = 0, cum = 0, maxDD = 0;
+  for (const t of trades) {
+    cum += getR(t);
+    if (cum > peak) peak = cum;
+    const dd = cum - peak;
+    if (dd < maxDD) maxDD = dd;
+  }
+  return { netR, trades: trades.length, wr, pf, dd: Number(maxDD.toFixed(2)), expectancy: exp, wins, losses };
+}
+
+/** Count losses where minutes_to_exit < 30. */
+function computeFastStopouts(sideTrades) {
+  const fast = sideTrades.filter((t) => {
+    if (!isLoss(t)) return false;
+    const m = t.minutes_to_exit ?? t.minutesToExit ?? null;
+    return m != null && Number(m) < 30;
+  });
+  const count = fast.length;
+  const pct   = sideTrades.length > 0 ? Number(((count / sideTrades.length) * 100).toFixed(1)) : 0;
+  return { count, pct };
+}
+
+/** Extract best/worst labels+netR from a buildSessionBreakdowns bucket array. */
+function snapshotFromBuckets(rows) {
+  if (!rows || !rows.length) return { best: null, worst: null };
+  const active = rows.filter((r) => r.count > 0).sort((a, b) => b.netR - a.netR);
+  if (!active.length) return { best: null, worst: null };
+  return {
+    best:  { label: active[0].label,                 netR: active[0].netR },
+    worst: { label: active[active.length - 1].label, netR: active[active.length - 1].netR },
+  };
+}
+
+// ─── Phase B exported adapter functions ──────────────────────────────────────
+
+const OVERVIEW_BREAKDOWN_CATS = [
+  { cat: "Direction",     key: "direction" },
+  { cat: "Structure",     key: "structure" },
+  { cat: "Entry Model",   key: "entryModel" },
+  { cat: "Trigger Delay", key: "triggerDelay" },
+  { cat: "R Target",      key: "rTarget" },
+  { cat: "Stop Buffer",   key: "stopBuffer" },
+  { cat: "BE / Trailing", key: "protection" },
+  { cat: "Cancellation",  key: "cancellation" },
+];
+
+/**
+ * Build DEEP_DIVE_LONDON-shaped overview data for a specific session.
+ *
+ * @param {object[]} sessionTrades — pre-filtered to one session
+ * @returns {object|null}
+ */
+export function buildOverviewDataFromSessionTrades(sessionTrades) {
+  if (!sessionTrades || sessionTrades.length === 0) return null;
+
+  const m = computeSideMetrics(sessionTrades);
+  if (!m) return null;
+
+  // Equity curve: trade-indexed [{ t, v }]
+  const equity = buildSessionEquityCurve(sessionTrades).map((p) => ({
+    t: `T${p.i + 1}`,
+    v: p.netR,
+  }));
+
+  // Breakdown table: all 8 dimensions via buildSessionBreakdowns
+  const { bucketsByKey } = buildSessionBreakdowns(sessionTrades);
+  const breakdown = OVERVIEW_BREAKDOWN_CATS.map(({ cat, key }) => {
+    const s = snapshotFromBuckets(bucketsByKey[key]);
+    return {
+      cat,
+      best:   s.best?.label  ?? "—",
+      bestR:  s.best?.netR   ?? 0,
+      worst:  s.worst?.label ?? "—",
+      worstR: s.worst?.netR  ?? 0,
+    };
+  });
+
+  // Avg time across all trades (minutes_to_exit field)
+  const getMinutes = (t) => {
+    const v = t.minutes_to_exit ?? t.minutesToExit ?? null;
+    return v != null ? Number(v) : null;
+  };
+  const allMins = sessionTrades.map(getMinutes).filter((v) => v != null);
+  let avgTime = "—";
+  if (allMins.length > 0) {
+    const avg = Math.round(allMins.reduce((s, v) => s + v, 0) / allMins.length);
+    if (avg < 60) avgTime = `${avg}m`;
+    else {
+      const h  = Math.floor(avg / 60);
+      const mm = avg % 60;
+      avgTime = mm > 0 ? `${h}h ${mm}m` : `${h}h`;
+    }
+  }
+
+  return {
+    metrics: {
+      netR:       m.netR,
+      wr:         m.wr,
+      expectancy: Number(m.expectancy.toFixed(2)),
+      pf:         m.pf,  // null = no losses
+      dd:         m.dd,
+      trades:     m.trades,
+      avgR:       Number(m.expectancy.toFixed(2)),
+      avgTime,
+    },
+    equity,
+    allSessionsEquity: [],  // Phase C: cross-session comparison
+    breakdown,
+  };
+}
+
+const EMPTY_DIRECTION_SIDE = {
+  netR: 0, trades: 0, wr: 0, pf: null, dd: 0, expectancy: 0,
+  bestStructure:  { label: "—", value: 0 },
+  worstStructure: { label: "—", value: 0 },
+  bestEntry:      { label: "—", value: 0 },
+  bestDelay:      { label: "—", value: 0 },
+  fastStopouts: { count: 0, pct: 0 },
+  equity: [{ t: 0, v: 0 }],
+};
+
+/**
+ * Build DIRECTION_LAB-shaped data for the selected session.
+ *
+ * @param {object[]} sessionTrades — pre-filtered to one session
+ * @returns {object|null}
+ */
+export function buildDirectionLabData(sessionTrades) {
+  if (!sessionTrades || sessionTrades.length === 0) return null;
+
+  const longTrades  = sessionTrades.filter((t) => normalizeDirection(t) === "Long");
+  const shortTrades = sessionTrades.filter((t) => normalizeDirection(t) === "Short");
+
+  if (longTrades.length === 0 && shortTrades.length === 0) return null;
+
+  function buildSide(trades) {
+    if (!trades.length) return EMPTY_DIRECTION_SIDE;
+    const m    = computeSideMetrics(trades);
+    const snap = trades.length >= 2 ? buildCardSnapshot(trades) : null;
+    const equity = buildSessionEquityCurve(trades).map((p) => ({ t: p.i, v: p.netR }));
+    return {
+      netR:       m.netR,
+      trades:     m.trades,
+      wr:         m.wr,
+      pf:         m.pf,
+      dd:         m.dd,
+      expectancy: m.expectancy,
+      bestStructure:  snap?.structure?.best    ? { label: snap.structure.best.label,    value: snap.structure.best.netR    } : { label: "—", value: 0 },
+      worstStructure: snap?.structure?.worst   ? { label: snap.structure.worst.label,   value: snap.structure.worst.netR   } : { label: "—", value: 0 },
+      bestEntry:      snap?.entryModel?.best   ? { label: snap.entryModel.best.label,   value: snap.entryModel.best.netR   } : { label: "—", value: 0 },
+      bestDelay:      snap?.triggerDelay?.best ? { label: snap.triggerDelay.best.label, value: snap.triggerDelay.best.netR } : { label: "—", value: 0 },
+      fastStopouts: computeFastStopouts(trades),
+      equity,
+    };
+  }
+
+  return {
+    longs:  buildSide(longTrades),
+    shorts: buildSide(shortTrades),
+  };
+}
+
+const EMPTY_STRUCT_SIDE = { netR: 0, trades: 0, wr: 0, pf: null, dd: 0 };
+
+/**
+ * Build STRUCTURE_LAB-shaped data for the selected session.
+ * The `overTime` field is always null (Phase C: requires time-series).
+ *
+ * @param {object[]} sessionTrades — pre-filtered to one session
+ * @returns {object|null}
+ */
+export function buildStructureLabData(sessionTrades) {
+  if (!sessionTrades || sessionTrades.length === 0) return null;
+
+  const bosTrades   = sessionTrades.filter((t) => normalizeStructure(t) === "BOS");
+  const chochTrades = sessionTrades.filter((t) => normalizeStructure(t) === "CHoCH");
+
+  if (bosTrades.length === 0 && chochTrades.length === 0) return null;
+
+  function buildStruct(trades) {
+    if (!trades.length) return EMPTY_STRUCT_SIDE;
+    const m = computeSideMetrics(trades);
+    return { netR: m.netR, trades: m.trades, wr: m.wr, pf: m.pf, dd: m.dd };
+  }
+
+  // 2×2 direction × structure matrix
+  const COMBOS = [
+    { dir: "Long",  struct: "BOS" },
+    { dir: "Short", struct: "BOS" },
+    { dir: "Long",  struct: "CHoCH" },
+    { dir: "Short", struct: "CHoCH" },
+  ];
+  const matrix = COMBOS.map(({ dir, struct }) => {
+    const trades = sessionTrades.filter(
+      (t) => normalizeDirection(t) === dir && normalizeStructure(t) === struct
+    );
+    const m = trades.length > 0 ? computeSideMetrics(trades) : EMPTY_STRUCT_SIDE;
+    return { dir, struct, netR: m.netR, trades: m.trades, wr: m.wr, pf: m.pf ?? 0, dd: m.dd };
+  });
+
+  return {
+    bos:     buildStruct(bosTrades),
+    choch:   buildStruct(chochTrades),
+    matrix,
+    overTime: null,  // Phase C: time-series requires timestamp bucketing
+  };
 }

@@ -13,12 +13,16 @@ import { useTradeUniverse } from "../../data/useTradeUniverse";
 import {
   buildDefaultSessionRules,
   applySessionRules,
+  resolveSession,
 } from "../../components/lab/session/analytics/sessionAnalytics";
 import { SESSION_KEYS } from "../../components/lab/session/config/sessionConfig";
 import {
   buildSessionListFromTrades,
   buildImpactSummaryFromTrades,
   buildVisualSummaryFromTrades,
+  buildOverviewDataFromSessionTrades,
+  buildDirectionLabData,
+  buildStructureLabData,
 } from "./data/sessionLabV1Adapter";
 
 /** Maps V1 lowercase keys → canonical session names used by sessionRules. */
@@ -80,6 +84,40 @@ export default function SessionLabPage() {
 
   const sessions = hasRealData && realSessionList ? realSessionList : mockSessions;
   const selected = sessions.find((s) => s.key === selectedKey) || sessions[0];
+
+  // Session-specific trades for deep dive tabs (Phase B)
+  const canonicalSelectedKey = V1_TO_CANONICAL[selectedKey];
+  const selectedSessionTrades = useMemo(
+    () =>
+      hasRealData && canonicalSelectedKey
+        ? allTrades.filter((t) => resolveSession(t) === canonicalSelectedKey)
+        : [],
+    [allTrades, canonicalSelectedKey, hasRealData]
+  );
+
+  const overviewData = useMemo(
+    () =>
+      selectedSessionTrades.length > 0
+        ? buildOverviewDataFromSessionTrades(selectedSessionTrades)
+        : null,
+    [selectedSessionTrades]
+  );
+
+  const directionData = useMemo(
+    () =>
+      selectedSessionTrades.length > 0
+        ? buildDirectionLabData(selectedSessionTrades)
+        : null,
+    [selectedSessionTrades]
+  );
+
+  const structureData = useMemo(
+    () =>
+      selectedSessionTrades.length > 0
+        ? buildStructureLabData(selectedSessionTrades)
+        : null,
+    [selectedSessionTrades]
+  );
 
   const toggleSessionField = (v1Key, field) => {
     if (hasRealData) {
@@ -196,6 +234,9 @@ export default function SessionLabPage() {
             session={selected}
             activeTab={activeTab}
             setActiveTab={setActiveTab}
+            overviewData={overviewData}
+            directionData={directionData}
+            structureData={structureData}
           />
           <div className="xl:sticky xl:top-6 xl:self-start">
             <QuickControls session={selected} onToggle={toggleSessionField} />
