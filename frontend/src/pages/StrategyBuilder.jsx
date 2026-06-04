@@ -132,6 +132,13 @@ export default function StrategyBuilder() {
     const sidecarConfig = useMemo(() => buildBacktesterConfig(cfg), [cfg]);
     const allowedSessions = useMemo(() => selectedAllowedSessions(cfg), [cfg]);
     const sessionSelectionWarning = Boolean(cfg.sessionFilter) && allowedSessions.length === 0;
+    const showEntryProtection =
+        (cfg.directionalEntryMode === "symmetric" && cfg.selectedEntryModel === "triggered_edge") ||
+        (cfg.directionalEntryMode === "asymmetric" && (
+            (cfg.longEntryEnabled && cfg.longEntryModel === "triggered_edge") ||
+            (cfg.shortEntryEnabled && cfg.shortEntryModel === "triggered_edge")
+        )) ||
+        Boolean(cfg.triggeredEdgeEntries);
     const sanityConfig = sidecarConfig || lastConfig || {};
     const sanityRun = runJob ? reduceRunSnapshot(runJob, importedRunId) : (lastRun || {});
     const generatedPlan = useMemo(() => estimateScenarioPlan(sidecarConfig), [sidecarConfig]);
@@ -709,29 +716,37 @@ export default function StrategyBuilder() {
                 </BuilderFocusCard>
                 </div>{/* end left Filters col */}
                 <div className="flex flex-col gap-4">
-                {/* ── Entry Mode panel ──────────────────────────────────────── */}
-                <BuilderFocusCard id="entry-mode" activeId={activeBuilderCard} onActivate={setActiveBuilderCard}>
-                <NeonPanel title="Entry Model">
-                    {/* Mode selector */}
+                {/* ── Entry Configuration panel ─────────────────────────────── */}
+                <BuilderFocusCard id="entry-configuration" activeId={activeBuilderCard} onActivate={setActiveBuilderCard}>
+                <NeonPanel title="Entry Configuration">
+                    {/* Section A: Direction Scope */}
                     <div className="mb-4">
+                        <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab mb-2">Direction Scope</div>
+                        <Segment options={["Long", "Short", "Both"]} value={cfg.direction} onChange={set("direction")} />
+                    </div>
+
+                    {/* Section B: Entry Assignment */}
+                    <div className="mb-4">
+                        <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab mb-2">Entry Assignment</div>
                         <Segment
                             options={[
-                                { value: "single", label: "Single Model" },
-                                { value: "research", label: "Scenario Batch" },
+                                { value: "symmetric", label: "Symmetric" },
+                                { value: "asymmetric", label: "Asymmetric" },
                             ]}
-                            value={cfg.entryMode}
-                            onChange={set("entryMode")}
+                            value={cfg.directionalEntryMode}
+                            onChange={set("directionalEntryMode")}
                         />
                         <div className="mt-2 text-[10.5px] text-muted-lab">
-                            {cfg.entryMode === "single"
-                                ? "Run one entry model. The baseline reference output is always included."
-                                : "Export baseline plus multiple penetration and/or triggered-edge result views in one run. Each becomes a selectable Result View in Run Workspace."}
+                            {cfg.directionalEntryMode === "symmetric"
+                                ? "Longs and shorts use the same entry model."
+                                : "Assign separate entry models for long and short trades."}
                         </div>
                     </div>
 
-                    {/* ── Single Model ──────────────────────────────────── */}
-                    {cfg.entryMode === "single" && (
-                        <div>
+                    {/* Section C: Entry Model (symmetric only) */}
+                    {cfg.directionalEntryMode === "symmetric" && (
+                        <div className="mb-4">
+                            <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab mb-2">Entry Model</div>
                             <Segment
                                 options={[
                                     { value: "baseline", label: "Baseline Edge" },
@@ -848,250 +863,12 @@ export default function StrategyBuilder() {
                                     </div>
                                 </div>
                             )}
-                            {/* ── Entry Protection — shown only when Single TE model is active ── */}
-                            {cfg.selectedEntryModel === "triggered_edge" && (
-                                <div className="mt-3 border border-[hsl(var(--border-soft))] clip-bevel-sm p-3 space-y-2">
-                                    <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab mb-2">Entry Protection</div>
-                                    <div className="flex items-center justify-between">
-                                        <div>
-                                            <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Cancel if OB taps then moves away before trigger</div>
-                                            <div className="text-[10.5px] text-muted-lab">Used-OB retrace cancel for triggered-edge setups.</div>
-                                        </div>
-                                        <NeonToggle checked={Boolean(cfg.triggeredEdgeCancelOnRetrace)} onChange={set("triggeredEdgeCancelOnRetrace")} />
-                                    </div>
-                                    {cfg.triggeredEdgeCancelOnRetrace && (
-                                        <div className="grid grid-cols-2 gap-3">
-                                            <Field label="Retrace Cancel Pips">
-                                                <NeonInput type="number" min="0" step="0.1" value={cfg.triggeredEdgeCancelRetracePips} onChange={(e) => set("triggeredEdgeCancelRetracePips")(Number(e.target.value))} />
-                                            </Field>
-                                            <Field label="Retrace Cancel OB %">
-                                                <NeonInput type="number" min="0" step="1" value={cfg.triggeredEdgeCancelRetraceObPct} onChange={(e) => set("triggeredEdgeCancelRetraceObPct")(Number(e.target.value))} />
-                                            </Field>
-                                        </div>
-                                    )}
-                                    <div className="flex items-center justify-between">
-                                        <div>
-                                            <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Cancel on first failed tag</div>
-                                            <div className="text-[10.5px] text-muted-lab">Cancel if OB taps but price fails to reach trigger within 1 candle.</div>
-                                        </div>
-                                        <NeonToggle checked={Boolean(cfg.triggeredEdgeCancelOnFirstFailedTag)} onChange={set("triggeredEdgeCancelOnFirstFailedTag")} />
-                                    </div>
-                                    <div className="text-[10px] text-muted-lab italic">
-                                        These settings apply to all triggered-edge models, including directional long/short.
-                                    </div>
-                                </div>
-                            )}
                         </div>
                     )}
 
-                    {/* ── Scenario Batch ───────────────────────────────── */}
-                    {cfg.entryMode === "research" && (
-                        <div className="space-y-3">
-                            {/* A · Baseline Limit Placement Depth */}
-                            <div className="border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
-                                <div className="mb-2">
-                                    <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab">A · Baseline Limit Placement Depth</div>
-                                    <div className="text-[10px] text-muted-lab">Sets the resting limit depth for the baseline reference output. Does not create scenario result views.</div>
-                                </div>
-                                <Segment
-                                    options={[
-                                        { value: 0, label: "Edge" },
-                                        { value: 25, label: "25%" },
-                                        { value: 50, label: "50%" },
-                                        { value: 75, label: "75%" },
-                                        { value: 100, label: "100%" },
-                                    ]}
-                                    value={Number(cfg.obEntryDepthPct ?? 0)}
-                                    onChange={(value) => set("obEntryDepthPct")(Number(value))}
-                                />
-                            </div>
-
-                            {/* B · Penetration Scenario Result Views */}
-                            <div className="border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
-                                <div className="mb-2 flex items-center justify-between">
-                                    <div>
-                                        <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab">B · Penetration Scenario Views</div>
-                                        <div className="text-[10px] text-muted-lab">Conditional depth entry — only enters when price first reaches the threshold. Each threshold exports a separate scenario result view alongside the baseline reference.</div>
-                                    </div>
-                                    <NeonToggle
-                                        checked={Boolean(cfg.entryResearchExports)}
-                                        onChange={(val) => {
-                                            if (!val) {
-                                                setCfg((c) => ({ ...c, entryResearchExports: false, entryResearchExportMode: "off", entryPenetrationThresholds: "" }));
-                                            } else {
-                                                setCfg((c) => ({ ...c, entryResearchExports: true, entryResearchExportMode: c.entryResearchExportMode === "off" ? "light" : c.entryResearchExportMode, entryPenetrationThresholds: c.entryPenetrationThresholds || "25,50" }));
-                                            }
-                                        }}
-                                    />
-                                </div>
-                                {cfg.entryResearchExports && (
-                                    <div className="grid grid-cols-2 gap-3 mt-2">
-                                        <Field label="Preset" className="col-span-2" hint="Light is the default. Custom exposes raw thresholds.">
-                                            <NeonSelect
-                                                value={resolveEntryExportMode(cfg) === "off" ? "light" : resolveEntryExportMode(cfg)}
-                                                onChange={(value) => {
-                                                    if (value === "full") {
-                                                        setCfg((current) => ({ ...current, entryResearchExportMode: "full", entryResearchExports: true, entryPenetrationThresholds: "10,25,50,75" }));
-                                                    } else if (value === "custom") {
-                                                        setCfg((current) => ({ ...current, entryResearchExportMode: "custom", entryResearchExports: true, entryPenetrationThresholds: current.entryPenetrationThresholds || "25,50" }));
-                                                    } else {
-                                                        setCfg((current) => ({ ...current, entryResearchExportMode: "light", entryResearchExports: true, entryPenetrationThresholds: "25,50" }));
-                                                    }
-                                                }}
-                                                options={[
-                                                    { value: "light", label: "Light / 25,50" },
-                                                    { value: "full", label: "Full / 10,25,50,75" },
-                                                    { value: "custom", label: "Custom" },
-                                                ]}
-                                            />
-                                        </Field>
-                                        {entryExportFullRangeWarning(cfg) && (
-                                            <div className="col-span-2 border border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.07)] clip-bevel-sm px-3 py-2 text-[10.5px] text-[hsl(var(--warning))]">
-                                                Full entry exports rerun the complete simulation for every threshold. Use Light or shorten the date range before a long backtest.
-                                            </div>
-                                        )}
-                                        {resolveEntryExportMode(cfg) === "custom" && (
-                                            <Field label="Thresholds" className="col-span-2" hint="Comma-separated percentages. Valid values are greater than 0 and less than 100.">
-                                                <NeonInput
-                                                    value={cfg.entryPenetrationThresholds}
-                                                    onChange={(e) => set("entryPenetrationThresholds")(e.target.value)}
-                                                />
-                                            </Field>
-                                        )}
-                                        <div className="col-span-2 flex items-center justify-between border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
-                                            <div>
-                                                <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Optimized batched entry engine</div>
-                                                <div className="text-[10.5px] text-muted-lab">
-                                                    Default on. Evaluates penetration thresholds in one shared pass.
-                                                </div>
-                                            </div>
-                                            <NeonToggle
-                                                checked={Boolean(cfg.useBatchedEntryPenetration)}
-                                                onChange={set("useBatchedEntryPenetration")}
-                                            />
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* C · Triggered Edge Scenario Result Views */}
-                            <div className="border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
-                                <div className="flex items-center justify-between">
-                                    <div>
-                                        <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab">C · Triggered Edge Scenario Views</div>
-                                        <div className="text-[10px] text-muted-lab">Arms only after price reaches the trigger threshold, then places a limit at the configured entry level. Entry delay controls when the order arms after the trigger. Exports one result view per threshold × delay.</div>
-                                    </div>
-                                    <NeonToggle checked={Boolean(cfg.triggeredEdgeEntries)} onChange={set("triggeredEdgeEntries")} />
-                                </div>
-                                {cfg.triggeredEdgeEntries && (
-                                    <div className="grid grid-cols-2 gap-3 mt-2">
-                                        <Field label="Trigger Thresholds" hint="Comma-separated OB penetration percentages.">
-                                            <NeonInput value={cfg.triggeredEdgeThresholds} onChange={(e) => set("triggeredEdgeThresholds")(e.target.value)} />
-                                        </Field>
-                                        <Field label="Entry Level %" hint="0 is the OB edge.">
-                                            <NeonInput type="number" min="0" max="100" step="1" value={cfg.triggeredEdgeEntryLevelPct} onChange={(e) => set("triggeredEdgeEntryLevelPct")(Number(e.target.value))} />
-                                        </Field>
-                                        <Field label="Entry Delay After Trigger" hint="0 = same · 1 = next · 2/3 = deferred" className="col-span-2">
-                                            <div className="flex gap-2">
-                                                {[{ d: 0, label: "0 · Same" }, { d: 1, label: "1 · Next" }, { d: 2, label: "2" }, { d: 3, label: "3" }].map(({ d, label }) => {
-                                                    const delays = Array.isArray(cfg.triggeredEdgeDelays) ? cfg.triggeredEdgeDelays : [0, 1];
-                                                    const active = delays.includes(d);
-                                                    return (
-                                                        <button
-                                                            key={d}
-                                                            type="button"
-                                                            onClick={() => {
-                                                                const next = active
-                                                                    ? delays.filter((x) => x !== d)
-                                                                    : [...delays, d].sort((a, b) => a - b);
-                                                                if (next.length === 0) return;
-                                                                const hasZero = next.includes(0);
-                                                                const hasOne  = next.includes(1);
-                                                                const legacyMode = hasZero && hasOne ? "both" : hasZero ? "same" : hasOne ? "next" : "both";
-                                                                setCfg((c) => ({ ...c, triggeredEdgeDelays: next, triggeredEdgeSameCandleMode: legacyMode }));
-                                                            }}
-                                                            className={[
-                                                                "px-3 py-1.5 text-[10.5px] font-ui uppercase tracking-[0.08em] clip-bevel-sm border transition-colors",
-                                                                active
-                                                                    ? "border-[hsl(var(--accent-primary)/0.7)] bg-[hsl(var(--accent-primary)/0.12)] text-[hsl(var(--accent-primary))]"
-                                                                    : "border-[hsl(var(--border-soft))] bg-transparent text-[hsl(var(--text-2)/0.5)] hover:text-[hsl(var(--text-2))]",
-                                                            ].join(" ")}
-                                                        >
-                                                            {label}
-                                                        </button>
-                                                    );
-                                                })}
-                                            </div>
-                                        </Field>
-                                    </div>
-                                )}
-                            </div>
-                            {/* ── Entry Protection — shown only when C (TE) is active ── */}
-                            {cfg.triggeredEdgeEntries && (
-                                <div className="mt-3 border border-[hsl(var(--border-soft))] clip-bevel-sm p-3 space-y-2">
-                                    <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab mb-2">Entry Protection</div>
-                                    <div className="flex items-center justify-between">
-                                        <div>
-                                            <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Cancel if OB taps then moves away before trigger</div>
-                                            <div className="text-[10.5px] text-muted-lab">Used-OB retrace cancel for triggered-edge setups.</div>
-                                        </div>
-                                        <NeonToggle checked={Boolean(cfg.triggeredEdgeCancelOnRetrace)} onChange={set("triggeredEdgeCancelOnRetrace")} />
-                                    </div>
-                                    {cfg.triggeredEdgeCancelOnRetrace && (
-                                        <div className="grid grid-cols-2 gap-3">
-                                            <Field label="Retrace Cancel Pips">
-                                                <NeonInput type="number" min="0" step="0.1" value={cfg.triggeredEdgeCancelRetracePips} onChange={(e) => set("triggeredEdgeCancelRetracePips")(Number(e.target.value))} />
-                                            </Field>
-                                            <Field label="Retrace Cancel OB %">
-                                                <NeonInput type="number" min="0" step="1" value={cfg.triggeredEdgeCancelRetraceObPct} onChange={(e) => set("triggeredEdgeCancelRetraceObPct")(Number(e.target.value))} />
-                                            </Field>
-                                        </div>
-                                    )}
-                                    <div className="flex items-center justify-between">
-                                        <div>
-                                            <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Cancel on first failed tag</div>
-                                            <div className="text-[10.5px] text-muted-lab">Cancel if OB taps but price fails to reach trigger within 1 candle.</div>
-                                        </div>
-                                        <NeonToggle checked={Boolean(cfg.triggeredEdgeCancelOnFirstFailedTag)} onChange={set("triggeredEdgeCancelOnFirstFailedTag")} />
-                                    </div>
-                                    <div className="text-[10px] text-muted-lab italic">
-                                        These settings apply to all triggered-edge models, including directional long/short.
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    )}
-                </NeonPanel>
-                </BuilderFocusCard>
-
-                {/* ── Direction & Entry panel ──────────────────────────────────── */}
-                <BuilderFocusCard id="entry-assignment" activeId={activeBuilderCard} onActivate={setActiveBuilderCard}>
-                <NeonPanel title="Direction & Entry">
-                    {/* Section A: Trade Direction */}
-                    <div className="mb-4">
-                        <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab mb-2">Trade Direction</div>
-                        <Segment options={["Long", "Short", "Both"]} value={cfg.direction} onChange={set("direction")} />
-                    </div>
-                    {/* Section B: Entry Assignment */}
-                    <div className="mb-3">
-                        <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab mb-2">Entry Assignment</div>
-                        <Segment
-                            options={[
-                                { value: "symmetric", label: "Symmetric" },
-                                { value: "asymmetric", label: "Asymmetric" },
-                            ]}
-                            value={cfg.directionalEntryMode}
-                            onChange={set("directionalEntryMode")}
-                        />
-                        <div className="mt-2 text-[10.5px] text-muted-lab">
-                            {cfg.directionalEntryMode === "symmetric"
-                                ? "Longs and shorts use the same entry model from the Entry Model panel above."
-                                : "Assign separate entry models for long and short trades."}
-                        </div>
-                    </div>
-                    {/* Section C: Long/Short cards when asymmetric */}
+                    {/* Section D: Directional Entry Cards (asymmetric only) */}
                     {cfg.directionalEntryMode === "asymmetric" && (
-                        <div className="space-y-3">
+                        <div className="mb-4 space-y-3">
                             <div className="flex items-start gap-2 border border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.07)] clip-bevel-sm px-3 py-2">
                                 <ShieldAlert className="w-3.5 h-3.5 shrink-0 mt-0.5 text-[hsl(var(--warning))]" />
                                 <div className="text-[10.5px] text-[hsl(var(--warning))]">
@@ -1133,6 +910,197 @@ export default function StrategyBuilder() {
                             </div>
                         </div>
                     )}
+
+                    {/* Section E: Entry Protection (unified) */}
+                    {showEntryProtection && (
+                        <div className="mb-4 border border-[hsl(var(--border-soft))] clip-bevel-sm p-3 space-y-2">
+                            <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab mb-2">Entry Protection</div>
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Cancel if OB taps then moves away before trigger</div>
+                                    <div className="text-[10.5px] text-muted-lab">Used-OB retrace cancel for triggered-edge setups.</div>
+                                </div>
+                                <NeonToggle checked={Boolean(cfg.triggeredEdgeCancelOnRetrace)} onChange={set("triggeredEdgeCancelOnRetrace")} />
+                            </div>
+                            {cfg.triggeredEdgeCancelOnRetrace && (
+                                <div className="grid grid-cols-2 gap-3">
+                                    <Field label="Retrace Cancel Pips">
+                                        <NeonInput type="number" min="0" step="0.1" value={cfg.triggeredEdgeCancelRetracePips} onChange={(e) => set("triggeredEdgeCancelRetracePips")(Number(e.target.value))} />
+                                    </Field>
+                                    <Field label="Retrace Cancel OB %">
+                                        <NeonInput type="number" min="0" step="1" value={cfg.triggeredEdgeCancelRetraceObPct} onChange={(e) => set("triggeredEdgeCancelRetraceObPct")(Number(e.target.value))} />
+                                    </Field>
+                                </div>
+                            )}
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Cancel on first failed tag</div>
+                                    <div className="text-[10.5px] text-muted-lab">Cancel if OB taps but price fails to reach trigger within 1 candle.</div>
+                                </div>
+                                <NeonToggle checked={Boolean(cfg.triggeredEdgeCancelOnFirstFailedTag)} onChange={set("triggeredEdgeCancelOnFirstFailedTag")} />
+                            </div>
+                            <div className="text-[10px] text-muted-lab italic">
+                                These settings apply to all triggered-edge models, including directional long/short.
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Section F: Scenario Batch */}
+                    <div className="border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab">Scenario Batch</div>
+                                <div className="text-[10px] text-muted-lab">Export baseline plus multiple scenario result views in one run. Each becomes a selectable Result View in Run Workspace.</div>
+                            </div>
+                            <NeonToggle
+                                checked={cfg.entryMode === "research"}
+                                onChange={(v) => set("entryMode")(v ? "research" : "single")}
+                            />
+                        </div>
+                        {cfg.entryMode === "research" && (
+                            <div className="mt-3 space-y-3">
+                                {/* A · Baseline Limit Placement Depth */}
+                                <div className="border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
+                                    <div className="mb-2">
+                                        <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab">A · Baseline Limit Placement Depth</div>
+                                        <div className="text-[10px] text-muted-lab">Sets the resting limit depth for the baseline reference output. Does not create scenario result views.</div>
+                                    </div>
+                                    <Segment
+                                        options={[
+                                            { value: 0, label: "Edge" },
+                                            { value: 25, label: "25%" },
+                                            { value: 50, label: "50%" },
+                                            { value: 75, label: "75%" },
+                                            { value: 100, label: "100%" },
+                                        ]}
+                                        value={Number(cfg.obEntryDepthPct ?? 0)}
+                                        onChange={(value) => set("obEntryDepthPct")(Number(value))}
+                                    />
+                                </div>
+
+                                {/* B · Penetration Scenario Result Views */}
+                                <div className="border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
+                                    <div className="mb-2 flex items-center justify-between">
+                                        <div>
+                                            <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab">B · Penetration Scenario Views</div>
+                                            <div className="text-[10px] text-muted-lab">Conditional depth entry — only enters when price first reaches the threshold. Each threshold exports a separate scenario result view alongside the baseline reference.</div>
+                                        </div>
+                                        <NeonToggle
+                                            checked={Boolean(cfg.entryResearchExports)}
+                                            onChange={(val) => {
+                                                if (!val) {
+                                                    setCfg((c) => ({ ...c, entryResearchExports: false, entryResearchExportMode: "off", entryPenetrationThresholds: "" }));
+                                                } else {
+                                                    setCfg((c) => ({ ...c, entryResearchExports: true, entryResearchExportMode: c.entryResearchExportMode === "off" ? "light" : c.entryResearchExportMode, entryPenetrationThresholds: c.entryPenetrationThresholds || "25,50" }));
+                                                }
+                                            }}
+                                        />
+                                    </div>
+                                    {cfg.entryResearchExports && (
+                                        <div className="grid grid-cols-2 gap-3 mt-2">
+                                            <Field label="Preset" className="col-span-2" hint="Light is the default. Custom exposes raw thresholds.">
+                                                <NeonSelect
+                                                    value={resolveEntryExportMode(cfg) === "off" ? "light" : resolveEntryExportMode(cfg)}
+                                                    onChange={(value) => {
+                                                        if (value === "full") {
+                                                            setCfg((current) => ({ ...current, entryResearchExportMode: "full", entryResearchExports: true, entryPenetrationThresholds: "10,25,50,75" }));
+                                                        } else if (value === "custom") {
+                                                            setCfg((current) => ({ ...current, entryResearchExportMode: "custom", entryResearchExports: true, entryPenetrationThresholds: current.entryPenetrationThresholds || "25,50" }));
+                                                        } else {
+                                                            setCfg((current) => ({ ...current, entryResearchExportMode: "light", entryResearchExports: true, entryPenetrationThresholds: "25,50" }));
+                                                        }
+                                                    }}
+                                                    options={[
+                                                        { value: "light", label: "Light / 25,50" },
+                                                        { value: "full", label: "Full / 10,25,50,75" },
+                                                        { value: "custom", label: "Custom" },
+                                                    ]}
+                                                />
+                                            </Field>
+                                            {entryExportFullRangeWarning(cfg) && (
+                                                <div className="col-span-2 border border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.07)] clip-bevel-sm px-3 py-2 text-[10.5px] text-[hsl(var(--warning))]">
+                                                    Full entry exports rerun the complete simulation for every threshold. Use Light or shorten the date range before a long backtest.
+                                                </div>
+                                            )}
+                                            {resolveEntryExportMode(cfg) === "custom" && (
+                                                <Field label="Thresholds" className="col-span-2" hint="Comma-separated percentages. Valid values are greater than 0 and less than 100.">
+                                                    <NeonInput
+                                                        value={cfg.entryPenetrationThresholds}
+                                                        onChange={(e) => set("entryPenetrationThresholds")(e.target.value)}
+                                                    />
+                                                </Field>
+                                            )}
+                                            <div className="col-span-2 flex items-center justify-between border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
+                                                <div>
+                                                    <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Optimized batched entry engine</div>
+                                                    <div className="text-[10.5px] text-muted-lab">
+                                                        Default on. Evaluates penetration thresholds in one shared pass.
+                                                    </div>
+                                                </div>
+                                                <NeonToggle
+                                                    checked={Boolean(cfg.useBatchedEntryPenetration)}
+                                                    onChange={set("useBatchedEntryPenetration")}
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* C · Triggered Edge Scenario Result Views */}
+                                <div className="border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab">C · Triggered Edge Scenario Views</div>
+                                            <div className="text-[10px] text-muted-lab">Arms only after price reaches the trigger threshold, then places a limit at the configured entry level. Entry delay controls when the order arms after the trigger. Exports one result view per threshold × delay.</div>
+                                        </div>
+                                        <NeonToggle checked={Boolean(cfg.triggeredEdgeEntries)} onChange={set("triggeredEdgeEntries")} />
+                                    </div>
+                                    {cfg.triggeredEdgeEntries && (
+                                        <div className="grid grid-cols-2 gap-3 mt-2">
+                                            <Field label="Trigger Thresholds" hint="Comma-separated OB penetration percentages.">
+                                                <NeonInput value={cfg.triggeredEdgeThresholds} onChange={(e) => set("triggeredEdgeThresholds")(e.target.value)} />
+                                            </Field>
+                                            <Field label="Entry Level %" hint="0 is the OB edge.">
+                                                <NeonInput type="number" min="0" max="100" step="1" value={cfg.triggeredEdgeEntryLevelPct} onChange={(e) => set("triggeredEdgeEntryLevelPct")(Number(e.target.value))} />
+                                            </Field>
+                                            <Field label="Entry Delay After Trigger" hint="0 = same · 1 = next · 2/3 = deferred" className="col-span-2">
+                                                <div className="flex gap-2">
+                                                    {[{ d: 0, label: "0 · Same" }, { d: 1, label: "1 · Next" }, { d: 2, label: "2" }, { d: 3, label: "3" }].map(({ d, label }) => {
+                                                        const delays = Array.isArray(cfg.triggeredEdgeDelays) ? cfg.triggeredEdgeDelays : [0, 1];
+                                                        const active = delays.includes(d);
+                                                        return (
+                                                            <button
+                                                                key={d}
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    const next = active
+                                                                        ? delays.filter((x) => x !== d)
+                                                                        : [...delays, d].sort((a, b) => a - b);
+                                                                    if (next.length === 0) return;
+                                                                    const hasZero = next.includes(0);
+                                                                    const hasOne  = next.includes(1);
+                                                                    const legacyMode = hasZero && hasOne ? "both" : hasZero ? "same" : hasOne ? "next" : "both";
+                                                                    setCfg((c) => ({ ...c, triggeredEdgeDelays: next, triggeredEdgeSameCandleMode: legacyMode }));
+                                                                }}
+                                                                className={[
+                                                                    "px-3 py-1.5 text-[10.5px] font-ui uppercase tracking-[0.08em] clip-bevel-sm border transition-colors",
+                                                                    active
+                                                                        ? "border-[hsl(var(--accent-primary)/0.7)] bg-[hsl(var(--accent-primary)/0.12)] text-[hsl(var(--accent-primary))]"
+                                                                        : "border-[hsl(var(--border-soft))] bg-transparent text-[hsl(var(--text-2)/0.5)] hover:text-[hsl(var(--text-2))]",
+                                                                ].join(" ")}
+                                                            >
+                                                                {label}
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </Field>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 </NeonPanel>
                 </BuilderFocusCard>
 
