@@ -53,7 +53,7 @@ export function SectionLabel({ children, hint, className = "" }) {
 }
 
 // -------------------- Metric block --------------------
-export function Metric({ label, value, tone = "default", sub, testId, big = false }) {
+export function Metric({ label, value, tone = "default", sub, testId, big = false, size = "default" }) {
   const toneClass =
     tone === "pos"
       ? "text-[#22C55E]"
@@ -64,19 +64,18 @@ export function Metric({ label, value, tone = "default", sub, testId, big = fals
       : tone === "amber"
       ? "text-[#F59E0B]"
       : "text-[#E5EDF7]";
+  const sizeClass = big
+    ? "text-3xl md:text-4xl font-bold"
+    : size === "sm"
+    ? "text-base md:text-lg font-semibold"
+    : "text-xl md:text-2xl font-semibold";
   return (
-    <div className="flex flex-col gap-1" data-testid={testId}>
-      <div className="label-eyebrow">{label}</div>
-      <div
-        className={[
-          "font-mono tabular leading-none",
-          big ? "text-3xl md:text-4xl font-bold" : "text-xl md:text-2xl font-semibold",
-          toneClass,
-        ].join(" ")}
-      >
+    <div className="flex flex-col gap-1 min-w-0" data-testid={testId}>
+      <div className="label-eyebrow whitespace-nowrap">{label}</div>
+      <div className={["font-mono tabular leading-none whitespace-nowrap", sizeClass, toneClass].join(" ")}>
         {value}
       </div>
-      {sub && <div className="text-[11px] text-[#64748B] mt-0.5">{sub}</div>}
+      {sub && <div className="text-[11px] text-[#64748B] mt-0.5 whitespace-nowrap">{sub}</div>}
     </div>
   );
 }
