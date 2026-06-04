@@ -154,7 +154,7 @@ const CHIP_META = {
 //   dense      — slightly smaller chip row (no vertical padding)
 //   className  — wrapper override
 // ─────────────────────────────────────────────────────────────────────────────
-export function RunConfigStrip({ run, dense = false, className }) {
+export function RunConfigStrip({ run, dense = false, className, defaultOpen }) {
     const config = React.useMemo(() => extractRunConfig(run), [run]);
 
     const { chips, coreEnd, entryEnd, filterEnd } = React.useMemo(
@@ -163,6 +163,7 @@ export function RunConfigStrip({ run, dense = false, className }) {
     );
 
     const [open, setOpen] = React.useState(() => {
+        if (defaultOpen !== undefined) return defaultOpen;
         try {
             const stored = localStorage.getItem(CONFIG_STRIP_OPEN_KEY);
             return stored === null ? false : stored === "true";
@@ -170,8 +171,9 @@ export function RunConfigStrip({ run, dense = false, className }) {
     });
 
     React.useEffect(() => {
+        if (defaultOpen !== undefined) return; // don't persist popover state
         try { localStorage.setItem(CONFIG_STRIP_OPEN_KEY, String(open)); } catch { /* non-critical */ }
-    }, [open]);
+    }, [open, defaultOpen]);
 
     if (!run || !chips.length) return null;
 

@@ -1,6 +1,6 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import { Clock, Plus, Database, Search, FolderKanban, Activity, ChevronDown, Check } from "lucide-react";
+import { Clock, Database, Search, FolderKanban, Activity, ChevronDown, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
     useDataset,
@@ -30,15 +30,6 @@ export function TopBar() {
                     />
                 </div>
                 <div className="flex-1" />
-                <button
-                    data-testid="topbar-new-backtest"
-                    onClick={() => navigate("/strategy")}
-                    className="group relative inline-flex items-center gap-2 px-3.5 py-1.5 text-[12px] font-ui uppercase tracking-wider clip-bevel-sm border border-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.10)] text-white hover:bg-[hsl(var(--accent-primary)/0.20)] transition-colors"
-                    style={{ boxShadow: "0 0 24px -8px hsl(var(--accent-primary))" }}
-                >
-                    <Plus className="w-3.5 h-3.5" />
-                    New Backtest
-                </button>
             </div>
         </div>
     );

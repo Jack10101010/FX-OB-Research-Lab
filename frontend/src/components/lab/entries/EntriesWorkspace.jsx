@@ -98,23 +98,6 @@ export function EntriesWorkspace() {
                 exactRows={exactRows}
             />
 
-            {/* Scope communication — Entries Workspace intentionally pins its
-                base trade list to the run's baseline/primary-variant reference
-                and is NOT governed by the active Strategy Map universe. The
-                per-entry-model columns are the page's multi-model axis. This
-                strip makes that contract explicit so KPIs here are never
-                misread as the currently-selected scenario. (Static label — no
-                universe resolution, no analytics dependency.) */}
-            <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 border border-[hsl(var(--border-soft)/0.7)] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm px-3 py-1.5 text-[11px]">
-                <span className="font-ui uppercase tracking-wider text-muted-lab">Scope</span>
-                <span className="text-[hsl(var(--text-2))]">
-                    Base list: <span className="text-[hsl(var(--accent-primary))]">Baseline reference</span> (fixed — not following active universe)
-                </span>
-                <span className="text-[hsl(var(--text-2))]">
-                    Model columns: <span className="text-white">per-entry-model</span>
-                </span>
-            </div>
-
             <div className="mt-4">
                 <WorkspaceTabBar
                     activeTab={activeTab}

@@ -9,7 +9,6 @@ import { useDataset } from "@/data/store";
 import { setSelectedTradeVariant, getTradeUniverse } from "@/data/store";
 import { useTradeUniverse } from "@/data/useTradeUniverse";
 import { useResultsLens } from "@/data/useResultsLens";
-import { TradeUniverseBadge } from "@/components/lab/TradeUniverseBadge";
 import { OBLabTabShell } from "@/components/lab/OBLabTabShell";
 // Phase RB-4 — all OrderBlockLab bucket tables route through the shared
 // basis-aware CanonicalBucketTable (frozen RB-3.2 contract).
@@ -20,9 +19,9 @@ import { TableCompareShell } from "@/components/lab/TableCompareShell";
 import { EdgeExplorerPanel } from "@/components/lab/EdgeExplorerPanel";
 import { createDrillPayload } from "@/data/drillContract";
 import {
-    Activity, AlertTriangle, Boxes, Clipboard, FileText, GitBranch,
+    AlertTriangle, Boxes, Clipboard, FileText,
     TrendingUp, TrendingDown, X, Filter,
-    Database, Target,
+    Database, Target, SlidersHorizontal, Clock,
 } from "lucide-react";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -202,11 +201,31 @@ export default function OrderBlockLab() {
     // Persistent header — LabRunHero + RunConfigStrip + TradeUniverseBadge only.
     // KPI chips and InsightCallouts belong in Tab 1 (Model Analysis) where they
     // serve as the verdict surface, not in the always-visible navigation band.
+    const universeDescription = activeRunId && universe ? (
+        <div className="flex flex-col gap-2.5">
+            <span className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-[11px] font-ui">
+                <span>
+                    <span className="text-[9.5px] uppercase tracking-[0.08em] text-[hsl(var(--text-muted))] mr-1.5">Universe</span>
+                    <span className="font-semibold text-[hsl(var(--text-1))]">
+                        {universe.universeType === "scenario" ? "Scenario trades" : "Baseline reference"}
+                    </span>
+                </span>
+                {universe.label && (
+                    <span>
+                        <span className="text-[9.5px] uppercase tracking-[0.08em] text-[hsl(var(--text-muted))] mr-1.5">Model</span>
+                        <span className="font-semibold text-[hsl(var(--text-1))]">{universe.label}</span>
+                    </span>
+                )}
+            </span>
+            <RunConfigButton run={activeRun} />
+        </div>
+    ) : null;
+
     const tabHeader = (
         <LabRunHero
             pageLabel="Order Block Lab"
             titleFallback="Order Block Lab"
-            description="Deep order block research using linked trades."
+            description={universeDescription}
             activeProject={ACTIVE_PROJECT}
             activeRun={activeRun}
             activeSummary={ACTIVE_RUN}
@@ -227,12 +246,6 @@ export default function OrderBlockLab() {
                     <VariantSelector variants={AVAILABLE_TRADE_VARIANTS} value={ACTIVE_TRADE_VARIANT} />
                 </>
             )}
-            sidePanel={activeRunId ? (
-                <div className="flex flex-col gap-2">
-                    <RunConfigStrip run={activeRun} className="mx-0 mb-0" />
-                    <TradeUniverseBadge universe={universe} compact />
-                </div>
-            ) : null}
         />
     );
 
@@ -259,20 +272,13 @@ export default function OrderBlockLab() {
                 <MetricChip label="Unlinked Trades" value={String(analytics.unlinkedCount)} sub="limited OB research" tone={analytics.unlinkedCount ? "danger" : "muted"} icon={AlertTriangle} />
                 <MetricChip label="Best Bucket" value={analytics.bestBucket ? formatR(analytics.bestBucket.netR) : "—"} sub={analytics.bestBucket?.label || "Limited Data"} tone="primary" icon={TrendingUp} />
                 <MetricChip label="Worst Bucket" value={analytics.worstBucket ? formatR(analytics.worstBucket.netR) : "—"} sub={analytics.worstBucket?.label || "Limited Data"} tone={analytics.worstBucket?.netR < 0 ? "danger" : "muted"} icon={TrendingDown} />
+                <MetricChip label="Best Session" value={analytics.bestSession ? formatR(analytics.bestSession.netR) : "—"} sub={analytics.bestSession?.label || "No data"} tone="primary" icon={Clock} />
+                <MetricChip label="Worst Session" value={analytics.worstSession ? formatR(analytics.worstSession.netR) : "—"} sub={analytics.worstSession?.label || "No data"} tone={analytics.worstSession?.netR < 0 ? "danger" : "muted"} icon={Clock} />
             </div>
 
             {/* Auto-generated insights */}
             {insights.length > 0 && <InsightCallouts insights={insights} />}
 
-            {/* Research Safety warning */}
-            {analytics.lowSampleBuckets > 0 && (
-                <NeonPanel title="Research Safety" tone="secondary" action={<Pill tone="warning">{analytics.lowSampleBuckets} LOW SAMPLE BUCKETS</Pill>}>
-                    <div className="flex items-start gap-2 text-[11.5px] font-ui text-[hsl(var(--warning))]">
-                        <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                        <span>Every bucket shows sample count. Treat buckets below {LOW_SAMPLE_N} trades as directional only. Click any bucket row to inspect its trade list.</span>
-                    </div>
-                </NeonPanel>
-            )}
 
             {/* Structural Quality + Session Performance — 2×2 grid.
                 Row 1: BOS vs CHoCH · Long vs Short (structure type verdict)
@@ -635,17 +641,17 @@ function InsightCallouts({ insights }) {
     };
 
     return (
-        <div className="px-6 mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2.5">
+        <div className="px-6 mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
             {insights.map((insight, i) => {
                 const t = toneMap[insight.tone] || toneMap.primary;
                 return (
                     <div
                         key={i}
-                        className="clip-bevel-sm border-l-2 px-3 py-2.5"
+                        className="clip-bevel-sm border-l-2 px-4 py-4"
                         style={{ borderLeftColor: t.border, borderTop: "1px solid hsl(var(--border-soft))", borderRight: "1px solid hsl(var(--border-soft))", borderBottom: "1px solid hsl(var(--border-soft))", background: t.bg }}
                     >
-                        <div className={`text-[9px] font-ui uppercase tracking-[0.18em] mb-1 ${t.label}`}>{insight.label}</div>
-                        <div className="text-[11.5px] font-ui text-[hsl(var(--text-2))] leading-relaxed">{insight.text}</div>
+                        <div className={`text-[10px] font-ui uppercase tracking-[0.18em] mb-2 ${t.label}`}>{insight.label}</div>
+                        <div className="text-[13px] font-ui text-[hsl(var(--text-2))] leading-relaxed">{insight.text}</div>
                     </div>
                 );
             })}
@@ -1395,6 +1401,48 @@ function ReportModal({ reportText, onClose }) {
     );
 }
 
+// ─── Run Config Button ────────────────────────────────────────────────────────
+// Compact button that reveals the full RunConfigStrip in a floating popover.
+// Replaces the always-visible chip row in the header right panel.
+
+function RunConfigButton({ run }) {
+    const [open, setOpen] = React.useState(false);
+    const ref = React.useRef(null);
+
+    React.useEffect(() => {
+        if (!open) return;
+        const handler = (e) => {
+            if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+        };
+        document.addEventListener("mousedown", handler);
+        return () => document.removeEventListener("mousedown", handler);
+    }, [open]);
+
+    if (!run) return null;
+
+    return (
+        <div className="relative" ref={ref}>
+            <button
+                type="button"
+                onClick={() => setOpen((p) => !p)}
+                className={`clip-bevel-sm border px-3 py-1.5 text-[11px] font-ui inline-flex items-center gap-1.5 transition-colors ${
+                    open
+                        ? "border-[hsl(var(--accent-primary)/0.5)] bg-[hsl(var(--accent-primary)/0.10)] text-[hsl(var(--accent-primary))]"
+                        : "border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))] hover:text-white"
+                }`}
+            >
+                <SlidersHorizontal className="w-3 h-3" />
+                Run Config
+            </button>
+            {open && (
+                <div className="absolute right-0 top-[calc(100%+6px)] z-50 min-w-[260px] bg-[hsl(var(--panel))] border border-[hsl(var(--border-soft))] shadow-[0_4px_24px_hsl(0,0%,0%,0.35)] clip-bevel-sm p-3">
+                    <RunConfigStrip run={run} className="mx-0 mb-0" defaultOpen={true} />
+                </div>
+            )}
+        </div>
+    );
+}
+
 // ─── Variant Selector ─────────────────────────────────────────────────────────
 
 function VariantSelector({ variants, value }) {
@@ -1529,6 +1577,10 @@ function buildOrderBlockAnalytics(trades) {
     const bestBucket       = usableRows.length ? usableRows.reduce((a, b) => b.netR > a.netR ? b : a) : null;
     const worstBucket      = usableRows.length ? usableRows.reduce((a, b) => b.netR < a.netR ? b : a) : null;
 
+    const usableSessionRows = originSessionRows.filter(r => r.count > 0 && r.label !== "Limited Data" && r.label !== "Unknown" && r.label !== "Outside");
+    const bestSession       = usableSessionRows.length ? usableSessionRows.reduce((a, b) => b.netR > a.netR ? b : a) : null;
+    const worstSession      = usableSessionRows.length ? usableSessionRows.reduce((a, b) => b.netR < a.netR ? b : a) : null;
+
     const sessionMatrix        = buildSessionMatrix(trades);
     const catastrophicBreach   = buildCatastrophicBreach(trades);
     const fieldCompleteness    = buildFieldCompleteness(trades);
@@ -1544,7 +1596,7 @@ function buildOrderBlockAnalytics(trades) {
     const bestWins    = [...sortedByR].filter(t => Number(t.r) > 0).sort((a, b) => Number(b.r) - Number(a.r));
 
     return {
-        linkedCount, unlinkedCount, lowSampleBuckets, bestBucket, worstBucket,
+        linkedCount, unlinkedCount, lowSampleBuckets, bestBucket, worstBucket, bestSession, worstSession,
         structureRows, directionRows, originSessionRows, createdSessionRows, detectionFieldAvailable, creationHourRows,
         widthRows, ageRows, penetrationRows, catastrophicBreach,
         fastStopoutRows, distanceBeforeFillRows, dayOfWeekRows,
