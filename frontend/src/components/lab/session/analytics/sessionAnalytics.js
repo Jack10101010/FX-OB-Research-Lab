@@ -580,6 +580,222 @@ export function buildSessionEquityCurve(trades) {
     });
 }
 
+// ── Rule Engine ──────────────────────────────────────────────────────────────
+
+/**
+ * Build the default (all-enabled) rule set for a list of session keys.
+ *
+ * @param {string[]} sessionKeys — defaults to SESSION_KEYS if not provided
+ * @returns {object} sessionRules map
+ */
+export function buildDefaultSessionRules(sessionKeys) {
+    const keys = sessionKeys ?? SESSION_KEYS;
+    return Object.fromEntries(
+        keys.map((key) => [key, {
+            enabled:             true,
+            direction:           { long: true, short: true },
+            structure:           { BOS: true, CHoCH: true },
+            entryModels:         {},   // empty = all included
+            triggerDelays:       {},
+            cancellationReasons: {},
+        }]),
+    );
+}
+
+/**
+ * Returns true if sessionRules differ from the default (all-enabled) state.
+ * Used to decide whether to show the preview panel and reset button.
+ *
+ * @param {object} sessionRules
+ * @returns {boolean}
+ */
+export function hasActiveRules(sessionRules) {
+    if (!sessionRules) return false;
+    for (const rule of Object.values(sessionRules)) {
+        if (!rule.enabled) return true;
+        if (!rule.direction.long || !rule.direction.short) return true;
+        if (!rule.structure.BOS || !rule.structure.CHoCH) return true;
+        if (Object.values(rule.entryModels).some((v) => v === false)) return true;
+        if (Object.values(rule.triggerDelays).some((v) => v === false)) return true;
+        if (Object.values(rule.cancellationReasons).some((v) => v === false)) return true;
+    }
+    return false;
+}
+
+/**
+ * Apply sessionRules to filter trades.
+ * A trade is excluded if:
+ *   - Its session is disabled
+ *   - Its direction is excluded for that session
+ *   - Its structure is excluded for that session
+ *   - Its entryModel / triggerDelay / cancellationReason is excluded (when the
+ *     corresponding rule map is non-empty)
+ *
+ * @param {object[]} trades
+ * @param {object}   sessionRules
+ * @returns {{ includedTrades, excludedTrades, exclusionSummary }}
+ */
+export function applySessionRules(trades, sessionRules) {
+    if (!sessionRules || !Object.keys(sessionRules).length) {
+        return {
+            includedTrades:   trades,
+            excludedTrades:   [],
+            exclusionSummary: { total: trades.length, included: trades.length, excluded: 0, sessionsDisabled: [] },
+        };
+    }
+
+    const included = [];
+    const excluded = [];
+
+    for (const trade of trades) {
+        const session = resolveSession(trade);
+        const rule    = sessionRules[session];
+
+        if (!rule) { included.push(trade); continue; }
+
+        if (!rule.enabled) { excluded.push(trade); continue; }
+
+        const dir = normalizeDirection(trade).toLowerCase();
+        if (dir === "long"  && !rule.direction.long)  { excluded.push(trade); continue; }
+        if (dir === "short" && !rule.direction.short) { excluded.push(trade); continue; }
+
+        const struct = normalizeStructure(trade);
+        if (struct !== "Unknown" && rule.structure[struct] === false) {
+            excluded.push(trade); continue;
+        }
+
+        if (Object.keys(rule.entryModels).length > 0) {
+            const model = trade.entryModel || trade.entry_model_key || trade.entry_model || "Baseline";
+            if (rule.entryModels[model] === false) { excluded.push(trade); continue; }
+        }
+
+        if (Object.keys(rule.triggerDelays).length > 0) {
+            const delay = String(trade.fill_delay_candles ?? trade.triggerDelay ?? 0);
+            if (rule.triggerDelays[delay] === false) { excluded.push(trade); continue; }
+        }
+
+        if (Object.keys(rule.cancellationReasons).length > 0) {
+            const reason = trade.cancellation_reason || trade.cancel_reason || "";
+            if (rule.cancellationReasons[reason] === false) { excluded.push(trade); continue; }
+        }
+
+        included.push(trade);
+    }
+
+    return {
+        includedTrades:   included,
+        excludedTrades:   excluded,
+        exclusionSummary: {
+            total:             trades.length,
+            included:          included.length,
+            excluded:          excluded.length,
+            sessionsDisabled:  Object.entries(sessionRules)
+                .filter(([, r]) => !r.enabled)
+                .map(([k]) => k),
+        },
+    };
+}
+
+/**
+ * Compare original and filtered trade sets to produce a preview diff.
+ * Used by the Filtered Preview panel in SessionLabWorkspace.
+ *
+ * @param {object[]} originalTrades
+ * @param {object[]} filteredTrades
+ * @returns {{
+ *   original: object,
+ *   filtered: object,
+ *   removed:  object,
+ *   delta:    object,
+ *   hasChanges: boolean,
+ * }}
+ */
+export function computePreviewComparison(originalTrades, filteredTrades) {
+    function metrics(trades) {
+        if (!trades.length) return { netR: 0, wins: 0, losses: 0, tradeCount: 0, maxDD: 0, winRate: null, profitFactor: null };
+        const wins   = trades.filter(isWin).length;
+        const losses = trades.filter(isLoss).length;
+        const decided = wins + losses;
+        const netR    = Number(trades.reduce((s, t) => s + getR(t), 0).toFixed(2));
+        const grossWin  = trades.filter((t) => getR(t) > 0).reduce((s, t) => s + getR(t), 0);
+        const grossLoss = trades.filter((t) => getR(t) < 0).reduce((s, t) => s + Math.abs(getR(t)), 0);
+        let peak = 0, cum = 0, maxDD = 0;
+        for (const t of trades) {
+            cum += getR(t);
+            if (cum > peak) peak = cum;
+            const dd = cum - peak;
+            if (dd < maxDD) maxDD = dd;
+        }
+        return {
+            netR, wins, losses, tradeCount: trades.length,
+            maxDD: Number(maxDD.toFixed(2)),
+            winRate:      decided > 0 ? Number(((wins / decided) * 100).toFixed(1)) : null,
+            profitFactor: grossLoss > 0 ? Number((grossWin / grossLoss).toFixed(2)) : null,
+        };
+    }
+
+    const removedTrades = originalTrades.filter((t) => !filteredTrades.includes(t));
+    const original = metrics(originalTrades);
+    const filtered = metrics(filteredTrades);
+
+    return {
+        original,
+        filtered,
+        removed: {
+            count:   removedTrades.length,
+            losses:  removedTrades.filter(isLoss).length,
+            wins:    removedTrades.filter(isWin).length,
+            netR:    Number(removedTrades.reduce((s, t) => s + getR(t), 0).toFixed(2)),
+        },
+        delta: {
+            netR:       Number((filtered.netR  - original.netR).toFixed(2)),
+            tradeCount: filtered.tradeCount - original.tradeCount,
+            maxDD:      Number((filtered.maxDD - original.maxDD).toFixed(2)),
+        },
+        hasChanges: filteredTrades.length !== originalTrades.length,
+    };
+}
+
+/**
+ * Compute best/worst bucket for key breakdown dimensions within a session.
+ * Used by SessionCard to show compact snapshot chips.
+ *
+ * Requires ≥2 trades in a bucket to qualify.
+ *
+ * @param {object[]} sessionTrades
+ * @returns {object|null}
+ */
+export function buildCardSnapshot(sessionTrades) {
+    if (!sessionTrades.length) return null;
+
+    const DIMS = [
+        { key: "direction",  fn: (t) => normalizeDirection(t),                                    exclude: ["Unknown"] },
+        { key: "structure",  fn: (t) => normalizeStructure(t),                                    exclude: ["Unknown"] },
+        { key: "entryModel", fn: (t) => t.entryModel || t.entry_model_key || t.entry_model || "Baseline" },
+        {
+            key: "triggerDelay",
+            fn: (t) => {
+                const d = t.fill_delay_candles ?? t.triggerDelay;
+                if (d == null || Number(d) === 0) return "Same";
+                return `Delay +${Number(d)}`;
+            },
+        },
+    ];
+
+    const result = {};
+    for (const { key, fn, exclude } of DIMS) {
+        const rows = buildBucketRows(groupBy(sessionTrades, fn), null)
+            .filter((r) => !exclude?.includes(r.label) && r.count >= 2);
+        if (!rows.length) { result[key] = { best: null, worst: null }; continue; }
+        const sorted = [...rows].sort((a, b) => b.netR - a.netR);
+        result[key] = {
+            best:  sorted[0]                    || null,
+            worst: sorted[sorted.length - 1]    || null,
+        };
+    }
+    return result;
+}
+
 // ── OB Profile Analytics ──────────────────────────────────────────────────────
 
 /**
