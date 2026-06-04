@@ -16,6 +16,7 @@ import { TriggeredEdgeFunnelPanel } from "./TriggeredEdgeFunnelPanel";
 import { SameNextCandlePanel }    from "./SameNextCandlePanel";
 import { CancelReasonPanel }      from "./CancelReasonPanel";
 import { GhostOutcomePanel }      from "./GhostOutcomePanel";
+import { DirectionalScenariosPanel } from "./DirectionalScenariosPanel";
 import { buildAllModelCurves }    from "../analytics/equityCurveAnalytics";
 import { PROFILE_KEYS }           from "../analytics/entryRegistry";
 
@@ -185,6 +186,15 @@ export function ModelAnalysis({
                         <GhostOutcomePanel trades={trades} />
                     </div>
                 </>
+            )}
+
+            {/* ── Backend Directional Scenarios ─────────────────────────── */}
+            {/* Shown only when directional results exist. Fully independent of
+                PLANNED_ENTRY_MODES and the ExactResultsPanel row set. */}
+            {activeRun?.directionalResults && (
+                <div className="grid grid-cols-1 gap-4">
+                    <DirectionalScenariosPanel activeRun={activeRun} />
+                </div>
             )}
 
             {/* ── Section divider ───────────────────────────────────────── */}
