@@ -1230,6 +1230,12 @@ export async function ingestRunBundle(fileList) {
         ghost_never_triggered: sm.ghost_never_triggered ?? sm.ghostNeverTriggered ?? null,
         ghost_net_r: sm.ghost_net_r ?? sm.ghostNetR ?? null,
         ghost_avg_r: sm.ghost_avg_r ?? sm.ghostAvgR ?? null,
+        // ── Structure-direction filter skip counts (Phase 1) ─────────────────
+        // Null when backend doesn't yet support the filter; old bundles load unchanged.
+        structure_direction_filter_skipped:
+            sm.structure_direction_filter_skipped
+            ?? cfg.structure_direction_filter_skipped
+            ?? null,
         sourceFiles,
     };
 

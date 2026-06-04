@@ -104,6 +104,15 @@ export function extractRunConfig(run) {
     })();
     const minObSize       = num("min_ob_size_pips", "minObSizePips", "min_ob_size");
     const maxObSize       = num("max_ob_size_pips", "maxObSizePips", "max_ob_size");
+    const allowedStructureDirections = (() => {
+        const raw = readFirst(config, "allowed_structure_directions")
+            ?? readFirst(summary, "allowed_structure_directions")
+            ?? readFirst(csumm, "allowed_structure_directions");
+        if (!raw) return null;
+        if (Array.isArray(raw)) return raw.length ? raw : null;
+        const parts = String(raw).split(/[,;]/).map((s) => s.trim()).filter(Boolean);
+        return parts.length ? parts : null;
+    })();
 
     // ── News ─────────────────────────────────────────────────────────────────
     const newsEnabled       = bool("news_filter_enabled", "newsEnabled",       "news_on",         "use_news_filter");
@@ -132,6 +141,7 @@ export function extractRunConfig(run) {
         sessions,
         minObSize,
         maxObSize,
+        allowedStructureDirections,
         // News
         newsEnabled,
         newsBlackoutBefore,
@@ -167,6 +177,8 @@ export function formatRunConfigValue(field, value) {
         case "verifyTicks":
             return `${value}tk`;
         case "sessions":
+            return Array.isArray(value) ? value.join(", ") : String(value);
+        case "allowedStructureDirections":
             return Array.isArray(value) ? value.join(", ") : String(value);
         case "penetrationThresholds":
             return Array.isArray(value) ? value.map((v) => `${v}%`).join(" / ") : String(value);

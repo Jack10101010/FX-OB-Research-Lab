@@ -47,6 +47,10 @@ export default function StrategyBuilder() {
         maxObSizePips: 100,
         structure: "Both",
         direction: "Both",
+        bosLong: true,
+        bosShort: true,
+        chochLong: true,
+        chochShort: true,
         rr: 3.3,
         obEntryDepthPct: 0,
         entryBuffer: 0.0,
@@ -522,9 +526,32 @@ export default function StrategyBuilder() {
                         <Field label="Max OB Size (pips)" hint="Filters OBs by width before trade simulation. Use 100 for baseline EURUSD.">
                             <NeonInput type="number" min="0.1" step="0.1" value={cfg.maxObSizePips} onChange={(e) => set("maxObSizePips")(Number(e.target.value))} />
                         </Field>
-                        <Field label="Structure Type" className="col-span-2">
-                            <Segment options={["BOS", "CHoCH", "Both"]} value={cfg.structure} onChange={set("structure")} />
-                        </Field>
+                        <div className="col-span-2">
+                            <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab mb-2">Structure Direction</div>
+                            <div className="flex flex-wrap gap-2">
+                                {[
+                                    { key: "bosLong",    label: "BOS Long",    excludedBy: cfg.direction === "Short" ? "Short" : null },
+                                    { key: "bosShort",   label: "BOS Short",   excludedBy: cfg.direction === "Long"  ? "Long"  : null },
+                                    { key: "chochLong",  label: "CHoCH Long",  excludedBy: cfg.direction === "Short" ? "Short" : null },
+                                    { key: "chochShort", label: "CHoCH Short", excludedBy: cfg.direction === "Long"  ? "Long"  : null },
+                                ].map(({ key, label, excludedBy }) => (
+                                    <button
+                                        key={key}
+                                        onClick={() => { if (!excludedBy) set(key)(!cfg[key]); }}
+                                        title={excludedBy ? `Excluded by Trade Direction = ${excludedBy}` : undefined}
+                                        className={`clip-bevel-sm px-2.5 py-1 text-[11px] font-ui uppercase tracking-wider border transition-colors ${
+                                            excludedBy
+                                                ? "border-[hsl(var(--border-mid))] text-[hsl(var(--text-2)/0.3)] cursor-not-allowed opacity-40"
+                                                : cfg[key]
+                                                ? "border-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.15)] text-white"
+                                                : "border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:border-[hsl(var(--accent-secondary))]"
+                                        }`}
+                                    >
+                                        {label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
                     </div>
                 </NeonPanel>
                 </BuilderFocusCard>
@@ -1183,6 +1210,11 @@ export default function StrategyBuilder() {
                         <StatusMeta k="Execution TF" v={sanityConfig.execution_timeframe || "—"} />
                         <StatusMeta k="Execution mode" v={formatExecutionMode((sanityConfig.execution_modes || [])[0])} />
                         <StatusMeta k="Structure filter" v={formatStructureFilter(sanityConfig.structure_filter)} />
+                        <StatusMeta k="Allowed struct/dir" v={Array.isArray(sanityConfig.allowed_structure_directions) && sanityConfig.allowed_structure_directions.length ? sanityConfig.allowed_structure_directions.join(", ") : "all"} />
+                        <StatusMeta k="BOS Long skip" v={sanityRun.structure_direction_filter_skipped?.bos_long ?? "—"} />
+                        <StatusMeta k="BOS Short skip" v={sanityRun.structure_direction_filter_skipped?.bos_short ?? "—"} />
+                        <StatusMeta k="CHoCH Long skip" v={sanityRun.structure_direction_filter_skipped?.choch_long ?? "—"} />
+                        <StatusMeta k="CHoCH Short skip" v={sanityRun.structure_direction_filter_skipped?.choch_short ?? "—"} />
                         <StatusMeta k="Plan passes" v={sanityRun.total_passes ?? generatedPlan.totalPasses ?? "—"} />
                         <StatusMeta k="Entry passes" v={sanityRun.scenario_plan_summary?.entry ?? generatedPlan.entry ?? "—"} />
                         <StatusMeta k="Protection passes" v={sanityRun.scenario_plan_summary?.protection ?? generatedPlan.protection ?? "—"} />
@@ -1395,6 +1427,23 @@ function BuilderFocusCard({ id, activeId, onActivate, className = "", children }
     );
 }
 
+function buildAllowedStructureDirections(cfg) {
+    const allowed = [];
+    if (cfg.bosLong    && cfg.direction !== "Short") allowed.push("bos_long");
+    if (cfg.bosShort   && cfg.direction !== "Long")  allowed.push("bos_short");
+    if (cfg.chochLong  && cfg.direction !== "Short") allowed.push("choch_long");
+    if (cfg.chochShort && cfg.direction !== "Long")  allowed.push("choch_short");
+    return allowed;
+}
+
+function deriveLegacyStructureFilterFromAllowed(allowed) {
+    const hasBos   = allowed.includes("bos_long")  || allowed.includes("bos_short");
+    const hasChoch = allowed.includes("choch_long") || allowed.includes("choch_short");
+    if (hasBos && !hasChoch) return "bos";
+    if (!hasBos && hasChoch) return "choch";
+    return "both";
+}
+
 function buildBacktesterConfig(cfg) {
     const allowedSessions = Boolean(cfg.sessionFilter) ? selectedAllowedSessions(cfg) : [];
 
@@ -1522,7 +1571,8 @@ function buildBacktesterConfig(cfg) {
         verify_limit_ticks: Number(cfg.verifyTicks ?? 0),
         execution_modes: [mapBuilderExecutionMode(cfg.executionMode)],
         trade_direction: mapBuilderTradeDirection(cfg.direction),
-        structure_filter: mapBuilderStructureFilter(cfg.structure),
+        structure_filter: deriveLegacyStructureFilterFromAllowed(buildAllowedStructureDirections(cfg)),
+        allowed_structure_directions: buildAllowedStructureDirections(cfg),
         entry_models: entryModels,
         entry_penetration_thresholds: entryPenetrationThresholds,
         batch_entry_penetration: batchEntryPenetration,
@@ -1693,6 +1743,7 @@ function reduceRunSnapshot(job, importedRunId = "") {
         news_flattened_r: job.news_flattened_r,
         news_flatten_late_count: job.news_flatten_late_count,
         session_filtered_skipped: job.session_filtered_skipped,
+        structure_direction_filter_skipped: job.structure_direction_filter_skipped ?? null,
         created_at: job.created_at,
         started_at: job.started_at,
         finished_at: job.finished_at,
@@ -1978,6 +2029,10 @@ const LOAD_FIELD_LABELS = {
     singlePenetrationPct: "single penetration threshold",
     singleTriggeredEdgeThreshold: "single triggered-edge threshold",
     monteCarlo: "Monte Carlo",
+    bosLong: "BOS Long",
+    bosShort: "BOS Short",
+    chochLong: "CHoCH Long",
+    chochShort: "CHoCH Short",
     directionalEntryMode: "directional entry mode",
     longEntryEnabled: "long entry enabled",
     longEntryModel: "long entry model",
@@ -2007,6 +2062,29 @@ function buildRunConfigLoadReport(current, run) {
     applyFirstPresent(patch, source, "maxObSizePips", ["max_ob_size_pips", "maxObSizePips"], toNumber);
     applyFirstPresent(patch, source, "structure", ["structure", "structure_type", "structure_filter", "allowed_structures"], mapConfigStructure);
     applyFirstPresent(patch, source, "direction", ["direction", "trade_direction", "direction_filter", "allowed_directions"], mapConfigDirection);
+    // ── Structure-direction chip round-trip (Phase 1) ────────────────────────
+    // If the run carries allowed_structure_directions, reconstruct individual chip state.
+    // Fall back to deriving from coarse structure + direction when the new field is absent.
+    {
+        const asd = source.allowed_structure_directions;
+        if (Array.isArray(asd) && asd.length) {
+            patch.bosLong    = asd.includes("bos_long");
+            patch.bosShort   = asd.includes("bos_short");
+            patch.chochLong  = asd.includes("choch_long");
+            patch.chochShort = asd.includes("choch_short");
+        } else {
+            const sf  = String(patch.structure  || "Both").toLowerCase();
+            const dir = String(patch.direction  || "Both").toLowerCase();
+            const hasBos   = sf  === "bos"   || sf  === "both" || sf  === "bos+choch";
+            const hasChoch = sf  === "choch"  || sf  === "both" || sf  === "bos+choch";
+            const hasLong  = dir === "long"   || dir === "both" || dir === "long+short";
+            const hasShort = dir === "short"  || dir === "both" || dir === "long+short";
+            patch.bosLong    = hasBos   && hasLong;
+            patch.bosShort   = hasBos   && hasShort;
+            patch.chochLong  = hasChoch && hasLong;
+            patch.chochShort = hasChoch && hasShort;
+        }
+    }
     applyFirstPresent(patch, source, "rr", ["rr_multiple", "rr", "risk_reward"], toNumber);
     applyFirstPresent(patch, source, "obEntryDepthPct", ["ob_entry_depth_pct", "obEntryDepthPct"], toNumber);
     applyFirstPresent(patch, source, "entryBuffer", ["entry_buffer_pips", "entry_buffer", "entryBuffer"], toNumber);
@@ -2365,6 +2443,24 @@ function structureChipLabel(value) {
     return "BOS";
 }
 
+function structureDirectionRibbonLabel(cfg) {
+    const all = buildAllowedStructureDirections(cfg);
+    // Full set or empty — fall back to coarse label
+    if (all.length === 0 || all.length === 4) return structureChipLabel(cfg.structure);
+    const hasBosL   = all.includes("bos_long");
+    const hasBosS   = all.includes("bos_short");
+    const hasChochL = all.includes("choch_long");
+    const hasChochS = all.includes("choch_short");
+    const parts = [];
+    if (hasBosL  && hasBosS)  parts.push("BOS");
+    else if (hasBosL)         parts.push("BOS L");
+    else if (hasBosS)         parts.push("BOS S");
+    if (hasChochL && hasChochS) parts.push("CHOCH");
+    else if (hasChochL)         parts.push("CHOCH L");
+    else if (hasChochS)         parts.push("CHOCH S");
+    return parts.join("+") || "NONE";
+}
+
 function directionChipLabel(value) {
     const v = mapConfigDirection(value);
     if (v === "Both") return "Long+Short";
@@ -2426,7 +2522,7 @@ function ConfigScopeRibbon({ cfg }) {
     const chips = [
         model,
         cfg.directionalEntryMode === "asymmetric" ? "ASYMMETRIC" : null,
-        structureChipLabel(cfg.structure).toUpperCase(),
+        structureDirectionRibbonLabel(cfg).toUpperCase(),
         directionChipLabel(cfg.direction).toUpperCase(),
         Number.isFinite(rr) ? `RR ${rr}` : null,
         formatExecutionMode(cfg.executionMode).toUpperCase(),

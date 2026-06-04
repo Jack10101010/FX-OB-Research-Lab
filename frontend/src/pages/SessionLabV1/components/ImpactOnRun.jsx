@@ -37,7 +37,8 @@ function Metric({ label, value, delta, deltaPos }) {
   );
 }
 
-export default function ImpactOnRun() {
+export default function ImpactOnRun({ impactOnRunData = null }) {
+  const cards = impactOnRunData ?? SESSION_IMPACT_CARDS;
   return (
     <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel))] p-4" data-testid="impact-on-run">
       <div className="flex items-center justify-between mb-3">
@@ -47,13 +48,13 @@ export default function ImpactOnRun() {
         </div>
       </div>
 
-      <div className="space-y-3">
-        {SESSION_IMPACT_CARDS.map((c) => (
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {cards.map((c) => (
           <ImpactCard key={c.scenario} data={c} />
         ))}
       </div>
 
-      <div className="mt-4 flex items-start gap-2 rounded-md border border-[#3B82F6]/30 bg-[#3B82F6]/8 p-3 text-[11px]">
+      <div className="mt-4 flex items-start gap-2 rounded-md border border-[#3B82F6]/30 bg-[#3B82F616] p-3 text-[11px] lg:max-w-sm">
         <Info size={13} className="text-[#3B82F6] mt-0.5 shrink-0" />
         <div>
           <div className="text-[hsl(var(--accent-primary))] font-medium">Changes above update preview metrics in real time.</div>

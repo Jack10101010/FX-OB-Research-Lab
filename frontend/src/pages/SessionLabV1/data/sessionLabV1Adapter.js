@@ -1163,3 +1163,101 @@ export function buildFailureAnalysisData(sessionTrades) {
 
   return { failureCards, cancellationReasons, worstCluster };
 }
+
+// ─── Phase C4: Impact On Run ──────────────────────────────────────────────────
+
+/**
+ * Compute run-level KPIs for an arbitrary trade slice.
+ * Returns the flat shape expected by ImpactCard.
+ */
+function computeScenarioMetrics(trades) {
+  if (!trades.length) return { netR: 0, trades: 0, wr: 0, pf: "—", dd: 0 };
+
+  const wins    = trades.filter(isWin).length;
+  const losses  = trades.filter(isLoss).length;
+  const decided = wins + losses;
+  const netR    = Number(trades.reduce((s, t) => s + getR(t), 0).toFixed(2));
+
+  const grossWin  = trades.filter((t) => getR(t) > 0).reduce((s, t) => s + getR(t),             0);
+  const grossLoss = trades.filter((t) => getR(t) < 0).reduce((s, t) => s + Math.abs(getR(t)), 0);
+
+  let peak = 0, cum = 0, maxDD = 0;
+  for (const t of trades) {
+    cum += getR(t);
+    if (cum > peak) peak = cum;
+    const dd = cum - peak;
+    if (dd < maxDD) maxDD = dd;
+  }
+
+  const wr = decided > 0 ? Number(((wins / decided) * 100).toFixed(1)) : 0;
+  const pf = grossLoss > 0
+    ? Number((grossWin / grossLoss).toFixed(2))
+    : grossWin > 0 ? "∞" : "—";
+  const dd = Number(maxDD.toFixed(2));
+
+  return { netR, trades: trades.length, wr, pf, dd };
+}
+
+/**
+ * Compute per-field deltas between a scenario and the baseline.
+ * Handles "∞" / "—" PF edge cases to match ImpactCard's existing display logic.
+ */
+function computeImpactDeltas(scenario, baseline) {
+  const netR   = Number((scenario.netR - baseline.netR).toFixed(1));
+  const trades = scenario.trades - baseline.trades;
+  const wr     = Number((scenario.wr   - baseline.wr).toFixed(1));
+  const dd     = Number((scenario.dd   - baseline.dd).toFixed(2));
+
+  let pf;
+  if (typeof scenario.pf !== "number") {
+    // scenario.pf is "∞" or "—"
+    pf = scenario.pf === "∞" ? "+∞" : "—";
+  } else if (typeof baseline.pf !== "number") {
+    // baseline is "∞" or "—" — indeterminate
+    pf = "—";
+  } else {
+    pf = Number((scenario.pf - baseline.pf).toFixed(2));
+  }
+
+  return { netR, trades, wr, pf, dd };
+}
+
+/**
+ * Build three what-if impact scenarios for the selected session.
+ * Denominator: allRunTrades (unfiltered primary result view).
+ *
+ * @param {string}   canonicalSessionKey  e.g. "London", "New York"
+ * @param {object[]} allRunTrades         full primary result view trade array
+ * @returns {object[]|null}
+ */
+export function buildImpactOnRunData(canonicalSessionKey, allRunTrades) {
+  if (!canonicalSessionKey || !Array.isArray(allRunTrades) || allRunTrades.length === 0) {
+    return null;
+  }
+
+  const sessionName  = canonicalSessionKey.toUpperCase();
+  const baseline     = computeScenarioMetrics(allRunTrades);
+  const notInSession = (t) => resolveSession(t) !== canonicalSessionKey;
+
+  const SCENARIOS = [
+    {
+      label:  `IF ${sessionName} IS DISABLED`,
+      filter: (t) => notInSession(t),
+    },
+    {
+      label:  `IF ONLY LONGS ARE USED (IN ${sessionName})`,
+      filter: (t) => notInSession(t) || normalizeDirection(t) === "Long",
+    },
+    {
+      label:  `IF ONLY BOS IS USED (IN ${sessionName})`,
+      filter: (t) => notInSession(t) || normalizeStructure(t) === "BOS",
+    },
+  ];
+
+  return SCENARIOS.map(({ label, filter }) => {
+    const filtered = allRunTrades.filter(filter);
+    const metrics  = computeScenarioMetrics(filtered);
+    const deltas   = computeImpactDeltas(metrics, baseline);
+    return { scenario: label, metrics, deltas };
+  });
+}

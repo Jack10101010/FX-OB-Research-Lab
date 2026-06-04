@@ -29,6 +29,7 @@ import {
   buildEntryModelLabData,
   buildOrderBlockLabData,
   buildFailureAnalysisData,
+  buildImpactOnRunData,
 } from "./data/sessionLabV1Adapter";
 
 /** Maps V1 lowercase keys → canonical session names used by sessionRules. */
@@ -162,6 +163,14 @@ export default function SessionLabPage() {
     [selectedSessionTrades]
   );
 
+  const impactOnRunData = useMemo(
+    () =>
+      hasRealData && canonicalSelectedKey
+        ? buildImpactOnRunData(canonicalSelectedKey, allTrades)
+        : null,
+    [allTrades, canonicalSelectedKey, hasRealData]
+  );
+
   const toggleSessionField = (v1Key, field) => {
     if (hasRealData) {
       const canonicalKey = V1_TO_CANONICAL[v1Key];
@@ -290,7 +299,7 @@ export default function SessionLabPage() {
               <QuickControls session={selected} onToggle={toggleSessionField} />
             </div>
           </div>
-          <ImpactOnRun />
+          <ImpactOnRun impactOnRunData={impactOnRunData} />
         </div>
 
         <HelpLegend />
