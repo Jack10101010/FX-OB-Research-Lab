@@ -1,7 +1,7 @@
 import React from "react";
 import {
   SectionLabel,
-  VerdictPill,
+  ToggleChip,
   fmtR,
 } from "./primitives";
 import { Moon, Building2, Coffee, Building, Sparkles, Globe, MoreHorizontal } from "lucide-react";
@@ -24,23 +24,6 @@ const ICON_COLORS = {
   outside: "#64748B",
 };
 
-/** Rectangle toggle button — active = cyan filled, inactive = muted outline. */
-function RectToggle({ label, active, onClick, testId }) {
-  return (
-    <button
-      onClick={onClick}
-      data-testid={testId}
-      className={[
-        "flex-1 py-1.5 text-[10px] font-ui font-semibold uppercase tracking-[0.1em] rounded-sm border transition-all",
-        active
-          ? "bg-[hsl(var(--accent-primary)/0.12)] border-[hsl(var(--accent-primary))] text-[hsl(var(--accent-primary))]"
-          : "bg-transparent border-[hsl(var(--border-soft))] text-muted-lab hover:border-[hsl(var(--border-mid))] hover:text-[hsl(var(--text-2))]",
-      ].join(" ")}
-    >
-      {label}
-    </button>
-  );
-}
 
 function SessionCard({ session, selected, onSelect, onToggle }) {
   const Icon = ICONS[session.key] || Building2;
@@ -84,11 +67,10 @@ function SessionCard({ session, selected, onSelect, onToggle }) {
           <Icon size={16} />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5 min-w-0">
+          <div className="min-w-0">
             <h3 className="font-display text-sm font-semibold tracking-tight uppercase text-[hsl(var(--text))] truncate">
               {session.name}
             </h3>
-            <VerdictPill verdict={session.verdict} />
           </div>
           <div className="text-[10px] text-muted-lab font-num mt-0.5">{session.range}</div>
         </div>
@@ -144,30 +126,34 @@ function SessionCard({ session, selected, onSelect, onToggle }) {
         <Row label="Delay" value={session.bestDelay} tone="cyan" />
       </div>
 
-      {/* Rectangle toggles */}
-      <div className="flex items-center gap-1.5 pt-3 border-t border-[hsl(var(--border-soft))]">
-        <RectToggle
-          label="Long"
+      {/* Toggles */}
+      <div className="flex items-center justify-between gap-2 pt-3 border-t border-[hsl(var(--border-soft))]">
+        <ToggleChip
+          label="LONG"
           active={session.longs}
           onClick={(e) => { e?.stopPropagation?.(); onToggle(session.key, "longs"); }}
+          color="cyan"
           testId={`toggle-${session.key}-long`}
         />
-        <RectToggle
-          label="Short"
+        <ToggleChip
+          label="SHORT"
           active={session.shorts}
           onClick={(e) => { e?.stopPropagation?.(); onToggle(session.key, "shorts"); }}
+          color="cyan"
           testId={`toggle-${session.key}-short`}
         />
-        <RectToggle
+        <ToggleChip
           label="BOS"
           active={session.bos}
           onClick={(e) => { e?.stopPropagation?.(); onToggle(session.key, "bos"); }}
+          color="cyan"
           testId={`toggle-${session.key}-bos`}
         />
-        <RectToggle
+        <ToggleChip
           label="CHoCH"
           active={session.choch}
           onClick={(e) => { e?.stopPropagation?.(); onToggle(session.key, "choch"); }}
+          color="cyan"
           testId={`toggle-${session.key}-choch`}
         />
       </div>
