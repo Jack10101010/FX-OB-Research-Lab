@@ -708,6 +708,27 @@ function entryTradeFileInfo(name) {
     };
 }
 
+// ─────────────────────── Directional file parser ───────────────────────
+// Matches Phase 3C output: trades_{variant}__dir_long_{longKey}__short_{shortKey}.csv
+// Examples:
+//   trades_one_per_direction__dir_long_te25_d2__short_te25_next.csv
+//   trades_allow_multi_position__dir_long_baseline__short_baseline.csv
+
+export function directionalTradeFileInfo(name) {
+    const file = String(name || "").split(/[\\/]/).pop().toLowerCase();
+    const m = file.match(
+        /^trades_(single_position|allow_multi_position|one_per_direction)__(dir_long_(.+?)__short_(.+?))\.csv$/
+    );
+    if (!m) return null;
+    return {
+        isDirectional: true,
+        executionMode: m[1],
+        scenarioId: m[2],       // "dir_long_te25_d2__short_te25_next"
+        longKey: m[3],          // "te25_d2"
+        shortKey: m[4],         // "te25_next"
+    };
+}
+
 function normalizeProtectionModeKey(value) {
     return String(value || "")
         .trim()
@@ -757,6 +778,7 @@ function detectFileKind(name) {
     if (n.endsWith(".csv")) {
         if (n.includes("candle"))                            return "candles";
         if (entryTradeFileInfo(name))                         return "trades_entry";
+        if (directionalTradeFileInfo(name))                   return "trades_directional";
         if (protectedTradeFileInfo(name))                     return "trades_protected";
         if (n.includes("order_block") || n.includes("ob_"))  return "order_blocks";
         if (n.includes("trades_single_position"))            return "trades_single_position";
@@ -851,6 +873,9 @@ export async function ingestRunBundle(fileList) {
         entrySourceFiles: [],
         protectionTradesByMode: {},
         protectionSourceFiles: [],
+        directionalTradesByScenario: {},
+        directionalScenarioMeta: {},
+        directionalSourceFiles: [],
         newsEvents: [],
         newsSourceFiles: [],
         readErrors: [],
@@ -937,6 +962,29 @@ export async function ingestRunBundle(fileList) {
                     }
                     collected.entrySourceFiles.push({ name: f.name, kind, mode, baseVariant: info.baseVariant, rows: t.length });
                     collected.recognized.push({ name: f.name, kind, mode, baseVariant: info.baseVariant, rows: t.length });
+                    break;
+                }
+                case "trades_directional": {
+                    const info = directionalTradeFileInfo(f.name);
+                    const parsed = parseCSV(text);
+                    validateCsvHeaders(kind, f.name, parsed.headers, collected.validationErrors, collected.validationWarnings);
+                    const t = parseTradesCSV(text);
+                    const { scenarioId, longKey, shortKey, executionMode } = info;
+                    const storageKey = `${executionMode}__${scenarioId}`;
+                    // Annotate each trade row with directional metadata
+                    const annotated = t.map((trade) => ({
+                        ...trade,
+                        isDirectional: true,
+                        directionalScenarioId: scenarioId,
+                        directionalLongKey: longKey,
+                        directionalShortKey: shortKey,
+                        directionalExecutionMode: executionMode,
+                    }));
+                    collected.directionalTradesByScenario[storageKey] = annotated;
+                    collected.directionalScenarioMeta[storageKey] = { scenarioId, longKey, shortKey, executionMode, isDirectional: true };
+                    collected.directionalSourceFiles.push({ name: f.name, kind, scenarioId, executionMode, longKey, shortKey, rows: t.length });
+                    collected.recognized.push({ name: f.name, kind, scenarioId, executionMode, rows: t.length });
+                    console.log(`[importer] Directional scenario detected: ${scenarioId} (${executionMode}) — ${t.length} rows`);
                     break;
                 }
                 default:
@@ -1078,6 +1126,20 @@ export async function ingestRunBundle(fileList) {
     const entryTradesByMode = Object.fromEntries(
         Object.entries(collected.entryTradesByMode).map(([mode, trades]) => [mode, enrichTradesWithOrderBlocks(trades, obLookup, pipSize)]),
     );
+    const directionalTradesByScenario = Object.fromEntries(
+        Object.entries(collected.directionalTradesByScenario).map(([key, trades]) => [key, enrichTradesWithOrderBlocks(trades, obLookup, pipSize)]),
+    );
+    const directionalEquityCurveByScenario = Object.fromEntries(
+        Object.entries(directionalTradesByScenario).map(([key, trades]) => [key, computeEquityCurve(trades)]),
+    );
+    const directionalCount = Object.keys(directionalTradesByScenario).length;
+    if (directionalCount > 0) {
+        console.log(`[importer] Directional scenarios imported: ${directionalCount}`);
+        Object.values(collected.directionalScenarioMeta).forEach((meta) => {
+            const rows = directionalTradesByScenario[`${meta.executionMode}__${meta.scenarioId}`]?.length ?? 0;
+            console.log(`  ${meta.scenarioId} (${meta.executionMode}): ${rows} trades`);
+        });
+    }
     const primaryTrades = tradesByVariant[primaryVariant] || [];
     const equityCurveByVariant = Object.fromEntries(
         Object.entries(tradesByVariant).map(([variant, trades]) => [variant, computeEquityCurve(trades)]),
@@ -1139,6 +1201,8 @@ export async function ingestRunBundle(fileList) {
         protection_results: sm.protection_results || {},
         entry_results: entryResultsSummary,
         entryResults: entryResultsSummary,
+        directional_results: sm.directional_results || sm.directionalResults || {},
+        directionalResults: sm.directional_results || sm.directionalResults || {},
         executionMode:sm.execution_mode || cfg.execution_mode || primaryVariant,
         reverseCancels: Number(sm.reverse_cancels ?? sm.reverseCancels ?? 0),
         date:         (sm.completed_at || new Date().toISOString()).slice(0, 10),
@@ -1193,6 +1257,13 @@ export async function ingestRunBundle(fileList) {
             tradesByMode: entryTradesByMode,
             equityCurveByMode: entryEquityCurveByMode,
             sourceFiles: collected.entrySourceFiles,
+            tradesOmittedForStorage: false,
+        },
+        directionalResults: {
+            tradesByScenario: directionalTradesByScenario,
+            equityCurveByScenario: directionalEquityCurveByScenario,
+            sourceFiles: collected.directionalSourceFiles,
+            scenarioMeta: collected.directionalScenarioMeta,
             tradesOmittedForStorage: false,
         },
         newsEvents: collected.newsEvents,
