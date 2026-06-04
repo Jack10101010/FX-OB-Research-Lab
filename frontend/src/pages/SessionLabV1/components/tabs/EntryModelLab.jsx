@@ -49,26 +49,38 @@ function CheckBox({ checked, color, onChange }) {
   );
 }
 
-export default function EntryModelLab() {
+export default function EntryModelLab({ entryModelData }) {
+  const models = entryModelData?.entryModels?.length > 0
+    ? entryModelData.entryModels
+    : ENTRY_MODELS;
+
   const [longModel, setLongModel] = useState("Triggered Edge Delay +2");
   const [shortModel, setShortModel] = useState("Triggered Edge Next");
   const [longsOn, setLongsOn] = useState(true);
   const [shortsOn, setShortsOn] = useState(true);
   const [includes, setIncludes] = useState(
-    ENTRY_MODELS.reduce((acc, m) => ({ ...acc, [m.name]: { long: true, short: true } }), {})
+    () => models.reduce((acc, m) => ({ ...acc, [m.name]: { long: true, short: true } }), {})
   );
 
   // for chart
-  const chartData = ENTRY_MODELS.map((m) => ({
+  const chartData = models.map((m) => ({
     name: m.name.replace("Penetration", "Pen").replace("Triggered Edge ", "TE ").replace("Baseline", "Base"),
     long: m.long.netR,
     short: m.short.netR,
   }));
 
-  const bestLong = [...ENTRY_MODELS].sort((a, b) => b.long.netR - a.long.netR)[0];
-  const worstLong = [...ENTRY_MODELS].sort((a, b) => a.long.netR - b.long.netR)[0];
-  const bestShort = [...ENTRY_MODELS].sort((a, b) => b.short.netR - a.short.netR)[0];
-  const worstShort = [...ENTRY_MODELS].sort((a, b) => a.short.netR - b.short.netR)[0];
+  const bestLong   = models.length > 0 ? [...models].sort((a, b) => b.long.netR  - a.long.netR)[0]  : null;
+  const worstLong  = models.length > 0 ? [...models].sort((a, b) => a.long.netR  - b.long.netR)[0]  : null;
+  const bestShort  = models.length > 0 ? [...models].sort((a, b) => b.short.netR - a.short.netR)[0] : null;
+  const worstShort = models.length > 0 ? [...models].sort((a, b) => a.short.netR - b.short.netR)[0] : null;
+
+  if (models.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-48 text-sm text-muted-lab font-num">
+        No entry model data available.
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">
@@ -116,18 +128,18 @@ export default function EntryModelLab() {
               </tr>
             </thead>
             <tbody>
-              {ENTRY_MODELS.map((m) => (
+              {models.map((m) => (
                 <tr key={m.name} className="border-b border-[hsl(var(--border-soft))]/40 hover:bg-[hsl(var(--panel-2))]/40">
                   <td className="px-3 py-1.5 text-[hsl(var(--text))] font-num">{m.name}</td>
                   <td className="px-1 py-1.5 font-num text-right text-[hsl(var(--text-2))] border-l border-[hsl(var(--border-soft))]/40">{m.long.trades}</td>
                   <td className={`px-1 py-1.5 font-num text-right ${m.long.netR >= 0 ? "text-[#22C55E]" : "text-[#EF4444]"}`}>{fmtR(m.long.netR, 2)}</td>
                   <td className="px-1 py-1.5 font-num text-right text-[hsl(var(--text))]">{m.long.wr}%</td>
-                  <td className="px-1 py-1.5 font-num text-right text-[hsl(var(--text))]">{m.long.pf}</td>
+                  <td className="px-1 py-1.5 font-num text-right text-[hsl(var(--text))]">{m.long.pf ?? "∞"}</td>
                   <td className={`px-1 py-1.5 font-num text-right ${m.long.exp >= 0 ? "text-[#22C55E]" : "text-[#EF4444]"}`}>{fmtR(m.long.exp, 2)}</td>
                   <td className="px-1 py-1.5 font-num text-right text-[hsl(var(--text-2))] border-l border-[hsl(var(--border-soft))]/40">{m.short.trades}</td>
                   <td className={`px-1 py-1.5 font-num text-right ${m.short.netR >= 0 ? "text-[#22C55E]" : "text-[#EF4444]"}`}>{fmtR(m.short.netR, 2)}</td>
                   <td className="px-1 py-1.5 font-num text-right text-[hsl(var(--text))]">{m.short.wr}%</td>
-                  <td className="px-1 py-1.5 font-num text-right text-[hsl(var(--text))]">{m.short.pf}</td>
+                  <td className="px-1 py-1.5 font-num text-right text-[hsl(var(--text))]">{m.short.pf ?? "∞"}</td>
                   <td className={`px-1 py-1.5 font-num text-right ${m.short.exp >= 0 ? "text-[#22C55E]" : "text-[#EF4444]"}`}>{fmtR(m.short.exp, 2)}</td>
                   <td className="px-2 py-1.5 text-center border-l border-[hsl(var(--border-soft))]/40">
                     <CheckBox
@@ -192,10 +204,10 @@ export default function EntryModelLab() {
                 </tr>
               </thead>
               <tbody>
-                <SnapshotRow label="Entry Model" bl={bestLong.name} wl={worstLong.name} bs={bestShort.name} ws={worstShort.name} />
-                <SnapshotRow label="Net R" bl={fmtR(bestLong.long.netR, 2)} wl={fmtR(worstLong.long.netR, 2)} bs={fmtR(bestShort.short.netR, 2)} ws={fmtR(worstShort.short.netR, 2)} mono tonal />
-                <SnapshotRow label="PF" bl={bestLong.long.pf} wl={worstLong.long.pf} bs={bestShort.short.pf} ws={worstShort.short.pf} mono />
-                <SnapshotRow label="WR" bl={`${bestLong.long.wr}%`} wl={`${worstLong.long.wr}%`} bs={`${bestShort.short.wr}%`} ws={`${worstShort.short.wr}%`} mono />
+                <SnapshotRow label="Entry Model" bl={bestLong?.name ?? "—"} wl={worstLong?.name ?? "—"} bs={bestShort?.name ?? "—"} ws={worstShort?.name ?? "—"} />
+                <SnapshotRow label="Net R" bl={fmtR(bestLong?.long?.netR ?? 0, 2)} wl={fmtR(worstLong?.long?.netR ?? 0, 2)} bs={fmtR(bestShort?.short?.netR ?? 0, 2)} ws={fmtR(worstShort?.short?.netR ?? 0, 2)} mono tonal />
+                <SnapshotRow label="PF" bl={bestLong?.long?.pf ?? "—"} wl={worstLong?.long?.pf ?? "—"} bs={bestShort?.short?.pf ?? "—"} ws={worstShort?.short?.pf ?? "—"} mono />
+                <SnapshotRow label="WR" bl={bestLong ? `${bestLong.long.wr}%` : "—"} wl={worstLong ? `${worstLong.long.wr}%` : "—"} bs={bestShort ? `${bestShort.short.wr}%` : "—"} ws={worstShort ? `${worstShort.short.wr}%` : "—"} mono />
               </tbody>
             </table>
           </div>

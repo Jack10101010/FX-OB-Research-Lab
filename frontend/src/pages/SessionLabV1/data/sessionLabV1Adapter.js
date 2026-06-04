@@ -652,3 +652,104 @@ export function buildTimeAnalysisData(sessionTrades, selectedSessionKey) {
 
   return { hourlyData, dayOfWeek, wrHeatmap, mode: "real" };
 }
+
+// ─── Phase C2 helpers ─────────────────────────────────────────────────────────
+
+/** Raw entry model key from a trade (multiple possible field names). */
+function getRawEntryModelKey(t) {
+  return t.entry_model_key || t.entry_model || t.entryFamily || t.entryModel || "";
+}
+
+/**
+ * Maps a raw entry model key to a display name compatible with mock ENTRY_MODELS names.
+ *
+ * Examples:
+ *   "entry_triggered_edge_25p0_same" → "TE Same"
+ *   "entry_penetration_10p0"         → "Penetration 10%"
+ *   ""                               → "Baseline"
+ */
+function getEntryModelDisplayName(key) {
+  if (!key) return "Baseline";
+  const k = String(key).toLowerCase().replace(/[\s-]+/g, "_").trim();
+  if (k === "baseline" || k === "") return "Baseline";
+  const penMatch = k.match(/penetration_?(\d+)/);
+  if (penMatch) return `Penetration ${penMatch[1]}%`;
+  if (k === "penetration") return "Penetration";
+  if (k.includes("triggered") || k.includes("te_") || k.startsWith("te")) {
+    if (k.endsWith("_same") || k.endsWith("same")) return "TE Same";
+    if (k.endsWith("_next") || k.endsWith("next")) return "TE Next";
+    const dMatch = k.match(/_d(\d+)$/);
+    if (dMatch) return `TE Delay +${dMatch[1]}`;
+    return "Triggered Edge";
+  }
+  return String(key).replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/** Trigger delay bucket label for a trade. */
+function getDelayBucket(t) {
+  const raw = t.fill_delay_candles ?? t.fillDelayCandles ?? t.trigger_delay ?? null;
+  const n   = raw != null ? Number(raw) : null;
+  if (n == null || n === 0) return "Same Candle";
+  if (n === 1) return "Next Candle";
+  if (n === 2) return "Delay +2";
+  if (n === 3) return "Delay +3";
+  return `Delay +${n}`;
+}
+
+/** Build one directional side for an ENTRY_MODELS-compatible row. */
+function buildDirectionalSide(trades) {
+  if (!trades.length) return { trades: 0, netR: 0, wr: 0, pf: null, exp: 0 };
+  const m = computeSideMetrics(trades);
+  return { trades: m.trades, netR: m.netR, wr: m.wr, pf: m.pf, exp: m.expectancy };
+}
+
+// ─── Phase C2 exported adapter function ──────────────────────────────────────
+
+/**
+ * Build EntryModelLab-shaped data for the selected session.
+ *
+ * Row shape is mock-compatible: { name, long: { trades, netR, wr, pf, exp }, short: { ... } }
+ *
+ * @param {object[]} sessionTrades — pre-filtered to one session
+ * @returns {{ entryModels, bestModel, delayBreakdown, mode: "real" }}
+ */
+export function buildEntryModelLabData(sessionTrades) {
+  const empty = { entryModels: [], bestModel: null, delayBreakdown: [], mode: "real" };
+  if (!sessionTrades || sessionTrades.length === 0) return empty;
+
+  // ── Entry models grouped by display name ──────────────────────────────────
+  const modelMap = new Map();
+  for (const t of sessionTrades) {
+    const name = getEntryModelDisplayName(getRawEntryModelKey(t));
+    if (!modelMap.has(name)) modelMap.set(name, []);
+    modelMap.get(name).push(t);
+  }
+
+  const entryModels = [...modelMap.entries()].map(([name, trades]) => ({
+    name,
+    long:  buildDirectionalSide(trades.filter((t) => normalizeDirection(t) === "Long")),
+    short: buildDirectionalSide(trades.filter((t) => normalizeDirection(t) === "Short")),
+  }));
+
+  // Sort by combined net R descending
+  entryModels.sort((a, b) => (b.long.netR + b.short.netR) - (a.long.netR + a.short.netR));
+
+  const bestModel = entryModels.length > 0 ? entryModels[0] : null;
+
+  // ── Delay breakdown ───────────────────────────────────────────────────────
+  const delayMap = new Map();
+  for (const t of sessionTrades) {
+    const bucket = getDelayBucket(t);
+    if (!delayMap.has(bucket)) delayMap.set(bucket, []);
+    delayMap.get(bucket).push(t);
+  }
+  const DELAY_ORDER = ["Same Candle", "Next Candle", "Delay +2", "Delay +3"];
+  const delayBreakdown = DELAY_ORDER
+    .filter((b) => delayMap.has(b))
+    .map((bucket) => {
+      const m = computeSideMetrics(delayMap.get(bucket));
+      return { bucket, trades: m.trades, netR: m.netR, wr: m.wr, pf: m.pf };
+    });
+
+  return { entryModels, bestModel, delayBreakdown, mode: "real" };
+}

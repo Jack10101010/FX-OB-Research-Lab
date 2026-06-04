@@ -24,7 +24,7 @@ const TABS = [
   { key: "streaks",     label: "Streaks",        icon: ListOrdered },
 ];
 
-export default function DeepDive({ session, activeTab, setActiveTab, overviewData, directionData, structureData, timeAnalysisData }) {
+export default function DeepDive({ session, activeTab, setActiveTab, overviewData, directionData, structureData, timeAnalysisData, entryModelData }) {
   return (
     <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel))] p-5 md:p-6" data-testid="session-deep-dive">
       {/* Header */}
@@ -73,7 +73,7 @@ export default function DeepDive({ session, activeTab, setActiveTab, overviewDat
         {activeTab === "overview" && <OverviewTab session={session} overviewData={overviewData} />}
         {activeTab === "direction" && <DirectionLab directionData={directionData} />}
         {activeTab === "structure" && <StructureLab structureData={structureData} />}
-        {activeTab === "entry" && <EntryModelLab />}
+        {activeTab === "entry" && <EntryModelLab key={session?.key} entryModelData={entryModelData} />}
         {activeTab === "time" && <TimeAnalysis timeAnalysisData={timeAnalysisData} session={session} />}
         {activeTab === "ob" && <OrderBlockLab />}
         {activeTab === "failure" && <FailureAnalysis />}
