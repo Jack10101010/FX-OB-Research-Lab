@@ -23,6 +23,7 @@ import {
   buildOverviewDataFromSessionTrades,
   buildDirectionLabData,
   buildStructureLabData,
+  buildTimeAnalysisData,
 } from "./data/sessionLabV1Adapter";
 
 /** Maps V1 lowercase keys → canonical session names used by sessionRules. */
@@ -117,6 +118,14 @@ export default function SessionLabPage() {
         ? buildStructureLabData(selectedSessionTrades)
         : null,
     [selectedSessionTrades]
+  );
+
+  const timeAnalysisData = useMemo(
+    () =>
+      selectedSessionTrades.length > 0 && canonicalSelectedKey
+        ? buildTimeAnalysisData(selectedSessionTrades, canonicalSelectedKey)
+        : null,
+    [selectedSessionTrades, canonicalSelectedKey]
   );
 
   const toggleSessionField = (v1Key, field) => {
@@ -237,6 +246,7 @@ export default function SessionLabPage() {
             overviewData={overviewData}
             directionData={directionData}
             structureData={structureData}
+            timeAnalysisData={timeAnalysisData}
           />
           <div className="xl:sticky xl:top-6 xl:self-start">
             <QuickControls session={selected} onToggle={toggleSessionField} />

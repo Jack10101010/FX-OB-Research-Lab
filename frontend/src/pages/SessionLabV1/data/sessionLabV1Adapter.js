@@ -6,6 +6,7 @@
  *
  * Phase A: buildSessionListFromTrades, buildImpactSummaryFromTrades, buildVisualSummaryFromTrades
  * Phase B: buildOverviewDataFromSessionTrades, buildDirectionLabData, buildStructureLabData
+ * Phase C1: buildTimeAnalysisData
  *
  * All functions are side-effect-free and safe inside useMemo.
  *
@@ -522,4 +523,132 @@ export function buildStructureLabData(sessionTrades) {
     matrix,
     overTime: null,  // Phase C: time-series requires timestamp bucketing
   };
+}
+
+// ─── Phase C1 helpers ─────────────────────────────────────────────────────────
+
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/** Parse a trade's fill/entry timestamp into a Date (UTC). Returns null if unavailable. */
+function getTradeDate(t) {
+  const ts = t.fill_time ?? t.fillTime ?? t.entry_time ?? t.entryTime ?? t.timestamp ?? null;
+  if (!ts) return null;
+  const d = new Date(typeof ts === "number" ? (ts < 1e10 ? ts * 1000 : ts) : ts);
+  return isFinite(d.getTime()) ? d : null;
+}
+
+/** UTC hour (0–23) for a trade. Returns null if timestamp missing. */
+function getTradeUtcHour(t) {
+  const d = getTradeDate(t);
+  return d ? d.getUTCHours() : null;
+}
+
+/** Short weekday label ("Mon"–"Sun") for a trade's timestamp. Returns null if missing. */
+function getTradeWeekday(t) {
+  const d = getTradeDate(t);
+  return d ? WEEKDAYS[d.getUTCDay()] : null;
+}
+
+/**
+ * Returns the UTC hour integers for a given canonical session key.
+ * e.g. "London" → [7, 8, 9], "Outside" → [20, 21, 22, 23]
+ */
+function getSessionHours(sessionKey) {
+  const def = SESSION_DEFINITIONS.find((d) => d.key === sessionKey);
+  if (!def || !def.startUtc || !def.endUtc) return [];
+  const [sh] = def.startUtc.split(":").map(Number);
+  const [eh] = def.endUtc.split(":").map(Number);
+  const hours = [];
+  if (def.key === "Outside") {
+    // 20:00–00:00 UTC wraps midnight → [20, 21, 22, 23]
+    for (let h = sh; h < 24; h++) hours.push(h);
+  } else {
+    for (let h = sh; h < eh; h++) hours.push(h);
+  }
+  return hours;
+}
+
+// ─── Phase C1 exported adapter function ──────────────────────────────────────
+
+/**
+ * Build TimeAnalysis-shaped data for the selected session.
+ *
+ * Returns only session hours by default (Phase C1 scope).
+ * wrHeatmap is null when insufficient day×hour combinations exist.
+ *
+ * @param {object[]} sessionTrades     — pre-filtered to one session
+ * @param {string}   selectedSessionKey — canonical session key (e.g. "London")
+ * @returns {{ hourlyData, dayOfWeek, wrHeatmap, mode: "real" }}
+ */
+export function buildTimeAnalysisData(sessionTrades, selectedSessionKey) {
+  const empty = { hourlyData: [], dayOfWeek: [], wrHeatmap: null, mode: "real" };
+  if (!sessionTrades || sessionTrades.length === 0) return empty;
+
+  const sessionHours = getSessionHours(selectedSessionKey);
+  if (sessionHours.length === 0) return empty;
+
+  // ── hourlyData ─────────────────────────────────────────────────────────────
+  const hourBuckets = new Map();
+  for (const h of sessionHours) hourBuckets.set(h, []);
+  for (const t of sessionTrades) {
+    const h = getTradeUtcHour(t);
+    if (h != null && hourBuckets.has(h)) hourBuckets.get(h).push(t);
+  }
+
+  const hourlyData = sessionHours.map((h) => {
+    const trades = hourBuckets.get(h);
+    const label  = `${String(h).padStart(2, "0")}:00`;
+    if (!trades || !trades.length) {
+      return { hour: label, trades: 0, netR: 0, wr: 0, pf: "—", avgR: 0, loss: 0 };
+    }
+    const m = computeSideMetrics(trades);
+    return {
+      hour:   label,
+      trades: m.trades,
+      netR:   m.netR,
+      wr:     m.wr,
+      pf:     m.pf != null ? m.pf : "∞",
+      avgR:   m.expectancy,
+      loss:   m.trades > 0 ? Number(((m.losses / m.trades) * 100).toFixed(1)) : 0,
+    };
+  });
+
+  // ── dayOfWeek ──────────────────────────────────────────────────────────────
+  const ALL_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const dayBuckets = {};
+  for (const day of ALL_DAYS) dayBuckets[day] = [];
+  for (const t of sessionTrades) {
+    const day = getTradeWeekday(t);
+    if (day && Object.prototype.hasOwnProperty.call(dayBuckets, day)) {
+      dayBuckets[day].push(t);
+    }
+  }
+  const dayOfWeek = ALL_DAYS
+    .filter((day) => dayBuckets[day].length > 0)
+    .map((day) => ({
+      day,
+      netR: Number(dayBuckets[day].reduce((s, t) => s + getR(t), 0).toFixed(2)),
+    }));
+
+  // ── wrHeatmap ──────────────────────────────────────────────────────────────
+  const heatDays  = ALL_DAYS.filter((day) => dayBuckets[day].length > 0);
+  const heatHours = sessionHours.map((h) => `${String(h).padStart(2, "0")}:00`);
+
+  let hasHeatData = false;
+  const heatRows = heatDays.map((day) => {
+    const values = sessionHours.map((h) => {
+      const trades = (dayBuckets[day] || []).filter((t) => getTradeUtcHour(t) === h);
+      if (!trades.length) return null;
+      const wins    = trades.filter(isWin).length;
+      const decided = trades.filter((t) => isWin(t) || isLoss(t)).length;
+      if (decided === 0) return null;
+      hasHeatData = true;
+      return Math.round((wins / decided) * 100);
+    });
+    return { day, values };
+  });
+
+  const wrHeatmap = hasHeatData ? { hours: heatHours, rows: heatRows } : null;
+
+  return { hourlyData, dayOfWeek, wrHeatmap, mode: "real" };
 }
