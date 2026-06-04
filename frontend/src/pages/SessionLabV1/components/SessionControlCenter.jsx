@@ -84,8 +84,8 @@ function SessionCard({ session, selected, onSelect, onToggle }) {
           <Icon size={16} />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="font-display text-base font-semibold tracking-tight uppercase text-[hsl(var(--text))]">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <h3 className="font-display text-sm font-semibold tracking-tight uppercase text-[hsl(var(--text))] truncate">
               {session.name}
             </h3>
             <VerdictPill verdict={session.verdict} />
