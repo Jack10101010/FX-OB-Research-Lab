@@ -7,6 +7,7 @@ import { EquityCurveV2, MiniLine } from "@/components/lab/EquityCurve";
 import { DataTable, Pill } from "@/components/lab/DataTable";
 import { NeonButton, NeonInput, NeonSelect, FilterToggle } from "@/components/lab/controls";
 import { RunConfigStrip } from "@/components/lab/RunConfigStrip";
+import { TradeSanityCard } from "@/components/lab/TradeSanityCard";
 import { compactTimeframe, formatRunDateRange, getRunDisplayName, reloadFullRunFromSidecar, updateRunBundle, useDataset } from "@/data/store";
 import { setActiveRunId, setSelectedTradeVariant } from "@/data/store";
 import { getNextStep, resolveRunReference, summarizeRunForDelta, buildRunDelta } from "@/data/projectWorkflow";
@@ -1807,6 +1808,13 @@ export default function RunDetail() {
                     </>
                 )}
             </div>
+
+            {/* RUN-SANITY-CARD-1: Trade sanity — direction/structure/outcome breakdown */}
+            <TradeSanityCard
+                trades={displayTrades}
+                resultView={resultView}
+                className="mx-6 mb-3"
+            />
 
             {isIndexOnlyRun && (
                 <div className="px-6 mb-4">

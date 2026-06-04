@@ -487,6 +487,64 @@ export function summarizeTradeSanity(trades, options = {}) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Direction × Structure × Outcome matrix
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Cross-tabulates performance trades by direction, structure, and outcome.
+ *
+ * @param {object[]} trades — canonical trade array
+ * @returns {{ rows: object[], totals: object }}
+ *   rows: stable order [long·BOS, long·CHoCH, short·BOS, short·CHoCH],
+ *         only non-empty rows included.
+ *   totals: { win, loss, flat, total } across all performance trades.
+ */
+export function buildDirStructMatrix(trades) {
+    const list = Array.isArray(trades) ? trades : [];
+    const cells = {};
+    const initCell = () => ({ win: 0, loss: 0, flat: 0, total: 0 });
+    const getCell = (dir, struct) => {
+        const key = `${dir}:${struct}`;
+        if (!cells[key]) cells[key] = initCell();
+        return cells[key];
+    };
+
+    let totalWin = 0, totalLoss = 0, totalFlat = 0, totalPerf = 0;
+
+    for (const trade of list) {
+        if (!isPerformanceTrade(trade)) continue;
+        totalPerf++;
+        const dir = directionBucket(trade) ?? "unknown";
+        const struct = normalizeStructure(trade);
+        const cell = getCell(dir, struct);
+        cell.total++;
+        if (isWinTrade(trade)) { cell.win++; totalWin++; }
+        else if (isLossTrade(trade)) { cell.loss++; totalLoss++; }
+        else { cell.flat++; totalFlat++; }
+    }
+
+    const ROWS = [
+        { dir: "long",  struct: "BOS"   },
+        { dir: "long",  struct: "CHoCH" },
+        { dir: "short", struct: "BOS"   },
+        { dir: "short", struct: "CHoCH" },
+    ];
+
+    const rows = ROWS
+        .map(({ dir, struct }) => {
+            const key = `${dir}:${struct}`;
+            const c = cells[key] || initCell();
+            return { dir, struct, ...c };
+        })
+        .filter((r) => r.total > 0);
+
+    return {
+        rows,
+        totals: { win: totalWin, loss: totalLoss, flat: totalFlat, total: totalPerf },
+    };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // UI display translation — internal enums → human-friendly strings.
 //
 // The backend emits raw outcome strings like "INVALID" and cancel reasons

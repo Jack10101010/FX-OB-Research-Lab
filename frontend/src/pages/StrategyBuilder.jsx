@@ -911,36 +911,74 @@ export default function StrategyBuilder() {
                         </div>
                     )}
 
-                    {/* Section E: Entry Protection (unified) */}
+                    {/* Section E: Pre-Trigger OB Protection */}
                     {showEntryProtection && (
-                        <div className="mb-4 border border-[hsl(var(--border-soft))] clip-bevel-sm p-3 space-y-2">
-                            <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab mb-2">Entry Protection</div>
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Cancel if OB taps then moves away before trigger</div>
-                                    <div className="text-[10.5px] text-muted-lab">Used-OB retrace cancel for triggered-edge setups.</div>
+                        <div className="mb-4 border border-[hsl(var(--border-soft))] clip-bevel-sm p-3 space-y-3">
+
+                            {/* Header */}
+                            <div>
+                                <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab">Pre-Trigger OB Protection</div>
+                                <div className="mt-1 text-[10.5px] text-muted-lab">
+                                    Remove an OB from the entry pool when price interacts with it but fails to confirm the triggered-edge entry. Cancelled OBs are tracked as ghost candidates in post-run analysis.
                                 </div>
-                                <NeonToggle checked={Boolean(cfg.triggeredEdgeCancelOnRetrace)} onChange={set("triggeredEdgeCancelOnRetrace")} />
                             </div>
-                            {cfg.triggeredEdgeCancelOnRetrace && (
-                                <div className="grid grid-cols-2 gap-3">
-                                    <Field label="Retrace Cancel Pips">
-                                        <NeonInput type="number" min="0" step="0.1" value={cfg.triggeredEdgeCancelRetracePips} onChange={(e) => set("triggeredEdgeCancelRetracePips")(Number(e.target.value))} />
-                                    </Field>
-                                    <Field label="Retrace Cancel OB %">
-                                        <NeonInput type="number" min="0" step="1" value={cfg.triggeredEdgeCancelRetraceObPct} onChange={(e) => set("triggeredEdgeCancelRetraceObPct")(Number(e.target.value))} />
-                                    </Field>
+
+                            {/* A · Retrace Cancel */}
+                            <div className="border-t border-[hsl(var(--border-soft))] pt-3">
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Enable Retrace Cancel</div>
+                                        <div className="text-[10.5px] text-muted-lab">Cancels a tapped-but-untriggered OB if price moves away from the zone before reaching the entry trigger.</div>
+                                    </div>
+                                    <NeonToggle checked={Boolean(cfg.triggeredEdgeCancelOnRetrace)} onChange={set("triggeredEdgeCancelOnRetrace")} />
                                 </div>
-                            )}
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Cancel on first failed tag</div>
-                                    <div className="text-[10.5px] text-muted-lab">Cancel if OB taps but price fails to reach trigger within 1 candle.</div>
-                                </div>
-                                <NeonToggle checked={Boolean(cfg.triggeredEdgeCancelOnFirstFailedTag)} onChange={set("triggeredEdgeCancelOnFirstFailedTag")} />
+                                {cfg.triggeredEdgeCancelOnRetrace && (
+                                    <div className="mt-2 grid grid-cols-2 gap-3">
+                                        <Field label="Retrace Distance (pips)" hint="Cancel when price moves this many pips above the OB edge">
+                                            <NeonInput type="number" min="0" step="0.1" value={cfg.triggeredEdgeCancelRetracePips} onChange={(e) => set("triggeredEdgeCancelRetracePips")(Number(e.target.value))} />
+                                        </Field>
+                                        <Field label="Retrace Distance (OB %)" hint="Alternative threshold: X% of OB height above the edge">
+                                            <NeonInput type="number" min="0" step="1" value={cfg.triggeredEdgeCancelRetraceObPct} onChange={(e) => set("triggeredEdgeCancelRetraceObPct")(Number(e.target.value))} />
+                                        </Field>
+                                    </div>
+                                )}
                             </div>
-                            <div className="text-[10px] text-muted-lab italic">
-                                These settings apply to all triggered-edge models, including directional long/short.
+
+                            {/* B · First Failed Tag */}
+                            <div className="border-t border-[hsl(var(--border-soft))] pt-3">
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Enable First Failed Tag Cancel</div>
+                                        <div className="text-[10.5px] text-muted-lab">Cancels an OB after the first failed visit: price tags the OB, fails to reach the trigger threshold, then exits the OB.</div>
+                                    </div>
+                                    <NeonToggle checked={Boolean(cfg.triggeredEdgeCancelOnFirstFailedTag)} onChange={set("triggeredEdgeCancelOnFirstFailedTag")} />
+                                </div>
+                            </div>
+
+                            {/* Coming later — display-only, no backend config emitted */}
+                            <div className="border-t border-[hsl(var(--border-soft))] pt-3">
+                                <div className="control-label text-[10px] font-ui uppercase tracking-wider mb-2" style={{ color: "hsl(var(--text-2) / 0.35)" }}>
+                                    Coming later — not active in this backtest
+                                </div>
+                                <div className="space-y-1.5 opacity-35 pointer-events-none select-none" aria-hidden="true">
+                                    {[
+                                        "Cancel after N failed tags",
+                                        "Cancel after X candles from first tag",
+                                        "Cancel at session boundary",
+                                        "Cancel after retrace by OB-height multiple",
+                                        "Cancel after structure break",
+                                        "Delay-arm validity: cancel if OB exits before arm",
+                                    ].map((label) => (
+                                        <div key={label} className="flex items-center justify-between border border-[hsl(var(--border-soft))] clip-bevel-sm px-3 py-2">
+                                            <div className="text-[10.5px] text-muted-lab">{label}</div>
+                                            <div className="w-7 h-3.5 rounded-full bg-[hsl(var(--border-soft))]" />
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="text-[10px] text-muted-lab italic border-t border-[hsl(var(--border-soft))] pt-2">
+                                Applies to all triggered-edge models, including directional long/short.
                             </div>
                         </div>
                     )}
