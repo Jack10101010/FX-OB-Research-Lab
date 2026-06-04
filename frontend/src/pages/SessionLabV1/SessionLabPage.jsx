@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import Header from "./components/Header";
 import RunImpactSummary from "./components/RunImpactSummary";
 import SessionControlCenter from "./components/SessionControlCenter";
@@ -9,25 +9,113 @@ import ImpactOnRun from "./components/ImpactOnRun";
 import HelpLegend from "./components/HelpLegend";
 import SessionSettingsModal from "./components/SessionSettingsModal";
 import { SESSION_LIST } from "./mockData";
+import { useTradeUniverse } from "../../data/useTradeUniverse";
+import {
+  buildDefaultSessionRules,
+  applySessionRules,
+} from "../../components/lab/session/analytics/sessionAnalytics";
+import { SESSION_KEYS } from "../../components/lab/session/config/sessionConfig";
+import {
+  buildSessionListFromTrades,
+  buildImpactSummaryFromTrades,
+  buildVisualSummaryFromTrades,
+} from "./data/sessionLabV1Adapter";
+
+/** Maps V1 lowercase keys → canonical session names used by sessionRules. */
+const V1_TO_CANONICAL = {
+  asia:    "Asia",
+  london:  "London",
+  lull:    "London Lull",
+  ny:      "New York",
+  nypm:    "NY PM",
+  outside: "Outside",
+};
 
 export default function SessionLabPage() {
-  const [sessions, setSessions] = useState(SESSION_LIST);
-  const [selectedKey, setSelectedKey] = useState("london");
-  const [direction, setDirection] = useState("both"); // both | long | short
-  const [previewMode, setPreviewMode] = useState("filtered"); // original | filtered
+  const { trades: allTrades = [] } = useTradeUniverse();
+  const hasRealData = Array.isArray(allTrades) && allTrades.length > 0;
+
+  // Rule state for real data (keyed by canonical session name)
+  const [sessionRules, setSessionRules] = useState(() =>
+    buildDefaultSessionRules(SESSION_KEYS)
+  );
+
+  // Mock fallback state
+  const [mockSessions, setMockSessions] = useState(SESSION_LIST);
+
+  const [selectedKey, setSelectedKey]   = useState("london");
+  const [direction, setDirection]       = useState("both");
+  const [previewMode, setPreviewMode]   = useState("filtered");
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState("overview");
+  const [activeTab, setActiveTab]       = useState("overview");
 
-  const selected = sessions.find((s) => s.key === selectedKey) || sessions[1];
+  // Apply session rules to get filtered trades
+  const { includedTrades: filteredTrades = [] } = useMemo(
+    () =>
+      hasRealData
+        ? applySessionRules(allTrades, sessionRules)
+        : { includedTrades: [] },
+    [allTrades, sessionRules, hasRealData]
+  );
 
-  const toggleSessionField = (key, field) => {
-    setSessions((prev) =>
-      prev.map((s) => (s.key === key ? { ...s, [field]: !s[field] } : s))
-    );
+  // Adapter-derived data (null when no run loaded)
+  const realSessionList = useMemo(
+    () =>
+      hasRealData ? buildSessionListFromTrades(allTrades, sessionRules) : null,
+    [allTrades, sessionRules, hasRealData]
+  );
+
+  const impactSummary = useMemo(
+    () =>
+      hasRealData
+        ? buildImpactSummaryFromTrades(allTrades, filteredTrades)
+        : null,
+    [allTrades, filteredTrades, hasRealData]
+  );
+
+  const visualData = useMemo(
+    () => (hasRealData ? buildVisualSummaryFromTrades(allTrades) : null),
+    [allTrades, hasRealData]
+  );
+
+  const sessions = hasRealData && realSessionList ? realSessionList : mockSessions;
+  const selected = sessions.find((s) => s.key === selectedKey) || sessions[0];
+
+  const toggleSessionField = (v1Key, field) => {
+    if (hasRealData) {
+      const canonicalKey = V1_TO_CANONICAL[v1Key];
+      if (!canonicalKey) return;
+      setSessionRules((prev) => {
+        const rule = prev[canonicalKey] ?? {
+          enabled:   true,
+          direction: { long: true, short: true },
+          structure: { BOS: true, CHoCH: true },
+        };
+        if (field === "enabled")
+          return { ...prev, [canonicalKey]: { ...rule, enabled: !rule.enabled } };
+        if (field === "longs")
+          return { ...prev, [canonicalKey]: { ...rule, direction: { ...rule.direction, long: !rule.direction.long } } };
+        if (field === "shorts")
+          return { ...prev, [canonicalKey]: { ...rule, direction: { ...rule.direction, short: !rule.direction.short } } };
+        if (field === "bos")
+          return { ...prev, [canonicalKey]: { ...rule, structure: { ...rule.structure, BOS: !rule.structure.BOS } } };
+        if (field === "choch")
+          return { ...prev, [canonicalKey]: { ...rule, structure: { ...rule.structure, CHoCH: !rule.structure.CHoCH } } };
+        return prev;
+      });
+    } else {
+      setMockSessions((prev) =>
+        prev.map((s) => (s.key === v1Key ? { ...s, [field]: !s[field] } : s))
+      );
+    }
   };
 
   const resetAllRules = () => {
-    setSessions(SESSION_LIST);
+    if (hasRealData) {
+      setSessionRules(buildDefaultSessionRules(SESSION_KEYS));
+    } else {
+      setMockSessions(SESSION_LIST);
+    }
   };
 
   return (
@@ -63,7 +151,35 @@ export default function SessionLabPage() {
           onResetAll={resetAllRules}
         />
 
-        <RunImpactSummary previewMode={previewMode} setPreviewMode={setPreviewMode} />
+        {/* Data mode badge */}
+        <div className="flex items-center">
+          {hasRealData ? (
+            <span
+              className="inline-flex items-center gap-1.5 rounded-md border border-[hsl(var(--success)/0.30)] bg-[hsl(var(--success)/0.08)] px-2.5 py-1 text-[10px] font-ui font-medium text-[hsl(var(--success))] uppercase tracking-wider"
+              data-testid="data-mode-badge"
+            >
+              <span
+                className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--success))]"
+                style={{ boxShadow: "0 0 6px hsl(var(--success))" }}
+              />
+              Live Data · {allTrades.length} trades
+            </span>
+          ) : (
+            <span
+              className="inline-flex items-center gap-1.5 rounded-md border border-[#F59E0B]/30 bg-[#F59E0B08] px-2.5 py-1 text-[10px] font-ui font-medium text-[#F59E0B] uppercase tracking-wider"
+              data-testid="data-mode-badge"
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-[#F59E0B]" />
+              Mock Data · Load a run to see live analysis
+            </span>
+          )}
+        </div>
+
+        <RunImpactSummary
+          previewMode={previewMode}
+          setPreviewMode={setPreviewMode}
+          impactSummary={impactSummary}
+        />
 
         <SessionControlCenter
           sessions={sessions}
@@ -72,9 +188,9 @@ export default function SessionLabPage() {
           onToggle={toggleSessionField}
         />
 
-        <VisualSummaryStrip />
+        <VisualSummaryStrip visualData={visualData} />
 
-        {/* Deep Dive area: 3-column layout — content / quick controls / impact */}
+        {/* Deep Dive: 3-column layout — content / quick controls / impact */}
         <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_240px_300px] 2xl:grid-cols-[minmax(0,1fr)_280px_360px] gap-6">
           <DeepDive
             session={selected}

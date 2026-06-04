@@ -1,5 +1,5 @@
 import React from "react";
-import { IMPACT_SUMMARY } from "../mockData";
+import { IMPACT_SUMMARY as MOCK_IMPACT_SUMMARY } from "../mockData";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Sub-helpers
@@ -40,21 +40,42 @@ function RunCol({ eyebrow, netR, netRClass, stats, testId }) {
 
 /** Delta column — headline + row-chip breakdown. */
 function DeltaCol({ delta, testId }) {
+  const netRPos = delta.netR >= 0;
+  const wrPos   = delta.wr   >= 0;
+  const pfPos   = delta.pf   != null && delta.pf >= 0;
+  const ddPos   = delta.dd   >= 0;
+
   return (
     <div className="min-w-0" data-testid={testId}>
       <div className="text-[9.5px] font-ui uppercase tracking-[0.16em] font-semibold text-muted-lab mb-2">
         Delta Impact
       </div>
-      <div className="font-num tabular-nums text-[2.1rem] font-bold leading-none mb-3 text-[hsl(var(--success))]">
-        +{delta.netR}R
+      <div
+        className={`font-num tabular-nums text-[2.1rem] font-bold leading-none mb-3 ${
+          netRPos ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]"
+        }`}
+      >
+        {netRPos ? "+" : ""}{delta.netR}R
       </div>
       <div className="flex flex-wrap gap-1.5">
-        <span className="row-chip row-chip-success">{Math.abs(delta.trades)} removed</span>
-        <span className="row-chip row-chip-success">{delta.losses_removed} losses out</span>
-        <span className="row-chip row-chip-warning">{delta.winners_removed} wins out</span>
-        <span className="row-chip row-chip-success">ΔWR +{delta.wr}%</span>
-        <span className="row-chip row-chip-success">ΔPF +{delta.pf}</span>
-        <span className="row-chip row-chip-success">ΔDD +{delta.dd}R</span>
+        <span className="row-chip row-chip-secondary">{Math.abs(delta.trades)} removed</span>
+        <span className={`row-chip ${delta.losses_removed > 0 ? "row-chip-success" : "row-chip-secondary"}`}>
+          {delta.losses_removed} losses out
+        </span>
+        <span className={`row-chip ${delta.winners_removed > 0 ? "row-chip-warning" : "row-chip-secondary"}`}>
+          {delta.winners_removed} wins out
+        </span>
+        <span className={`row-chip ${wrPos ? "row-chip-success" : "row-chip-danger"}`}>
+          ΔWR {wrPos ? "+" : ""}{delta.wr}%
+        </span>
+        {delta.pf != null && (
+          <span className={`row-chip ${pfPos ? "row-chip-success" : "row-chip-danger"}`}>
+            ΔPF {pfPos ? "+" : ""}{delta.pf}
+          </span>
+        )}
+        <span className={`row-chip ${ddPos ? "row-chip-success" : "row-chip-danger"}`}>
+          ΔDD {ddPos ? "+" : ""}{delta.dd}R
+        </span>
       </div>
     </div>
   );
@@ -107,8 +128,11 @@ function PreviewToggle({ previewMode, setPreviewMode }) {
 // Main component
 // ─────────────────────────────────────────────────────────────────────────────
 
-export default function RunImpactSummary({ previewMode, setPreviewMode }) {
-  const { baseline, preview, delta } = IMPACT_SUMMARY;
+export default function RunImpactSummary({ previewMode, setPreviewMode, impactSummary }) {
+  const { baseline, preview, delta } = impactSummary ?? MOCK_IMPACT_SUMMARY;
+
+  const baseNetRPos    = baseline.netR >= 0;
+  const previewNetRPos = preview.netR  >= 0;
 
   return (
     <div
@@ -132,12 +156,12 @@ export default function RunImpactSummary({ previewMode, setPreviewMode }) {
         <div className="flex-1 min-w-0 px-4 py-3 lg:border-r lg:border-[hsl(var(--border-soft))]">
           <RunCol
             eyebrow="Original Run"
-            netR={`+${baseline.netR}R`}
-            netRClass="text-[hsl(var(--success))]"
+            netR={`${baseNetRPos ? "+" : ""}${baseline.netR}R`}
+            netRClass={baseNetRPos ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]"}
             stats={[
               { label: "Trades",   value: baseline.trades },
               { label: "Win Rate", value: `${baseline.wr}%` },
-              { label: "PF",       value: baseline.pf },
+              { label: "PF",       value: baseline.pf ?? "∞" },
               { label: "Max DD",   value: `${baseline.dd}R`, colorClass: "text-[hsl(var(--danger))]" },
             ]}
             testId="impact-baseline"
@@ -150,12 +174,12 @@ export default function RunImpactSummary({ previewMode, setPreviewMode }) {
         <div className="flex-1 min-w-0 px-4 py-3 lg:border-r lg:border-[hsl(var(--border-soft))]">
           <RunCol
             eyebrow="Filtered Preview"
-            netR={`+${preview.netR}R`}
-            netRClass="text-[hsl(var(--success))]"
+            netR={`${previewNetRPos ? "+" : ""}${preview.netR}R`}
+            netRClass={previewNetRPos ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]"}
             stats={[
               { label: "Trades",   value: preview.trades },
               { label: "Win Rate", value: `${preview.wr}%` },
-              { label: "PF",       value: preview.pf },
+              { label: "PF",       value: preview.pf ?? "∞" },
               { label: "Max DD",   value: `${preview.dd}R`, colorClass: "text-[hsl(var(--danger))]" },
             ]}
             testId="impact-preview"

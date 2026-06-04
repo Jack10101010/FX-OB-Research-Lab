@@ -5,10 +5,10 @@ import {
   PieChart, Pie, LabelList,
 } from "recharts";
 import {
-  NET_R_BY_SESSION,
-  TRADES_BY_DIRECTION,
-  TRADES_BY_STRUCTURE,
-  TOP_ENTRY_MODEL,
+  NET_R_BY_SESSION     as MOCK_NET_R_BY_SESSION,
+  TRADES_BY_DIRECTION  as MOCK_TRADES_BY_DIRECTION,
+  TRADES_BY_STRUCTURE  as MOCK_TRADES_BY_STRUCTURE,
+  TOP_ENTRY_MODEL      as MOCK_TOP_ENTRY_MODEL,
 } from "../mockData";
 
 const tooltipStyle = {
@@ -31,36 +31,50 @@ function Card({ children, className = "", testId }) {
   );
 }
 
-export default function VisualSummaryStrip() {
+export default function VisualSummaryStrip({ visualData }) {
+  const netRBySession     = visualData?.netRBySession     ?? MOCK_NET_R_BY_SESSION;
+  const topEntryModel     = visualData?.topEntryModel     ?? MOCK_TOP_ENTRY_MODEL;
+  const tradesByDirection = visualData?.tradesByDirection ?? MOCK_TRADES_BY_DIRECTION;
+  const tradesByStructure = visualData?.tradesByStructure ?? MOCK_TRADES_BY_STRUCTURE;
+
+  // Compute totals + legend dynamically from data arrays
+  const dirTotal  = tradesByDirection.reduce((s, d) => s + d.value, 0);
+  const dirLegend = tradesByDirection.map((d) => ({
+    name:  d.name,
+    value: `${d.value} (${dirTotal > 0 ? ((d.value / dirTotal) * 100).toFixed(1) : 0}%)`,
+    color: d.color,
+  }));
+
+  const structTotal  = tradesByStructure.reduce((s, d) => s + d.value, 0);
+  const structLegend = tradesByStructure.map((d) => ({
+    name:  d.name,
+    value: `${d.value} (${structTotal > 0 ? ((d.value / structTotal) * 100).toFixed(1) : 0}%)`,
+    color: d.color,
+  }));
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-      <NetRBySession />
+      <NetRBySession data={netRBySession} />
       <TradesByDonut
         title="Trades by Direction"
-        data={TRADES_BY_DIRECTION}
-        total={27}
-        legend={[
-          { name: "Long",  value: "18 (66.7%)", color: "#22C55E" },
-          { name: "Short", value: "9 (33.3%)",  color: "#EF4444" },
-        ]}
+        data={tradesByDirection}
+        total={dirTotal}
+        legend={dirLegend}
         testId="trades-by-direction"
       />
       <TradesByDonut
         title="Trades by Structure"
-        data={TRADES_BY_STRUCTURE}
-        total={27}
-        legend={[
-          { name: "BOS",   value: "17 (63.0%)", color: "#3B82F6" },
-          { name: "CHoCH", value: "10 (37.0%)", color: "#A855F7" },
-        ]}
+        data={tradesByStructure}
+        total={structTotal}
+        legend={structLegend}
         testId="trades-by-structure"
       />
-      <TopEntryModel />
+      <TopEntryModel data={topEntryModel} />
     </div>
   );
 }
 
-function NetRBySession() {
+function NetRBySession({ data }) {
   return (
     <Card>
       <div className="flex items-baseline justify-between mb-3">
@@ -71,7 +85,7 @@ function NetRBySession() {
       </div>
       <div className="h-44" data-testid="chart-net-r-by-session">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={NET_R_BY_SESSION} margin={{ top: 16, right: 8, bottom: 4, left: -16 }}>
+          <BarChart data={data} margin={{ top: 16, right: 8, bottom: 4, left: -16 }}>
             <XAxis
               dataKey="name"
               tick={{ fill: "#64748B", fontSize: 10, fontFamily: "IBM Plex Mono, monospace" }}
@@ -91,7 +105,7 @@ function NetRBySession() {
               formatter={(v) => [`${v > 0 ? "+" : ""}${v}R`, "Net R"]}
             />
             <Bar dataKey="netR" radius={[3, 3, 0, 0]}>
-              {NET_R_BY_SESSION.map((d) => (
+              {data.map((d) => (
                 <Cell
                   key={d.name}
                   fill={d.netR >= 0 ? "#22C55E" : "#EF4444"}
@@ -156,7 +170,7 @@ function TradesByDonut({ title, data, total, legend, testId }) {
   );
 }
 
-function TopEntryModel() {
+function TopEntryModel({ data }) {
   return (
     <Card>
       <div className="flex items-baseline justify-between mb-3">
@@ -168,7 +182,7 @@ function TopEntryModel() {
       <div className="h-44" data-testid="chart-top-entry">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart
-            data={TOP_ENTRY_MODEL}
+            data={data}
             layout="vertical"
             margin={{ top: 4, right: 28, bottom: 4, left: 4 }}
           >
@@ -187,7 +201,7 @@ function TopEntryModel() {
               formatter={(v) => [`${v > 0 ? "+" : ""}${v}R`, "Net R"]}
             />
             <Bar dataKey="netR" radius={[3, 3, 3, 3]}>
-              {TOP_ENTRY_MODEL.map((d) => (
+              {data.map((d) => (
                 <Cell key={d.name} fill={d.netR >= 0 ? "#22C55E" : "#EF4444"} fillOpacity={0.85} />
               ))}
               <LabelList
