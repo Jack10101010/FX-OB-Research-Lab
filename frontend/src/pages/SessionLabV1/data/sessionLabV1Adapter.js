@@ -1261,3 +1261,56 @@ export function buildImpactOnRunData(canonicalSessionKey, allRunTrades) {
     return { scenario: label, metrics, deltas };
   });
 }
+
+// ─── Phase C5: Session-scoped Visual Summary ──────────────────────────────────
+
+/**
+ * Build direction/structure/entry-model chart data scoped to the selected session.
+ *
+ * @param {object[]} selectedSessionTrades  trades belonging to the selected session
+ * @returns {{ tradesByDirection, tradesByStructure, topEntryModel }}
+ */
+export function buildSessionVisualData(selectedSessionTrades) {
+  if (!Array.isArray(selectedSessionTrades) || selectedSessionTrades.length === 0) {
+    return { tradesByDirection: [], tradesByStructure: [], topEntryModel: [] };
+  }
+
+  const tradesByDirection = [
+    {
+      name:  "Long",
+      value: selectedSessionTrades.filter((t) => normalizeDirection(t) === "Long").length,
+      color: "#22C55E",
+    },
+    {
+      name:  "Short",
+      value: selectedSessionTrades.filter((t) => normalizeDirection(t) === "Short").length,
+      color: "#EF4444",
+    },
+  ];
+
+  const tradesByStructure = [
+    {
+      name:  "BOS",
+      value: selectedSessionTrades.filter((t) => normalizeStructure(t) === "BOS").length,
+      color: "#3B82F6",
+    },
+    {
+      name:  "CHoCH",
+      value: selectedSessionTrades.filter((t) => normalizeStructure(t) === "CHoCH").length,
+      color: "#A855F7",
+    },
+  ];
+
+  const modelMap = new Map();
+  for (const t of selectedSessionTrades) {
+    const label = entryModelDef ? entryModelDef.getLabel(t) : "Baseline";
+    modelMap.set(label, (modelMap.get(label) ?? 0) + getR(t));
+  }
+
+  const topEntryModel = [...modelMap.entries()]
+    .map(([name, netR]) => ({ name, netR: Number(netR.toFixed(2)) }))
+    .sort((a, b) => b.netR - a.netR)
+    .slice(0, 8);
+
+  return { tradesByDirection, tradesByStructure, topEntryModel };
+}

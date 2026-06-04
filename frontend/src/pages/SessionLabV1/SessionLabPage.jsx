@@ -30,6 +30,7 @@ import {
   buildOrderBlockLabData,
   buildFailureAnalysisData,
   buildImpactOnRunData,
+  buildSessionVisualData,
 } from "./data/sessionLabV1Adapter";
 
 /** Maps V1 lowercase keys → canonical session names used by sessionRules. */
@@ -171,6 +172,14 @@ export default function SessionLabPage() {
     [allTrades, canonicalSelectedKey, hasRealData]
   );
 
+  const sessionVisualData = useMemo(
+    () =>
+      selectedSessionTrades.length > 0
+        ? buildSessionVisualData(selectedSessionTrades)
+        : { tradesByDirection: [], tradesByStructure: [], topEntryModel: [] },
+    [selectedSessionTrades]
+  );
+
   const toggleSessionField = (v1Key, field) => {
     if (hasRealData) {
       const canonicalKey = V1_TO_CANONICAL[v1Key];
@@ -278,7 +287,7 @@ export default function SessionLabPage() {
           onToggle={toggleSessionField}
         />
 
-        <VisualSummaryStrip visualData={visualData} />
+        <VisualSummaryStrip visualData={visualData} sessionVisualData={sessionVisualData} />
 
         {/* Deep Dive: top row = Deep Dive + Quick Controls; Impact full width below */}
         <div className="space-y-6">

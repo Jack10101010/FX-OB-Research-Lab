@@ -31,11 +31,11 @@ function Card({ children, className = "", testId }) {
   );
 }
 
-export default function VisualSummaryStrip({ visualData }) {
-  const netRBySession     = visualData?.netRBySession     ?? MOCK_NET_R_BY_SESSION;
-  const topEntryModel     = visualData?.topEntryModel     ?? MOCK_TOP_ENTRY_MODEL;
-  const tradesByDirection = visualData?.tradesByDirection ?? MOCK_TRADES_BY_DIRECTION;
-  const tradesByStructure = visualData?.tradesByStructure ?? MOCK_TRADES_BY_STRUCTURE;
+export default function VisualSummaryStrip({ visualData, sessionVisualData }) {
+  const netRBySession     = visualData?.netRBySession ?? MOCK_NET_R_BY_SESSION;
+  const tradesByDirection = sessionVisualData?.tradesByDirection ?? visualData?.tradesByDirection ?? MOCK_TRADES_BY_DIRECTION;
+  const tradesByStructure = sessionVisualData?.tradesByStructure ?? visualData?.tradesByStructure ?? MOCK_TRADES_BY_STRUCTURE;
+  const topEntryModel     = sessionVisualData?.topEntryModel     ?? visualData?.topEntryModel     ?? MOCK_TOP_ENTRY_MODEL;
 
   // Compute totals + legend dynamically from data arrays
   const dirTotal  = tradesByDirection.reduce((s, d) => s + d.value, 0);
@@ -85,7 +85,7 @@ function NetRBySession({ data }) {
       </div>
       <div className="h-44" data-testid="chart-net-r-by-session">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data} margin={{ top: 16, right: 8, bottom: 4, left: -16 }}>
+          <BarChart data={data} margin={{ top: 20, right: 12, bottom: 4, left: -16 }}>
             <XAxis
               dataKey="name"
               tick={{ fill: "#64748B", fontSize: 10, fontFamily: "IBM Plex Mono, monospace" }}
@@ -132,15 +132,16 @@ function TradesByDonut({ title, data, total, legend, testId }) {
       <div className="mb-3">
         <SectionLabel>{title}</SectionLabel>
       </div>
-      <div className="relative flex items-center gap-4" data-testid={testId}>
-        <div className="relative h-40 w-40 shrink-0">
+      <div className="flex flex-col items-center gap-3" data-testid={testId}>
+        {/* Donut — smaller so it leaves room for the legend */}
+        <div className="relative h-28 w-28 shrink-0">
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie
                 data={data}
                 dataKey="value"
-                innerRadius={42}
-                outerRadius={64}
+                innerRadius={30}
+                outerRadius={50}
                 paddingAngle={2}
                 stroke="none"
               >
@@ -152,16 +153,17 @@ function TradesByDonut({ title, data, total, legend, testId }) {
             </PieChart>
           </ResponsiveContainer>
           <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-            <span className="font-num tabular-nums text-2xl font-bold text-[hsl(var(--text))]">{total}</span>
+            <span className="font-num tabular-nums text-xl font-bold text-[hsl(var(--text))]">{total}</span>
             <span className="text-[9px] text-muted-lab uppercase tracking-[0.12em] font-ui">Trades</span>
           </div>
         </div>
-        <ul className="flex-1 space-y-2">
+        {/* Legend — full card width, no overflow risk */}
+        <ul className="w-full space-y-2">
           {legend.map((l) => (
-            <li key={l.name} className="flex items-center gap-2 text-xs">
-              <span className="h-2.5 w-2.5 rounded-sm shrink-0" style={{ backgroundColor: l.color }} />
-              <span className="font-ui font-medium text-[hsl(var(--text))]">{l.name}</span>
-              <span className="ml-auto font-num text-[hsl(var(--text-2))]">{l.value}</span>
+            <li key={l.name} className="flex items-center gap-2 min-w-0">
+              <span className="h-2 w-2 rounded-sm shrink-0" style={{ backgroundColor: l.color }} />
+              <span className="font-ui text-xs font-medium text-[hsl(var(--text))] shrink-0">{l.name}</span>
+              <span className="ml-auto font-num text-xs text-[hsl(var(--text-2))] shrink-0 whitespace-nowrap">{l.value}</span>
             </li>
           ))}
         </ul>
@@ -184,16 +186,16 @@ function TopEntryModel({ data }) {
           <BarChart
             data={data}
             layout="vertical"
-            margin={{ top: 4, right: 28, bottom: 4, left: 4 }}
+            margin={{ top: 4, right: 32, bottom: 4, left: 4 }}
           >
             <XAxis type="number" hide />
             <YAxis
               dataKey="name"
               type="category"
-              tick={{ fill: "#94A3B8", fontSize: 10, fontFamily: "IBM Plex Mono, monospace" }}
+              tick={{ fill: "#94A3B8", fontSize: 9.5, fontFamily: "IBM Plex Mono, monospace" }}
               axisLine={false}
               tickLine={false}
-              width={86}
+              width={90}
             />
             <Tooltip
               cursor={{ fill: "rgba(34,211,238,0.05)" }}
