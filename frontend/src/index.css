@@ -687,3 +687,50 @@
 [data-theme="terminal"] polyline {
     filter: none !important;
 }
+
+/* ============================================================
+   SESSION LAB V1 (Emergent prototype) — utility classes
+   These are self-contained and only affect components under
+   frontend/src/pages/SessionLabV1/.
+   ============================================================ */
+
+/* uppercase monospace section eyebrow label */
+.label-eyebrow {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 10px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: #64748b;
+    font-weight: 500;
+}
+
+/* tabular numerics for metric display */
+.tabular {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+}
+
+/* subtle grain dot-pattern overlay */
+.grain {
+    position: relative;
+}
+.grain::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(
+        rgba(255, 255, 255, 0.015) 1px,
+        transparent 1px
+    );
+    background-size: 3px 3px;
+    pointer-events: none;
+    border-radius: inherit;
+}
+
+/* selected card cyan glow (Session Lab V1) */
+.card-glow {
+    box-shadow:
+        0 0 0 1px #22d3ee,
+        0 0 18px rgba(34, 211, 238, 0.18),
+        inset 0 0 24px rgba(34, 211, 238, 0.04);
+}

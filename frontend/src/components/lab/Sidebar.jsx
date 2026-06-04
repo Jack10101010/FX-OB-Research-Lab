@@ -44,6 +44,7 @@ const NAV_GROUPS = [
             { to: "/trade-inspector", label: "Trade Inspector", icon: Crosshair },
             { to: "/failures-lab",    label: "Failures Lab",    icon: Microscope },
             { to: "/session-lab",     label: "Session Lab",     icon: Clock },
+            { to: "/session-lab-v1",  label: "Session Lab V1",  icon: FlaskConical, badge: "Mock" },
         ],
     },
     {
@@ -169,7 +170,8 @@ export function Sidebar() {
                                         />
                                         <item.icon className={cn("w-4 h-4", isActive && "text-[hsl(var(--accent-primary))]")} />
                                         {!collapsed && <span>{item.label}</span>}
-                                        {isActive && !collapsed && <ChevronRight className="w-3.5 h-3.5 ml-auto text-[hsl(var(--accent-primary))]" />}
+                                        {!collapsed && item.badge && <span className="ml-auto text-[9px] font-ui px-1 py-0.5 rounded bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))] leading-none">{item.badge}</span>}
+                                        {isActive && !collapsed && !item.badge && <ChevronRight className="w-3.5 h-3.5 ml-auto text-[hsl(var(--accent-primary))]" />}
                                     </>
                                 )}
                             </NavLink>
