@@ -1,5 +1,5 @@
 import React from "react";
-import { Panel, SectionLabel, Metric, fmtR } from "../primitives";
+import { SectionLabel, Metric, fmtR } from "../primitives";
 import {
   LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid, Legend,
 } from "recharts";
@@ -29,7 +29,7 @@ export default function OverviewTab({ session }) {
   return (
     <div className="space-y-5">
       {/* Top metric row */}
-      <div className="rounded-lg border border-[#223142] bg-[#0D1520] px-4 py-4">
+      <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] px-4 py-4">
         <SectionLabel className="mb-3">Session Overview</SectionLabel>
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-x-4 gap-y-3">
           <Metric label="Net R" value={`+${m.netR}R`} tone="pos" testId="metric-net-r" />
@@ -46,10 +46,10 @@ export default function OverviewTab({ session }) {
       {/* Chart + Breakdown */}
       <div className="grid grid-cols-1 lg:grid-cols-[1.3fr_1fr] gap-4">
         {/* Net R over time */}
-        <div className="rounded-lg border border-[#223142] bg-[#0D1520] p-4">
+        <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-4">
           <div className="flex items-baseline justify-between mb-3">
             <SectionLabel>Net R Over Time</SectionLabel>
-            <div className="flex items-center gap-3 text-[10px] font-mono uppercase tracking-wider">
+            <div className="flex items-center gap-3 text-[10px] font-num uppercase tracking-wider">
               <Legend2 color="#22C55E" label="This Session" />
               <Legend2 color="#94A3B8" label="All Sessions" dashed />
             </div>
@@ -93,17 +93,17 @@ export default function OverviewTab({ session }) {
         </div>
 
         {/* Breakdown Snapshot */}
-        <div className="rounded-lg border border-[#223142] bg-[#0D1520] p-4">
+        <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-4">
           <div className="flex items-baseline justify-between mb-3">
             <SectionLabel>Breakdown Snapshot</SectionLabel>
-            <button className="text-[10px] text-[#22D3EE] hover:text-[#67E8F9] font-mono uppercase tracking-wider inline-flex items-center gap-1">
+            <button className="text-[10px] text-[hsl(var(--accent-primary))] hover:opacity-80 font-num uppercase tracking-wider inline-flex items-center gap-1">
               View Full <ArrowRight size={10} />
             </button>
           </div>
-          <div className="overflow-hidden rounded-md border border-[#223142]">
+          <div className="overflow-hidden rounded-md border border-[hsl(var(--border-soft))]">
             <table className="w-full text-xs">
               <thead>
-                <tr className="bg-[#172331] text-[#64748B] uppercase tracking-wider text-[9px]">
+                <tr className="bg-[hsl(var(--panel-2))] text-muted-lab uppercase tracking-wider text-[9px]">
                   <th className="text-left px-3 py-2 font-medium">Category</th>
                   <th className="text-left px-2 py-2 font-medium">Best</th>
                   <th className="text-right px-2 py-2 font-medium">Net R</th>
@@ -113,14 +113,14 @@ export default function OverviewTab({ session }) {
               </thead>
               <tbody>
                 {dd.breakdown.map((row) => (
-                  <tr key={row.cat} className="border-t border-[#223142]/60 hover:bg-[#172331]/40">
-                    <td className="px-3 py-1.5 text-[#94A3B8]">{row.cat}</td>
-                    <td className="px-2 py-1.5 font-mono text-[#E5EDF7]">{row.best}</td>
-                    <td className={`px-2 py-1.5 font-mono text-right ${row.bestR >= 0 ? "text-[#22C55E]" : "text-[#EF4444]"}`}>
+                  <tr key={row.cat} className="border-t border-[hsl(var(--border-soft))]/60 hover:bg-[hsl(var(--panel-2))]/40">
+                    <td className="px-3 py-1.5 text-[hsl(var(--text-2))]">{row.cat}</td>
+                    <td className="px-2 py-1.5 font-num text-[hsl(var(--text))]">{row.best}</td>
+                    <td className={`px-2 py-1.5 font-num text-right ${row.bestR >= 0 ? "text-[#22C55E]" : "text-[#EF4444]"}`}>
                       {fmtR(row.bestR, 2)}
                     </td>
-                    <td className="px-2 py-1.5 font-mono text-[#E5EDF7]">{row.worst}</td>
-                    <td className={`px-3 py-1.5 font-mono text-right ${row.worstR >= 0 ? "text-[#22C55E]" : "text-[#EF4444]"}`}>
+                    <td className="px-2 py-1.5 font-num text-[hsl(var(--text))]">{row.worst}</td>
+                    <td className={`px-3 py-1.5 font-num text-right ${row.worstR >= 0 ? "text-[#22C55E]" : "text-[#EF4444]"}`}>
                       {row.worstR === 0 ? "—" : fmtR(row.worstR, 2)}
                     </td>
                   </tr>
@@ -144,7 +144,7 @@ export default function OverviewTab({ session }) {
 
 function Legend2({ color, label, dashed }) {
   return (
-    <span className="inline-flex items-center gap-1.5 text-[#94A3B8]">
+    <span className="inline-flex items-center gap-1.5 text-[hsl(var(--text-2))]">
       <svg width="18" height="2" viewBox="0 0 18 2">
         <line
           x1="0" y1="1" x2="18" y2="1"
@@ -159,16 +159,16 @@ function Legend2({ color, label, dashed }) {
 }
 
 function MiniCard({ icon: Icon, label, value, sub, tone }) {
-  const cls = tone === "pos" ? "text-[#22C55E]" : tone === "neg" ? "text-[#EF4444]" : tone === "cyan" ? "text-[#22D3EE]" : "text-[#E5EDF7]";
+  const cls = tone === "pos" ? "text-[#22C55E]" : tone === "neg" ? "text-[#EF4444]" : tone === "cyan" ? "text-[hsl(var(--accent-primary))]" : "text-[hsl(var(--text))]";
   return (
-    <div className="rounded-lg border border-[#223142] bg-[#0D1520] p-3 flex items-center gap-3">
-      <div className="h-9 w-9 rounded-md bg-[#172331] border border-[#223142] flex items-center justify-center text-[#22D3EE]">
+    <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-3 flex items-center gap-3">
+      <div className="h-9 w-9 rounded-md bg-[hsl(var(--panel-2))] border border-[hsl(var(--border-soft))] flex items-center justify-center text-[hsl(var(--accent-primary))]">
         <Icon size={14} />
       </div>
       <div className="min-w-0">
         <div className="label-eyebrow">{label}</div>
-        <div className={`font-mono tabular text-sm font-semibold ${cls}`}>{value}</div>
-        <div className="text-[10px] text-[#64748B] font-mono">{sub}</div>
+        <div className={`font-num tabular text-sm font-semibold ${cls}`}>{value}</div>
+        <div className="text-[10px] text-muted-lab font-num">{sub}</div>
       </div>
     </div>
   );

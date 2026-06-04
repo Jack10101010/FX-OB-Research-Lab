@@ -1,5 +1,5 @@
 import React from "react";
-import { Panel, SectionLabel, fmtR } from "./primitives";
+import { SectionLabel, fmtR } from "./primitives";
 import { SESSION_IMPACT_CARDS } from "../mockData";
 import { Info } from "lucide-react";
 
@@ -16,7 +16,7 @@ function ImpactCard({ data }) {
   ];
 
   return (
-    <div className="rounded-lg border border-[#223142] bg-[#0D1520] p-4">
+    <div className="rounded-lg border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-4">
       <div className="label-eyebrow mb-3">{data.scenario}</div>
       <div className="grid grid-cols-3 gap-x-3 gap-y-3">
         {rows.map((r) => (
@@ -30,20 +30,20 @@ function ImpactCard({ data }) {
 function Metric({ label, value, delta, deltaPos }) {
   return (
     <div className="min-w-0">
-      <div className="text-[9px] text-[#64748B] uppercase tracking-wider font-mono truncate">{label}</div>
-      <div className="font-mono tabular text-sm font-bold text-[#E5EDF7] truncate">{value}</div>
-      <div className={`text-[10px] font-mono mt-0.5 truncate ${deltaPos ? "text-[#22C55E]" : "text-[#EF4444]"}`}>{delta}</div>
+      <div className="text-[9px] text-muted-lab uppercase tracking-wider font-num truncate">{label}</div>
+      <div className="font-num tabular text-sm font-bold text-[hsl(var(--text))] truncate">{value}</div>
+      <div className={`text-[10px] font-num mt-0.5 truncate ${deltaPos ? "text-[#22C55E]" : "text-[#EF4444]"}`}>{delta}</div>
     </div>
   );
 }
 
 export default function ImpactOnRun() {
   return (
-    <Panel className="p-4" data-testid="impact-on-run">
+    <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel))] p-4" data-testid="impact-on-run">
       <div className="flex items-center justify-between mb-3">
         <div className="flex flex-col">
-          <span className="font-display text-base font-bold text-[#E5EDF7]">Impact of This Session</span>
-          <span className="text-[10px] text-[#64748B] font-mono uppercase tracking-wider">What-if scenarios</span>
+          <span className="font-display text-base font-bold text-[hsl(var(--text))]">Impact of This Session</span>
+          <span className="text-[10px] text-muted-lab font-num uppercase tracking-wider">What-if scenarios</span>
         </div>
       </div>
 
@@ -56,10 +56,10 @@ export default function ImpactOnRun() {
       <div className="mt-4 flex items-start gap-2 rounded-md border border-[#3B82F6]/30 bg-[#3B82F6]/8 p-3 text-[11px]">
         <Info size={13} className="text-[#3B82F6] mt-0.5 shrink-0" />
         <div>
-          <div className="text-[#60A5FA] font-medium">Changes above update preview metrics in real time.</div>
-          <div className="text-[#94A3B8] mt-0.5">Use this to test ideas and discover what truly drives your edge.</div>
+          <div className="text-[hsl(var(--accent-primary))] font-medium">Changes above update preview metrics in real time.</div>
+          <div className="text-[hsl(var(--text-2))] mt-0.5">Use this to test ideas and discover what truly drives your edge.</div>
         </div>
       </div>
-    </Panel>
+    </div>
   );
 }

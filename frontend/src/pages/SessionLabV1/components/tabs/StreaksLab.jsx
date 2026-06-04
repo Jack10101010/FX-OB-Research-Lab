@@ -28,8 +28,8 @@ export default function StreaksLab() {
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs text-[#94A3B8]">Winning / losing streak analysis and sequence insights.</p>
-        <div className="inline-flex items-center gap-1 rounded-lg border border-[#223142] bg-[#0D1520] p-1">
+        <p className="text-xs text-[hsl(var(--text-2))]">Winning / losing streak analysis and sequence insights.</p>
+        <div className="inline-flex items-center gap-1 rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-1">
           {[
             { v: "all", label: "All" },
             { v: "wins", label: "Wins" },
@@ -41,7 +41,7 @@ export default function StreaksLab() {
               data-testid={`streak-filter-${o.v}`}
               className={[
                 "px-3 py-1.5 text-xs font-medium rounded-md transition-all",
-                filter === o.v ? "bg-[#22D3EE]/15 text-[#22D3EE]" : "text-[#94A3B8] hover:text-[#E5EDF7]",
+                filter === o.v ? "bg-[hsl(var(--accent-primary)/0.12)] text-[hsl(var(--accent-primary))]" : "text-[hsl(var(--text-2))] hover:text-[hsl(var(--text))]",
               ].join(" ")}
             >
               {o.label}
@@ -51,7 +51,7 @@ export default function StreaksLab() {
       </div>
 
       {/* Sequence strip */}
-      <div className="rounded-lg border border-[#223142] bg-[#0D1520] p-4">
+      <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-4">
         <SectionLabel className="mb-3">W / L Sequence Strip</SectionLabel>
         <div className="relative overflow-x-auto pb-12">
           <div className="flex items-center gap-1.5 min-w-max">
@@ -64,19 +64,19 @@ export default function StreaksLab() {
                   onMouseEnter={() => setHoverIndex(i)}
                   onFocus={() => setHoverIndex(i)}
                   className={[
-                    "h-9 w-9 rounded-full flex items-center justify-center text-[11px] font-bold font-mono transition-all relative",
+                    "h-9 w-9 rounded-full flex items-center justify-center text-[11px] font-bold font-num transition-all relative",
                     isWin
                       ? "bg-[#22C55E]/15 text-[#22C55E] border border-[#22C55E]/40"
                       : "bg-[#EF4444]/15 text-[#EF4444] border border-[#EF4444]/40",
-                    isHover ? "scale-110 shadow-[0_0_12px_rgba(34,211,238,0.4)] border-[#22D3EE]" : "",
+                    isHover ? "scale-110 shadow-[0_0_12px_rgba(34,211,238,0.4)] border-[hsl(var(--accent-primary))]" : "",
                   ].join(" ")}
                 >
                   {v}
                   {isHover && (
-                    <div className="absolute left-1/2 top-full mt-3 -translate-x-1/2 z-10 w-48 rounded-md border border-[#22D3EE]/40 bg-[#121C29] p-3 text-left shadow-2xl">
-                      <div className="text-[11px] font-bold text-[#E5EDF7]">{SAMPLE_TRADE_HOVER.id}</div>
-                      <div className="text-[10px] text-[#64748B] font-mono mb-2">{SAMPLE_TRADE_HOVER.time}</div>
-                      <ul className="space-y-1 text-[10px] font-mono">
+                    <div className="absolute left-1/2 top-full mt-3 -translate-x-1/2 z-10 w-48 rounded-md border border-[hsl(var(--accent-primary))]/40 bg-[hsl(var(--panel-2))] p-3 text-left shadow-2xl">
+                      <div className="text-[11px] font-bold text-[hsl(var(--text))]">{SAMPLE_TRADE_HOVER.id}</div>
+                      <div className="text-[10px] text-muted-lab font-num mb-2">{SAMPLE_TRADE_HOVER.time}</div>
+                      <ul className="space-y-1 text-[10px] font-num">
                         <TR k="Session" v={SAMPLE_TRADE_HOVER.session} />
                         <TR k="Direction" v={SAMPLE_TRADE_HOVER.direction} />
                         <TR k="Structure" v={SAMPLE_TRADE_HOVER.structure} />
@@ -91,7 +91,7 @@ export default function StreaksLab() {
               );
             })}
           </div>
-          <div className="mt-2 text-[10px] text-[#64748B] font-mono">
+          <div className="mt-2 text-[10px] text-muted-lab font-num">
             Hover over any W/L dot to see trade details.
           </div>
         </div>
@@ -100,7 +100,7 @@ export default function StreaksLab() {
       {/* Streak summary + Runs test + Distribution */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Summary */}
-        <div className="rounded-lg border border-[#223142] bg-[#0D1520] p-4">
+        <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-4">
           <SectionLabel className="mb-3">Streak Summary</SectionLabel>
           <div className="grid grid-cols-2 gap-4">
             <Stat label="Longest Win Streak" value={STREAK_SUMMARY.longestWin} sub={`Net R +${STREAK_SUMMARY.netRWin}R`} tone="pos" />
@@ -111,7 +111,7 @@ export default function StreaksLab() {
         </div>
 
         {/* Runs test */}
-        <div className="rounded-lg border border-[#F59E0B]/30 bg-gradient-to-b from-[#231804] to-[#0D1520] p-4">
+        <div className="rounded border border-[#F59E0B]/30 bg-gradient-to-b from-[#231804] to-[#0D1520] p-4">
           <SectionLabel className="mb-3">Runs Test (Randomness)</SectionLabel>
           <div className="grid grid-cols-2 gap-4 mb-4">
             <Stat label="Z Score" value={STREAK_SUMMARY.zScore} tone="amber" />
@@ -121,16 +121,16 @@ export default function StreaksLab() {
             <AlertTriangle size={14} className="text-[#F59E0B]" />
             <div>
               <div className="font-display text-sm font-bold text-[#F59E0B] uppercase tracking-wider">{STREAK_SUMMARY.verdict}</div>
-              <div className="text-[10px] text-[#94A3B8] font-mono">Trade outcomes show negative dependency.</div>
+              <div className="text-[10px] text-[hsl(var(--text-2))] font-num">Trade outcomes show negative dependency.</div>
             </div>
           </div>
         </div>
 
         {/* Distribution */}
-        <div className="rounded-lg border border-[#223142] bg-[#0D1520] p-4">
+        <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-4">
           <div className="flex items-baseline justify-between mb-3">
             <SectionLabel>Streak Distribution</SectionLabel>
-            <div className="flex items-center gap-3 text-[10px] font-mono uppercase tracking-wider">
+            <div className="flex items-center gap-3 text-[10px] font-num uppercase tracking-wider">
               <Legend2 color="#22C55E" label="Wins" />
               <Legend2 color="#EF4444" label="Losses" />
             </div>
@@ -147,7 +147,7 @@ export default function StreaksLab() {
               </BarChart>
             </ResponsiveContainer>
           </div>
-          <div className="text-[10px] text-[#64748B] font-mono mt-1 text-center">Streak Length</div>
+          <div className="text-[10px] text-muted-lab font-num mt-1 text-center">Streak Length</div>
         </div>
       </div>
     </div>
@@ -155,27 +155,27 @@ export default function StreaksLab() {
 }
 
 function TR({ k, v, tone }) {
-  const cls = tone === "pos" ? "text-[#22C55E]" : tone === "neg" ? "text-[#EF4444]" : "text-[#E5EDF7]";
+  const cls = tone === "pos" ? "text-[#22C55E]" : tone === "neg" ? "text-[#EF4444]" : "text-[hsl(var(--text))]";
   return (
     <li className="flex items-center justify-between gap-3">
-      <span className="text-[#64748B]">{k}</span>
+      <span className="text-muted-lab">{k}</span>
       <span className={cls}>{v}</span>
     </li>
   );
 }
 function Stat({ label, value, sub, tone }) {
-  const cls = tone === "pos" ? "text-[#22C55E]" : tone === "neg" ? "text-[#EF4444]" : tone === "amber" ? "text-[#F59E0B]" : "text-[#E5EDF7]";
+  const cls = tone === "pos" ? "text-[#22C55E]" : tone === "neg" ? "text-[#EF4444]" : tone === "amber" ? "text-[#F59E0B]" : "text-[hsl(var(--text))]";
   return (
     <div>
       <div className="label-eyebrow">{label}</div>
-      <div className={`font-mono tabular text-2xl font-bold ${cls}`}>{value}</div>
-      {sub && <div className="text-[10px] text-[#64748B] font-mono mt-0.5">{sub}</div>}
+      <div className={`font-num tabular text-2xl font-bold ${cls}`}>{value}</div>
+      {sub && <div className="text-[10px] text-muted-lab font-num mt-0.5">{sub}</div>}
     </div>
   );
 }
 function Legend2({ color, label }) {
   return (
-    <span className="inline-flex items-center gap-1.5 text-[#94A3B8]">
+    <span className="inline-flex items-center gap-1.5 text-[hsl(var(--text-2))]">
       <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color, boxShadow: `0 0 6px ${color}` }} />
       {label}
     </span>

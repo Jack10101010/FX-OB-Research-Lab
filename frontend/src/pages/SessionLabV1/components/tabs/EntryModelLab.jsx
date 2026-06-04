@@ -24,11 +24,11 @@ function ModelSelect({ label, value, onChange, testId }) {
           data-testid={testId}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="w-full appearance-none rounded-md border border-[#223142] bg-[#172331] px-3 py-2 pr-8 text-xs text-[#E5EDF7] font-mono focus:outline-none focus:border-[#22D3EE]"
+          className="w-full appearance-none rounded-md border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] px-3 py-2 pr-8 text-xs text-[hsl(var(--text))] font-num focus:outline-none focus:border-[hsl(var(--accent-primary))]"
         >
           {ENTRY_MODEL_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
         </select>
-        <ChevronDown size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#94A3B8] pointer-events-none" />
+        <ChevronDown size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[hsl(var(--text-2))] pointer-events-none" />
       </div>
     </label>
   );
@@ -40,7 +40,7 @@ function CheckBox({ checked, color, onChange }) {
       onClick={onChange}
       className={[
         "h-4 w-4 rounded border flex items-center justify-center transition-all",
-        checked ? "" : "border-[#223142] bg-[#0D1520]",
+        checked ? "" : "border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))]",
       ].join(" ")}
       style={checked ? { backgroundColor: `${color}1A`, borderColor: color } : {}}
     >
@@ -73,7 +73,7 @@ export default function EntryModelLab() {
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs text-[#94A3B8]">Compare all entry models. Enable different models for Longs vs Shorts.</p>
+        <p className="text-xs text-[hsl(var(--text-2))]">Compare all entry models. Enable different models for Longs vs Shorts.</p>
         <div className="flex items-center gap-3">
           <span className="label-eyebrow">Include in Preview</span>
           <ToggleChip label="LONGS" active={longsOn} onClick={() => setLongsOn((v) => !v)} color="green" testId="el-longs-toggle" />
@@ -81,34 +81,34 @@ export default function EntryModelLab() {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-end gap-4 rounded-lg border border-[#22D3EE]/20 bg-[#0F2A33]/40 p-4">
+      <div className="flex flex-wrap items-end gap-4 rounded border border-[hsl(var(--accent-primary))]/20 bg-[hsl(var(--accent-primary)/0.06)] p-4">
         <ModelSelect label="Longs Use" value={longModel} onChange={setLongModel} testId="el-long-model" />
         <ModelSelect label="Shorts Use" value={shortModel} onChange={setShortModel} testId="el-short-model" />
       </div>
 
       {/* Performance table */}
-      <div className="rounded-lg border border-[#223142] bg-[#0D1520] p-4">
+      <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-4">
         <SectionLabel className="mb-3">Entry Model Performance (This Session)</SectionLabel>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
-              <tr className="text-[#64748B] uppercase tracking-wider text-[9px] border-b border-[#223142]">
+              <tr className="text-muted-lab uppercase tracking-wider text-[9px] border-b border-[hsl(var(--border-soft))]">
                 <th className="text-left px-3 py-2 font-medium" rowSpan={2}>Entry Model</th>
-                <th className="text-center px-2 py-1 font-medium border-l border-[#223142]" colSpan={5}>
+                <th className="text-center px-2 py-1 font-medium border-l border-[hsl(var(--border-soft))]" colSpan={5}>
                   <span className="text-[#22C55E]">LONGS</span>
                 </th>
-                <th className="text-center px-2 py-1 font-medium border-l border-[#223142]" colSpan={5}>
+                <th className="text-center px-2 py-1 font-medium border-l border-[hsl(var(--border-soft))]" colSpan={5}>
                   <span className="text-[#EF4444]">SHORTS</span>
                 </th>
-                <th className="text-center px-2 py-1 font-medium border-l border-[#223142]" colSpan={2} rowSpan={2}>Include</th>
+                <th className="text-center px-2 py-1 font-medium border-l border-[hsl(var(--border-soft))]" colSpan={2} rowSpan={2}>Include</th>
               </tr>
-              <tr className="text-[#64748B] uppercase tracking-wider text-[9px] border-b border-[#223142]">
-                <th className="text-right px-1 py-1.5 font-medium border-l border-[#223142]">Trades</th>
+              <tr className="text-muted-lab uppercase tracking-wider text-[9px] border-b border-[hsl(var(--border-soft))]">
+                <th className="text-right px-1 py-1.5 font-medium border-l border-[hsl(var(--border-soft))]">Trades</th>
                 <th className="text-right px-1 py-1.5 font-medium">Net R</th>
                 <th className="text-right px-1 py-1.5 font-medium">WR</th>
                 <th className="text-right px-1 py-1.5 font-medium">PF</th>
                 <th className="text-right px-1 py-1.5 font-medium">Exp.</th>
-                <th className="text-right px-1 py-1.5 font-medium border-l border-[#223142]">Trades</th>
+                <th className="text-right px-1 py-1.5 font-medium border-l border-[hsl(var(--border-soft))]">Trades</th>
                 <th className="text-right px-1 py-1.5 font-medium">Net R</th>
                 <th className="text-right px-1 py-1.5 font-medium">WR</th>
                 <th className="text-right px-1 py-1.5 font-medium">PF</th>
@@ -117,19 +117,19 @@ export default function EntryModelLab() {
             </thead>
             <tbody>
               {ENTRY_MODELS.map((m) => (
-                <tr key={m.name} className="border-b border-[#223142]/40 hover:bg-[#172331]/40">
-                  <td className="px-3 py-1.5 text-[#E5EDF7] font-mono">{m.name}</td>
-                  <td className="px-1 py-1.5 font-mono text-right text-[#94A3B8] border-l border-[#223142]/40">{m.long.trades}</td>
-                  <td className={`px-1 py-1.5 font-mono text-right ${m.long.netR >= 0 ? "text-[#22C55E]" : "text-[#EF4444]"}`}>{fmtR(m.long.netR, 2)}</td>
-                  <td className="px-1 py-1.5 font-mono text-right text-[#E5EDF7]">{m.long.wr}%</td>
-                  <td className="px-1 py-1.5 font-mono text-right text-[#E5EDF7]">{m.long.pf}</td>
-                  <td className={`px-1 py-1.5 font-mono text-right ${m.long.exp >= 0 ? "text-[#22C55E]" : "text-[#EF4444]"}`}>{fmtR(m.long.exp, 2)}</td>
-                  <td className="px-1 py-1.5 font-mono text-right text-[#94A3B8] border-l border-[#223142]/40">{m.short.trades}</td>
-                  <td className={`px-1 py-1.5 font-mono text-right ${m.short.netR >= 0 ? "text-[#22C55E]" : "text-[#EF4444]"}`}>{fmtR(m.short.netR, 2)}</td>
-                  <td className="px-1 py-1.5 font-mono text-right text-[#E5EDF7]">{m.short.wr}%</td>
-                  <td className="px-1 py-1.5 font-mono text-right text-[#E5EDF7]">{m.short.pf}</td>
-                  <td className={`px-1 py-1.5 font-mono text-right ${m.short.exp >= 0 ? "text-[#22C55E]" : "text-[#EF4444]"}`}>{fmtR(m.short.exp, 2)}</td>
-                  <td className="px-2 py-1.5 text-center border-l border-[#223142]/40">
+                <tr key={m.name} className="border-b border-[hsl(var(--border-soft))]/40 hover:bg-[hsl(var(--panel-2))]/40">
+                  <td className="px-3 py-1.5 text-[hsl(var(--text))] font-num">{m.name}</td>
+                  <td className="px-1 py-1.5 font-num text-right text-[hsl(var(--text-2))] border-l border-[hsl(var(--border-soft))]/40">{m.long.trades}</td>
+                  <td className={`px-1 py-1.5 font-num text-right ${m.long.netR >= 0 ? "text-[#22C55E]" : "text-[#EF4444]"}`}>{fmtR(m.long.netR, 2)}</td>
+                  <td className="px-1 py-1.5 font-num text-right text-[hsl(var(--text))]">{m.long.wr}%</td>
+                  <td className="px-1 py-1.5 font-num text-right text-[hsl(var(--text))]">{m.long.pf}</td>
+                  <td className={`px-1 py-1.5 font-num text-right ${m.long.exp >= 0 ? "text-[#22C55E]" : "text-[#EF4444]"}`}>{fmtR(m.long.exp, 2)}</td>
+                  <td className="px-1 py-1.5 font-num text-right text-[hsl(var(--text-2))] border-l border-[hsl(var(--border-soft))]/40">{m.short.trades}</td>
+                  <td className={`px-1 py-1.5 font-num text-right ${m.short.netR >= 0 ? "text-[#22C55E]" : "text-[#EF4444]"}`}>{fmtR(m.short.netR, 2)}</td>
+                  <td className="px-1 py-1.5 font-num text-right text-[hsl(var(--text))]">{m.short.wr}%</td>
+                  <td className="px-1 py-1.5 font-num text-right text-[hsl(var(--text))]">{m.short.pf}</td>
+                  <td className={`px-1 py-1.5 font-num text-right ${m.short.exp >= 0 ? "text-[#22C55E]" : "text-[#EF4444]"}`}>{fmtR(m.short.exp, 2)}</td>
+                  <td className="px-2 py-1.5 text-center border-l border-[hsl(var(--border-soft))]/40">
                     <CheckBox
                       checked={includes[m.name]?.long}
                       color="#22C55E"
@@ -156,10 +156,10 @@ export default function EntryModelLab() {
 
       {/* Bar chart + best/worst */}
       <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-4">
-        <div className="rounded-lg border border-[#223142] bg-[#0D1520] p-4">
+        <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-4">
           <div className="flex items-baseline justify-between mb-3">
             <SectionLabel>Net R by Entry Model</SectionLabel>
-            <div className="flex items-center gap-3 text-[10px] font-mono uppercase tracking-wider">
+            <div className="flex items-center gap-3 text-[10px] font-num uppercase tracking-wider">
               <Legend color="#22C55E" label="Longs" />
               <Legend color="#EF4444" label="Shorts" />
             </div>
@@ -178,12 +178,12 @@ export default function EntryModelLab() {
           </div>
         </div>
 
-        <div className="rounded-lg border border-[#223142] bg-[#0D1520] p-4">
+        <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-4">
           <SectionLabel className="mb-3">Best / Worst Snapshot</SectionLabel>
-          <div className="overflow-hidden rounded-md border border-[#223142]">
+          <div className="overflow-hidden rounded-md border border-[hsl(var(--border-soft))]">
             <table className="w-full text-xs">
               <thead>
-                <tr className="bg-[#172331] text-[#64748B] uppercase tracking-wider text-[9px]">
+                <tr className="bg-[hsl(var(--panel-2))] text-muted-lab uppercase tracking-wider text-[9px]">
                   <th className="text-left px-3 py-2 font-medium">Category</th>
                   <th className="text-left px-2 py-2 font-medium">Best (Long)</th>
                   <th className="text-left px-2 py-2 font-medium">Worst (Long)</th>
@@ -207,7 +207,7 @@ export default function EntryModelLab() {
 
 function Legend({ color, label }) {
   return (
-    <span className="inline-flex items-center gap-1.5 text-[#94A3B8]">
+    <span className="inline-flex items-center gap-1.5 text-[hsl(var(--text-2))]">
       <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color, boxShadow: `0 0 6px ${color}` }} />
       {label}
     </span>
@@ -216,17 +216,17 @@ function Legend({ color, label }) {
 
 function SnapshotRow({ label, bl, wl, bs, ws, mono, tonal }) {
   const toneOf = (v) => {
-    if (!tonal) return "text-[#E5EDF7]";
+    if (!tonal) return "text-[hsl(var(--text))]";
     const num = parseFloat(v);
     return num >= 0 ? "text-[#22C55E]" : "text-[#EF4444]";
   };
   return (
-    <tr className="border-t border-[#223142]/40">
-      <td className="px-3 py-1.5 text-[#94A3B8] text-[10px] uppercase tracking-wider font-mono">{label}</td>
-      <td className={`px-2 py-1.5 ${mono ? "font-mono" : ""} ${toneOf(bl)}`}>{bl}</td>
-      <td className={`px-2 py-1.5 ${mono ? "font-mono" : ""} ${toneOf(wl)}`}>{wl}</td>
-      <td className={`px-2 py-1.5 ${mono ? "font-mono" : ""} ${toneOf(bs)}`}>{bs}</td>
-      <td className={`px-3 py-1.5 ${mono ? "font-mono" : ""} ${toneOf(ws)}`}>{ws}</td>
+    <tr className="border-t border-[hsl(var(--border-soft))]/40">
+      <td className="px-3 py-1.5 text-[hsl(var(--text-2))] text-[10px] uppercase tracking-wider font-num">{label}</td>
+      <td className={`px-2 py-1.5 ${mono ? "font-num" : ""} ${toneOf(bl)}`}>{bl}</td>
+      <td className={`px-2 py-1.5 ${mono ? "font-num" : ""} ${toneOf(wl)}`}>{wl}</td>
+      <td className={`px-2 py-1.5 ${mono ? "font-num" : ""} ${toneOf(bs)}`}>{bs}</td>
+      <td className={`px-3 py-1.5 ${mono ? "font-num" : ""} ${toneOf(ws)}`}>{ws}</td>
     </tr>
   );
 }

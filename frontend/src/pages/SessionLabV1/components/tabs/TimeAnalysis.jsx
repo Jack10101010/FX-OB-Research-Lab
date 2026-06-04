@@ -30,14 +30,14 @@ export default function TimeAnalysis() {
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs text-[#94A3B8]">Performance by hour and day of week.</p>
-        <div className="inline-flex items-center gap-1 rounded-lg border border-[#223142] bg-[#0D1520] p-1">
+        <p className="text-xs text-[hsl(var(--text-2))]">Performance by hour and day of week.</p>
+        <div className="inline-flex items-center gap-1 rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-1">
           <button
             data-testid="time-view-session"
             onClick={() => setView("session")}
             className={[
               "inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-all",
-              view === "session" ? "bg-[#22D3EE]/15 text-[#22D3EE]" : "text-[#94A3B8] hover:text-[#E5EDF7]",
+              view === "session" ? "bg-[hsl(var(--accent-primary)/0.12)] text-[hsl(var(--accent-primary))]" : "text-[hsl(var(--text-2))] hover:text-[hsl(var(--text))]",
             ].join(" ")}
           >
             <Clock size={12} />
@@ -48,7 +48,7 @@ export default function TimeAnalysis() {
             onClick={() => setView("full")}
             className={[
               "inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-all",
-              view === "full" ? "bg-[#22D3EE]/15 text-[#22D3EE]" : "text-[#94A3B8] hover:text-[#E5EDF7]",
+              view === "full" ? "bg-[hsl(var(--accent-primary)/0.12)] text-[hsl(var(--accent-primary))]" : "text-[hsl(var(--text-2))] hover:text-[hsl(var(--text))]",
             ].join(" ")}
           >
             <Sun size={12} />
@@ -60,7 +60,7 @@ export default function TimeAnalysis() {
       {/* Top row: Hourly Net R + Heatmap + Day of Week */}
       <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_1.4fr_1fr] gap-4">
         {/* Hourly Net R */}
-        <div className="rounded-lg border border-[#223142] bg-[#0D1520] p-4">
+        <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-4">
           <SectionLabel className="mb-3">Hourly Net R (UTC)</SectionLabel>
           <div className="h-52">
             <ResponsiveContainer width="100%" height="100%">
@@ -80,20 +80,20 @@ export default function TimeAnalysis() {
         </div>
 
         {/* Heatmap */}
-        <div className="rounded-lg border border-[#223142] bg-[#0D1520] p-4">
+        <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-4">
           <SectionLabel className="mb-3">Hourly Win Rate (%)</SectionLabel>
           <div className="space-y-1">
-            <div className="grid grid-cols-[40px_repeat(6,1fr)] gap-1 text-[9px] font-mono text-[#64748B] uppercase tracking-wider">
+            <div className="grid grid-cols-[40px_repeat(6,1fr)] gap-1 text-[9px] font-num text-muted-lab uppercase tracking-wider">
               <div></div>
               {WR_HEATMAP.hours.map((h) => <div key={h} className="text-center">{h}</div>)}
             </div>
             {WR_HEATMAP.rows.map((row) => (
               <div key={row.day} className="grid grid-cols-[40px_repeat(6,1fr)] gap-1">
-                <div className="text-[10px] font-mono text-[#94A3B8] flex items-center">{row.day}</div>
+                <div className="text-[10px] font-num text-[hsl(var(--text-2))] flex items-center">{row.day}</div>
                 {row.values.map((v, i) => (
                   <div
                     key={i}
-                    className="h-7 rounded flex items-center justify-center text-[10px] font-mono font-semibold text-[#050A12]"
+                    className="h-7 rounded flex items-center justify-center text-[10px] font-num font-semibold text-[hsl(var(--bg))]"
                     style={{ backgroundColor: heatColor(v), opacity: 0.85 }}
                     title={`${row.day} ${WR_HEATMAP.hours[i]} – ${v}% WR`}
                   >
@@ -103,7 +103,7 @@ export default function TimeAnalysis() {
               </div>
             ))}
           </div>
-          <div className="flex items-center justify-end gap-2 mt-3 text-[9px] text-[#64748B] font-mono uppercase tracking-wider">
+          <div className="flex items-center justify-end gap-2 mt-3 text-[9px] text-muted-lab font-num uppercase tracking-wider">
             <span>0%</span>
             <div className="h-2 w-32 rounded-full bg-gradient-to-r from-[#EF4444] via-[#F59E0B] to-[#22C55E]" />
             <span>100%</span>
@@ -111,7 +111,7 @@ export default function TimeAnalysis() {
         </div>
 
         {/* Day of week */}
-        <div className="rounded-lg border border-[#223142] bg-[#0D1520] p-4">
+        <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-4">
           <SectionLabel className="mb-3">Day of Week (Net R)</SectionLabel>
           <ul className="space-y-2">
             {DAY_OF_WEEK.map((d) => {
@@ -120,8 +120,8 @@ export default function TimeAnalysis() {
               const positive = d.netR >= 0;
               return (
                 <li key={d.day} className="grid grid-cols-[40px_1fr_60px] items-center gap-2 text-xs">
-                  <span className="text-[#94A3B8] font-mono">{d.day}</span>
-                  <div className="h-3 w-full bg-[#172331] rounded-sm overflow-hidden">
+                  <span className="text-[hsl(var(--text-2))] font-num">{d.day}</span>
+                  <div className="h-3 w-full bg-[hsl(var(--panel-2))] rounded-sm overflow-hidden">
                     <div
                       className="h-full rounded-sm"
                       style={{
@@ -131,7 +131,7 @@ export default function TimeAnalysis() {
                       }}
                     />
                   </div>
-                  <span className={`font-mono text-right ${positive ? "text-[#22C55E]" : "text-[#EF4444]"}`}>{fmtR(d.netR, 2)}</span>
+                  <span className={`font-num text-right ${positive ? "text-[#22C55E]" : "text-[#EF4444]"}`}>{fmtR(d.netR, 2)}</span>
                 </li>
               );
             })}
@@ -140,12 +140,12 @@ export default function TimeAnalysis() {
       </div>
 
       {/* Hourly summary table */}
-      <div className="rounded-lg border border-[#223142] bg-[#0D1520] p-4">
+      <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-4">
         <SectionLabel className="mb-3">Hourly Summary</SectionLabel>
-        <div className="overflow-hidden rounded-md border border-[#223142]">
+        <div className="overflow-hidden rounded-md border border-[hsl(var(--border-soft))]">
           <table className="w-full text-xs">
             <thead>
-              <tr className="bg-[#172331] text-[#64748B] uppercase tracking-wider text-[9px]">
+              <tr className="bg-[hsl(var(--panel-2))] text-muted-lab uppercase tracking-wider text-[9px]">
                 <th className="text-left px-3 py-2 font-medium">Hour (UTC)</th>
                 <th className="text-right px-2 py-2 font-medium">Trades</th>
                 <th className="text-right px-2 py-2 font-medium">Net R</th>
@@ -157,20 +157,20 @@ export default function TimeAnalysis() {
             </thead>
             <tbody>
               {HOURLY_DATA.map((d) => (
-                <tr key={d.hour} className="border-t border-[#223142]/40 hover:bg-[#172331]/40">
-                  <td className="px-3 py-1.5 font-mono text-[#E5EDF7]">{d.hour}</td>
-                  <td className="px-2 py-1.5 font-mono text-right text-[#94A3B8]">{d.trades}</td>
-                  <td className={`px-2 py-1.5 font-mono text-right ${d.netR >= 0 ? "text-[#22C55E]" : "text-[#EF4444]"}`}>{fmtR(d.netR, 2)}</td>
-                  <td className="px-2 py-1.5 font-mono text-right text-[#E5EDF7]">{d.wr}%</td>
-                  <td className="px-2 py-1.5 font-mono text-right text-[#E5EDF7]">{d.pf}</td>
-                  <td className={`px-2 py-1.5 font-mono text-right ${d.avgR >= 0 ? "text-[#22C55E]" : "text-[#EF4444]"}`}>{fmtR(d.avgR, 2)}</td>
-                  <td className="px-3 py-1.5 font-mono text-right text-[#EF4444]">{d.loss}%</td>
+                <tr key={d.hour} className="border-t border-[hsl(var(--border-soft))]/40 hover:bg-[hsl(var(--panel-2))]/40">
+                  <td className="px-3 py-1.5 font-num text-[hsl(var(--text))]">{d.hour}</td>
+                  <td className="px-2 py-1.5 font-num text-right text-[hsl(var(--text-2))]">{d.trades}</td>
+                  <td className={`px-2 py-1.5 font-num text-right ${d.netR >= 0 ? "text-[#22C55E]" : "text-[#EF4444]"}`}>{fmtR(d.netR, 2)}</td>
+                  <td className="px-2 py-1.5 font-num text-right text-[hsl(var(--text))]">{d.wr}%</td>
+                  <td className="px-2 py-1.5 font-num text-right text-[hsl(var(--text))]">{d.pf}</td>
+                  <td className={`px-2 py-1.5 font-num text-right ${d.avgR >= 0 ? "text-[#22C55E]" : "text-[#EF4444]"}`}>{fmtR(d.avgR, 2)}</td>
+                  <td className="px-3 py-1.5 font-num text-right text-[#EF4444]">{d.loss}%</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        <p className="mt-3 text-[10px] text-[#64748B] font-mono">Times shown in UTC. Only hours within the selected session are displayed.</p>
+        <p className="mt-3 text-[10px] text-muted-lab font-num">Times shown in UTC. Only hours within the selected session are displayed.</p>
       </div>
     </div>
   );

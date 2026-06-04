@@ -1,5 +1,5 @@
 import React from "react";
-import { Panel, SectionLabel } from "./primitives";
+import { SectionLabel } from "./primitives";
 import OverviewTab from "./tabs/OverviewTab";
 import DirectionLab from "./tabs/DirectionLab";
 import StructureLab from "./tabs/StructureLab";
@@ -26,23 +26,23 @@ const TABS = [
 
 export default function DeepDive({ session, activeTab, setActiveTab }) {
   return (
-    <Panel className="p-5 md:p-6" data-testid="session-deep-dive">
+    <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel))] p-5 md:p-6" data-testid="session-deep-dive">
       {/* Header */}
       <div className="flex flex-wrap items-baseline justify-between gap-3 mb-4">
         <div className="flex items-baseline gap-3">
           <SectionLabel>Session Deep Dive</SectionLabel>
-          <h2 className="font-display text-2xl md:text-3xl font-bold tracking-tight text-[#E5EDF7]">
+          <h2 className="font-display text-2xl md:text-3xl font-bold tracking-tight text-[hsl(var(--text))]">
             {session.name}{" "}
-            <span className="text-sm text-[#64748B] font-mono font-normal">({session.range})</span>
+            <span className="text-sm text-muted-lab font-num font-normal">({session.range})</span>
           </h2>
         </div>
-        <div className="text-[10px] text-[#64748B] font-mono uppercase tracking-wider">
+        <div className="text-[10px] text-muted-lab font-num uppercase tracking-wider">
           Switch tab to drill into a specific lab
         </div>
       </div>
 
       {/* Tab strip */}
-      <div className="flex flex-wrap items-center gap-1 mb-5 border-b border-[#223142] -mx-1 pb-0">
+      <div className="flex flex-wrap items-center gap-1 mb-5 border-b border-[hsl(var(--border-soft))] -mx-1 pb-0">
         {TABS.map((t) => {
           const active = activeTab === t.key;
           const Icon = t.icon;
@@ -54,14 +54,14 @@ export default function DeepDive({ session, activeTab, setActiveTab }) {
               className={[
                 "relative inline-flex items-center gap-2 px-3 py-2.5 text-xs font-medium transition-all",
                 active
-                  ? "text-[#22D3EE]"
-                  : "text-[#94A3B8] hover:text-[#E5EDF7]",
+                  ? "text-[hsl(var(--accent-primary))]"
+                  : "text-[hsl(var(--text-2))] hover:text-[hsl(var(--text))]",
               ].join(" ")}
             >
               <Icon size={13} />
               {t.label}
               {active && (
-                <span className="absolute bottom-[-1px] left-0 right-0 h-[2px] bg-[#22D3EE] shadow-[0_0_8px_rgba(34,211,238,0.5)]" />
+                <span className="absolute bottom-[-1px] left-0 right-0 h-[2px] bg-[hsl(var(--accent-primary))] shadow-[0_0_8px_rgba(34,211,238,0.5)]" />
               )}
             </button>
           );
@@ -79,6 +79,6 @@ export default function DeepDive({ session, activeTab, setActiveTab }) {
         {activeTab === "failure" && <FailureAnalysis />}
         {activeTab === "streaks" && <StreaksLab />}
       </div>
-    </Panel>
+    </div>
   );
 }

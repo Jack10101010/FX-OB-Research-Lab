@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Panel, SectionLabel } from "./primitives";
+import { SectionLabel } from "./primitives";
 import { RotateCcw, Sparkles, BookmarkPlus } from "lucide-react";
 
 function MiniToggle({ active, onChange, color = "#22C55E", testId }) {
@@ -28,10 +28,10 @@ function MiniToggle({ active, onChange, color = "#22C55E", testId }) {
 function Row({ label, active, onChange, hot, color = "#22C55E", testId }) {
   return (
     <div className="flex items-center justify-between gap-3 py-1.5">
-      <span className={`text-xs ${active ? "text-[#E5EDF7]" : "text-[#64748B]"}`}>{label}</span>
+      <span className={`text-xs ${active ? "text-[hsl(var(--text))]" : "text-muted-lab"}`}>{label}</span>
       <div className="flex items-center gap-2">
         {hot && (
-          <span className="font-mono text-[10px] uppercase tracking-wider text-[#22D3EE]">
+          <span className="font-num text-[10px] uppercase tracking-wider text-[hsl(var(--accent-primary))]">
             {hot}
           </span>
         )}
@@ -43,7 +43,7 @@ function Row({ label, active, onChange, hot, color = "#22C55E", testId }) {
 
 function Group({ title, children }) {
   return (
-    <div className="border-t border-[#223142] pt-3 first:border-t-0 first:pt-0">
+    <div className="border-t border-[hsl(var(--border-soft))] pt-3 first:border-t-0 first:pt-0">
       <SectionLabel className="mb-2">{title}</SectionLabel>
       <div className="space-y-0.5">{children}</div>
     </div>
@@ -64,11 +64,11 @@ export default function QuickControls({ session, onToggle }) {
   const flip = (key, setter) => setter((s) => ({ ...s, [key]: !s[key] }));
 
   return (
-    <Panel className="p-4" data-testid="quick-controls">
+    <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel))] p-4" data-testid="quick-controls">
       <div className="flex items-center justify-between mb-3">
         <div className="flex flex-col">
-          <span className="font-display text-base font-bold text-[#E5EDF7]">Quick Controls</span>
-          <span className="text-[10px] text-[#22D3EE] font-mono uppercase tracking-wider">Affects Preview</span>
+          <span className="font-display text-base font-bold text-[hsl(var(--text))]">Quick Controls</span>
+          <span className="text-[10px] text-[hsl(var(--accent-primary))] font-num uppercase tracking-wider">Affects Preview</span>
         </div>
         <span className="rounded-full bg-[#22C55E]/10 text-[#22C55E] text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 border border-[#22C55E]/30">
           {session.name}
@@ -104,7 +104,7 @@ export default function QuickControls({ session, onToggle }) {
         </Group>
       </div>
 
-      <div className="mt-4 pt-4 border-t border-[#223142] grid grid-cols-1 gap-2">
+      <div className="mt-4 pt-4 border-t border-[hsl(var(--border-soft))] grid grid-cols-1 gap-2">
         <button
           data-testid="qc-reset-session"
           className="inline-flex items-center justify-center gap-2 rounded-md border border-[#EF4444]/40 bg-transparent text-[#F87171] py-2 text-xs font-medium hover:bg-[#EF4444]/10"
@@ -114,19 +114,19 @@ export default function QuickControls({ session, onToggle }) {
         </button>
         <button
           data-testid="qc-apply-rule"
-          className="inline-flex items-center justify-center gap-2 rounded-md bg-[#22D3EE]/12 text-[#22D3EE] border border-[#22D3EE]/40 py-2 text-xs font-medium hover:bg-[#22D3EE]/20"
+          className="inline-flex items-center justify-center gap-2 rounded-md bg-[hsl(var(--accent-primary)/0.12)] text-[hsl(var(--accent-primary))] border border-[hsl(var(--accent-primary))]/40 py-2 text-xs font-medium hover:bg-[hsl(var(--accent-primary))]/20"
         >
           <Sparkles size={12} />
           Apply as Candidate Rule
         </button>
         <button
           data-testid="qc-save-view"
-          className="inline-flex items-center justify-center gap-2 rounded-md bg-[#22D3EE] text-[#050A12] py-2 text-xs font-medium hover:bg-[#67E8F9]"
+          className="inline-flex items-center justify-center gap-2 rounded-md bg-[hsl(var(--accent-primary))] text-[hsl(var(--bg))] py-2 text-xs font-medium hover:opacity-90"
         >
           <BookmarkPlus size={12} />
           Save View
         </button>
       </div>
-    </Panel>
+    </div>
   );
 }

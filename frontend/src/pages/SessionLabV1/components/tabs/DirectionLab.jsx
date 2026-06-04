@@ -18,7 +18,7 @@ const tooltipStyle = {
 function DirectionCard({ side, data, color }) {
   const positive = data.netR >= 0;
   return (
-    <div className="rounded-lg border border-[#223142] bg-[#0D1520] p-4">
+    <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-4">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <span
@@ -29,7 +29,7 @@ function DirectionCard({ side, data, color }) {
             {side}
           </span>
         </div>
-        <button className="text-[10px] text-[#22D3EE] hover:text-[#67E8F9] font-mono uppercase tracking-wider">
+        <button className="text-[10px] text-[hsl(var(--accent-primary))] hover:opacity-80 font-num uppercase tracking-wider">
           Include
         </button>
       </div>
@@ -80,11 +80,11 @@ function DirectionCard({ side, data, color }) {
 }
 
 function Cell({ label, value, tone }) {
-  const cls = tone === "neg" ? "text-[#EF4444]" : "text-[#E5EDF7]";
+  const cls = tone === "neg" ? "text-[#EF4444]" : "text-[hsl(var(--text))]";
   return (
     <div>
       <div className="label-eyebrow">{label}</div>
-      <div className={`font-mono tabular text-sm font-semibold ${cls}`}>{value}</div>
+      <div className={`font-num tabular text-sm font-semibold ${cls}`}>{value}</div>
     </div>
   );
 }
@@ -92,10 +92,10 @@ function Cell({ label, value, tone }) {
 function Row({ label, value, suffix, pos }) {
   return (
     <li className="flex items-center justify-between gap-3">
-      <span className="text-[#64748B] uppercase tracking-wider text-[9px] font-mono">{label}</span>
-      <span className="text-[#E5EDF7] font-mono truncate">{value}</span>
+      <span className="text-muted-lab uppercase tracking-wider text-[9px] font-num">{label}</span>
+      <span className="text-[hsl(var(--text))] font-num truncate">{value}</span>
       {suffix && (
-        <span className={`font-mono ${pos ? "text-[#22C55E]" : "text-[#EF4444]"}`}>{suffix}</span>
+        <span className={`font-num ${pos ? "text-[#22C55E]" : "text-[#EF4444]"}`}>{suffix}</span>
       )}
     </li>
   );
@@ -110,13 +110,13 @@ function ModelSelect({ label, value, onChange, testId }) {
           data-testid={testId}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="w-full appearance-none rounded-md border border-[#223142] bg-[#172331] px-3 py-2 pr-8 text-xs text-[#E5EDF7] font-mono focus:outline-none focus:border-[#22D3EE]"
+          className="w-full appearance-none rounded-md border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] px-3 py-2 pr-8 text-xs text-[hsl(var(--text))] font-num focus:outline-none focus:border-[hsl(var(--accent-primary))]"
         >
           {ENTRY_MODEL_OPTIONS.map((o) => (
             <option key={o} value={o}>{o}</option>
           ))}
         </select>
-        <ChevronDown size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#94A3B8] pointer-events-none" />
+        <ChevronDown size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[hsl(var(--text-2))] pointer-events-none" />
       </div>
     </label>
   );
@@ -128,14 +128,14 @@ function ComparisonBar({ label, longVal, shortVal, format = (v) => v }) {
   const shortPct = 100 - longPct;
   return (
     <div className="grid grid-cols-[120px_1fr] items-center gap-3 py-1.5">
-      <span className="text-[10px] text-[#64748B] uppercase tracking-wider font-mono">{label}</span>
+      <span className="text-[10px] text-muted-lab uppercase tracking-wider font-num">{label}</span>
       <div className="flex items-center gap-3">
-        <span className="w-16 text-right font-mono tabular text-xs text-[#22C55E]">{format(longVal)}</span>
-        <div className="flex-1 h-4 flex items-center bg-[#172331] rounded-sm overflow-hidden">
+        <span className="w-16 text-right font-num tabular text-xs text-[#22C55E]">{format(longVal)}</span>
+        <div className="flex-1 h-4 flex items-center bg-[hsl(var(--panel-2))] rounded-sm overflow-hidden">
           <div className="h-full bg-[#22C55E]/70" style={{ width: `${longPct}%` }} />
           <div className="h-full bg-[#EF4444]/70" style={{ width: `${shortPct}%` }} />
         </div>
-        <span className="w-16 font-mono tabular text-xs text-[#EF4444]">{format(shortVal)}</span>
+        <span className="w-16 font-num tabular text-xs text-[#EF4444]">{format(shortVal)}</span>
       </div>
     </div>
   );
@@ -154,7 +154,7 @@ export default function DirectionLab() {
     <div className="space-y-5">
       {/* Header bar */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs text-[#94A3B8]">Deep dive into Long vs Short performance in this session.</p>
+        <p className="text-xs text-[hsl(var(--text-2))]">Deep dive into Long vs Short performance in this session.</p>
         <div className="flex items-center gap-3">
           <span className="label-eyebrow">Include in Preview</span>
           <ToggleChip label="LONGS" active={longsOn} onClick={() => setLongsOn((v) => !v)} color="green" testId="dl-toggle-longs" />
@@ -163,7 +163,7 @@ export default function DirectionLab() {
       </div>
 
       {/* Per-direction entry model selectors */}
-      <div className="flex flex-wrap items-end gap-4 rounded-lg border border-[#22D3EE]/20 bg-[#0F2A33]/40 p-4">
+      <div className="flex flex-wrap items-end gap-4 rounded border border-[hsl(var(--accent-primary))]/20 bg-[hsl(var(--accent-primary)/0.06)] p-4">
         <div className="flex-1">
           <SectionLabel hint="Choose different models for longs vs shorts">
             Per-Direction Entry Model
@@ -180,7 +180,7 @@ export default function DirectionLab() {
       </div>
 
       {/* Comparison */}
-      <div className="rounded-lg border border-[#223142] bg-[#0D1520] p-4">
+      <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-4">
         <SectionLabel className="mb-3">Long vs Short Comparison</SectionLabel>
         <ComparisonBar label="Net R"          longVal={L.netR}   shortVal={S.netR}   format={(v) => fmtR(v, 2)} />
         <ComparisonBar label="Win Rate"       longVal={L.wr}     shortVal={S.wr}     format={(v) => `${v}%`} />
@@ -188,7 +188,7 @@ export default function DirectionLab() {
         <ComparisonBar label="Expectancy (R)" longVal={0.69}     shortVal={-1.15}    format={(v) => fmtR(v, 2)} />
         <ComparisonBar label="Max Drawdown"   longVal={L.dd}     shortVal={S.dd}     format={(v) => `${v}R`} />
         <ComparisonBar label="Trades"         longVal={L.trades} shortVal={S.trades} />
-        <p className="mt-3 text-[10px] text-[#64748B] font-mono">Results update automatically when you change filters above.</p>
+        <p className="mt-3 text-[10px] text-muted-lab font-num">Results update automatically when you change filters above.</p>
       </div>
     </div>
   );

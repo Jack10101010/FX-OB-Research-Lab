@@ -18,10 +18,10 @@ const tooltipStyle = {
 
 function HBars({ data, title, testId }) {
   return (
-    <div className="rounded-lg border border-[#223142] bg-[#0D1520] p-4">
+    <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-4">
       <div className="flex items-baseline justify-between mb-3">
         <SectionLabel>{title}</SectionLabel>
-        <span className="text-[9px] text-[#64748B] font-mono uppercase tracking-wider">By Net R</span>
+        <span className="text-[9px] text-muted-lab font-num uppercase tracking-wider">By Net R</span>
       </div>
       <div className="h-56" data-testid={testId}>
         <ResponsiveContainer width="100%" height="100%">
@@ -56,12 +56,12 @@ function HBars({ data, title, testId }) {
 
 function BucketTable({ title, items, valueLabel = "Net R" }) {
   return (
-    <div className="rounded-lg border border-[#223142] bg-[#0D1520] p-4">
+    <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-4">
       <SectionLabel className="mb-3">{title}</SectionLabel>
-      <div className="overflow-hidden rounded-md border border-[#223142]">
+      <div className="overflow-hidden rounded-md border border-[hsl(var(--border-soft))]">
         <table className="w-full text-xs">
           <thead>
-            <tr className="bg-[#172331] text-[#64748B] uppercase tracking-wider text-[9px]">
+            <tr className="bg-[hsl(var(--panel-2))] text-muted-lab uppercase tracking-wider text-[9px]">
               <th className="text-left px-3 py-2 font-medium">Bucket</th>
               <th className="text-right px-2 py-2 font-medium">Trades</th>
               <th className="text-right px-2 py-2 font-medium">%</th>
@@ -70,11 +70,11 @@ function BucketTable({ title, items, valueLabel = "Net R" }) {
           </thead>
           <tbody>
             {items.map((b) => (
-              <tr key={b.bucket} className="border-t border-[#223142]/40 hover:bg-[#172331]/40">
-                <td className="px-3 py-1.5 text-[#E5EDF7] font-mono">{b.bucket}</td>
-                <td className="px-2 py-1.5 font-mono text-right text-[#94A3B8]">{b.trades}</td>
-                <td className="px-2 py-1.5 font-mono text-right text-[#94A3B8]">{b.pct}%</td>
-                <td className={`px-3 py-1.5 font-mono text-right ${b.netR >= 0 ? "text-[#22C55E]" : "text-[#EF4444]"}`}>{fmtR(b.netR, 2)}</td>
+              <tr key={b.bucket} className="border-t border-[hsl(var(--border-soft))]/40 hover:bg-[hsl(var(--panel-2))]/40">
+                <td className="px-3 py-1.5 text-[hsl(var(--text))] font-num">{b.bucket}</td>
+                <td className="px-2 py-1.5 font-num text-right text-[hsl(var(--text-2))]">{b.trades}</td>
+                <td className="px-2 py-1.5 font-num text-right text-[hsl(var(--text-2))]">{b.pct}%</td>
+                <td className={`px-3 py-1.5 font-num text-right ${b.netR >= 0 ? "text-[#22C55E]" : "text-[#EF4444]"}`}>{fmtR(b.netR, 2)}</td>
               </tr>
             ))}
           </tbody>
@@ -88,10 +88,10 @@ export default function OrderBlockLab() {
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs text-[#94A3B8]">OB origin, detection and quality analysis.</p>
+        <p className="text-xs text-[hsl(var(--text-2))]">OB origin, detection and quality analysis.</p>
         <div className="flex items-center gap-2 rounded-md border border-[#F59E0B]/30 bg-[#F59E0B]/8 px-3 py-1.5">
           <Info size={12} className="text-[#F59E0B]" />
-          <span className="text-[10px] text-[#F59E0B] font-mono uppercase tracking-wider">
+          <span className="text-[10px] text-[#F59E0B] font-num uppercase tracking-wider">
             OB fields require re-import for legacy runs
           </span>
         </div>
@@ -106,7 +106,7 @@ export default function OrderBlockLab() {
       {/* Row 2: News vs Clean + OB Width + meta */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* News vs Clean */}
-        <div className="rounded-lg border border-[#223142] bg-[#0D1520] p-4">
+        <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-4">
           <SectionLabel className="mb-3">News vs Clean OBs</SectionLabel>
           <div className="flex items-center gap-4">
             <div className="relative h-40 w-40 shrink-0">
@@ -119,20 +119,20 @@ export default function OrderBlockLab() {
                 </PieChart>
               </ResponsiveContainer>
               <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                <span className="font-mono tabular text-2xl font-bold text-[#E5EDF7]">27</span>
-                <span className="text-[9px] text-[#64748B] uppercase tracking-wider font-mono">Total OBs</span>
+                <span className="font-num tabular text-2xl font-bold text-[hsl(var(--text))]">27</span>
+                <span className="text-[9px] text-muted-lab uppercase tracking-wider font-num">Total OBs</span>
               </div>
             </div>
             <ul className="flex-1 space-y-2 text-xs">
               <li className="flex items-center gap-2">
                 <span className="h-2.5 w-2.5 rounded-sm bg-[#F59E0B]" />
-                <span className="text-[#E5EDF7] font-medium">News OB</span>
-                <span className="ml-auto text-[#94A3B8] font-mono">9 (33.3%)</span>
+                <span className="text-[hsl(var(--text))] font-medium">News OB</span>
+                <span className="ml-auto text-[hsl(var(--text-2))] font-num">9 (33.3%)</span>
               </li>
               <li className="flex items-center gap-2">
                 <span className="h-2.5 w-2.5 rounded-sm bg-[#22C55E]" />
-                <span className="text-[#E5EDF7] font-medium">Clean OB</span>
-                <span className="ml-auto text-[#94A3B8] font-mono">18 (66.7%)</span>
+                <span className="text-[hsl(var(--text))] font-medium">Clean OB</span>
+                <span className="ml-auto text-[hsl(var(--text-2))] font-num">18 (66.7%)</span>
               </li>
             </ul>
           </div>
@@ -141,7 +141,7 @@ export default function OrderBlockLab() {
         <BucketTable title="OB Width (ATR)" items={OB_DATA.width} />
 
         {/* Meta stats */}
-        <div className="rounded-lg border border-[#223142] bg-[#0D1520] p-4 flex flex-col gap-4">
+        <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-4 flex flex-col gap-4">
           <SectionLabel>Quality Snapshot</SectionLabel>
           <div className="space-y-4">
             <MiniStat label="Avg OB Width" value={OB_DATA.meta.avgWidth} tone="cyan" />
@@ -155,7 +155,7 @@ export default function OrderBlockLab() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <BucketTable title="OB Age at Entry" items={OB_DATA.age} />
 
-        <div className="rounded-lg border border-[#223142] bg-[#0D1520] p-4">
+        <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-4">
           <SectionLabel className="mb-3">OB Success Rate by Type</SectionLabel>
           <ul className="space-y-2.5">
             {[
@@ -166,11 +166,11 @@ export default function OrderBlockLab() {
               { name: "Old OB",   wr: 39, color: "#94A3B8" },
             ].map((r) => (
               <li key={r.name} className="grid grid-cols-[120px_1fr_50px] items-center gap-3 text-xs">
-                <span className="text-[#E5EDF7] font-mono">{r.name}</span>
-                <div className="h-3 w-full bg-[#172331] rounded-sm overflow-hidden">
+                <span className="text-[hsl(var(--text))] font-num">{r.name}</span>
+                <div className="h-3 w-full bg-[hsl(var(--panel-2))] rounded-sm overflow-hidden">
                   <div className="h-full" style={{ width: `${r.wr}%`, backgroundColor: r.color, opacity: 0.85 }} />
                 </div>
-                <span className="font-mono text-right text-[#E5EDF7]">{r.wr}% WR</span>
+                <span className="font-num text-right text-[hsl(var(--text))]">{r.wr}% WR</span>
               </li>
             ))}
           </ul>
@@ -181,11 +181,11 @@ export default function OrderBlockLab() {
 }
 
 function MiniStat({ label, value, tone }) {
-  const cls = tone === "pos" ? "text-[#22C55E]" : tone === "neg" ? "text-[#EF4444]" : tone === "cyan" ? "text-[#22D3EE]" : tone === "amber" ? "text-[#F59E0B]" : "text-[#E5EDF7]";
+  const cls = tone === "pos" ? "text-[#22C55E]" : tone === "neg" ? "text-[#EF4444]" : tone === "cyan" ? "text-[hsl(var(--accent-primary))]" : tone === "amber" ? "text-[#F59E0B]" : "text-[hsl(var(--text))]";
   return (
     <div>
       <div className="label-eyebrow">{label}</div>
-      <div className={`font-mono tabular text-2xl font-bold ${cls}`}>{value}</div>
+      <div className={`font-num tabular text-2xl font-bold ${cls}`}>{value}</div>
     </div>
   );
 }
