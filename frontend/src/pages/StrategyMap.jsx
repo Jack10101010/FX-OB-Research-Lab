@@ -51,6 +51,7 @@ const DEFAULT_LAYERS = {
     newsLabels: false,
     // Triggered-edge lifecycle visuals
     triggeredEdgeLevels: false,
+    triggeredEdgeLabels: false,
     triggeredEdgeLifecycle: false,
     triggeredEdgeBadges: true,
     cancelledSetups: true,
@@ -61,6 +62,8 @@ const DEFAULT_LAYERS = {
     ghostFillMarkers: false,
     ghostWinMarkers: false,
     ghostLossMarkers: false,
+    // FFT Debug overlay — pink tap/cancel markers + debug checklist in lifecycle panel
+    fftDebug: false,
 };
 
 const DEFAULT_UI_SETTINGS = {
@@ -173,15 +176,19 @@ export default function StrategyMap() {
     const [showMarkers, setShowMarkers] = useState(initialUi.layers.markers);
     // Triggered-edge lifecycle layer toggles
     const [showTriggeredEdgeLevels, setShowTriggeredEdgeLevels] = useState(initialUi.layers.triggeredEdgeLevels);
+    const [showTriggeredEdgeLabels, setShowTriggeredEdgeLabels] = useState(initialUi.layers.triggeredEdgeLabels ?? false);
     const [showTriggeredEdgeLifecycle, setShowTriggeredEdgeLifecycle] = useState(initialUi.layers.triggeredEdgeLifecycle);
     const [showTriggeredEdgeBadges, setShowTriggeredEdgeBadges] = useState(initialUi.layers.triggeredEdgeBadges);
     const [showCancelledSetups, setShowCancelledSetups] = useState(initialUi.layers.cancelledSetups);
+    // Lifecycle detail popover (shown when a badge/lifecycle marker is clicked)
+    const [selectedOverlay, setSelectedOverlay] = useState(null);
     const [showObDetails, setShowObDetails] = useState(initialUi.layers.obDetails ?? false);
     // Ghost tracking overlay toggles (Phase 0 — all off by default)
     const [showGhostCandidateMarkers, setShowGhostCandidateMarkers] = useState(initialUi.layers.ghostCandidateMarkers ?? false);
     const [showGhostFillMarkers, setShowGhostFillMarkers] = useState(initialUi.layers.ghostFillMarkers ?? false);
     const [showGhostWinMarkers, setShowGhostWinMarkers] = useState(initialUi.layers.ghostWinMarkers ?? false);
     const [showGhostLossMarkers, setShowGhostLossMarkers] = useState(initialUi.layers.ghostLossMarkers ?? false);
+    const [showFftDebug, setShowFftDebug] = useState(initialUi.layers.fftDebug ?? false);
     const [sessionSettings, setSessionSettings] = useState(initialUi.sessionSettings);
     const [tradeQuery, setTradeQuery] = useState("");
     const [tradeOutcomeFilter, setTradeOutcomeFilter] = useState("All");
@@ -431,6 +438,7 @@ export default function StrategyMap() {
         setShowNewsEvents(defaults.layers.news);
         setShowNewsLabels(defaults.layers.newsLabels);
         setShowTriggeredEdgeLevels(defaults.layers.triggeredEdgeLevels);
+        setShowTriggeredEdgeLabels(defaults.layers.triggeredEdgeLabels ?? false);
         setShowTriggeredEdgeLifecycle(defaults.layers.triggeredEdgeLifecycle);
         setShowTriggeredEdgeBadges(defaults.layers.triggeredEdgeBadges);
         setShowCancelledSetups(defaults.layers.cancelledSetups);
@@ -439,6 +447,7 @@ export default function StrategyMap() {
         setShowGhostFillMarkers(defaults.layers.ghostFillMarkers ?? false);
         setShowGhostWinMarkers(defaults.layers.ghostWinMarkers ?? false);
         setShowGhostLossMarkers(defaults.layers.ghostLossMarkers ?? false);
+        setShowFftDebug(defaults.layers.fftDebug ?? false);
         setSelectedEntryModelByRun(defaults.selectedEntryModelByRun || {});
         setSessionSettings(defaults.sessionSettings);
         saveStrategyMapUi(defaults);
@@ -474,6 +483,7 @@ export default function StrategyMap() {
                 news: showNewsEvents,
                 newsLabels: showNewsLabels,
                 triggeredEdgeLevels: showTriggeredEdgeLevels,
+                triggeredEdgeLabels: showTriggeredEdgeLabels,
                 triggeredEdgeLifecycle: showTriggeredEdgeLifecycle,
                 triggeredEdgeBadges: showTriggeredEdgeBadges,
                 cancelledSetups: showCancelledSetups,
@@ -482,6 +492,7 @@ export default function StrategyMap() {
                 ghostFillMarkers: showGhostFillMarkers,
                 ghostWinMarkers: showGhostWinMarkers,
                 ghostLossMarkers: showGhostLossMarkers,
+                fftDebug: showFftDebug,
             },
             sessionSettings,
         });
@@ -508,6 +519,7 @@ export default function StrategyMap() {
         showNewsEvents,
         showNewsLabels,
         showTriggeredEdgeLevels,
+        showTriggeredEdgeLabels,
         showTriggeredEdgeLifecycle,
         showTriggeredEdgeBadges,
         showCancelledSetups,
@@ -516,6 +528,7 @@ export default function StrategyMap() {
         showGhostFillMarkers,
         showGhostWinMarkers,
         showGhostLossMarkers,
+        showFftDebug,
         sessionSettings,
     ]);
 
@@ -590,9 +603,14 @@ export default function StrategyMap() {
             if (selectedTradeId) setSelectedTradeId(null);
             return;
         }
-        if (!activeTrades.some((trade) => trade.id === selectedTradeId)) {
-            setSelectedTradeId(null);
-        }
+        // Use same fuzzy key as selectedTrade lookup so IDs like "T-007" match "7"
+        const key = rrLookupKey(selectedTradeId);
+        const stillPresent = activeTrades.some((trade) => (
+            trade.id === selectedTradeId
+            || rrLookupKey(trade.id) === key
+            || rrLookupKey(trade.displayTradeId) === key
+        ));
+        if (!stillPresent) setSelectedTradeId(null);
     }, [activeTrades, selectedTradeId]);
 
     // ── Intrabar inspector (Phase 1) — resolve the currently-selected trade
@@ -738,9 +756,13 @@ export default function StrategyMap() {
                                 {resolvedScenario.resolvedFamily === "triggered_edge" && hasTriggeredEdgeTrades && (
                                     <>
                                         <Toggle label="Trigger Levels" checked={showTriggeredEdgeLevels} onChange={setShowTriggeredEdgeLevels} dot="warning" />
+                                        {showTriggeredEdgeLevels && (
+                                            <Toggle label="Trig Labels" checked={showTriggeredEdgeLabels} onChange={setShowTriggeredEdgeLabels} dot="muted" />
+                                        )}
                                         <Toggle label="Lifecycle" checked={showTriggeredEdgeLifecycle} onChange={setShowTriggeredEdgeLifecycle} dot="primary" />
                                         <Toggle label="OB Badges" checked={showTriggeredEdgeBadges} onChange={setShowTriggeredEdgeBadges} dot="success" />
                                         <Toggle label="Cancelled Setups" checked={showCancelledSetups} onChange={setShowCancelledSetups} dot="secondary" />
+                                        <Toggle label="🔍 FFT Debug" checked={showFftDebug} onChange={setShowFftDebug} dot="danger" />
                                     </>
                                 )}
                                 {hasGhostData && (
@@ -800,14 +822,17 @@ export default function StrategyMap() {
                             height={chartHeight}
                             triggeredEdgeOverlays={triggeredEdgeOverlays}
                             showTriggeredEdgeLevels={showTriggeredEdgeLevels}
+                            showTriggeredEdgeLabels={showTriggeredEdgeLabels}
                             showTriggeredEdgeLifecycle={showTriggeredEdgeLifecycle}
                             showTriggeredEdgeBadges={showTriggeredEdgeBadges}
                             showCancelledSetups={showCancelledSetups}
+                            onSelectOverlay={(ov) => setSelectedOverlay((cur) => (cur === ov ? null : ov))}
                             showObDetails={showObDetails}
                             showGhostCandidateMarkers={showGhostCandidateMarkers}
                             showGhostFillMarkers={showGhostFillMarkers}
                             showGhostWinMarkers={showGhostWinMarkers}
                             showGhostLossMarkers={showGhostLossMarkers}
+                            showFftDebug={showFftDebug}
                             onSelectTrade={(id) => {
                                 if (id == null) { setSelectedTradeId(null); return; }
                                 const incomingKey = rrLookupKey(id);
@@ -826,6 +851,15 @@ export default function StrategyMap() {
                                 sourceIsFine={!candlesAreCoarse}
                                 medianCandleGapSec={medianCandleGapSec}
                                 onClose={() => setSelectedTradeId(null)}
+                            />
+                        )}
+                        {selectedOverlay && (
+                            <LifecycleDetailPanel
+                                overlay={selectedOverlay}
+                                trades={activeTrades}
+                                onClose={() => setSelectedOverlay(null)}
+                                showFftDebug={showFftDebug}
+                                runConfig={summary?.config || bundle?.config || null}
                             />
                         )}
                     </div>
@@ -1179,6 +1213,11 @@ function buildTriggeredEdgeOverlays(trades = [], obs = []) {
         );
         const cancelReason = trade.cancel_reason || trade.cancelReason || "";
         const cancelledBeforeEntry = truthyFlag(trade.cancelled_before_entry) || truthyFlag(trade.cancelledBeforeEntry);
+        const isFftCancel = normalizeOutcome(cancelReason).includes("first_failed");
+        // For FFT cancels, exit_time (the candle at which FFT fired) is the cancel timestamp
+        const fftCancelTime = isFftCancel
+            ? firstAvailable(trade.exit_time, trade.exitTime, trade.exit)
+            : null;
         const filledOnTriggerCandle = truthyFlag(trade.filled_on_trigger_candle) || truthyFlag(trade.filledOnTriggerCandle);
         const filledOnNextCandle = trade.filled_on_trigger_candle === false || trade.filledOnTriggerCandle === false || String(trade.filled_on_trigger_candle).toLowerCase() === "false" || String(trade.filledOnTriggerCandle).toLowerCase() === "false";
         const hasTrigger = !!(triggerTime && String(triggerTime).trim());
@@ -1197,6 +1236,8 @@ function buildTriggeredEdgeOverlays(trades = [], obs = []) {
             badgeState = "never_trig";
         } else if ((retraceCancelTime && String(retraceCancelTime).trim()) || cancelNorm.includes("retrace")) {
             badgeState = "used_ob";
+        } else if (cancelledBeforeEntry && cancelNorm.includes("first_failed")) {
+            badgeState = "first_failed";
         } else if (cancelledBeforeEntry && (cancelNorm.includes("inval") || cancelNorm.includes("breach") || cancelNorm.includes("broken"))) {
             badgeState = "inval";
         } else if (filledOnTriggerCandle) {
@@ -1236,6 +1277,17 @@ function buildTriggeredEdgeOverlays(trades = [], obs = []) {
             triggerPrice,
             entryPrice,
             badgeState,
+            // FFT debug fields
+            isFftCancel,
+            fftCancelTime,
+            tappedCandleIndex: numericOrNull(trade.tapped_candle_index ?? trade.tappedCandleIndex),
+            triggerCandleIndex: numericOrNull(trade.trigger_candle_index ?? trade.triggerCandleIndex),
+            armCandleIndex: numericOrNull(trade.arm_candle_index ?? trade.armCandleIndex),
+            exitedObBeforeArm: trade.exited_ob_before_arm ?? trade.exitedObBeforeArm ?? null,
+            obOccupiedAtArm: trade.ob_occupied_at_arm ?? trade.obOccupiedAtArm ?? null,
+            armedAfterObExit: trade.armed_after_ob_exit ?? trade.armedAfterObExit ?? null,
+            obExitTime: firstAvailable(trade.ob_exit_time, trade.obExitTime) || null,
+            ghostCandidate: trade.ghost_candidate ?? trade.ghostCandidate ?? null,
         });
     }
     return out;
@@ -1870,11 +1922,284 @@ function StrategyTradeListPanel({
     );
 }
 
+
 function TradeDetail({ label, value, wide = false }) {
     return (
         <div className={wide ? "col-span-2" : ""}>
             <div className="font-ui text-[9px] uppercase tracking-wider text-[hsl(var(--text-3))]">{label}</div>
             <div className="font-ui text-[11px] text-[hsl(var(--text-1))] truncate">{value || "—"}</div>
+        </div>
+    );
+}
+
+// ── Lifecycle Detail Panel ────────────────────────────────────────────────────
+// Compact popover shown when a triggered-edge badge or lifecycle marker is
+// clicked. Displays cancel reason, OB/trade IDs, timestamps, and ghost fields
+// for cancelled/protected setups (no IntrabarInspector needed for these).
+
+function fmtOverlayTime(raw) {
+    const ts = normalizeTimestampSeconds(raw);
+    if (!ts) return "—";
+    const d = new Date(ts * 1000);
+    const pad = (v) => String(v).padStart(2, "0");
+    return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} UTC`;
+}
+
+function LifecycleDetailPanel({ overlay: ov, onClose, trades = [], showFftDebug = false, runConfig = null }) {
+    if (!ov) return null;
+
+    // Look up the live trade for outcome/R/fill-time/exit-time (not in overlay)
+    const tradeKey = rrLookupKey(ov.tradeId);
+    const trade = trades.find((t) => (
+        t.id === ov.tradeId
+        || rrLookupKey(t.id) === tradeKey
+        || rrLookupKey(t.displayTradeId) === tradeKey
+    )) || null;
+
+    // IDs and direction
+    const rawId = ov.obId || ov.ob_id || "";
+    const idNum = String(rawId).match(/\d+/) ? String(Number(String(rawId).match(/\d+/)[0])).padStart(3, "0") : String(rawId);
+    const obIdLabel = idNum ? `OB-${idNum}` : "—";
+    const tradeIdLabel = ov.tradeId || "—";
+    const dir = ov.direction === "bull" ? "bullish" : ov.direction === "bear" ? "bearish" : String(ov.direction || "").toLowerCase();
+    const dirLabel = dir === "bullish" ? "BULL" : dir === "bearish" ? "BEAR" : String(ov.direction || "—").toUpperCase();
+
+    // Trade values from live trade lookup
+    const outcome = String(trade?.outcome || "").toLowerCase();
+    const r = (() => {
+        const v = trade?.r ?? trade?.net_r;
+        return (v != null && v !== "" && isFinite(Number(v))) ? Number(v) : null;
+    })();
+    const fillTime = trade?.entry || null;  // 'entry' field in trade = fill timestamp string
+    const exitTime = trade?.exit || null;
+
+    // Badge
+    const BADGE_STATUS = {
+        same:         { label: "Same-Candle Fill",      tone: "rgba(22,163,74,0.88)" },
+        next:         { label: "Next-Candle Fill",       tone: "rgba(6,182,212,0.85)" },
+        used_ob:      { label: "Retrace Cancel",         tone: "rgba(219,39,119,0.88)" },
+        first_failed: { label: "First Failed Visit",     tone: "rgba(219,39,119,0.88)" },
+        never_trig:   { label: "Never Triggered",        tone: "rgba(107,114,128,0.82)" },
+        inval:        { label: "Invalidated Pre-Entry",  tone: "rgba(139,92,246,0.82)" },
+    };
+    const badgeInfo = BADGE_STATUS[ov.badgeState] || null;
+
+    // Time helpers
+    const fmtShort = (raw) => {
+        const ts = normalizeTimestampSeconds(raw);
+        if (!ts) return null;
+        const d = new Date(ts * 1000);
+        const pad = (v) => String(v).padStart(2, "0");
+        return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+    };
+    const fmtAt = (raw) => {
+        const s = fmtShort(raw);
+        return s ? ` at ${s} UTC` : "";
+    };
+
+    // Narrative
+    const trigPctText = ov.triggerPenetrationPct != null
+        ? `${ov.triggerPenetrationPct}% penetration`
+        : "the trigger level";
+    const rText = r != null
+        ? (r >= 0 ? `won +${r.toFixed(2)}R` : `lost ${Math.abs(r).toFixed(2)}R`)
+        : (outcome ? `resulted in ${outcome}` : "outcome unknown");
+    const cancelLabel = displayCancelReason(ov.cancelReason);
+
+    let narrative = "";
+    switch (ov.badgeState) {
+        case "never_trig":
+            narrative = `Price tapped into the ${dir} OB${fmtAt(ov.tappedTime)} but never reached ${trigPctText}. The setup expired without a fill.`;
+            break;
+        case "first_failed":
+            narrative = `Price first entered the ${dir} OB${fmtAt(ov.tappedTime)} but exited without reaching ${trigPctText}. This first visit is marked as a "failed tag" — the OB won't accept further entries.`;
+            break;
+        case "used_ob":
+            narrative = `Price tapped the ${dir} OB${fmtAt(ov.tappedTime)}, crossed ${trigPctText}${fmtAt(ov.triggerTime)}, arming the entry order. Before the order filled, price retraced back out of the OB. The pending fill was cancelled${fmtAt(ov.retraceCancelTime)}.`;
+            break;
+        case "inval":
+            narrative = `The ${dir} OB setup was invalidated before any trigger.${cancelLabel ? ` Reason: ${cancelLabel}.` : ""} The setup was removed to protect the trade from a compromised zone.`;
+            break;
+        case "same":
+            narrative = `Price tapped the ${dir} OB${fmtAt(ov.tappedTime)}, crossed ${trigPctText}, and filled on the same trigger candle${fmtAt(fillTime)}. The trade ${rText}.`;
+            break;
+        case "next":
+            narrative = `Price tapped the ${dir} OB${fmtAt(ov.tappedTime)}, crossed ${trigPctText}${fmtAt(ov.triggerTime)}, then the fill order executed on the next candle open${fmtAt(fillTime)}. The trade ${rText}.`;
+            break;
+        default:
+            narrative = ov.cancelledBeforeEntry
+                ? `The ${dir} OB setup was cancelled before any fill.${cancelLabel ? ` (${cancelLabel})` : ""}`
+                : ov.wasTriggered
+                    ? `Price triggered the ${dir} OB at ${trigPctText}${fmtAt(ov.triggerTime)}.`
+                    : `The ${dir} OB setup did not trigger.`;
+    }
+    if (ov.ghost_candidate && ov.ghost_outcome) {
+        const ghostRText = ov.ghost_r != null
+            ? ` at ${ov.ghost_r >= 0 ? "+" : ""}${ov.ghost_r.toFixed(2)}R`
+            : "";
+        narrative += ` Simulated as a ghost: hypothetical outcome was ${ov.ghost_outcome.toUpperCase()}${ghostRText}.`;
+    }
+
+    // Event timeline
+    const isWin = (o) => ["win", "target", "tp"].includes(String(o).toLowerCase());
+    const timelineEvents = [
+        ov.detectionTime && { label: "OB Detected",                   time: ov.detectionTime,    color: "hsl(var(--text-3))" },
+        ov.tappedTime    && { label: "Tapped OB",                     time: ov.tappedTime,        color: "#6366f1" },
+        ov.triggerTime   && { label: `Trigger Crossed (${trigPctText})`, time: ov.triggerTime,   color: "#f59e0b" },
+        ov.armedAt       && { label: "Entry Armed",                    time: ov.armedAt,           color: "#fbbf24" },
+        fillTime         && { label: "Filled",                         time: fillTime,             color: "#16a34a" },
+        ov.retraceCancelTime && { label: "Retrace Cancel",             time: ov.retraceCancelTime, color: "#e11d48" },
+        exitTime && outcome && {
+            label: `Exit (${outcome.toUpperCase()})${r != null ? ` · ${r >= 0 ? "+" : ""}${r.toFixed(2)}R` : ""}`,
+            time: exitTime,
+            color: isWin(outcome) ? "#16a34a" : "#e11d48",
+        },
+    ].filter(Boolean).sort((a, b) => {
+        const ta = normalizeTimestampSeconds(a.time);
+        const tb = normalizeTimestampSeconds(b.time);
+        if (ta == null) return 1;
+        if (tb == null) return -1;
+        return ta - tb;
+    });
+
+    const ghostOutcome = String(ov.ghost_outcome || "").toUpperCase();
+    const ghostR = ov.ghost_r;
+
+    return (
+        <div
+            className="mt-2 rounded-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-1)/0.96)] px-3 py-2.5 shadow-md"
+            style={{ fontSize: 11 }}
+        >
+            {/* Header */}
+            <div className="flex items-center justify-between mb-1.5">
+                <div className="flex items-center gap-2">
+                    <span className="font-ui text-[10px] uppercase tracking-wider font-semibold text-[hsl(var(--text-1))]">
+                        Lifecycle Detail
+                    </span>
+                    {badgeInfo && (
+                        <span
+                            className="px-1.5 py-px rounded-sm font-ui text-[8px] uppercase tracking-wider"
+                            style={{ background: badgeInfo.tone, color: "rgba(255,255,255,0.96)" }}
+                        >
+                            {badgeInfo.label}
+                        </span>
+                    )}
+                </div>
+                <button
+                    type="button"
+                    onClick={onClose}
+                    className="font-ui text-[9px] uppercase tracking-wider text-[hsl(var(--text-3))] hover:text-[hsl(var(--text-1))] px-1"
+                >
+                    ✕
+                </button>
+            </div>
+            {/* Compact meta */}
+            <div className="mb-2 flex items-center gap-1.5 font-ui text-[10px] text-[hsl(var(--text-2))]">
+                <span className="font-semibold text-[hsl(var(--text-1))]">{obIdLabel}</span>
+                <span>·</span>
+                <span>{tradeIdLabel}</span>
+                <span>·</span>
+                <span>{dirLabel}</span>
+                {r != null && (
+                    <>
+                        <span>·</span>
+                        <span className={`font-semibold ${r >= 0 ? "text-green-600" : "text-rose-500"}`}>
+                            {r >= 0 ? "+" : ""}{r.toFixed(2)}R
+                        </span>
+                    </>
+                )}
+            </div>
+            {/* Plain-English narrative */}
+            <p className="font-ui text-[10.5px] text-[hsl(var(--text-1))] leading-snug mb-2">
+                {narrative}
+            </p>
+            {/* Event timeline */}
+            {timelineEvents.length > 0 && (
+                <div className="border-t border-[hsl(var(--border-soft))] pt-1.5">
+                    <div className="font-ui text-[9px] uppercase tracking-wider text-[hsl(var(--text-3))] mb-1">Event Sequence</div>
+                    <div className="space-y-0.5">
+                        {timelineEvents.map((ev, i) => (
+                            <div key={i} className="flex items-center gap-1.5">
+                                <span
+                                    className="flex-shrink-0 rounded-full"
+                                    style={{ width: 5, height: 5, background: ev.color }}
+                                />
+                                <span className="font-ui text-[9px] text-[hsl(var(--text-3))] w-44 flex-shrink-0 truncate">{ev.label}</span>
+                                <span className="font-mono text-[9px] text-[hsl(var(--text-2))]">{fmtShort(ev.time)} UTC</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+            {/* Ghost simulation */}
+            {ov.ghost_candidate && (ghostOutcome || ghostR != null) && (
+                <div className="border-t border-[hsl(var(--border-soft))] mt-1.5 pt-1.5">
+                    <div className="font-ui text-[9px] uppercase tracking-wider text-[hsl(var(--text-3))] mb-0.5">Ghost Simulation</div>
+                    <div className="flex items-center gap-3">
+                        {ghostOutcome && (
+                            <span className="font-ui text-[10px] text-[hsl(var(--text-1))]">{ghostOutcome}</span>
+                        )}
+                        {ghostR != null && (
+                            <span className={`font-ui text-[10px] font-semibold ${ghostR > 0 ? "text-green-600" : ghostR < 0 ? "text-rose-500" : "text-[hsl(var(--text-2))]"}`}>
+                                {ghostR >= 0 ? "+" : ""}{ghostR.toFixed(2)}R
+                            </span>
+                        )}
+                    </div>
+                </div>
+            )}
+            {/* FFT Debug checklist — shown when FFT Debug layer is on */}
+            {showFftDebug && (ov.isFftCancel || ov.tappedBeforeTrigger || ov.badgeState === "first_failed") && (() => {
+                const fftEnabled = runConfig?.triggered_edge_cancel_on_first_failed_tag;
+                const fftEnabledLabel = fftEnabled === true ? "YES" : fftEnabled === false ? "NO" : "unknown";
+                const tappedFlag = ov.tappedBeforeTrigger;
+                const triggerReachedBeforeCancel = ov.wasTriggered && !ov.isFftCancel;
+                const noFftRecorded = !ov.isFftCancel && tappedFlag;
+                const fmtBool = (v) => v === true ? "true" : v === false ? "false" : "—";
+                const fmtNum = (v) => (v != null && v !== "") ? String(v) : "—";
+                return (
+                    <div className="border-t border-[hsl(var(--border-soft))] mt-1.5 pt-1.5">
+                        <div className="font-ui text-[9px] uppercase tracking-wider mb-1" style={{ color: "rgba(219,39,119,0.9)" }}>
+                            🔍 FFT Debug
+                        </div>
+                        <div className="space-y-0.5">
+                            {[
+                                ["FFT enabled in config",    fftEnabledLabel],
+                                ["tapped_before_trigger",    fmtBool(tappedFlag)],
+                                ["First tap time",           fmtShort(ov.tappedTime) || "—"],
+                                ["Trigger threshold",        ov.triggerPenetrationPct != null ? `${ov.triggerPenetrationPct}%` : "—"],
+                                ["Trigger time",             fmtShort(ov.triggerTime) || "—"],
+                                ["Cancel reason",            ov.cancelReason || "—"],
+                                ["Cancelled before entry",   fmtBool(ov.cancelledBeforeEntry)],
+                                ["Trigger before cancel?",   triggerReachedBeforeCancel ? "YES" : ov.isFftCancel ? "NO (FFT fired first)" : "—"],
+                                ["FFT cancel time",          ov.fftCancelTime ? (fmtShort(ov.fftCancelTime) || "—") : "not exported"],
+                                ["Ghost candidate",          fmtBool(ov.ghostCandidate)],
+                                ["tapped_candle_index",      fmtNum(ov.tappedCandleIndex)],
+                                ["trigger_candle_index",     fmtNum(ov.triggerCandleIndex)],
+                                ["arm_candle_index",         fmtNum(ov.armCandleIndex)],
+                                ["exited_ob_before_arm",     fmtBool(ov.exitedObBeforeArm)],
+                                ["ob_occupied_at_arm",       fmtBool(ov.obOccupiedAtArm)],
+                                ["armed_after_ob_exit",      fmtBool(ov.armedAfterObExit)],
+                                ["ob_exit_time",             ov.obExitTime ? (fmtShort(ov.obExitTime) || "—") : "—"],
+                            ].map(([label, value]) => (
+                                <div key={label} className="flex items-start gap-1">
+                                    <span className="font-ui text-[9px] text-[hsl(var(--text-3))] w-40 flex-shrink-0 truncate">{label}</span>
+                                    <span className="font-mono text-[9px] text-[hsl(var(--text-1))]">{value}</span>
+                                </div>
+                            ))}
+                        </div>
+                        {noFftRecorded && (
+                            <p className="mt-1 font-ui text-[9px]" style={{ color: "rgba(219,39,119,0.85)" }}>
+                                ⚠ Tapped OB but no FFT cancel recorded for this row.
+                            </p>
+                        )}
+                        {!ov.fftCancelTime && ov.isFftCancel && (
+                            <p className="mt-1 font-ui text-[9px] text-[hsl(var(--text-3))]">
+                                FFT cancel point: backend does not export first_failed_tag_time separately — using exit_time as proxy.
+                            </p>
+                        )}
+                    </div>
+                );
+            })()}
         </div>
     );
 }

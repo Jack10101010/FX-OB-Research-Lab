@@ -278,9 +278,11 @@ export function CandleChart({
     // Triggered-edge lifecycle props
     triggeredEdgeOverlays = [],
     showTriggeredEdgeLevels = false,
+    showTriggeredEdgeLabels = false,   // sub-toggle for trigger line text labels
     showTriggeredEdgeLifecycle = false,
     showTriggeredEdgeBadges = true,
     showCancelledSetups = true,
+    onSelectOverlay,   // (overlayObject | null) => void — lifecycle detail popover
     // OB Details callout overlay (compact badge per OB box, off by default)
     showObDetails = false,
     // Ghost tracking overlay props (Phase 0 — observational, all off by default)
@@ -288,6 +290,8 @@ export function CandleChart({
     showGhostFillMarkers = false,
     showGhostWinMarkers = false,
     showGhostLossMarkers = false,
+    // FFT Debug overlay — pink entry-edge tap/cancel markers
+    showFftDebug = false,
 }) {
     const containerRef = useRef(null);
     const chartRef = useRef(null);
@@ -789,7 +793,9 @@ export function CandleChart({
             const rawExitTime = normalizeChartTimestamp(tool.exitTime ?? tool.exit_time ?? tool.newsFlattenTime ?? tool.news_flatten_time);
             const isNewsFlatten = Boolean(tool.isNewsFlatten || normalizeText(tool.outcome || tool.status || tool.statusLabel).includes("news_flatten"));
             const snappedExitTime = rawExitTime != null && hasRealCandleTime ? snapCeil(rawExitTime) : rawExitTime;
-            const endTime = isNewsFlatten && snappedExitTime != null
+            // Use actual exit time when available (for all trade types).
+            // Fall back to 50-candle lookahead when exit_time is absent.
+            const endTime = snappedExitTime != null
                 ? snappedExitTime
                 : candleTimes[Math.min(candleTimes.length - 1, startIndex + 50)];
             const boxStart = Math.min(startTime, endTime);
@@ -1014,7 +1020,7 @@ export function CandleChart({
                 width: Math.max(2, right - left),
                 y: clamp(y, 0, maxHeight),
                 color,
-                label: `${pctLabel} · ${color.stateLabel}`,
+                label: showTriggeredEdgeLabels ? `${pctLabel} · ${color.stateLabel}` : null,
             });
         }
         return out;
@@ -1058,6 +1064,7 @@ export function CandleChart({
                     y: yMid,
                     color: ev.color,
                     label: ev.label,
+                    overlay: ov,
                 });
             }
         }
@@ -1076,13 +1083,14 @@ export function CandleChart({
         // INVALID_CANCELLED outcomes from the backend) but the rendered label
         // is now PROTECTED — these setups were saved from a bad fill, not
         // corrupted. Violet palette already wired in BADGE_COLORS below.
-        const BADGE_LABELS = { same: "SAME", next: "NEXT", used_ob: "USED OB", never_trig: "NEVER TRIG", inval: "PROTECTED" };
+        const BADGE_LABELS = { same: "SAME", next: "NEXT", used_ob: "RETRACE", first_failed: "FAILED TAG", never_trig: "NEVER TRIG", inval: "PROTECTED" };
         const BADGE_COLORS = {
-            same:       { bg: "rgba(22, 163, 74, 0.88)",   text: "rgba(255,255,255,0.96)" },
-            next:       { bg: "rgba(6, 182, 212, 0.85)",   text: "rgba(255,255,255,0.96)" },
-            used_ob:    { bg: "rgba(217, 119, 6, 0.88)",   text: "rgba(255,255,255,0.96)" },
-            never_trig: { bg: "rgba(107, 114, 128, 0.82)", text: "rgba(255,255,255,0.92)" },
-            inval:      { bg: "rgba(139, 92, 246, 0.82)",   text: "rgba(255,255,255,0.96)" },
+            same:         { bg: "rgba(22, 163, 74, 0.88)",   text: "rgba(255,255,255,0.96)" },
+            next:         { bg: "rgba(6, 182, 212, 0.85)",   text: "rgba(255,255,255,0.96)" },
+            used_ob:      { bg: "rgba(219, 39, 119, 0.88)",  text: "rgba(255,255,255,0.96)" },  // pre-trigger cancel — pink
+            first_failed: { bg: "rgba(219, 39, 119, 0.88)",  text: "rgba(255,255,255,0.96)" },  // pre-trigger cancel — pink
+            never_trig:   { bg: "rgba(107, 114, 128, 0.82)", text: "rgba(255,255,255,0.92)" },
+            inval:        { bg: "rgba(139, 92, 246, 0.82)",  text: "rgba(255,255,255,0.96)" },
         };
         return triggeredEdgeOverlays
             .filter((ov) => {
@@ -1103,6 +1111,7 @@ export function CandleChart({
                     label,
                     color,
                     tradeId: ov.tradeId,
+                    overlay: ov,
                 };
             })
             .filter(Boolean);
@@ -1165,6 +1174,85 @@ export function CandleChart({
             });
         }
         return out;
+    })();
+
+    // ── FFT Debug: entry-edge tap + cancel markers + tap→cancel line ─────────
+    // Renders at the OB entry edge (top for bull, bottom for bear) rather than
+    // the midpoint used by the regular lifecycle markers.
+    const fftDebugMarkers = (() => {
+        if (!showFftDebug || !triggeredEdgeOverlays?.length) return { dots: [], lines: [] };
+        const chart = chartRef.current;
+        const series = seriesRef.current;
+        if (!chart || !series) return { dots: [], lines: [] };
+        const visibleRange = chart.timeScale().getVisibleRange?.();
+        const rangeFrom = normalizeChartTimestamp(visibleRange?.from);
+        const rangeTo = normalizeChartTimestamp(visibleRange?.to);
+        const isVisible = (t) => (rangeFrom == null || t >= rangeFrom) && (rangeTo == null || t <= rangeTo);
+        const bounds = containerRef.current?.getBoundingClientRect();
+        const maxHeight = bounds?.height || height;
+        const dots = [];
+        const lines = [];
+        for (const ov of triggeredEdgeOverlays) {
+            if (!showCancelledSetups && (ov.cancelledBeforeEntry || ov.badgeState === "never_trig")) continue;
+            // Y = OB entry side: top for bullish, bottom for bearish
+            const rawY = ov.direction === "bull"
+                ? (ov.obTop != null ? series.priceToCoordinate(ov.obTop) : null)
+                : (ov.obBot != null ? series.priceToCoordinate(ov.obBot) : null);
+            if (rawY == null) continue;
+            const y = clamp(rawY, 0, maxHeight);
+            // TAP dot (indigo) at OB entry edge
+            let tapX = null;
+            if (ov.tappedTime) {
+                const parsed = normalizeChartTimestamp(ov.tappedTime);
+                if (parsed != null) {
+                    const snap = hasRealCandleTime ? snapFloor(parsed) : parsed;
+                    if (snap != null && isVisible(snap)) {
+                        tapX = chart.timeScale().timeToCoordinate(snap);
+                        if (tapX != null) {
+                            dots.push({
+                                id: `fft-tap-${ov.tradeId || ov.obId}`,
+                                x: tapX, y,
+                                color: "rgba(99,102,241,0.95)",
+                                label: "TAP",
+                                overlay: ov,
+                            });
+                        }
+                    }
+                }
+            }
+            // FFT cancel dot (bright pink) at OB entry edge
+            let cancelX = null;
+            if (ov.isFftCancel && ov.fftCancelTime) {
+                const parsed = normalizeChartTimestamp(ov.fftCancelTime);
+                if (parsed != null) {
+                    const snap = hasRealCandleTime ? snapFloor(parsed) : parsed;
+                    if (snap != null && isVisible(snap)) {
+                        cancelX = chart.timeScale().timeToCoordinate(snap);
+                        if (cancelX != null) {
+                            dots.push({
+                                id: `fft-cancel-${ov.tradeId || ov.obId}`,
+                                x: cancelX, y,
+                                color: "rgba(219,39,119,0.95)",
+                                label: "FFT",
+                                size: "lg",
+                                overlay: ov,
+                            });
+                        }
+                    }
+                }
+            }
+            // Horizontal line from TAP → FFT cancel across OB entry edge
+            if (tapX != null && cancelX != null) {
+                const x1 = Math.min(tapX, cancelX);
+                const x2 = Math.max(tapX, cancelX);
+                lines.push({
+                    id: `fft-line-${ov.tradeId || ov.obId}`,
+                    x1, x2, y,
+                    color: "rgba(219,39,119,0.55)",
+                });
+            }
+        }
+        return { dots, lines };
     })();
 
     // ── Phase 2: clickable trade-marker dots ──────────────────────────────────
@@ -1260,18 +1348,29 @@ export function CandleChart({
                 ))}
                 {/* Triggered-edge: lifecycle event dot markers */}
                 {triggeredEdgeLifecycleMarkers.map((m) => (
-                    <TriggeredEdgeLifecycleMarker key={m.id} marker={m} />
+                    <TriggeredEdgeLifecycleMarker
+                        key={m.id}
+                        marker={m}
+                        onClick={onSelectOverlay ? () => { onSelectOverlay(m.overlay); } : undefined}
+                    />
                 ))}
                 {/* Triggered-edge: OB badge chips */}
                 {triggeredEdgeBadgeShapes.map((b) => {
                     const badgeKey = obLookupKey(b.tradeId);
                     const selected = !!(selectedKey != null && badgeKey != null && badgeKey === selectedKey);
+                    const handleBadgeClick = () => {
+                        if (onSelectOverlay && b.overlay) onSelectOverlay(b.overlay);
+                        // Also open IntrabarInspector for filled (non-cancelled) trades
+                        if (onSelectTrade && b.tradeId && !b.overlay?.cancelledBeforeEntry) {
+                            handleSelectTrade(b.tradeId);
+                        }
+                    };
                     return (
                         <TriggeredEdgeBadge
                             key={b.id}
                             badge={b}
                             selected={selected}
-                            onClick={(onSelectTrade && b.tradeId) ? () => handleSelectTrade(b.tradeId) : undefined}
+                            onClick={(onSelectTrade || onSelectOverlay) ? handleBadgeClick : undefined}
                         />
                     );
                 })}
@@ -1300,6 +1399,18 @@ export function CandleChart({
                     >
                         {b.label}{b.ghostR != null ? ` ${b.ghostR >= 0 ? "+" : ""}${b.ghostR.toFixed(1)}R` : ""}
                     </div>
+                ))}
+                {/* FFT Debug: tap→cancel horizontal lines at OB entry edge */}
+                {fftDebugMarkers.lines.map((line) => (
+                    <FftDebugLine key={line.id} line={line} />
+                ))}
+                {/* FFT Debug: TAP (indigo) and FFT (pink) dots at OB entry edge */}
+                {fftDebugMarkers.dots.map((dot) => (
+                    <FftDebugDot
+                        key={dot.id}
+                        dot={dot}
+                        onClick={onSelectOverlay && dot.overlay ? () => onSelectOverlay(dot.overlay) : undefined}
+                    />
                 ))}
                 {/* Phase 2: clickable trade-marker dots */}
                 {tradeMarkerShapes.map((dot) => (
@@ -1629,11 +1740,13 @@ function TriggeredEdgeLevelLine({ shape }) {
     );
 }
 
-function TriggeredEdgeLifecycleMarker({ marker }) {
+function TriggeredEdgeLifecycleMarker({ marker, onClick }) {
+    const interactive = !!onClick;
     return (
         <div
-            className="absolute pointer-events-none rounded-full"
-            title={marker.label}
+            className={`absolute rounded-full ${interactive ? "pointer-events-auto" : "pointer-events-none"}`}
+            title={`${marker.label}${marker.overlay?.cancelReason ? ` · ${marker.overlay.cancelReason}` : ""}`}
+            onClick={interactive ? (e) => { e.stopPropagation(); onClick(); } : undefined}
             style={{
                 left: marker.x - 4,
                 top: marker.y - 4,
@@ -1641,6 +1754,45 @@ function TriggeredEdgeLifecycleMarker({ marker }) {
                 height: 8,
                 background: marker.color,
                 zIndex: 15,
+                cursor: interactive ? "pointer" : "default",
+            }}
+        />
+    );
+}
+
+function FftDebugDot({ dot, onClick }) {
+    const size = dot.size === "lg" ? 10 : 7;
+    const interactive = !!onClick;
+    return (
+        <div
+            className={`absolute rounded-full ${interactive ? "pointer-events-auto" : "pointer-events-none"}`}
+            title={`${dot.label}${dot.overlay?.cancelReason ? ` · ${dot.overlay.cancelReason}` : ""}`}
+            onClick={interactive ? (e) => { e.stopPropagation(); onClick(); } : undefined}
+            style={{
+                left: dot.x - size / 2,
+                top: dot.y - size / 2,
+                width: size,
+                height: size,
+                background: dot.color,
+                zIndex: 18,
+                cursor: interactive ? "pointer" : "default",
+                boxShadow: `0 0 4px ${dot.color}`,
+            }}
+        />
+    );
+}
+
+function FftDebugLine({ line }) {
+    return (
+        <div
+            className="absolute pointer-events-none"
+            style={{
+                left: line.x1,
+                top: line.y,
+                width: line.x2 - line.x1,
+                height: 1,
+                borderTop: `1px solid ${line.color}`,
+                zIndex: 17,
             }}
         />
     );
