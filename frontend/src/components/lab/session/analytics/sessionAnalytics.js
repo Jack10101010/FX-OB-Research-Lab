@@ -579,3 +579,82 @@ export function buildSessionEquityCurve(trades) {
         return { i, netR: cum, v: cum };
     });
 }
+
+// ── OB Profile Analytics ──────────────────────────────────────────────────────
+
+/**
+ * Summarise OB-related fields for a set of session trades.
+ * Requires obOriginSession / obDetectionSession to be present on trades
+ * (populated via the importer enrichment added in Phase 1).
+ *
+ * @param {object[]} sessionTrades
+ * @returns {{
+ *   obFieldAvailable: boolean,
+ *   hasWidth:         boolean,
+ *   hasNews:          boolean,
+ *   originRows:       object[],
+ *   detectionRows:    object[],
+ *   widthRows:        object[],
+ *   news:             { count, netR, winRate, wins, losses },
+ *   clean:            { count, netR, winRate, wins, losses },
+ * }}
+ */
+export function buildSessionOBProfile(sessionTrades) {
+    const hasOrigin    = sessionTrades.some((t) => t.obOriginSession);
+    const hasDetection = sessionTrades.some((t) => t.obDetectionSession);
+    const hasWidth     = sessionTrades.some((t) => t.obWidthPips != null || t.ob_width_pips != null);
+    const hasNews      = sessionTrades.some((t) => t.obCreatedDuringNews != null || t.ob_created_during_news != null);
+
+    const obFieldAvailable = hasOrigin || hasDetection;
+
+    const originRows = buildBucketRows(
+        groupBy(sessionTrades, (t) => t.obOriginSession || "Unknown"),
+        null,
+    );
+
+    const detectionRows = buildBucketRows(
+        groupBy(sessionTrades, (t) => t.obDetectionSession || "Unknown"),
+        null,
+    );
+
+    const WIDTH_ORDER = ["<5 pips", "5–10 pips", "10–15 pips", "15+ pips", "Unknown"];
+    const widthRows = buildBucketRows(
+        groupBy(sessionTrades, (t) => {
+            const w = Number(t.obWidthPips ?? t.ob_width_pips);
+            if (!isFinite(w) || w <= 0) return "Unknown";
+            if (w < 5)  return "<5 pips";
+            if (w < 10) return "5–10 pips";
+            if (w < 15) return "10–15 pips";
+            return "15+ pips";
+        }),
+        WIDTH_ORDER,
+    );
+
+    const newsTrades  = sessionTrades.filter((t) => t.obCreatedDuringNews === true || t.ob_created_during_news === true);
+    const cleanTrades = sessionTrades.filter((t) => !(t.obCreatedDuringNews === true || t.ob_created_during_news === true));
+
+    function groupSummary(trades) {
+        const wins   = trades.filter(isWin).length;
+        const losses = trades.filter(isLoss).length;
+        const decided = wins + losses;
+        const netR    = Number(trades.reduce((s, t) => s + getR(t), 0).toFixed(2));
+        return {
+            count:   trades.length,
+            netR,
+            winRate: decided > 0 ? Number(((wins / decided) * 100).toFixed(1)) : null,
+            wins,
+            losses,
+        };
+    }
+
+    return {
+        obFieldAvailable,
+        hasWidth,
+        hasNews,
+        originRows,
+        detectionRows,
+        widthRows,
+        news:  groupSummary(newsTrades),
+        clean: groupSummary(cleanTrades),
+    };
+}
