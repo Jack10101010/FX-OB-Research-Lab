@@ -53,7 +53,7 @@ export default function SessionLabPage() {
         }}
       />
 
-      <div className="relative mx-auto max-w-[2200px] px-4 md:px-6 lg:px-6 xl:px-8 2xl:px-10 py-6 md:py-8 space-y-6 md:space-y-8">
+      <div className="relative mx-auto max-w-[2200px] px-3 md:px-4 lg:px-4 xl:px-6 2xl:px-8 py-5 md:py-6 space-y-5 md:space-y-6">
         <Header
           direction={direction}
           setDirection={setDirection}

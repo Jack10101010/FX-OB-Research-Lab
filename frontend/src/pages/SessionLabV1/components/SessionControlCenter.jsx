@@ -1,6 +1,5 @@
 import React from "react";
 import {
-  Panel,
   SectionLabel,
   VerdictPill,
   ToggleChip,
@@ -8,7 +7,7 @@ import {
   SplitBar,
   fmtR,
 } from "./primitives";
-import { Moon, Building2, Coffee, Building, Sparkles, Globe, MoreHorizontal, BarChart2 } from "lucide-react";
+import { Moon, Building2, Coffee, Building, Sparkles, Globe, MoreHorizontal } from "lucide-react";
 
 const ICONS = {
   asia: Moon,
@@ -33,7 +32,6 @@ function SessionCard({ session, selected, onSelect, onToggle }) {
   const iconColor = ICON_COLORS[session.key];
   const positive = session.netR >= 0;
   const dimmed = !session.enabled;
-  // Partial = any of long/short/bos/choch off but session enabled
   const partial =
     session.enabled &&
     (!session.longs || !session.shorts || !session.bos || !session.choch);
@@ -43,19 +41,19 @@ function SessionCard({ session, selected, onSelect, onToggle }) {
       onClick={() => onSelect(session.key)}
       data-testid={`session-card-${session.key}`}
       className={[
-        "relative rounded-xl border bg-[#121C29] p-4 cursor-pointer transition-all overflow-hidden",
+        "relative rounded border bg-[hsl(var(--panel-2))] p-4 cursor-pointer transition-all overflow-hidden",
         selected
-          ? "border-[#22D3EE] card-glow"
-          : "border-[#223142] hover:border-[#2E4358]",
+          ? "border-[hsl(var(--accent-primary))] card-glow"
+          : "border-[hsl(var(--border-soft))] hover:border-[hsl(var(--border-mid))]",
         dimmed ? "opacity-50 grayscale-[40%]" : "",
       ].join(" ")}
     >
-      {/* Status dot */}
+      {/* Options dot */}
       <div className="absolute top-3 right-3 flex items-center gap-1">
         <button
           data-testid={`session-card-${session.key}-options`}
           onClick={(e) => e.stopPropagation()}
-          className="text-[#64748B] hover:text-[#E5EDF7] p-1 rounded"
+          className="text-muted-lab hover:text-[hsl(var(--text))] p-1 rounded"
         >
           <MoreHorizontal size={14} />
         </button>
@@ -64,7 +62,7 @@ function SessionCard({ session, selected, onSelect, onToggle }) {
       {/* Title row */}
       <div className="flex items-start gap-3 mb-3">
         <div
-          className="flex h-9 w-9 items-center justify-center rounded-lg shrink-0"
+          className="flex h-9 w-9 items-center justify-center rounded shrink-0"
           style={{
             backgroundColor: `${iconColor}1A`,
             border: `1px solid ${iconColor}40`,
@@ -75,12 +73,12 @@ function SessionCard({ session, selected, onSelect, onToggle }) {
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="font-display text-base font-semibold tracking-tight uppercase text-[#E5EDF7]">
+            <h3 className="font-display text-base font-semibold tracking-tight uppercase text-[hsl(var(--text))]">
               {session.name}
             </h3>
             <VerdictPill verdict={session.verdict} />
           </div>
-          <div className="text-[10px] text-[#64748B] font-mono mt-0.5">{session.range}</div>
+          <div className="text-[10px] text-muted-lab font-num mt-0.5">{session.range}</div>
         </div>
       </div>
 
@@ -88,8 +86,8 @@ function SessionCard({ session, selected, onSelect, onToggle }) {
       <div className="flex items-center justify-between mb-3">
         <div
           className={[
-            "font-display font-bold tabular text-3xl leading-none",
-            positive ? "text-[#22C55E]" : "text-[#EF4444]",
+            "font-num tabular-nums font-bold text-3xl leading-none",
+            positive ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]",
           ].join(" ")}
         >
           {fmtR(session.netR)}
@@ -141,7 +139,7 @@ function SessionCard({ session, selected, onSelect, onToggle }) {
       </div>
 
       {/* Toggles */}
-      <div className="flex items-center justify-between gap-2 pt-3 border-t border-[#223142]">
+      <div className="flex items-center justify-between gap-2 pt-3 border-t border-[hsl(var(--border-soft))]">
         <ToggleChip
           label="LONG"
           active={session.longs}
@@ -149,7 +147,7 @@ function SessionCard({ session, selected, onSelect, onToggle }) {
             e?.stopPropagation?.();
             onToggle(session.key, "longs");
           }}
-          color="green"
+          color="cyan"
           testId={`toggle-${session.key}-long`}
         />
         <ToggleChip
@@ -159,7 +157,7 @@ function SessionCard({ session, selected, onSelect, onToggle }) {
             e?.stopPropagation?.();
             onToggle(session.key, "shorts");
           }}
-          color="red"
+          color="cyan"
           testId={`toggle-${session.key}-short`}
         />
         <ToggleChip
@@ -169,7 +167,7 @@ function SessionCard({ session, selected, onSelect, onToggle }) {
             e?.stopPropagation?.();
             onToggle(session.key, "bos");
           }}
-          color="blue"
+          color="cyan"
           testId={`toggle-${session.key}-bos`}
         />
         <ToggleChip
@@ -179,35 +177,13 @@ function SessionCard({ session, selected, onSelect, onToggle }) {
             e?.stopPropagation?.();
             onToggle(session.key, "choch");
           }}
-          color="purple"
+          color="cyan"
           testId={`toggle-${session.key}-choch`}
         />
       </div>
 
-      {/* Analyze button */}
-      <button
-        data-testid={`session-card-${session.key}-analyze`}
-        onClick={(e) => {
-          e.stopPropagation();
-          onSelect(session.key);
-          window.scrollTo({
-            top: document.body.scrollHeight * 0.55,
-            behavior: "smooth",
-          });
-        }}
-        className={[
-          "mt-3 w-full inline-flex items-center justify-center gap-2 rounded-md border py-2 text-xs font-medium transition-all",
-          selected
-            ? "bg-[#22D3EE]/15 border-[#22D3EE] text-[#22D3EE]"
-            : "bg-[#0D1520] border-[#223142] text-[#94A3B8] hover:border-[#22D3EE] hover:text-[#22D3EE]",
-        ].join(" ")}
-      >
-        <BarChart2 size={12} />
-        Analyze
-      </button>
-
       {/* Status indicator bottom-left */}
-      <div className="absolute bottom-3 left-3 flex items-center gap-1.5 text-[9px] font-mono uppercase tracking-wider">
+      <div className="absolute bottom-3 left-3 flex items-center gap-1.5 text-[9px] font-num uppercase tracking-wider">
         <span
           className="h-1.5 w-1.5 rounded-full"
           style={{
@@ -222,36 +198,49 @@ function SessionCard({ session, selected, onSelect, onToggle }) {
 
 function Cell({ label, value, tone = "default" }) {
   const cls =
-    tone === "pos" ? "text-[#22C55E]" : tone === "neg" ? "text-[#EF4444]" : tone === "cyan" ? "text-[#22D3EE]" : "text-[#E5EDF7]";
+    tone === "pos"
+      ? "text-[hsl(var(--success))]"
+      : tone === "neg"
+      ? "text-[hsl(var(--danger))]"
+      : tone === "cyan"
+      ? "text-[hsl(var(--accent-primary))]"
+      : "text-[hsl(var(--text))]";
   return (
     <div className="flex flex-col gap-0.5">
-      <span className="text-[9px] uppercase tracking-wider text-[#64748B] font-mono">{label}</span>
-      <span className={`font-mono tabular text-xs font-semibold ${cls}`}>{value}</span>
+      <span className="text-[9px] uppercase tracking-wider text-muted-lab font-ui">{label}</span>
+      <span className={`font-num tabular-nums text-xs font-semibold ${cls}`}>{value}</span>
     </div>
   );
 }
 
 function Row({ label, value, tone = "default" }) {
-  const cls = tone === "pos" ? "text-[#22C55E]" : tone === "neg" ? "text-[#EF4444]" : tone === "cyan" ? "text-[#22D3EE]" : "text-[#E5EDF7]";
+  const cls =
+    tone === "pos"
+      ? "text-[hsl(var(--success))]"
+      : tone === "neg"
+      ? "text-[hsl(var(--danger))]"
+      : tone === "cyan"
+      ? "text-[hsl(var(--accent-primary))]"
+      : "text-[hsl(var(--text))]";
   return (
     <div className="flex items-baseline gap-2 leading-tight">
-      <span className="text-[#64748B] uppercase tracking-wider font-mono w-10">{label}</span>
-      <span className={`font-mono truncate text-[10.5px] ${cls}`}>{value}</span>
+      <span className="text-muted-lab uppercase tracking-wider font-ui w-10">{label}</span>
+      <span className={`font-num truncate text-[10.5px] ${cls}`}>{value}</span>
     </div>
   );
 }
 
 export default function SessionControlCenter({ sessions, selectedKey, onSelect, onToggle }) {
   return (
-    <Panel className="p-5 md:p-6">
+    <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel))] p-5 md:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
         <div className="flex items-center gap-3">
           <SectionLabel>Session Control Center</SectionLabel>
-          <span className="text-[10px] text-[#64748B]">
+          <span className="text-[10px] text-muted-lab font-ui">
             Toggle sessions, directions and structures — preview updates instantly.
           </span>
         </div>
-        <div className="flex items-center gap-4 text-[10px] font-mono uppercase tracking-wider">
+        <div className="flex items-center gap-4 text-[10px] font-ui uppercase tracking-wider">
           <LegendDot color="#22C55E" label="Enabled" />
           <LegendDot color="#EF4444" label="Disabled" />
           <LegendDot color="#F59E0B" label="Partially Disabled" />
@@ -269,13 +258,13 @@ export default function SessionControlCenter({ sessions, selectedKey, onSelect, 
           />
         ))}
       </div>
-    </Panel>
+    </div>
   );
 }
 
 function LegendDot({ color, label }) {
   return (
-    <span className="inline-flex items-center gap-1.5 text-[#94A3B8]">
+    <span className="inline-flex items-center gap-1.5 text-[hsl(var(--text-2))]">
       <span
         className="h-1.5 w-1.5 rounded-full"
         style={{ backgroundColor: color, boxShadow: `0 0 6px ${color}` }}
