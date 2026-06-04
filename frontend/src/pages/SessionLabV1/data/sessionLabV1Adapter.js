@@ -32,6 +32,12 @@ import {
 
 import { SESSION_DEFINITIONS } from "../../../components/lab/session/config/sessionConfig";
 
+import {
+  classifyTrade,
+  displayCancelReason,
+  EXCLUDED_CATEGORIES,
+} from "../../../data/tradeClassification";
+
 // ─── Key maps ────────────────────────────────────────────────────────────────
 
 /** Canonical session key → V1 lowercase short key. */
@@ -907,4 +913,253 @@ export function buildOrderBlockLabData(sessionTrades) {
     meta,
     successByType,
   };
+}
+
+// ─── Phase C3: Failure Analysis ───────────────────────────────────────────────
+
+/**
+ * Build an 8-point sparkline from a trade array.
+ * Computes running cumulative R, samples n evenly-spaced points.
+ * Empty array → [0, 0, 0, 0, 0, 0, 0, 0].
+ */
+function buildSparkline(trades, n = 8) {
+  if (!trades.length) return Array(n).fill(0);
+  // Build full cumulative R array
+  const cum = [];
+  let running = 0;
+  for (const t of trades) {
+    running += getR(t);
+    cum.push(Number(running.toFixed(2)));
+  }
+  if (cum.length <= n) {
+    // Pad end with final value
+    const last = cum[cum.length - 1];
+    while (cum.length < n) cum.push(last);
+    return cum;
+  }
+  // Sample n evenly-spaced indices
+  const result = [];
+  for (let i = 0; i < n; i++) {
+    const idx = Math.round((i / (n - 1)) * (cum.length - 1));
+    result.push(cum[idx]);
+  }
+  return result;
+}
+
+/**
+ * Extract HH:MM UTC label from an entry/fill time string.
+ * Handles ISO datetimes ("2024-01-15T08:30:00Z") and bare time strings ("08:30").
+ */
+function parseTimeLabel(entryStr) {
+  if (!entryStr) return "—";
+  const s = String(entryStr).trim();
+  if (!s) return "—";
+  let hhmm;
+  if (s.includes("T")) {
+    // ISO datetime — extract chars after T
+    const after = s.slice(s.indexOf("T") + 1);
+    hhmm = after.slice(0, 5); // "HH:MM"
+  } else {
+    hhmm = s.slice(0, 5);
+  }
+  // Validate looks like HH:MM
+  if (!/^\d{2}:\d{2}$/.test(hhmm)) return "—";
+  return `${hhmm} UTC`;
+}
+
+/**
+ * Find the worst consecutive-loss streak in session trades (≥ 2 losses).
+ * "Worst" = deepest (most negative) cumulative R.
+ * Tie-breaker: longer streak.
+ * Returns the array of trades in the worst streak, or [] if none qualifies.
+ */
+function findWorstCluster(sessionTrades) {
+  let bestStreak = [];
+  let bestNetR   = 0;
+
+  let current = [];
+  for (const t of sessionTrades) {
+    if (isLoss(t)) {
+      current.push(t);
+    } else {
+      if (current.length >= 2) {
+        const cNetR = current.reduce((s, x) => s + getR(x), 0);
+        if (
+          cNetR < bestNetR ||
+          (cNetR === bestNetR && current.length > bestStreak.length)
+        ) {
+          bestStreak = current;
+          bestNetR   = cNetR;
+        }
+      }
+      current = [];
+    }
+  }
+  // Check tail
+  if (current.length >= 2) {
+    const cNetR = current.reduce((s, x) => s + getR(x), 0);
+    if (
+      cNetR < bestNetR ||
+      (cNetR === bestNetR && current.length > bestStreak.length)
+    ) {
+      bestStreak = current;
+    }
+  }
+  return bestStreak;
+}
+
+/**
+ * Build a single failure card object from a matched trade slice.
+ */
+function buildFailureCard(name, matchingTrades, totalCount) {
+  const count = matchingTrades.length;
+  const pct   = totalCount > 0 ? Number(((count / totalCount) * 100).toFixed(1)) : 0;
+  const netR  = Number(matchingTrades.reduce((s, t) => s + getR(t), 0).toFixed(2));
+  const spark = buildSparkline(matchingTrades);
+  return { name, count, pct, netR, spark };
+}
+
+/**
+ * Normalize a cancel_reason string to ALL_CAPS_UNDERSCORE for comparison.
+ */
+function normReason(raw) {
+  return String(raw || "").trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+}
+
+/**
+ * Build failure analytics for the FailureAnalysis tab.
+ * Returns null for empty input.
+ *
+ * @param {object[]} sessionTrades - pre-filtered to one session
+ * @returns {object|null}
+ */
+export function buildFailureAnalysisData(sessionTrades) {
+  if (!Array.isArray(sessionTrades) || sessionTrades.length === 0) return null;
+
+  const total      = sessionTrades.length;
+  const lossTrades = sessionTrades.filter(isLoss);
+
+  const hasWidthData = sessionTrades.some((t) => t.obWidthPips != null || t.ob_width_pips != null);
+  const hasNewsData  = sessionTrades.some((t) => t.obCreatedDuringNews != null || t.ob_origin_news_window != null);
+  const hasMinsExit  = sessionTrades.some((t) => t.minutes_to_exit != null || t.minutesToExit != null);
+
+  // ── Failure cards ────────────────────────────────────────────────────────────
+  const failureCards = [];
+
+  // 1. Fast Stopouts — losses under 30 minutes (only when field available)
+  if (hasMinsExit) {
+    const fast = lossTrades.filter((t) => {
+      const m = t.minutes_to_exit ?? t.minutesToExit ?? null;
+      return m != null && Number(m) < 30;
+    });
+    if (fast.length > 0) {
+      failureCards.push(buildFailureCard("Fast Stopouts", fast, total));
+    }
+  }
+
+  // 2. First Failed Tag — tapped before trigger or first_failed_tag cancel reason
+  const firstFailed = sessionTrades.filter((t) => {
+    if (t.tappedBeforeTrigger === true || t.tapped_before_trigger === true) return true;
+    const r = normReason(t.cancel_reason || t.cancelReason);
+    return r === "FIRST_FAILED_TAG";
+  });
+  if (firstFailed.length > 0) {
+    failureCards.push(buildFailureCard("First Failed Tag", firstFailed, total));
+  }
+
+  // 3. OB Too Wide — losses where width >= 15 pips (only when field available)
+  if (hasWidthData) {
+    const wide = lossTrades.filter((t) => Number(t.obWidthPips ?? t.ob_width_pips) >= 15);
+    if (wide.length > 0) {
+      failureCards.push(buildFailureCard("OB Too Wide", wide, total));
+    }
+  }
+
+  // 4. News-Origin OB — losses on news-created OBs (only when field available)
+  if (hasNewsData) {
+    const newsLosses = lossTrades.filter(
+      (t) => t.obCreatedDuringNews === true || t.ob_created_during_news === true || t.ob_origin_news_window === true,
+    );
+    if (newsLosses.length > 0) {
+      failureCards.push(buildFailureCard("News-Origin OB", newsLosses, total));
+    }
+  }
+
+  // 5. Cancelled Pre-Entry — always shown (zero count is meaningful)
+  const cancelled = sessionTrades.filter((t) => classifyTrade(t) === "INVALID_CANCELLED");
+  failureCards.push(buildFailureCard("Cancelled Pre-Entry", cancelled, total));
+
+  // 6. Session Expiry — only shown when present
+  const sessionExpiry = sessionTrades.filter((t) => classifyTrade(t) === "SESSION_FILTERED");
+  if (sessionExpiry.length > 0) {
+    failureCards.push(buildFailureCard("Session Expiry", sessionExpiry, total));
+  }
+
+  // ── Cancellation Reasons ─────────────────────────────────────────────────────
+  const excludedTrades = sessionTrades.filter((t) => EXCLUDED_CATEGORIES.has(classifyTrade(t)));
+  const reasonMap = new Map();
+
+  for (const t of excludedTrades) {
+    const raw = t.cancel_reason || t.cancelReason || "";
+    let label;
+    if (raw) {
+      label = displayCancelReason(raw);
+    } else {
+      const cat = classifyTrade(t);
+      if (cat === "SESSION_FILTERED") label = "Session Filter Cancel";
+      else if (cat === "NEWS_CANCELLED") label = "News Touch Cancel";
+      else label = "Other";
+    }
+    if (!reasonMap.has(label)) reasonMap.set(label, []);
+    reasonMap.get(label).push(t);
+  }
+
+  const cancellationReasons = Array.from(reasonMap.entries())
+    .sort((a, b) => b[1].length - a[1].length)
+    .map(([name, trades]) => ({
+      name,
+      pct:  Number(((trades.length / total) * 100).toFixed(1)),
+      netR: Number(trades.reduce((s, t) => s + getR(t), 0).toFixed(2)),
+    }));
+
+  // ── Worst cluster ────────────────────────────────────────────────────────────
+  const clusterTrades = findWorstCluster(sessionTrades);
+  let worstCluster = null;
+
+  if (clusterTrades.length >= 2) {
+    const first    = clusterTrades[0];
+    const last     = clusterTrades[clusterTrades.length - 1];
+    const clusterR = Number(clusterTrades.reduce((s, t) => s + getR(t), 0).toFixed(2));
+
+    const firstTime = parseTimeLabel(first.entry || first.fill_time || first.fillTime || "");
+    const lastTime  = parseTimeLabel(last.entry  || last.fill_time  || last.fillTime  || "");
+    const window    = firstTime !== "—" && lastTime !== "—" ? `${firstTime} – ${lastTime}` : "—";
+
+    function mode(arr) {
+      if (!arr.length) return null;
+      const freq = {};
+      for (const v of arr) freq[v] = (freq[v] || 0) + 1;
+      return Object.entries(freq).sort((a, b) => b[1] - a[1])[0][0];
+    }
+
+    const dirs    = clusterTrades.map((t) => normalizeDirection(t)).filter((v) => v !== "Unknown");
+    const structs = clusterTrades.map((t) => normalizeStructure(t)).filter((v) => v !== "Unknown");
+    const entries = clusterTrades
+      .map((t) => t.entryModel || t.entry_model_key || t.entry_model || "")
+      .filter(Boolean);
+
+    const causeParts = [mode(dirs), mode(structs), mode(entries)].filter(Boolean);
+    const cause = causeParts.length > 0 ? causeParts.join(" / ") : "—";
+
+    worstCluster = {
+      losses: clusterTrades.length,
+      window,
+      netR:   clusterR,
+      trades: clusterTrades.length,
+      cause,
+      spark:  buildSparkline(clusterTrades),
+    };
+  }
+
+  return { failureCards, cancellationReasons, worstCluster };
 }
