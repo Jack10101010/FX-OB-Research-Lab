@@ -518,9 +518,6 @@ export default function StrategyBuilder() {
                         <Field label="Structure Type" className="col-span-2">
                             <Segment options={["BOS", "CHoCH", "Both"]} value={cfg.structure} onChange={set("structure")} />
                         </Field>
-                        <Field label="Trade Direction" className="col-span-2">
-                            <Segment options={["Long", "Short", "Both"]} value={cfg.direction} onChange={set("direction")} />
-                        </Field>
                     </div>
                 </NeonPanel>
                 </BuilderFocusCard>
@@ -714,7 +711,7 @@ export default function StrategyBuilder() {
                 <div className="flex flex-col gap-4">
                 {/* ── Entry Mode panel ──────────────────────────────────────── */}
                 <BuilderFocusCard id="entry-mode" activeId={activeBuilderCard} onActivate={setActiveBuilderCard}>
-                <NeonPanel title="Entry Mode">
+                <NeonPanel title="Entry Model">
                     {/* Mode selector */}
                     <div className="mb-4">
                         <Segment
@@ -848,30 +845,39 @@ export default function StrategyBuilder() {
                                                 })}
                                             </div>
                                         </Field>
-                                        <div className="col-span-2 flex items-center justify-between border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
-                                            <div>
-                                                <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Cancel if OB taps then moves away before trigger</div>
-                                                <div className="text-[10.5px] text-muted-lab">Used-OB retrace cancel for triggered-edge setups.</div>
-                                            </div>
-                                            <NeonToggle checked={Boolean(cfg.triggeredEdgeCancelOnRetrace)} onChange={set("triggeredEdgeCancelOnRetrace")} />
+                                    </div>
+                                </div>
+                            )}
+                            {/* ── Entry Protection — shown only when Single TE model is active ── */}
+                            {cfg.selectedEntryModel === "triggered_edge" && (
+                                <div className="mt-3 border border-[hsl(var(--border-soft))] clip-bevel-sm p-3 space-y-2">
+                                    <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab mb-2">Entry Protection</div>
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Cancel if OB taps then moves away before trigger</div>
+                                            <div className="text-[10.5px] text-muted-lab">Used-OB retrace cancel for triggered-edge setups.</div>
                                         </div>
-                                        {cfg.triggeredEdgeCancelOnRetrace && (
-                                            <>
-                                                <Field label="Retrace Cancel Pips">
-                                                    <NeonInput type="number" min="0" step="0.1" value={cfg.triggeredEdgeCancelRetracePips} onChange={(e) => set("triggeredEdgeCancelRetracePips")(Number(e.target.value))} />
-                                                </Field>
-                                                <Field label="Retrace Cancel OB %">
-                                                    <NeonInput type="number" min="0" step="1" value={cfg.triggeredEdgeCancelRetraceObPct} onChange={(e) => set("triggeredEdgeCancelRetraceObPct")(Number(e.target.value))} />
-                                                </Field>
-                                            </>
-                                        )}
-                                        <div className="col-span-2 flex items-center justify-between border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
-                                            <div>
-                                                <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Cancel on first failed tag</div>
-                                                <div className="text-[10.5px] text-muted-lab">Cancel if OB taps but price fails to reach trigger within 1 candle.</div>
-                                            </div>
-                                            <NeonToggle checked={Boolean(cfg.triggeredEdgeCancelOnFirstFailedTag)} onChange={set("triggeredEdgeCancelOnFirstFailedTag")} />
+                                        <NeonToggle checked={Boolean(cfg.triggeredEdgeCancelOnRetrace)} onChange={set("triggeredEdgeCancelOnRetrace")} />
+                                    </div>
+                                    {cfg.triggeredEdgeCancelOnRetrace && (
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <Field label="Retrace Cancel Pips">
+                                                <NeonInput type="number" min="0" step="0.1" value={cfg.triggeredEdgeCancelRetracePips} onChange={(e) => set("triggeredEdgeCancelRetracePips")(Number(e.target.value))} />
+                                            </Field>
+                                            <Field label="Retrace Cancel OB %">
+                                                <NeonInput type="number" min="0" step="1" value={cfg.triggeredEdgeCancelRetraceObPct} onChange={(e) => set("triggeredEdgeCancelRetraceObPct")(Number(e.target.value))} />
+                                            </Field>
                                         </div>
+                                    )}
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Cancel on first failed tag</div>
+                                            <div className="text-[10.5px] text-muted-lab">Cancel if OB taps but price fails to reach trigger within 1 candle.</div>
+                                        </div>
+                                        <NeonToggle checked={Boolean(cfg.triggeredEdgeCancelOnFirstFailedTag)} onChange={set("triggeredEdgeCancelOnFirstFailedTag")} />
+                                    </div>
+                                    <div className="text-[10px] text-muted-lab italic">
+                                        These settings apply to all triggered-edge models, including directional long/short.
                                     </div>
                                 </div>
                             )}
@@ -1017,42 +1023,58 @@ export default function StrategyBuilder() {
                                                 })}
                                             </div>
                                         </Field>
-                                        <div className="col-span-2 flex items-center justify-between border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
-                                            <div>
-                                                <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Cancel if OB taps then moves away before trigger</div>
-                                                <div className="text-[10.5px] text-muted-lab">Used-OB retrace cancel for triggered-edge setups.</div>
-                                            </div>
-                                            <NeonToggle checked={Boolean(cfg.triggeredEdgeCancelOnRetrace)} onChange={set("triggeredEdgeCancelOnRetrace")} />
-                                        </div>
-                                        {cfg.triggeredEdgeCancelOnRetrace && (
-                                            <>
-                                                <Field label="Retrace Cancel Pips">
-                                                    <NeonInput type="number" min="0" step="0.1" value={cfg.triggeredEdgeCancelRetracePips} onChange={(e) => set("triggeredEdgeCancelRetracePips")(Number(e.target.value))} />
-                                                </Field>
-                                                <Field label="Retrace Cancel OB %">
-                                                    <NeonInput type="number" min="0" step="1" value={cfg.triggeredEdgeCancelRetraceObPct} onChange={(e) => set("triggeredEdgeCancelRetraceObPct")(Number(e.target.value))} />
-                                                </Field>
-                                            </>
-                                        )}
-                                        <div className="col-span-2 flex items-center justify-between border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
-                                            <div>
-                                                <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Cancel on first failed tag</div>
-                                                <div className="text-[10.5px] text-muted-lab">Cancel if OB taps but price fails to reach trigger within 1 candle.</div>
-                                            </div>
-                                            <NeonToggle checked={Boolean(cfg.triggeredEdgeCancelOnFirstFailedTag)} onChange={set("triggeredEdgeCancelOnFirstFailedTag")} />
-                                        </div>
                                     </div>
                                 )}
                             </div>
+                            {/* ── Entry Protection — shown only when C (TE) is active ── */}
+                            {cfg.triggeredEdgeEntries && (
+                                <div className="mt-3 border border-[hsl(var(--border-soft))] clip-bevel-sm p-3 space-y-2">
+                                    <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab mb-2">Entry Protection</div>
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Cancel if OB taps then moves away before trigger</div>
+                                            <div className="text-[10.5px] text-muted-lab">Used-OB retrace cancel for triggered-edge setups.</div>
+                                        </div>
+                                        <NeonToggle checked={Boolean(cfg.triggeredEdgeCancelOnRetrace)} onChange={set("triggeredEdgeCancelOnRetrace")} />
+                                    </div>
+                                    {cfg.triggeredEdgeCancelOnRetrace && (
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <Field label="Retrace Cancel Pips">
+                                                <NeonInput type="number" min="0" step="0.1" value={cfg.triggeredEdgeCancelRetracePips} onChange={(e) => set("triggeredEdgeCancelRetracePips")(Number(e.target.value))} />
+                                            </Field>
+                                            <Field label="Retrace Cancel OB %">
+                                                <NeonInput type="number" min="0" step="1" value={cfg.triggeredEdgeCancelRetraceObPct} onChange={(e) => set("triggeredEdgeCancelRetraceObPct")(Number(e.target.value))} />
+                                            </Field>
+                                        </div>
+                                    )}
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Cancel on first failed tag</div>
+                                            <div className="text-[10.5px] text-muted-lab">Cancel if OB taps but price fails to reach trigger within 1 candle.</div>
+                                        </div>
+                                        <NeonToggle checked={Boolean(cfg.triggeredEdgeCancelOnFirstFailedTag)} onChange={set("triggeredEdgeCancelOnFirstFailedTag")} />
+                                    </div>
+                                    <div className="text-[10px] text-muted-lab italic">
+                                        These settings apply to all triggered-edge models, including directional long/short.
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     )}
                 </NeonPanel>
                 </BuilderFocusCard>
 
-                {/* ── Entry Assignment panel ──────────────────────────────────── */}
+                {/* ── Direction & Entry panel ──────────────────────────────────── */}
                 <BuilderFocusCard id="entry-assignment" activeId={activeBuilderCard} onActivate={setActiveBuilderCard}>
-                <NeonPanel title="Entry Assignment">
+                <NeonPanel title="Direction & Entry">
+                    {/* Section A: Trade Direction */}
+                    <div className="mb-4">
+                        <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab mb-2">Trade Direction</div>
+                        <Segment options={["Long", "Short", "Both"]} value={cfg.direction} onChange={set("direction")} />
+                    </div>
+                    {/* Section B: Entry Assignment */}
                     <div className="mb-3">
+                        <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab mb-2">Entry Assignment</div>
                         <Segment
                             options={[
                                 { value: "symmetric", label: "Symmetric" },
@@ -1063,10 +1085,11 @@ export default function StrategyBuilder() {
                         />
                         <div className="mt-2 text-[10.5px] text-muted-lab">
                             {cfg.directionalEntryMode === "symmetric"
-                                ? "Longs and shorts use the same entry model from the Entry Mode panel above."
+                                ? "Longs and shorts use the same entry model from the Entry Model panel above."
                                 : "Assign separate entry models for long and short trades."}
                         </div>
                     </div>
+                    {/* Section C: Long/Short cards when asymmetric */}
                     {cfg.directionalEntryMode === "asymmetric" && (
                         <div className="space-y-3">
                             <div className="flex items-start gap-2 border border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.07)] clip-bevel-sm px-3 py-2">
@@ -1076,24 +1099,34 @@ export default function StrategyBuilder() {
                                 </div>
                             </div>
                             <div className="grid grid-cols-2 gap-3">
-                                <DirectionalEntryCard
-                                    label="Long Entries"
-                                    enabled={cfg.longEntryEnabled}
-                                    entryModel={cfg.longEntryModel}
-                                    penetrationPct={cfg.longPenetrationPct}
-                                    triggeredEdgeThreshold={cfg.longTriggeredEdgeThreshold}
-                                    triggeredEdgeDelays={cfg.longTriggeredEdgeDelays}
-                                    onChange={(suffix, value) => set(`long${suffix}`)(value)}
-                                />
-                                <DirectionalEntryCard
-                                    label="Short Entries"
-                                    enabled={cfg.shortEntryEnabled}
-                                    entryModel={cfg.shortEntryModel}
-                                    penetrationPct={cfg.shortPenetrationPct}
-                                    triggeredEdgeThreshold={cfg.shortTriggeredEdgeThreshold}
-                                    triggeredEdgeDelays={cfg.shortTriggeredEdgeDelays}
-                                    onChange={(suffix, value) => set(`short${suffix}`)(value)}
-                                />
+                                <div className={cfg.direction === "Short" ? "opacity-40 pointer-events-none" : ""}>
+                                    {cfg.direction === "Short" && (
+                                        <div className="text-[10px] text-muted-lab italic mb-1.5">Long trades excluded by Trade Direction = Short Only.</div>
+                                    )}
+                                    <DirectionalEntryCard
+                                        label="Long Entries"
+                                        enabled={cfg.longEntryEnabled}
+                                        entryModel={cfg.longEntryModel}
+                                        penetrationPct={cfg.longPenetrationPct}
+                                        triggeredEdgeThreshold={cfg.longTriggeredEdgeThreshold}
+                                        triggeredEdgeDelays={cfg.longTriggeredEdgeDelays}
+                                        onChange={(suffix, value) => set(`long${suffix}`)(value)}
+                                    />
+                                </div>
+                                <div className={cfg.direction === "Long" ? "opacity-40 pointer-events-none" : ""}>
+                                    {cfg.direction === "Long" && (
+                                        <div className="text-[10px] text-muted-lab italic mb-1.5">Short trades excluded by Trade Direction = Long Only.</div>
+                                    )}
+                                    <DirectionalEntryCard
+                                        label="Short Entries"
+                                        enabled={cfg.shortEntryEnabled}
+                                        entryModel={cfg.shortEntryModel}
+                                        penetrationPct={cfg.shortPenetrationPct}
+                                        triggeredEdgeThreshold={cfg.shortTriggeredEdgeThreshold}
+                                        triggeredEdgeDelays={cfg.shortTriggeredEdgeDelays}
+                                        onChange={(suffix, value) => set(`short${suffix}`)(value)}
+                                    />
+                                </div>
                             </div>
                             <div className="text-[10px] text-muted-lab border border-[hsl(var(--border-soft))] clip-bevel-sm px-3 py-2">
                                 Session-specific long/short rules will build on this structure later.
@@ -2499,6 +2532,9 @@ function DirectionalEntryCard({ label, enabled, entryModel, penetrationPct, trig
                                     })}
                                 </div>
                             </Field>
+                            <div className="text-[10px] text-muted-lab italic border border-[hsl(var(--border-soft))] clip-bevel-sm px-2 py-1">
+                                Retrace cancel and first-failed-tag settings apply globally — configure in Entry Protection above.
+                            </div>
                         </div>
                     )}
                 </>
