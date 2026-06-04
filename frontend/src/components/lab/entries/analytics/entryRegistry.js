@@ -569,5 +569,9 @@ export function familyModels(family) {
 
 export function modelByMode(mode) {
     const norm = String(mode || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+    // Directional scenario IDs (dir_long_*__short_*) are not in PLANNED_ENTRY_MODES by design —
+    // they are cross-scenario composites stored in bundle.directionalResults, not individual entry
+    // families. Use formatDirectionalScenarioLabel() from entryFormatters.js to display them.
+    if (norm.startsWith("dir_long_")) return null;
     return PLANNED_ENTRY_MODES.find(m => m.mode === norm) || null;
 }

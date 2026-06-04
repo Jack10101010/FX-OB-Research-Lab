@@ -1026,6 +1026,26 @@ function entryModelSortRank(key) {
 
 function formatEntryModelKey(value) {
     const key = String(value || "").trim();
+    // Directional scenario IDs: dir_long_X__short_Y
+    const dirMatch = key.match(/^dir_long_(.+?)__short_(.+)$/);
+    if (dirMatch) {
+        const fmtSide = (k) => {
+            const s = String(k || "").toLowerCase();
+            if (!s || s === "none") return "Disabled";
+            if (s === "baseline") return "Baseline";
+            const pm = s.match(/^pen(\d+)$/);
+            if (pm) return `Pen ${pm[1]}%`;
+            const tm = s.match(/^te(\d+)_(same|next|d\d+)$/);
+            if (tm) {
+                if (tm[2] === "same") return `TE ${tm[1]}% Same`;
+                if (tm[2] === "next") return `TE ${tm[1]}% Next`;
+                const dm = tm[2].match(/^d(\d+)$/);
+                if (dm) return `TE ${tm[1]}% Delay +${dm[1]}`;
+            }
+            return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+        };
+        return `Long ${fmtSide(dirMatch[1])} / Short ${fmtSide(dirMatch[2])}`;
+    }
     const penetration = key.match(/^entry_penetration_([0-9]+(?:p[0-9]+)?)/i);
     if (penetration) return `Penetration ${formatModelPct(penetration[1])}`;
     const triggered = key.match(/^entry_triggered_edge_([0-9]+(?:p[0-9]+)?)(?:_(same|next|d\d+))?/i);
