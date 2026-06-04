@@ -20,6 +20,7 @@ import {
     outcomeToneForTrade,
 } from "@/data/tradeClassification";
 import { formatDirectionalScenarioLabel } from "@/components/lab/entries/analytics/entryFormatters";
+import { derivePrimaryResultView } from "@/data/tradeUniverse";
 
 const STRATEGY_MAP_UI_KEY = "fxob_strategy_map_ui_v1";
 const DEFAULT_CHART_HEIGHT = 460;
@@ -289,6 +290,28 @@ export default function StrategyMap() {
         const saved = runId ? selectedEntryModelByRun[runId] : "";
         return entryModelOptions.some((option) => option.value === saved) ? saved : defaultEntryModel;
     }, [defaultEntryModel, entryModelOptions, runId, selectedEntryModelByRun]);
+    // Derived primary result view — seeds the global scenario when no explicit
+    // selection exists for this run (replaces the old "first TE key" heuristic).
+    const derivedPrimaryScenario = useMemo(
+        () => derivePrimaryResultView(bundle),
+        [bundle],
+    );
+    // Auto-seed the global scenario from the run's primary result view when:
+    //   - No scenario active (fresh start, SCENARIO.runId is null)
+    //   - Scenario targets a different run (run switch)
+    //   - Scenario family is unset (null)
+    // Explicit user selections (SCENARIO.runId === runId && SCENARIO.family set)
+    // are never overwritten — the shouldSeed guard prevents that.
+    useEffect(() => {
+        if (!runId || !derivedPrimaryScenario) return;
+        const shouldSeed = (
+            !SCENARIO?.runId
+            || SCENARIO.runId !== runId
+            || !SCENARIO.family
+        );
+        if (!shouldSeed) return;
+        setScenario({ runId, ...derivedPrimaryScenario });
+    }, [runId, derivedPrimaryScenario]); // eslint-disable-line react-hooks/exhaustive-deps
     // ------------------------------------------------------------------
     // Canonical scenario resolver (Phase 2)
     // All trade/OB/overlay/stats data flows from here.
