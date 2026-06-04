@@ -1,0 +1,112 @@
+{
+  "project": "FX-OB Research Lab - Session Lab",
+  "design_philosophy": "Premium quant research cockpit. E1 Design Principles: Control Room grid, visual hierarchy first (charts > tables), high contrast typography, deep neon accents on dark canvas. ADHD-friendly layout.",
+  "theme": {
+    "archetype": "Archetype 2 (Performance Pro) / Archetype 4 (Swiss) Hybrid",
+    "mode": "dark",
+    "colors": {
+      "background": {
+        "app": "#050A12",
+        "panel": "#0D1520",
+        "card": "#121C29"
+      },
+      "border": {
+        "default": "#223142",
+        "active": "#22D3EE"
+      },
+      "accent": {
+        "primary": "#22D3EE",
+        "secondary": "#14B8A6"
+      },
+      "feedback": {
+        "positive": "#22C55E",
+        "negative": "#EF4444",
+        "warning": "#F59E0B",
+        "info": "#3B82F6",
+        "structure": "#A855F7"
+      },
+      "text": {
+        "primary": "#E5EDF7",
+        "secondary": "#94A3B8",
+        "muted": "#64748B"
+      }
+    }
+  },
+  "typography": {
+    "fonts": {
+      "heading": "Outfit, sans-serif",
+      "body": "IBM Plex Sans, sans-serif",
+      "mono": "IBM Plex Mono, monospace"
+    },
+    "rules": {
+      "headings": "Big page titles, tight tracking (tracking-tight). No generic sans like Inter.",
+      "labels": "Small uppercase with wide tracking (tracking-[0.2em]) for section labels.",
+      "metrics": "Tabular numeric variant MUST be used for all metric numbers (font-mono).",
+      "size_minimum": "No tiny typography. Base size text-sm minimum on desktop."
+    }
+  },
+  "layout_and_spacing": {
+    "grid_protocol": "MODE B: THE CONTROL ROOM GRID. Dense, data correlation, 1px solid borders, optical alignment.",
+    "spacing_scale": "Tailwind standard, favor tight gaps (gap-4/gap-6) inside widgets and wider gaps (gap-8/gap-12) between main sections.",
+    "borders": "1px solid #223142. Selected states use 1px solid #22D3EE + subtle cyan inner shadow/glow."
+  },
+  "components": {
+    "cards": {
+      "default": "bg-[#121C29] border border-[#223142] rounded-lg shadow-sm p-4 md:p-6",
+      "glassy": "bg-[#121C29]/80 backdrop-blur-xl border border-[#223142]",
+      "selected": "border-[#22D3EE] shadow-[0_0_15px_rgba(34,211,238,0.1)]",
+      "disabled": "opacity-50 grayscale-[50%]"
+    },
+    "verdict_pills": {
+      "strong": "bg-[#22C55E]/10 text-[#22C55E] border border-[#22C55E]/30 px-2 py-1 rounded-full text-xs font-bold uppercase tracking-wider",
+      "selective": "bg-[#F59E0B]/10 text-[#F59E0B] border border-[#F59E0B]/30 px-2 py-1 rounded-full text-xs font-bold uppercase tracking-wider",
+      "avoid": "bg-[#EF4444]/10 text-[#EF4444] border border-[#EF4444]/30 px-2 py-1 rounded-full text-xs font-bold uppercase tracking-wider"
+    },
+    "toggle_chips": {
+      "active": "bg-[#22D3EE]/10 text-[#22D3EE] border border-[#22D3EE]/50 rounded-md px-3 py-1 text-sm font-medium",
+      "inactive": "bg-transparent text-[#64748B] border border-[#223142] hover:border-[#94A3B8] rounded-md px-3 py-1 text-sm font-medium"
+    },
+    "charts": {
+      "library": "recharts",
+      "styling": "Transparent backgrounds. Grid lines stroke-[#223142] stroke-dasharray='3 3'. Custom HTML tooltips with bg-[#121C29] border border-[#223142] and text-[#E5EDF7].",
+      "colors": "Use theme colors (Positive, Negative, Info, Structure) directly in Recharts stroke/fill attributes."
+    }
+  },
+  "page_structure": {
+    "route": "/session-lab",
+    "sections": [
+      {
+        "id": "header",
+        "description": "Header / Controls — Title + subtitle + direction toggle + Preview Mode toggle + actions."
+      },
+      {
+        "id": "run_impact_summary",
+        "description": "3-column comparison (Baseline, Preview, Delta). Huge tabular numbers. Green/Red text based on positive/negative deltas."
+      },
+      {
+        "id": "session_control_center",
+        "description": "Grid of 6 bento cards (Asia, London, etc.). Include verdict pills, sparklines, metric rows, and toggle chips."
+      },
+      {
+        "id": "visual_summary_strip",
+        "description": "4-panel horizontal bento: Bar chart (Net R), Donut (Direction), Donut (Structure), H-Bar (Top Entry)."
+      },
+      {
+        "id": "deep_dive",
+        "description": "Complex bottom section with a left-side Tabs navigator (Overview, Direction Lab, etc.) and a Sticky right panel (Quick Controls & Impact)."
+      }
+    ]
+  },
+  "testing": {
+    "rules": "All interactive and key informational elements MUST include a data-testid attribute in kebab-case."
+  },
+  "instructions_to_main_agent": [
+    "Create the single page mounted at /session-lab using React and Tailwind.",
+    "Implement all visual toggles as stateful UI elements (no backend logic needed, use mock data).",
+    "Utilize Phosphor icons (yarn add @phosphor-icons/react) for dense, professional data UI.",
+    "Avoid Shadcn 'Card' wrappers if they restrict the Control Room layout; use pure div HTML with the specified colors.",
+    "Ensure Recharts components are styled heavily to match the dark theme (no white tooltip backgrounds!).",
+    "Add sticky positioning to the Quick Controls panel on the right side of the Deep Dive section.",
+    "Use font-mono for all numeric metrics and uppercase tracking-[0.2em] for small labels to create a technical 'HUD' feel."
+  ]
+}
