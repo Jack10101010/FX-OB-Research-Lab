@@ -2,9 +2,6 @@ import React from "react";
 import {
   SectionLabel,
   VerdictPill,
-  ToggleChip,
-  Sparkline,
-  SplitBar,
   fmtR,
 } from "./primitives";
 import { Moon, Building2, Coffee, Building, Sparkles, Globe, MoreHorizontal } from "lucide-react";
@@ -27,14 +24,29 @@ const ICON_COLORS = {
   outside: "#64748B",
 };
 
+/** Rectangle toggle button — active = cyan filled, inactive = muted outline. */
+function RectToggle({ label, active, onClick, testId }) {
+  return (
+    <button
+      onClick={onClick}
+      data-testid={testId}
+      className={[
+        "flex-1 py-1.5 text-[10px] font-ui font-semibold uppercase tracking-[0.1em] rounded-sm border transition-all",
+        active
+          ? "bg-[hsl(var(--accent-primary)/0.12)] border-[hsl(var(--accent-primary))] text-[hsl(var(--accent-primary))]"
+          : "bg-transparent border-[hsl(var(--border-soft))] text-muted-lab hover:border-[hsl(var(--border-mid))] hover:text-[hsl(var(--text-2))]",
+      ].join(" ")}
+    >
+      {label}
+    </button>
+  );
+}
+
 function SessionCard({ session, selected, onSelect, onToggle }) {
   const Icon = ICONS[session.key] || Building2;
   const iconColor = ICON_COLORS[session.key];
   const positive = session.netR >= 0;
   const dimmed = !session.enabled;
-  const partial =
-    session.enabled &&
-    (!session.longs || !session.shorts || !session.bos || !session.choch);
 
   return (
     <div
@@ -48,8 +60,8 @@ function SessionCard({ session, selected, onSelect, onToggle }) {
         dimmed ? "opacity-50 grayscale-[40%]" : "",
       ].join(" ")}
     >
-      {/* Options dot */}
-      <div className="absolute top-3 right-3 flex items-center gap-1">
+      {/* Options */}
+      <div className="absolute top-3 right-3">
         <button
           data-testid={`session-card-${session.key}-options`}
           onClick={(e) => e.stopPropagation()}
@@ -82,8 +94,8 @@ function SessionCard({ session, selected, onSelect, onToggle }) {
         </div>
       </div>
 
-      {/* Big metric + sparkline */}
-      <div className="flex items-center justify-between mb-3">
+      {/* Net R */}
+      <div className="mb-3">
         <div
           className={[
             "font-num tabular-nums font-bold text-3xl leading-none",
@@ -92,12 +104,6 @@ function SessionCard({ session, selected, onSelect, onToggle }) {
         >
           {fmtR(session.netR)}
         </div>
-        <Sparkline
-          data={session.spark}
-          color={positive ? "#22C55E" : "#EF4444"}
-          width={90}
-          height={32}
-        />
       </div>
 
       {/* Metric row */}
@@ -138,58 +144,31 @@ function SessionCard({ session, selected, onSelect, onToggle }) {
         <Row label="Delay" value={session.bestDelay} tone="cyan" />
       </div>
 
-      {/* Toggles */}
-      <div className="flex items-center justify-between gap-2 pt-3 border-t border-[hsl(var(--border-soft))]">
-        <ToggleChip
-          label="LONG"
+      {/* Rectangle toggles */}
+      <div className="flex items-center gap-1.5 pt-3 border-t border-[hsl(var(--border-soft))]">
+        <RectToggle
+          label="Long"
           active={session.longs}
-          onClick={(e) => {
-            e?.stopPropagation?.();
-            onToggle(session.key, "longs");
-          }}
-          color="cyan"
+          onClick={(e) => { e?.stopPropagation?.(); onToggle(session.key, "longs"); }}
           testId={`toggle-${session.key}-long`}
         />
-        <ToggleChip
-          label="SHORT"
+        <RectToggle
+          label="Short"
           active={session.shorts}
-          onClick={(e) => {
-            e?.stopPropagation?.();
-            onToggle(session.key, "shorts");
-          }}
-          color="cyan"
+          onClick={(e) => { e?.stopPropagation?.(); onToggle(session.key, "shorts"); }}
           testId={`toggle-${session.key}-short`}
         />
-        <ToggleChip
+        <RectToggle
           label="BOS"
           active={session.bos}
-          onClick={(e) => {
-            e?.stopPropagation?.();
-            onToggle(session.key, "bos");
-          }}
-          color="cyan"
+          onClick={(e) => { e?.stopPropagation?.(); onToggle(session.key, "bos"); }}
           testId={`toggle-${session.key}-bos`}
         />
-        <ToggleChip
+        <RectToggle
           label="CHoCH"
           active={session.choch}
-          onClick={(e) => {
-            e?.stopPropagation?.();
-            onToggle(session.key, "choch");
-          }}
-          color="cyan"
+          onClick={(e) => { e?.stopPropagation?.(); onToggle(session.key, "choch"); }}
           testId={`toggle-${session.key}-choch`}
-        />
-      </div>
-
-      {/* Status indicator bottom-left */}
-      <div className="absolute bottom-3 left-3 flex items-center gap-1.5 text-[9px] font-num uppercase tracking-wider">
-        <span
-          className="h-1.5 w-1.5 rounded-full"
-          style={{
-            backgroundColor: dimmed ? "#EF4444" : partial ? "#F59E0B" : "#22C55E",
-            boxShadow: `0 0 6px ${dimmed ? "#EF4444" : partial ? "#F59E0B" : "#22C55E"}`,
-          }}
         />
       </div>
     </div>
@@ -230,21 +209,29 @@ function Row({ label, value, tone = "default" }) {
   );
 }
 
+function SplitBar({ leftLabel, leftPct, leftColor, rightLabel, rightPct, rightColor, height = 4 }) {
+  return (
+    <div className="flex flex-col gap-1 w-full">
+      <div className="flex justify-between text-[9.5px] text-muted-lab font-num">
+        <span>{leftLabel} {leftPct}%</span>
+        <span>{rightLabel} {rightPct}%</span>
+      </div>
+      <div className="flex w-full overflow-hidden rounded-full" style={{ height }}>
+        <div style={{ width: `${leftPct}%`, backgroundColor: leftColor }} />
+        <div style={{ width: `${rightPct}%`, backgroundColor: rightColor }} />
+      </div>
+    </div>
+  );
+}
+
 export default function SessionControlCenter({ sessions, selectedKey, onSelect, onToggle }) {
   return (
     <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel))] p-5 md:p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
-        <div className="flex items-center gap-3">
-          <SectionLabel>Session Control Center</SectionLabel>
-          <span className="text-[10px] text-muted-lab font-ui">
-            Toggle sessions, directions and structures — preview updates instantly.
-          </span>
-        </div>
-        <div className="flex items-center gap-4 text-[10px] font-ui uppercase tracking-wider">
-          <LegendDot color="#22C55E" label="Enabled" />
-          <LegendDot color="#EF4444" label="Disabled" />
-          <LegendDot color="#F59E0B" label="Partially Disabled" />
-        </div>
+      <div className="flex flex-wrap items-center gap-3 mb-5">
+        <SectionLabel>Session Control Center</SectionLabel>
+        <span className="text-[10px] text-muted-lab font-ui">
+          Toggle sessions, directions and structures — preview updates instantly.
+        </span>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
@@ -259,17 +246,5 @@ export default function SessionControlCenter({ sessions, selectedKey, onSelect, 
         ))}
       </div>
     </div>
-  );
-}
-
-function LegendDot({ color, label }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 text-[hsl(var(--text-2))]">
-      <span
-        className="h-1.5 w-1.5 rounded-full"
-        style={{ backgroundColor: color, boxShadow: `0 0 6px ${color}` }}
-      />
-      {label}
-    </span>
   );
 }
