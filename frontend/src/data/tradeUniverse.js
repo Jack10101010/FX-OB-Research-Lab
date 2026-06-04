@@ -641,6 +641,147 @@ export function describeTradeUniverse(universe) {
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
+// Primary result view derivation
+// ───────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Derive the most relevant primary result view for a run bundle.
+ *
+ * Pure — no React, no localStorage, no side effects, no mutation.
+ *
+ * Priority:
+ *   1. Directional scenarios (first alphabetical non-empty key)
+ *   2. Config-driven single selected model (TE → penetration → baseline→null)
+ *   3. Research / batch key scan (d3 > d2 > next > same > penetration)
+ *   4. null (caller falls back to baseline)
+ *
+ * @param {object} bundle  The full run bundle from the store.
+ * @returns {{ family: string, threshold: number|null, fillMode: string|null, directionalStorageKey: string|null } | null}
+ */
+export function derivePrimaryResultView(bundle) {
+    if (!bundle) return null;
+
+    // ── 1. Directional scenarios ────────────────────────────────────────────
+    const directionalByScenario = bundle?.directionalResults?.tradesByScenario;
+    if (directionalByScenario && typeof directionalByScenario === "object") {
+        const nonEmptyKeys = Object.keys(directionalByScenario)
+            .filter((k) => Array.isArray(directionalByScenario[k]) && directionalByScenario[k].length > 0)
+            .sort();
+        if (nonEmptyKeys.length > 0) {
+            return {
+                family: "directional",
+                threshold: null,
+                fillMode: null,
+                directionalStorageKey: nonEmptyKeys[0],
+            };
+        }
+    }
+
+    // ── 2. Config-driven single selected model ──────────────────────────────
+    const config = bundle.config || {};
+    const entryMode = config.entry_mode ?? config.entryMode ?? null;
+    const selectedModel = config.selected_entry_model ?? config.selectedEntryModel ?? null;
+    const byMode = entryTradesByMode(bundle);
+
+    const hasNonEmptyKey = (key) => key && Array.isArray(byMode[key]) && byMode[key].length > 0;
+
+    if (entryMode === "single" && selectedModel) {
+        // A. Triggered Edge
+        if (selectedModel === "triggered_edge") {
+            const rawThresholds =
+                config.triggered_edge_entry_thresholds
+                ?? config.triggered_edge_trigger_thresholds
+                ?? config.triggeredEdgeEntryThresholds
+                ?? config.triggeredEdgeTriggerThresholds
+                ?? [];
+            const thresholds = Array.isArray(rawThresholds) ? rawThresholds : [];
+            const threshold = thresholds.length > 0 ? numericOrNull(thresholds[0]) : null;
+
+            if (threshold != null) {
+                const rawDelays =
+                    config.triggered_edge_candle_delays
+                    ?? config.triggeredEdgeCandleDelays
+                    ?? [];
+                const delays = (Array.isArray(rawDelays) ? rawDelays : []).map(Number);
+
+                // Prefer higher delay variants: d3 > d2 > next(1) > same(0)
+                const DELAY_PREFERENCE = [3, 2, 1, 0];
+                const delayToFillMode = (d) => {
+                    if (d === 0) return "same";
+                    if (d === 1) return "next";
+                    return `d${d}`;
+                };
+                const pickedDelay = delays.length > 0
+                    ? (DELAY_PREFERENCE.find((d) => delays.includes(d)) ?? delays[0])
+                    : null;
+                const fillMode = pickedDelay != null ? delayToFillMode(pickedDelay) : null;
+                const candidateKey = buildCanonicalKey("triggered_edge", threshold, fillMode);
+
+                if (hasNonEmptyKey(candidateKey)) {
+                    return { family: "triggered_edge", threshold, fillMode, directionalStorageKey: null };
+                }
+            }
+        }
+
+        // B. Penetration
+        if (selectedModel === "entry_penetration") {
+            const rawThresholds =
+                config.entry_penetration_thresholds
+                ?? config.entryPenetrationThresholds
+                ?? [];
+            const thresholds = Array.isArray(rawThresholds) ? rawThresholds : [];
+            const threshold = thresholds.length > 0 ? numericOrNull(thresholds[0]) : null;
+
+            if (threshold != null) {
+                const candidateKey = buildCanonicalKey("penetration", threshold, null);
+                if (hasNonEmptyKey(candidateKey)) {
+                    return { family: "penetration", threshold, fillMode: null, directionalStorageKey: null };
+                }
+            }
+        }
+
+        // C. Baseline → no specific primary view; caller stays on baseline
+        if (selectedModel === "baseline") return null;
+    }
+
+    // ── 3. Research / batch key scan ────────────────────────────────────────
+    const nonEmptyKeys = Object.keys(byMode).filter(
+        (k) => Array.isArray(byMode[k]) && byMode[k].length > 0,
+    );
+
+    // TE suffixes in preference order
+    for (const suffix of ["_d3", "_d2", "_next", "_same"]) {
+        const match = nonEmptyKeys
+            .filter((k) => k.startsWith("entry_triggered_edge") && k.endsWith(suffix))
+            .sort()[0];
+        if (match) {
+            return {
+                family: "triggered_edge",
+                threshold: extractThreshold(match),
+                fillMode: fillModeFromKey(match),
+                directionalStorageKey: null,
+            };
+        }
+    }
+
+    // Penetration fallback
+    const penKey = nonEmptyKeys
+        .filter((k) => k.startsWith("entry_penetration"))
+        .sort()[0];
+    if (penKey) {
+        return {
+            family: "penetration",
+            threshold: extractThreshold(penKey),
+            fillMode: null,
+            directionalStorageKey: null,
+        };
+    }
+
+    // ── 4. Final fallback ───────────────────────────────────────────────────
+    return null;
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
 // Internal — empty / default universe
 // ───────────────────────────────────────────────────────────────────────────────
 
