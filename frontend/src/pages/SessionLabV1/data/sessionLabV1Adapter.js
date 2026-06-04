@@ -1314,3 +1314,160 @@ export function buildSessionVisualData(selectedSessionTrades) {
 
   return { tradesByDirection, tradesByStructure, topEntryModel };
 }
+
+// ─── Phase C8: Streaks Lab ────────────────────────────────────────────────────
+
+/** Format a Date as "HH:MM UTC". */
+function formatUTCTime(date) {
+  const h = String(date.getUTCHours()).padStart(2, "0");
+  const m = String(date.getUTCMinutes()).padStart(2, "0");
+  return `${h}:${m} UTC`;
+}
+
+/** Determine exit label for a trade. */
+function getExitLabel(t) {
+  if (isWin(t)) return "Target Hit";
+  const mins = t.minutes_to_exit ?? t.minutesToExit ?? null;
+  if (isLoss(t) && mins != null && Number(mins) < 30) return "Fast Stopout (<30m)";
+  if (isLoss(t)) return "Stop Loss";
+  return "Other";
+}
+
+/**
+ * Build a list of consecutive streak runs from a decided sequence.
+ * Returns [{ outcome, length, netR, trades }]
+ */
+function buildRuns(decidedSeq) {
+  if (!decidedSeq.length) return [];
+  const runs = [];
+  let cur = { outcome: decidedSeq[0].outcome, length: 1, netR: decidedSeq[0].r, trades: [decidedSeq[0].trade] };
+  for (let i = 1; i < decidedSeq.length; i++) {
+    const s = decidedSeq[i];
+    if (s.outcome === cur.outcome) {
+      cur.length++;
+      cur.netR += s.r;
+      cur.trades.push(s.trade);
+    } else {
+      runs.push(cur);
+      cur = { outcome: s.outcome, length: 1, netR: s.r, trades: [s.trade] };
+    }
+  }
+  runs.push(cur);
+  return runs;
+}
+
+/**
+ * Build StreaksLab-shaped data for the selected session.
+ *
+ * @param {object[]} sessionTrades — pre-filtered to one session
+ * @returns {{ wlSequence, streakSummary, streakDistribution, mode: "real" }}
+ */
+export function buildStreaksData(sessionTrades) {
+  const empty = { wlSequence: [], streakSummary: null, streakDistribution: [], mode: "real" };
+  if (!Array.isArray(sessionTrades) || sessionTrades.length === 0) return empty;
+
+  // ── wlSequence — all trades in order ─────────────────────────────────────
+  const wlSequence = sessionTrades.map((t, idx) => {
+    const date = getTradeDate(t);
+    return {
+      id:        `Trade #${idx + 1}`,
+      result:    getR(t),
+      session:   resolveSession(t),
+      direction: normalizeDirection(t),
+      structure: normalizeStructure(t),
+      entry:     getEntryModelDisplayName(getRawEntryModelKey(t)),
+      delay:     getDelayBucket(t),
+      exitLabel: getExitLabel(t),
+      time:      date ? formatUTCTime(date) : "—",
+    };
+  });
+
+  // ── Decided sequence (W/L only) ───────────────────────────────────────────
+  const decidedSeq = sessionTrades
+    .filter((t) => isWin(t) || isLoss(t))
+    .map((t) => ({ outcome: isWin(t) ? "W" : "L", r: getR(t), trade: t }));
+
+  if (decidedSeq.length === 0) {
+    return { wlSequence, streakSummary: null, streakDistribution: [], mode: "real" };
+  }
+
+  const runs = buildRuns(decidedSeq);
+  const wRuns = runs.filter((r) => r.outcome === "W");
+  const lRuns = runs.filter((r) => r.outcome === "L");
+
+  // ── Longest streaks ───────────────────────────────────────────────────────
+  const maxWLen = wRuns.length > 0 ? Math.max(...wRuns.map((r) => r.length)) : 0;
+  const maxLLen = lRuns.length > 0 ? Math.max(...lRuns.map((r) => r.length)) : 0;
+
+  // Ties: W tie → highest netR; L tie → lowest netR
+  const longestWRun = wRuns.filter((r) => r.length === maxWLen)
+    .sort((a, b) => b.netR - a.netR)[0] ?? null;
+  const longestLRun = lRuns.filter((r) => r.length === maxLLen)
+    .sort((a, b) => a.netR - b.netR)[0] ?? null;
+
+  // avgWin = average W run length (1dp)
+  const avgWin = wRuns.length > 0
+    ? Number((wRuns.reduce((s, r) => s + r.length, 0) / wRuns.length).toFixed(1))
+    : 0;
+
+  // maxLossR = most negative netR among L runs
+  const maxLossR = lRuns.length > 0
+    ? Number(Math.min(...lRuns.map((r) => r.netR)).toFixed(2))
+    : 0;
+
+  // ── Runs test (Wald-Wolfowitz) ────────────────────────────────────────────
+  const n  = decidedSeq.length;
+  const n1 = wRuns.reduce((s, r) => s + r.length, 0);   // total wins
+  const n2 = lRuns.reduce((s, r) => s + r.length, 0);   // total losses
+  const R  = runs.length;
+
+  let zScore = 0;
+  let pValue = 1;
+  let verdict = "INSUFFICIENT";
+
+  if (n1 > 0 && n2 > 0 && n >= 2) {
+    const E        = (2 * n1 * n2 / n) + 1;
+    const variance = (2 * n1 * n2 * (2 * n1 * n2 - n)) / (n * n * (n - 1));
+    const sigma    = Math.sqrt(Math.max(variance, 0));
+    const z        = sigma > 0 ? (R - E) / sigma : 0;
+    const absZ     = Math.abs(z);
+
+    zScore = Number(z.toFixed(2));
+    pValue = absZ < 1.0  ? 0.32
+           : absZ < 1.28 ? 0.20
+           : absZ < 1.44 ? 0.15
+           : absZ < 1.65 ? 0.10
+           : absZ < 1.96 ? 0.05
+           :               0.01;
+    verdict = absZ > 1.96 ? "NOT RANDOM" : "RANDOM";
+  }
+
+  // ── Streak distribution ───────────────────────────────────────────────────
+  const BUCKETS = [1, 2, 3, 4];
+  const distMap  = { 1: { w: 0, l: 0 }, 2: { w: 0, l: 0 }, 3: { w: 0, l: 0 }, 4: { w: 0, l: 0 }, "5+": { w: 0, l: 0 } };
+  for (const run of runs) {
+    const key = run.length >= 5 ? "5+" : run.length;
+    if (run.outcome === "W") distMap[key].w++;
+    else                     distMap[key].l++;
+  }
+
+  const hasFivePlus = distMap["5+"].w > 0 || distMap["5+"].l > 0;
+  const streakDistribution = [
+    ...BUCKETS.map((len) => ({ len, wins: distMap[len].w, losses: distMap[len].l })),
+    ...(hasFivePlus ? [{ len: "5+", wins: distMap["5+"].w, losses: distMap["5+"].l }] : []),
+  ];
+
+  const streakSummary = {
+    longestWin:  maxWLen,
+    longestLoss: maxLLen,
+    avgWin,
+    maxLossR,
+    netRWin:  longestWRun ? Number(longestWRun.netR.toFixed(2)) : 0,
+    netRLoss: longestLRun ? Number(longestLRun.netR.toFixed(2)) : 0,
+    zScore,
+    pValue,
+    verdict,
+  };
+
+  return { wlSequence, streakSummary, streakDistribution, mode: "real" };
+}

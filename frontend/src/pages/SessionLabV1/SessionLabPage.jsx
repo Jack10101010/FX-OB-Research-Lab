@@ -31,6 +31,7 @@ import {
   buildFailureAnalysisData,
   buildImpactOnRunData,
   buildSessionVisualData,
+  buildStreaksData,
 } from "./data/sessionLabV1Adapter";
 
 /** Maps V1 lowercase keys → canonical session names used by sessionRules. */
@@ -180,6 +181,14 @@ export default function SessionLabPage() {
     [selectedSessionTrades]
   );
 
+  const streaksData = useMemo(
+    () =>
+      selectedSessionTrades.length > 0
+        ? buildStreaksData(selectedSessionTrades)
+        : null,
+    [selectedSessionTrades]
+  );
+
   const toggleSessionField = (v1Key, field) => {
     if (hasRealData) {
       const canonicalKey = V1_TO_CANONICAL[v1Key];
@@ -303,6 +312,7 @@ export default function SessionLabPage() {
               entryModelData={entryModelData}
               orderBlockData={orderBlockData}
               failureData={failureData}
+              streaksData={streaksData}
             />
             <div className="xl:sticky xl:top-6 xl:self-start">
               <QuickControls session={selected} onToggle={toggleSessionField} />
