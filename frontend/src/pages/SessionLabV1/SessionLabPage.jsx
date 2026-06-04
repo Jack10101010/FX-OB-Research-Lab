@@ -27,6 +27,7 @@ import {
   buildStructureLabData,
   buildTimeAnalysisData,
   buildEntryModelLabData,
+  buildOrderBlockLabData,
 } from "./data/sessionLabV1Adapter";
 
 /** Maps V1 lowercase keys → canonical session names used by sessionRules. */
@@ -140,6 +141,14 @@ export default function SessionLabPage() {
     () =>
       selectedSessionTrades.length > 0
         ? buildEntryModelLabData(selectedSessionTrades)
+        : null,
+    [selectedSessionTrades]
+  );
+
+  const orderBlockData = useMemo(
+    () =>
+      selectedSessionTrades.length > 0
+        ? buildOrderBlockLabData(selectedSessionTrades)
         : null,
     [selectedSessionTrades]
   );
@@ -265,6 +274,7 @@ export default function SessionLabPage() {
               structureData={structureData}
               timeAnalysisData={timeAnalysisData}
               entryModelData={entryModelData}
+              orderBlockData={orderBlockData}
             />
             <div className="xl:sticky xl:top-6 xl:self-start">
               <QuickControls session={selected} onToggle={toggleSessionField} />

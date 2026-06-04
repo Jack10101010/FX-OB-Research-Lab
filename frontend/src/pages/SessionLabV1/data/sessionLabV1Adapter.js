@@ -19,6 +19,7 @@ import {
   buildSessionEquityCurve,
   buildCardSnapshot,
   buildSessionBreakdowns,
+  buildSessionOBProfile,
   resolveSession,
   normalizeDirection,
   normalizeStructure,
@@ -752,4 +753,158 @@ export function buildEntryModelLabData(sessionTrades) {
     });
 
   return { entryModels, bestModel, delayBreakdown, mode: "real" };
+}
+
+// ─── Phase C2: OB Lab ─────────────────────────────────────────────────────────
+
+/** True when a trade has a decided performance outcome (win or loss). */
+function isPerformanceTrade(t) {
+  return isWin(t) || isLoss(t);
+}
+
+/**
+ * Build OB analytics for the OrderBlockLab tab.
+ * Delegates to buildSessionOBProfile for origin/detection/width/news data.
+ * OB age is approximated from bars_to_fill.
+ *
+ * @param {object[]} sessionTrades - pre-filtered to one session
+ * @returns {object|null}
+ */
+export function buildOrderBlockLabData(sessionTrades) {
+  if (!Array.isArray(sessionTrades) || sessionTrades.length === 0) return null;
+
+  const profile = buildSessionOBProfile(sessionTrades);
+  const { obFieldAvailable, hasWidth, hasNews, originRows, detectionRows, widthRows, news, clean } = profile;
+
+  // ── Origin rows → HBars shape ───────────────────────────────────────────────
+  const origin = originRows
+    .filter((r) => r.count > 0)
+    .map((r) => ({ session: r.label, netR: r.netR }))
+    .sort((a, b) => b.netR - a.netR);
+
+  // ── Detection rows → HBars shape ────────────────────────────────────────────
+  const detection = detectionRows
+    .filter((r) => r.count > 0)
+    .map((r) => ({ session: r.label, netR: r.netR }))
+    .sort((a, b) => b.netR - a.netR);
+
+  // ── Width rows → BucketTable shape ──────────────────────────────────────────
+  const totalWidthTrades = widthRows.reduce((s, r) => s + r.count, 0) || 1;
+  const width = widthRows
+    .filter((r) => r.label !== "Unknown" && r.count > 0)
+    .map((r) => ({
+      bucket: r.label,
+      trades: r.count,
+      pct: Number(((r.count / totalWidthTrades) * 100).toFixed(1)),
+      netR: r.netR,
+    }));
+
+  // ── OB Age (bars_to_fill proxy) → BucketTable shape ─────────────────────────
+  const AGE_ORDER = ["0–4 bars", "5–10 bars", "11–20 bars", "> 20 bars"];
+  const hasAge = sessionTrades.some((t) => t.bars_to_fill != null);
+  const ageMap = new Map();
+
+  for (const t of sessionTrades) {
+    const raw = t.bars_to_fill;
+    if (raw == null) continue;
+    const n = Number(raw);
+    let bucket;
+    if (n <= 4)       bucket = "0–4 bars";
+    else if (n <= 10) bucket = "5–10 bars";
+    else if (n <= 20) bucket = "11–20 bars";
+    else              bucket = "> 20 bars";
+    if (!ageMap.has(bucket)) ageMap.set(bucket, []);
+    ageMap.get(bucket).push(t);
+  }
+
+  const totalAgeTrades = Array.from(ageMap.values()).reduce((s, a) => s + a.length, 0) || 1;
+  const age = AGE_ORDER
+    .filter((b) => ageMap.has(b))
+    .map((b) => {
+      const arr = ageMap.get(b);
+      const netR = Number(arr.reduce((s, t) => s + getR(t), 0).toFixed(2));
+      return {
+        bucket: b,
+        trades: arr.length,
+        pct:    Number(((arr.length / totalAgeTrades) * 100).toFixed(1)),
+        netR,
+      };
+    });
+
+  // ── News vs Clean donut ──────────────────────────────────────────────────────
+  const newsClean = [
+    { name: "News OB",  value: news.count,  color: "#F59E0B" },
+    { name: "Clean OB", value: clean.count, color: "#22C55E" },
+  ].filter((d) => d.value > 0);
+  const totalOBs = news.count + clean.count;
+
+  // ── Meta stats ───────────────────────────────────────────────────────────────
+  const widthValues = sessionTrades
+    .map((t) => Number(t.obWidthPips ?? t.ob_width_pips))
+    .filter((v) => Number.isFinite(v) && v > 0);
+  const avgWidthNum = widthValues.length > 0
+    ? widthValues.reduce((s, v) => s + v, 0) / widthValues.length
+    : null;
+  const avgWidth = avgWidthNum != null ? `${avgWidthNum.toFixed(1)}p` : "—";
+
+  const decidedTrades = sessionTrades.filter(isPerformanceTrade);
+  const winCount = decidedTrades.filter(isWin).length;
+  const successRate = decidedTrades.length > 0
+    ? `${((winCount / decidedTrades.length) * 100).toFixed(1)}%`
+    : "—";
+
+  const meta = { avgWidth, fillRate: "—", successRate };
+
+  // ── Success rate by OB type ──────────────────────────────────────────────────
+  function typeWR(filterFn) {
+    const slice   = sessionTrades.filter(filterFn);
+    const decided = slice.filter(isPerformanceTrade);
+    if (decided.length < 2) return null;
+    const wins = decided.filter(isWin).length;
+    return Number(((wins / decided.length) * 100).toFixed(0));
+  }
+
+  const SUCCESS_TYPES = [
+    {
+      name: "BOS OB",
+      color: "#3B82F6",
+      wr: typeWR((t) => String(t.structure || t.structure_type || "").toUpperCase() === "BOS"),
+    },
+    {
+      name: "CHoCH OB",
+      color: "#A855F7",
+      wr: typeWR((t) => String(t.structure || t.structure_type || "").toUpperCase() === "CHOCH"),
+    },
+    {
+      name: "News OB",
+      color: "#F59E0B",
+      wr: typeWR((t) => t.obCreatedDuringNews === true || t.ob_created_during_news === true || t.ob_origin_news_window === true),
+    },
+    {
+      name: "Wide OB",
+      color: "#EF4444",
+      wr: typeWR((t) => Number(t.obWidthPips ?? t.ob_width_pips) >= 15),
+    },
+    {
+      name: "Old OB",
+      color: "#94A3B8",
+      wr: typeWR((t) => Number(t.bars_to_fill) > 10),
+    },
+  ];
+  const successByType = SUCCESS_TYPES.filter((r) => r.wr != null);
+
+  return {
+    obFieldAvailable,
+    hasWidth,
+    hasNews,
+    hasAge,
+    origin,
+    detection,
+    width,
+    age,
+    newsClean,
+    totalOBs,
+    meta,
+    successByType,
+  };
 }

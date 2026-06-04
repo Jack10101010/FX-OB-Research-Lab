@@ -16,6 +16,15 @@ const tooltipStyle = {
   padding: "6px 10px",
 };
 
+// Static fallback for success-by-type when real data has no qualifying types
+const MOCK_SUCCESS_BY_TYPE = [
+  { name: "BOS OB",   wr: 68, color: "#3B82F6" },
+  { name: "CHoCH OB", wr: 42, color: "#A855F7" },
+  { name: "News OB",  wr: 33, color: "#F59E0B" },
+  { name: "Wide OB",  wr: 27, color: "#EF4444" },
+  { name: "Old OB",   wr: 39, color: "#94A3B8" },
+];
+
 function HBars({ data, title, testId }) {
   return (
     <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-4">
@@ -84,23 +93,45 @@ function BucketTable({ title, items, valueLabel = "Net R" }) {
   );
 }
 
-export default function OrderBlockLab() {
+export default function OrderBlockLab({ orderBlockData }) {
+  // Use real data when available; fall back to mock shapes
+  const src = orderBlockData ?? OB_DATA;
+  const isReal = orderBlockData != null;
+
+  const newsClean = src.newsClean ?? OB_DATA.newsClean;
+  const totalOBs  = src.totalOBs  ?? newsClean.reduce((s, d) => s + d.value, 0);
+  const newsItem  = newsClean.find((d) => d.name === "News OB")  ?? newsClean[0];
+  const cleanItem = newsClean.find((d) => d.name === "Clean OB") ?? newsClean[1];
+  const newsCount  = newsItem?.value  ?? 0;
+  const cleanCount = cleanItem?.value ?? 0;
+  const newsPct   = totalOBs > 0 ? ((newsCount  / totalOBs) * 100).toFixed(1) : "—";
+  const cleanPct  = totalOBs > 0 ? ((cleanCount / totalOBs) * 100).toFixed(1) : "—";
+
+  const successRows = isReal && src.successByType?.length > 0
+    ? src.successByType
+    : MOCK_SUCCESS_BY_TYPE;
+
+  // "Re-import" notice — show when real data loaded but OB fields not enriched
+  const showReimportNotice = !isReal || !src.obFieldAvailable;
+
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs text-[hsl(var(--text-2))]">OB origin, detection and quality analysis.</p>
-        <div className="flex items-center gap-2 rounded-md border border-[#F59E0B]/30 bg-[#F59E0B]/8 px-3 py-1.5">
-          <Info size={12} className="text-[#F59E0B]" />
-          <span className="text-[10px] text-[#F59E0B] font-num uppercase tracking-wider">
-            OB fields require re-import for legacy runs
-          </span>
-        </div>
+        {showReimportNotice && (
+          <div className="flex items-center gap-2 rounded-md border border-[#F59E0B]/30 bg-[#F59E0B]/8 px-3 py-1.5">
+            <Info size={12} className="text-[#F59E0B]" />
+            <span className="text-[10px] text-[#F59E0B] font-num uppercase tracking-wider">
+              OB fields require re-import for legacy runs
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Row 1: Origin + Detection */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <HBars data={OB_DATA.origin} title="OB Origin Session" testId="ob-origin-chart" />
-        <HBars data={OB_DATA.detection} title="OB Detection Session" testId="ob-detection-chart" />
+        <HBars data={src.origin} title="OB Origin Session" testId="ob-origin-chart" />
+        <HBars data={src.detection} title="OB Detection Session" testId="ob-detection-chart" />
       </div>
 
       {/* Row 2: News vs Clean + OB Width + meta */}
@@ -112,14 +143,14 @@ export default function OrderBlockLab() {
             <div className="relative h-40 w-40 shrink-0">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
-                  <Pie data={OB_DATA.newsClean} dataKey="value" innerRadius={42} outerRadius={64} paddingAngle={2} stroke="none">
-                    {OB_DATA.newsClean.map((d, i) => <Cell key={i} fill={d.color} />)}
+                  <Pie data={newsClean} dataKey="value" innerRadius={42} outerRadius={64} paddingAngle={2} stroke="none">
+                    {newsClean.map((d, i) => <Cell key={i} fill={d.color} />)}
                   </Pie>
                   <Tooltip contentStyle={tooltipStyle} />
                 </PieChart>
               </ResponsiveContainer>
               <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                <span className="font-num tabular text-2xl font-bold text-[hsl(var(--text))]">27</span>
+                <span className="font-num tabular text-2xl font-bold text-[hsl(var(--text))]">{totalOBs}</span>
                 <span className="text-[9px] text-muted-lab uppercase tracking-wider font-num">Total OBs</span>
               </div>
             </div>
@@ -127,44 +158,38 @@ export default function OrderBlockLab() {
               <li className="flex items-center gap-2">
                 <span className="h-2.5 w-2.5 rounded-sm bg-[#F59E0B]" />
                 <span className="text-[hsl(var(--text))] font-medium">News OB</span>
-                <span className="ml-auto text-[hsl(var(--text-2))] font-num">9 (33.3%)</span>
+                <span className="ml-auto text-[hsl(var(--text-2))] font-num">{newsCount} ({newsPct}%)</span>
               </li>
               <li className="flex items-center gap-2">
                 <span className="h-2.5 w-2.5 rounded-sm bg-[#22C55E]" />
                 <span className="text-[hsl(var(--text))] font-medium">Clean OB</span>
-                <span className="ml-auto text-[hsl(var(--text-2))] font-num">18 (66.7%)</span>
+                <span className="ml-auto text-[hsl(var(--text-2))] font-num">{cleanCount} ({cleanPct}%)</span>
               </li>
             </ul>
           </div>
         </div>
 
-        <BucketTable title="OB Width (ATR)" items={OB_DATA.width} />
+        <BucketTable title="OB Width (pips)" items={src.width} />
 
         {/* Meta stats */}
         <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-4 flex flex-col gap-4">
           <SectionLabel>Quality Snapshot</SectionLabel>
           <div className="space-y-4">
-            <MiniStat label="Avg OB Width" value={OB_DATA.meta.avgWidth} tone="cyan" />
-            <MiniStat label="OB Fill Rate" value={OB_DATA.meta.fillRate} tone="pos" />
-            <MiniStat label="OB Success Rate" value={OB_DATA.meta.successRate} tone="amber" />
+            <MiniStat label="Avg OB Width" value={src.meta.avgWidth} tone="cyan" />
+            <MiniStat label="OB Fill Rate" value={src.meta.fillRate} tone="pos" />
+            <MiniStat label="OB Success Rate" value={src.meta.successRate} tone="amber" />
           </div>
         </div>
       </div>
 
       {/* Row 3: OB Age + Success metrics */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <BucketTable title="OB Age at Entry" items={OB_DATA.age} />
+        <BucketTable title="OB Age at Entry" items={src.age} />
 
         <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-4">
           <SectionLabel className="mb-3">OB Success Rate by Type</SectionLabel>
           <ul className="space-y-2.5">
-            {[
-              { name: "BOS OB",   wr: 68, color: "#3B82F6" },
-              { name: "CHoCH OB", wr: 42, color: "#A855F7" },
-              { name: "News OB",  wr: 33, color: "#F59E0B" },
-              { name: "Wide OB",  wr: 27, color: "#EF4444" },
-              { name: "Old OB",   wr: 39, color: "#94A3B8" },
-            ].map((r) => (
+            {successRows.map((r) => (
               <li key={r.name} className="grid grid-cols-[120px_1fr_50px] items-center gap-3 text-xs">
                 <span className="text-[hsl(var(--text))] font-num">{r.name}</span>
                 <div className="h-3 w-full bg-[hsl(var(--panel-2))] rounded-sm overflow-hidden">
