@@ -335,9 +335,9 @@ function buildTriggeredEdgeOverlays(trades = [], obs = []) {
             badgeState = "first_failed";
         } else if (cancelledBeforeEntry && (cancelNorm.includes("inval") || cancelNorm.includes("breach") || cancelNorm.includes("broken"))) {
             badgeState = "inval";
-        } else if (filledOnTriggerCandle) {
+        } else if (!cancelledBeforeEntry && filledOnTriggerCandle) {
             badgeState = "same";
-        } else if (filledOnNextCandle) {
+        } else if (!cancelledBeforeEntry && filledOnNextCandle) {
             badgeState = "next";
         }
         out.push({
