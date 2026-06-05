@@ -339,6 +339,17 @@ export default function StrategyBuilder() {
                 outputFolder: payload.folder || runJob.output_folder || "",
                 ...(projectId ? { projectId, runRole, experimentType } : {}),
             };
+            // METADATA-ROUNDTRIP-FIX (dd44c84): sidecar strip removes _entry_mode /
+            // _selected_entry_model from the POST payload, so sidecar config.json never
+            // contains them.  Re-inject from the current sidecarConfig before the bundle
+            // enters the store so buildRunConfigLoadReport can recover entryMode /
+            // selectedEntryModel for same-session imports.
+            if (result.bundle.config) {
+                if (sidecarConfig._entry_mode !== undefined)
+                    result.bundle.config._entry_mode = sidecarConfig._entry_mode;
+                if (sidecarConfig._selected_entry_model !== undefined)
+                    result.bundle.config._selected_entry_model = sidecarConfig._selected_entry_model;
+            }
             const storedBundle = addRunBundle(result.bundle) || result.bundle;
             if (projectId) {
                 assignRunToProject(storedBundle.id, projectId, { runRole, experimentType });

@@ -796,11 +796,22 @@ export function buildRunConfigLoadReport(current, run) {
     // then fallback to entryMode / entry_mode for hand-crafted configs.
     applyFirstPresent(patch, source, "entryMode", ["_entry_mode", "entryMode", "entry_mode"],
         (value) => ["single", "research"].includes(value) ? value : null);
-    // Backward compat: infer "research" from entry_models when _entry_mode is absent
+    // Backward compat: infer entryMode / selectedEntryModel from entry_models
+    // when _entry_mode is absent (old bundles or cross-session imports after dd44c84).
+    // >1 model  → research mode (selectedEntryModel not applicable).
+    // exactly 1 → single mode; infer selectedEntryModel from the model name so that
+    //             baseline/entry_penetration/triggered_edge runs load correctly
+    //             without requiring the _entry_mode/_selected_entry_model round-trip keys.
     if (!("entryMode" in patch)) {
         const srcModels = ensureArray(source.entry_models || source.entryModels || []);
-        if (srcModels.length > 0) {
+        if (srcModels.length > 1) {
             patch.entryMode = "research";
+        } else if (srcModels.length === 1) {
+            const INFER_MODELS = ["baseline", "entry_penetration", "triggered_edge"];
+            patch.entryMode = "single";
+            if (!("selectedEntryModel" in patch) && INFER_MODELS.includes(srcModels[0])) {
+                patch.selectedEntryModel = srcModels[0];
+            }
         }
     }
 
