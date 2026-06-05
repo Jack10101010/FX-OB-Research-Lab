@@ -867,6 +867,13 @@ export default function RunDetail() {
         return { models: [...models], contexts: [...contexts] };
     }, [displayTrades]);
 
+    // Per-tag performance stats for the Classification tab.
+    // Source: displayTrades (full scenario universe, not ledger-filtered subset).
+    const classificationBreakdown = React.useMemo(
+        () => buildClassificationBreakdown(displayTrades),
+        [displayTrades],
+    );
+
     const filteredLedgerRows = React.useMemo(() => {
         const rows = Array.isArray(displayTrades) ? displayTrades : [];
         const query = ledgerSearch.trim().toLowerCase();
@@ -1361,6 +1368,7 @@ export default function RunDetail() {
     const resultsTabs = React.useMemo(() => ([
         { id: "config", label: "Config" },
         { id: "trades", label: "Trades" },
+        { id: "classification", label: "Classification" },
         { id: "ob-stats", label: "OB Stats" },
         { id: "outcomes", label: "Outcomes" },
         { id: "monthly", label: "Monthly" },
@@ -2845,6 +2853,79 @@ export default function RunDetail() {
                         ]}
                         rows={filteredLedgerRows}
                     />
+                </NeonPanel>}
+
+                {showResultsSection("classification") && <NeonPanel className="xl:col-span-3" title="Classification Performance">
+                    {!Array.isArray(displayTrades) || !displayTrades.length ? (
+                        <div className="py-6 text-center font-ui text-[11px] text-muted-lab">
+                            No trade data. Import a run to see classification performance.
+                        </div>
+                    ) : (
+                        <div className="space-y-5">
+                            {[
+                                { dimLabel: "Entry Model",   rows: classificationBreakdown.entry_model   },
+                                { dimLabel: "Entry Context", rows: classificationBreakdown.entry_context },
+                            ].map(({ dimLabel, rows }) => {
+                                if (!rows.length) return null;
+                                return (
+                                    <div key={dimLabel}>
+                                        <div className="text-[10px] font-ui uppercase tracking-wider text-[hsl(var(--text-3))] mb-2">
+                                            {dimLabel}
+                                        </div>
+                                        {/* Column headers */}
+                                        <div
+                                            className="grid items-center gap-x-3 px-2 mb-1 text-[9px] font-ui uppercase tracking-wider text-[hsl(var(--text-3)/0.7)]"
+                                            style={{ gridTemplateColumns: "minmax(96px,auto) repeat(4,minmax(52px,1fr))" }}
+                                        >
+                                            <span>Tag</span>
+                                            <span className="text-right">Trades</span>
+                                            <span className="text-right">Win Rate</span>
+                                            <span className="text-right">Net R</span>
+                                            <span className="text-right">Avg R</span>
+                                        </div>
+                                        {/* Data rows */}
+                                        <div className="space-y-1">
+                                            {rows.map((row) => {
+                                                const wrTone = row.winRate == null
+                                                    ? "text-muted-lab"
+                                                    : row.winRate >= 0.5
+                                                        ? "text-[hsl(var(--success))]"
+                                                        : "text-[hsl(var(--danger))]";
+                                                const rTone = (v) => v > 0
+                                                    ? "text-[hsl(var(--success))]"
+                                                    : v < 0
+                                                        ? "text-[hsl(var(--danger))]"
+                                                        : "text-muted-lab";
+                                                return (
+                                                    <div
+                                                        key={row.tag}
+                                                        className="grid items-center gap-x-3 px-2 py-1.5 border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm"
+                                                        style={{ gridTemplateColumns: "minmax(96px,auto) repeat(4,minmax(52px,1fr))" }}
+                                                    >
+                                                        <div className="min-w-0">
+                                                            <ClassificationBadge tag={row.tag} />
+                                                        </div>
+                                                        <span className="font-num tabular-nums text-right text-[11px] text-[hsl(var(--text-2))]">
+                                                            {row.count}
+                                                        </span>
+                                                        <span className={`font-num tabular-nums text-right text-[11px] ${wrTone}`}>
+                                                            {row.winRate != null ? `${Math.round(row.winRate * 100)}%` : "—"}
+                                                        </span>
+                                                        <span className={`font-num tabular-nums text-right text-[11px] ${rTone(row.netR)}`}>
+                                                            {formatSignedR(row.netR)}
+                                                        </span>
+                                                        <span className={`font-num tabular-nums text-right text-[11px] ${rTone(row.avgR)}`}>
+                                                            {formatSignedR(row.avgR, 2)}
+                                                        </span>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
                 </NeonPanel>}
 
                 {showResultsSection("ob-stats") && <NeonPanel title="Order Block Stats">
@@ -4541,4 +4622,80 @@ function TimeOfDayHeatmap({ trades }) {
             </div>
         </NeonPanel>
     );
+}
+
+// ── Classification Performance Breakdown ─────────────────────────────────────
+// Pure aggregation — no React, no side effects.
+// Computes per-tag stats for Entry Model and Entry Context dimensions.
+//
+// Win rate denominator: wins + losses (excludes breakevens so WR isn't diluted
+// by trades that neither won nor lost). Avg R denominator: all performance
+// trades (count), so it properly reflects expectancy drag from breakevens.
+//
+// entry_context is multi-valued: one trade contributes to all its context
+// buckets simultaneously (e.g. a trade tagged ["aae"] adds to the "aae" row).
+function buildClassificationBreakdown(trades) {
+    if (!Array.isArray(trades) || !trades.length) {
+        return { entry_model: [], entry_context: [] };
+    }
+
+    const modelMap   = new Map();
+    const contextMap = new Map();
+
+    function ensureBucket(map, tag) {
+        if (!map.has(tag)) map.set(tag, { count: 0, wins: 0, losses: 0, sumR: 0 });
+        return map.get(tag);
+    }
+
+    for (const trade of trades) {
+        if (!isPerformanceTrade(trade)) continue;
+        const r    = Number.isFinite(Number(trade?.r)) ? Number(trade.r) : 0;
+        const win  = isWinTrade(trade);
+        const loss = isLossTrade(trade);
+
+        let cls;
+        try { cls = buildTradeClassification(trade); }
+        catch { continue; }
+
+        // entry_model — single bucket per trade
+        const mb = ensureBucket(modelMap, cls.entry_model);
+        mb.count++;
+        if (win)  mb.wins++;
+        if (loss) mb.losses++;
+        mb.sumR += r;
+
+        // entry_context — one bucket per context tag (multi-valued dimension)
+        for (const t of cls.entry_context) {
+            const cb = ensureBucket(contextMap, t);
+            cb.count++;
+            if (win)  cb.wins++;
+            if (loss) cb.losses++;
+            cb.sumR += r;
+        }
+    }
+
+    function toRows(map) {
+        return [...map.entries()]
+            .map(([tag, { count, wins, losses, sumR }]) => {
+                const meta = getTagMeta(tag);
+                const wl   = wins + losses;
+                return {
+                    tag,
+                    label:   meta.label,
+                    tone:    meta.tone,
+                    count,
+                    wins,
+                    losses,
+                    winRate: wl > 0 ? wins / wl : null,
+                    netR:    sumR,
+                    avgR:    count > 0 ? sumR / count : 0,
+                };
+            })
+            .sort((a, b) => b.count - a.count);
+    }
+
+    return {
+        entry_model:   toRows(modelMap),
+        entry_context: toRows(contextMap),
+    };
 }
