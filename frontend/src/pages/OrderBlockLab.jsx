@@ -10,6 +10,8 @@ import { setSelectedTradeVariant, getTradeUniverse } from "@/data/store";
 import { useTradeUniverse } from "@/data/useTradeUniverse";
 import { useResultsLens } from "@/data/useResultsLens";
 import { OBLabTabShell } from "@/components/lab/OBLabTabShell";
+// Phase OB-RETEST-1 — frontend-derived OB retest analysis (new tab).
+import { RetestLabTab } from "@/components/lab/retest/RetestLabTab";
 // Phase RB-4 — all OrderBlockLab bucket tables route through the shared
 // basis-aware CanonicalBucketTable (frozen RB-3.2 contract).
 import { CanonicalBucketTable } from "@/components/lab/CanonicalBucketTable";
@@ -535,12 +537,27 @@ export default function OrderBlockLab() {
         </div>
     );
 
+    // ── Tab 6: Retest Lab ─────────────────────────────────────────────────────
+    // Frontend-derived OB retest analysis (Phase 1). Gated on candle availability;
+    // all logic lives in data/obRetest.js. `enabled` defers candle load until the
+    // tab is active so unopened tabs never fetch ~25k candles.
+    const tabRetestLab = (
+        <RetestLabTab
+            orderBlocks={orderBlocks}
+            trades={trades}
+            activeRun={activeRun}
+            activeRunId={activeRunId}
+            enabled={activeTab === "retest-lab"}
+        />
+    );
+
     const TABS = [
         { key: "model-analysis", label: "Model Analysis",  short: "Analysis",   content: tabModelAnalysis   },
         { key: "edge-discovery", label: "Edge Discovery",  short: "Discovery",  content: tabEdgeDiscovery   },
         { key: "failure-lab",    label: "Failure Lab",     short: "Failures",   content: tabFailureLab      },
         { key: "robustness",     label: "Robustness",      short: "Robustness", content: tabRobustness      },
         { key: "promotion",      label: "Promotion Desk",  short: "Promotion",  content: tabPromotion       },
+        { key: "retest-lab",     label: "Retest Lab",      short: "Retest",     content: tabRetestLab       },
     ];
 
     return (
