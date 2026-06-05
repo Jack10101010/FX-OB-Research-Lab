@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React from "react";
 import { SectionLabel, fmtR } from "../primitives";
 import {
   BarChart, Bar, Cell, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid,
@@ -25,8 +25,6 @@ const heatColor = (v) => {
 };
 
 export default function TimeAnalysis({ timeAnalysisData, session }) {
-  const [view, setView] = useState("session"); // session | full
-
   // Real data when available; mock fallback
   const tData = timeAnalysisData ?? {
     hourlyData: HOURLY_DATA,
@@ -62,25 +60,18 @@ export default function TimeAnalysis({ timeAnalysisData, session }) {
         <div className="inline-flex items-center gap-1 rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-1">
           <button
             data-testid="time-view-session"
-            onClick={() => setView("session")}
-            className={[
-              "inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-all",
-              view === "session" ? "bg-[hsl(var(--accent-primary)/0.12)] text-[hsl(var(--accent-primary))]" : "text-[hsl(var(--text-2))] hover:text-[hsl(var(--text))]",
-            ].join(" ")}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-[hsl(var(--accent-primary)/0.12)] text-[hsl(var(--accent-primary))]"
           >
             <Clock size={12} />
             {sessionToggleLabel}
           </button>
           <button
             data-testid="time-view-full"
-            onClick={() => setView("full")}
-            className={[
-              "inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-all",
-              view === "full" ? "bg-[hsl(var(--accent-primary)/0.12)] text-[hsl(var(--accent-primary))]" : "text-[hsl(var(--text-2))] hover:text-[hsl(var(--text))]",
-            ].join(" ")}
+            disabled
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md text-[hsl(var(--text-2))] opacity-40 cursor-not-allowed"
           >
             <Sun size={12} />
-            Full Day (00:00 – 24:00 UTC)
+            Full Day (soon)
           </button>
         </div>
       </div>

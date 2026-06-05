@@ -1,10 +1,10 @@
 import React from "react";
 import { SectionLabel, Metric, fmtR } from "../primitives";
 import {
-  LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid, Legend,
+  LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid,
 } from "recharts";
 import { DEEP_DIVE_LONDON } from "../../mockData";
-import { ArrowRight, Calendar, Zap, Layers3, GitBranch } from "lucide-react";
+import { Calendar, Zap } from "lucide-react";
 
 const tooltipStyle = {
   backgroundColor: "#121C29",
@@ -26,8 +26,13 @@ export default function OverviewTab({ session, overviewData }) {
     session: e.v,
     all:     allEq[i]?.v ?? null,
   }));
+  const hasAllSessionsEquity = allEq.length > 0 && allEq.some((p) => p?.v != null);
 
   const netRPos = m.netR >= 0;
+
+  // Real mini-card values
+  const bestDay     = dd.bestDay     ?? null;
+  const fastStopouts = dd.fastStopouts ?? null;
 
   return (
     <div className="space-y-5">
@@ -54,7 +59,7 @@ export default function OverviewTab({ session, overviewData }) {
             <SectionLabel>Net R Over Time</SectionLabel>
             <div className="flex items-center gap-3 text-[10px] font-num uppercase tracking-wider">
               <Legend2 color="#22C55E" label="This Session" />
-              <Legend2 color="#94A3B8" label="All Sessions" dashed />
+              {hasAllSessionsEquity && <Legend2 color="#94A3B8" label="All Sessions" dashed />}
             </div>
           </div>
           <div className="h-56" data-testid="chart-net-r-over-time">
@@ -75,15 +80,17 @@ export default function OverviewTab({ session, overviewData }) {
                   width={32}
                 />
                 <Tooltip contentStyle={tooltipStyle} />
-                <Line
-                  type="monotone"
-                  dataKey="all"
-                  stroke="#94A3B8"
-                  strokeWidth={1.5}
-                  strokeDasharray="4 4"
-                  dot={false}
-                  connectNulls={false}
-                />
+                {hasAllSessionsEquity && (
+                  <Line
+                    type="monotone"
+                    dataKey="all"
+                    stroke="#94A3B8"
+                    strokeWidth={1.5}
+                    strokeDasharray="4 4"
+                    dot={false}
+                    connectNulls={false}
+                  />
+                )}
                 <Line
                   type="monotone"
                   dataKey="session"
@@ -101,9 +108,6 @@ export default function OverviewTab({ session, overviewData }) {
         <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-4">
           <div className="flex items-baseline justify-between mb-3">
             <SectionLabel>Breakdown Snapshot</SectionLabel>
-            <button className="text-[10px] text-[hsl(var(--accent-primary))] hover:opacity-80 font-num uppercase tracking-wider inline-flex items-center gap-1">
-              View Full <ArrowRight size={10} />
-            </button>
           </div>
           <div className="overflow-hidden rounded-md border border-[hsl(var(--border-soft))]">
             <table className="w-full text-xs">
@@ -136,12 +140,22 @@ export default function OverviewTab({ session, overviewData }) {
         </div>
       </div>
 
-      {/* Small cards underneath */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <MiniCard icon={Calendar} label="Best Day" value="Friday" sub="+4.12R" tone="pos" />
-        <MiniCard icon={Zap} label="Fast Stopouts" value="4" sub="22.2% of trades" tone="neg" />
-        <MiniCard icon={Layers3} label="OB Created" value="London" sub="+4.8R" tone="pos" />
-        <MiniCard icon={GitBranch} label="OB Origin" value="New York" sub="+3.1R" tone="cyan" />
+      {/* Mini cards */}
+      <div className="grid grid-cols-2 gap-3">
+        <MiniCard
+          icon={Calendar}
+          label="Best Day"
+          value={bestDay ? bestDay.day : "—"}
+          sub={bestDay ? `${bestDay.netR >= 0 ? "+" : ""}${bestDay.netR}R` : "No timestamp data"}
+          tone={bestDay ? (bestDay.netR >= 0 ? "pos" : "neg") : "default"}
+        />
+        <MiniCard
+          icon={Zap}
+          label="Fast Stopouts"
+          value={fastStopouts ? fastStopouts.count : "—"}
+          sub={fastStopouts ? `${fastStopouts.pct}% of trades` : ""}
+          tone={fastStopouts?.count > 0 ? "neg" : "default"}
+        />
       </div>
     </div>
   );

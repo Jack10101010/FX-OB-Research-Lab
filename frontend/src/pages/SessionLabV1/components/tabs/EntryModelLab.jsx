@@ -1,10 +1,9 @@
-import React, { useState } from "react";
-import { SectionLabel, ToggleChip, fmtR } from "../primitives";
+import React from "react";
+import { SectionLabel, fmtR } from "../primitives";
 import {
   BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid, Cell, LabelList,
 } from "recharts";
-import { ENTRY_MODELS, ENTRY_MODEL_OPTIONS } from "../../mockData";
-import { ChevronDown, Check } from "lucide-react";
+import { ENTRY_MODELS } from "../../mockData";
 
 const tooltipStyle = {
   backgroundColor: "#121C29",
@@ -15,52 +14,10 @@ const tooltipStyle = {
   padding: "6px 10px",
 };
 
-function ModelSelect({ label, value, onChange, testId }) {
-  return (
-    <label className="flex flex-col gap-1 flex-1 min-w-[180px]">
-      <span className="label-eyebrow">{label}</span>
-      <div className="relative">
-        <select
-          data-testid={testId}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="w-full appearance-none rounded-md border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] px-3 py-2 pr-8 text-xs text-[hsl(var(--text))] font-num focus:outline-none focus:border-[hsl(var(--accent-primary))]"
-        >
-          {ENTRY_MODEL_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
-        </select>
-        <ChevronDown size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[hsl(var(--text-2))] pointer-events-none" />
-      </div>
-    </label>
-  );
-}
-
-function CheckBox({ checked, color, onChange }) {
-  return (
-    <button
-      onClick={onChange}
-      className={[
-        "h-4 w-4 rounded border flex items-center justify-center transition-all",
-        checked ? "" : "border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))]",
-      ].join(" ")}
-      style={checked ? { backgroundColor: `${color}1A`, borderColor: color } : {}}
-    >
-      {checked && <Check size={11} style={{ color }} strokeWidth={3} />}
-    </button>
-  );
-}
-
 export default function EntryModelLab({ entryModelData }) {
   const models = entryModelData?.entryModels?.length > 0
     ? entryModelData.entryModels
     : ENTRY_MODELS;
-
-  const [longModel, setLongModel] = useState("Triggered Edge Delay +2");
-  const [shortModel, setShortModel] = useState("Triggered Edge Next");
-  const [longsOn, setLongsOn] = useState(true);
-  const [shortsOn, setShortsOn] = useState(true);
-  const [includes, setIncludes] = useState(
-    () => models.reduce((acc, m) => ({ ...acc, [m.name]: { long: true, short: true } }), {})
-  );
 
   // for chart
   const chartData = models.map((m) => ({
@@ -84,19 +41,7 @@ export default function EntryModelLab({ entryModelData }) {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs text-[hsl(var(--text-2))]">Compare all entry models. Enable different models for Longs vs Shorts.</p>
-        <div className="flex items-center gap-3">
-          <span className="label-eyebrow">Include in Preview</span>
-          <ToggleChip label="LONGS" active={longsOn} onClick={() => setLongsOn((v) => !v)} color="green" testId="el-longs-toggle" />
-          <ToggleChip label="SHORTS" active={shortsOn} onClick={() => setShortsOn((v) => !v)} color="red" testId="el-shorts-toggle" />
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-end gap-4 rounded border border-[hsl(var(--accent-primary))]/20 bg-[hsl(var(--accent-primary)/0.06)] p-4">
-        <ModelSelect label="Longs Use" value={longModel} onChange={setLongModel} testId="el-long-model" />
-        <ModelSelect label="Shorts Use" value={shortModel} onChange={setShortModel} testId="el-short-model" />
-      </div>
+      <p className="text-xs text-[hsl(var(--text-2))]">Compare all entry models. Enable different models for Longs vs Shorts.</p>
 
       {/* Performance table */}
       <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-4">
@@ -112,7 +57,6 @@ export default function EntryModelLab({ entryModelData }) {
                 <th className="text-center px-2 py-1 font-medium border-l border-[hsl(var(--border-soft))]" colSpan={5}>
                   <span className="text-[#EF4444]">SHORTS</span>
                 </th>
-                <th className="text-center px-2 py-1 font-medium border-l border-[hsl(var(--border-soft))]" colSpan={2} rowSpan={2}>Include</th>
               </tr>
               <tr className="text-muted-lab uppercase tracking-wider text-[9px] border-b border-[hsl(var(--border-soft))]">
                 <th className="text-right px-1 py-1.5 font-medium border-l border-[hsl(var(--border-soft))]">Trades</th>
@@ -141,24 +85,6 @@ export default function EntryModelLab({ entryModelData }) {
                   <td className="px-1 py-1.5 font-num text-right text-[hsl(var(--text))]">{m.short.wr}%</td>
                   <td className="px-1 py-1.5 font-num text-right text-[hsl(var(--text))]">{m.short.pf ?? "∞"}</td>
                   <td className={`px-1 py-1.5 font-num text-right ${m.short.exp >= 0 ? "text-[#22C55E]" : "text-[#EF4444]"}`}>{fmtR(m.short.exp, 2)}</td>
-                  <td className="px-2 py-1.5 text-center border-l border-[hsl(var(--border-soft))]/40">
-                    <CheckBox
-                      checked={includes[m.name]?.long}
-                      color="#22C55E"
-                      onChange={() =>
-                        setIncludes((s) => ({ ...s, [m.name]: { ...s[m.name], long: !s[m.name].long } }))
-                      }
-                    />
-                  </td>
-                  <td className="px-2 py-1.5 text-center">
-                    <CheckBox
-                      checked={includes[m.name]?.short}
-                      color="#EF4444"
-                      onChange={() =>
-                        setIncludes((s) => ({ ...s, [m.name]: { ...s[m.name], short: !s[m.name].short } }))
-                      }
-                    />
-                  </td>
                 </tr>
               ))}
             </tbody>

@@ -1,10 +1,9 @@
-import React, { useState } from "react";
-import { SectionLabel, Metric, ToggleChip, fmtR } from "../primitives";
+import React from "react";
+import { SectionLabel, fmtR } from "../primitives";
 import {
   AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid,
 } from "recharts";
-import { DIRECTION_LAB, ENTRY_MODEL_OPTIONS } from "../../mockData";
-import { ChevronDown } from "lucide-react";
+import { DIRECTION_LAB } from "../../mockData";
 
 const tooltipStyle = {
   backgroundColor: "#121C29",
@@ -19,7 +18,7 @@ function DirectionCard({ side, data, color }) {
   const positive = data.netR >= 0;
   return (
     <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-4">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center mb-3">
         <div className="flex items-center gap-2">
           <span
             className="h-2 w-2 rounded-full"
@@ -29,9 +28,6 @@ function DirectionCard({ side, data, color }) {
             {side}
           </span>
         </div>
-        <button className="text-[10px] text-[hsl(var(--accent-primary))] hover:opacity-80 font-num uppercase tracking-wider">
-          Include
-        </button>
       </div>
       <div className="font-display text-4xl font-bold tabular" style={{ color: positive ? "#22C55E" : "#EF4444" }}>
         {fmtR(data.netR, 2)}
@@ -101,27 +97,6 @@ function Row({ label, value, suffix, pos }) {
   );
 }
 
-function ModelSelect({ label, value, onChange, testId }) {
-  return (
-    <label className="flex flex-col gap-1 flex-1 min-w-[160px]">
-      <span className="label-eyebrow">{label}</span>
-      <div className="relative">
-        <select
-          data-testid={testId}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="w-full appearance-none rounded-md border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] px-3 py-2 pr-8 text-xs text-[hsl(var(--text))] font-num focus:outline-none focus:border-[hsl(var(--accent-primary))]"
-        >
-          {ENTRY_MODEL_OPTIONS.map((o) => (
-            <option key={o} value={o}>{o}</option>
-          ))}
-        </select>
-        <ChevronDown size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[hsl(var(--text-2))] pointer-events-none" />
-      </div>
-    </label>
-  );
-}
-
 function ComparisonBar({ label, longVal, shortVal, format = (v) => v }) {
   const safeL = typeof longVal  === "number" && isFinite(longVal)  ? longVal  : 0;
   const safeS = typeof shortVal === "number" && isFinite(shortVal) ? shortVal : 0;
@@ -144,36 +119,12 @@ function ComparisonBar({ label, longVal, shortVal, format = (v) => v }) {
 }
 
 export default function DirectionLab({ directionData }) {
-  const [longModel, setLongModel] = useState("Triggered Edge Delay +2");
-  const [shortModel, setShortModel] = useState("Triggered Edge Next");
-  const [longsOn, setLongsOn] = useState(true);
-  const [shortsOn, setShortsOn] = useState(true);
-
   const L = directionData?.longs  ?? DIRECTION_LAB.longs;
   const S = directionData?.shorts ?? DIRECTION_LAB.shorts;
 
   return (
     <div className="space-y-5">
-      {/* Header bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs text-[hsl(var(--text-2))]">Deep dive into Long vs Short performance in this session.</p>
-        <div className="flex items-center gap-3">
-          <span className="label-eyebrow">Include in Preview</span>
-          <ToggleChip label="LONGS" active={longsOn} onClick={() => setLongsOn((v) => !v)} color="green" testId="dl-toggle-longs" />
-          <ToggleChip label="SHORTS" active={shortsOn} onClick={() => setShortsOn((v) => !v)} color="red" testId="dl-toggle-shorts" />
-        </div>
-      </div>
-
-      {/* Per-direction entry model selectors */}
-      <div className="flex flex-wrap items-end gap-4 rounded border border-[hsl(var(--accent-primary))]/20 bg-[hsl(var(--accent-primary)/0.06)] p-4">
-        <div className="flex-1">
-          <SectionLabel hint="Choose different models for longs vs shorts">
-            Per-Direction Entry Model
-          </SectionLabel>
-        </div>
-        <ModelSelect label="Longs Use" value={longModel} onChange={setLongModel} testId="dl-longs-model" />
-        <ModelSelect label="Shorts Use" value={shortModel} onChange={setShortModel} testId="dl-shorts-model" />
-      </div>
+      <p className="text-xs text-[hsl(var(--text-2))]">Deep dive into Long vs Short performance in this session.</p>
 
       {/* Long + Short cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -190,7 +141,7 @@ export default function DirectionLab({ directionData }) {
         <ComparisonBar label="Expectancy (R)" longVal={L.expectancy ?? 0} shortVal={S.expectancy ?? 0} format={(v) => fmtR(v, 2)} />
         <ComparisonBar label="Max Drawdown"   longVal={L.dd}            shortVal={S.dd}            format={(v) => `${v}R`} />
         <ComparisonBar label="Trades"         longVal={L.trades}        shortVal={S.trades} />
-        <p className="mt-3 text-[10px] text-muted-lab font-num">Results update automatically when you change filters above.</p>
+        <p className="mt-3 text-[10px] text-muted-lab font-num">Direction breakdown updates when a new session is selected.</p>
       </div>
     </div>
   );

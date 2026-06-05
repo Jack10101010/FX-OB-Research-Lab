@@ -1,8 +1,7 @@
-import React, { useState } from "react";
-import { SectionLabel, ToggleChip, fmtR } from "../primitives";
+import React from "react";
+import { SectionLabel, fmtR } from "../primitives";
 import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip,
-  LineChart, Line, XAxis, YAxis, CartesianGrid,
 } from "recharts";
 import { STRUCTURE_LAB } from "../../mockData";
 
@@ -19,12 +18,11 @@ function StructCard({ name, data, color }) {
   const positive = data.netR >= 0;
   return (
     <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-4">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center mb-3">
         <div className="flex items-center gap-2">
           <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color, boxShadow: `0 0 6px ${color}` }} />
           <span className="font-display text-sm font-bold uppercase tracking-wider" style={{ color }}>{name}</span>
         </div>
-        <button className="text-[10px] text-[hsl(var(--accent-primary))] hover:opacity-80 font-num uppercase tracking-wider">Include</button>
       </div>
       <div className={`font-display text-4xl font-bold tabular ${positive ? "text-[#22C55E]" : "text-[#EF4444]"}`}>
         {fmtR(data.netR, 2)}
@@ -50,34 +48,22 @@ function Sm({ label, value, tone }) {
 }
 
 export default function StructureLab({ structureData }) {
-  const [bosOn,   setBosOn]   = useState(true);
-  const [chochOn, setChochOn] = useState(true);
-
   // Real data when available, mock fallback otherwise
   const bos    = structureData?.bos    ?? STRUCTURE_LAB.bos;
   const choch  = structureData?.choch  ?? STRUCTURE_LAB.choch;
   const matrix = structureData?.matrix ?? STRUCTURE_LAB.matrix;
-  // overTime: always use mock — Phase C will add time-series
-  const overTime = STRUCTURE_LAB.overTime;
 
   const donut = [
     { name: "BOS",   value: bos.trades,   color: "#3B82F6" },
     { name: "CHoCH", value: choch.trades, color: "#A855F7" },
   ];
-  const donutTotal  = bos.trades + choch.trades;
-  const bosPercent  = donutTotal > 0 ? ((bos.trades   / donutTotal) * 100).toFixed(1) : "0.0";
+  const donutTotal   = bos.trades + choch.trades;
+  const bosPercent   = donutTotal > 0 ? ((bos.trades   / donutTotal) * 100).toFixed(1) : "0.0";
   const chochPercent = donutTotal > 0 ? ((choch.trades / donutTotal) * 100).toFixed(1) : "0.0";
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs text-[hsl(var(--text-2))]">Compare BOS vs CHoCH performance and drill into interactions.</p>
-        <div className="flex items-center gap-3">
-          <span className="label-eyebrow">Include in Preview</span>
-          <ToggleChip label="BOS" active={bosOn} onClick={() => setBosOn((v) => !v)} color="blue" testId="sl-toggle-bos" />
-          <ToggleChip label="CHoCH" active={chochOn} onClick={() => setChochOn((v) => !v)} color="purple" testId="sl-toggle-choch" />
-        </div>
-      </div>
+      <p className="text-xs text-[hsl(var(--text-2))]">Compare BOS vs CHoCH performance and drill into interactions.</p>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <StructCard name="BOS"   data={bos}   color="#3B82F6" />
@@ -118,26 +104,11 @@ export default function StructureLab({ structureData }) {
           </div>
         </div>
 
-        {/* Net R over time — mock data (Phase C) */}
+        {/* Net R over time — placeholder */}
         <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] p-4">
-          <div className="flex items-baseline justify-between mb-3">
-            <SectionLabel>Net R by Structure Over Time</SectionLabel>
-            <div className="flex items-center gap-3 text-[10px] font-num uppercase tracking-wider">
-              <Legend2 color="#3B82F6" label="BOS" />
-              <Legend2 color="#A855F7" label="CHoCH" />
-            </div>
-          </div>
-          <div className="h-44">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={overTime} margin={{ top: 8, right: 12, bottom: 0, left: -16 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#223142" />
-                <XAxis dataKey="t" tick={{ fill: "#64748B", fontSize: 9, fontFamily: "IBM Plex Mono" }} axisLine={{ stroke: "#223142" }} tickLine={false} interval={2} />
-                <YAxis tick={{ fill: "#64748B", fontSize: 9, fontFamily: "IBM Plex Mono" }} axisLine={false} tickLine={false} width={28} />
-                <Tooltip contentStyle={tooltipStyle} />
-                <Line type="monotone" dataKey="bos"   stroke="#3B82F6" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="choch" stroke="#A855F7" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
+          <SectionLabel className="mb-3">Net R by Structure Over Time</SectionLabel>
+          <div className="flex items-center justify-center h-44 text-[11px] text-muted-lab font-num">
+            Time-series view coming in a future update.
           </div>
         </div>
       </div>
@@ -177,17 +148,8 @@ export default function StructureLab({ structureData }) {
             </tbody>
           </table>
         </div>
-        <p className="mt-3 text-[10px] text-muted-lab font-num">Toggle BOS / CHoCH above to include or exclude from preview.</p>
+        <p className="mt-3 text-[10px] text-muted-lab font-num">Structure breakdown updates when a new session is selected.</p>
       </div>
     </div>
-  );
-}
-
-function Legend2({ color, label }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 text-[hsl(var(--text-2))]">
-      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color, boxShadow: `0 0 6px ${color}` }} />
-      {label}
-    </span>
   );
 }

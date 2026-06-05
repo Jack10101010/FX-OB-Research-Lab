@@ -418,6 +418,24 @@ export function buildOverviewDataFromSessionTrades(sessionTrades) {
     }
   }
 
+  // Best weekday by net R
+  const dayNetR = {};
+  for (const t of sessionTrades) {
+    const day = getTradeWeekday(t);
+    if (!day) continue;
+    dayNetR[day] = (dayNetR[day] ?? 0) + getR(t);
+  }
+  let bestDay = null;
+  const dayEntries = Object.entries(dayNetR);
+  if (dayEntries.length > 0) {
+    const best = dayEntries.reduce((a, b) => (b[1] > a[1] ? b : a));
+    bestDay = { day: best[0], netR: Number(best[1].toFixed(2)) };
+  }
+
+  // Fast stopouts
+  const fsRaw = computeFastStopouts(sessionTrades);
+  const fastStopouts = fsRaw ? { count: fsRaw.count, pct: fsRaw.pct } : { count: 0, pct: 0 };
+
   return {
     metrics: {
       netR:       m.netR,
@@ -432,6 +450,8 @@ export function buildOverviewDataFromSessionTrades(sessionTrades) {
     equity,
     allSessionsEquity: [],  // Phase C: cross-session comparison
     breakdown,
+    bestDay,
+    fastStopouts,
   };
 }
 
