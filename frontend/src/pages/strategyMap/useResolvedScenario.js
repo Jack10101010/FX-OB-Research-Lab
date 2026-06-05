@@ -145,6 +145,28 @@ function enrichObsWithTradeLabels(obs = [], trades = []) {
         // Override the stale colorKey that store enrichment set from obFinalStatus.
         // The scenario trade's outcome takes priority — e.g. INVALID must not show as red LOSS.
         const scenarioColorKey = colorKeyForTradeOutcome(trade);
+
+        // ── Scenario-correct OB right edge (time1) ─────────────────────────
+        // ob.time1 / ob.chart_right_time are set at store-enrichment time from
+        // the BASELINE linked trade (e.g. S_16). When a different scenario is
+        // viewed, the scenario trade has a completely different exit time. We
+        // must recalculate time1 from the scenario trade so the box extends to
+        // the correct point.
+        //
+        // Priority: scenarioExit → scenarioFill → existing ob.time1 (unchanged).
+        // trade.exit = exit_time from CSV (set for all completed trades, including
+        // cancelled-before-entry outcomes where _apply_exit_metrics records the
+        // cancel candle).
+        let time1 = ob.time1; // default: keep store-enriched value
+        const scenarioExitSec = normalizeTimestampSeconds(trade.exit || trade.exit_time || trade.exitTime || "");
+        const scenarioFillSec = normalizeTimestampSeconds(trade.entry || trade.fill_time || trade.fillTime || "");
+        if (scenarioExitSec != null) {
+            time1 = scenarioExitSec;
+        } else if (scenarioFillSec != null) {
+            time1 = scenarioFillSec;
+        }
+        // If neither is available (truly pending / unfilled), keep ob.time1 unchanged.
+
         return {
             ...ob,
             tradeId: trade.displayTradeId || trade.id || ob.linkedTradeId || ob.tradeId,
@@ -156,6 +178,7 @@ function enrichObsWithTradeLabels(obs = [], trades = []) {
             isNewsFlatten,
             colorKey: scenarioColorKey ?? ob.colorKey,
             statusLabel: isNewsFlatten ? "NEWS FLATTEN" : (ob.statusLabel || ob.obFinalStatusLabel),
+            time1,
         };
     });
 }
@@ -290,6 +313,10 @@ function buildTriggeredEdgeOverlays(trades = [], obs = []) {
             || String(trade.filledOnTriggerCandle).toLowerCase() === "false";
         const hasTrigger = !!(triggerTime && String(triggerTime).trim());
         const cancelNorm = normalizeOutcome(cancelReason);
+        const isFftCancel = cancelNorm.includes("first_failed");
+        const fftCancelTime = isFftCancel
+            ? firstAvailable(trade.exit_time, trade.exitTime, trade.exit)
+            : null;
         const wasCancelled = Boolean(
             cancelledBeforeEntry
             || (retraceCancelTime && String(retraceCancelTime).trim())
@@ -304,6 +331,8 @@ function buildTriggeredEdgeOverlays(trades = [], obs = []) {
             badgeState = "never_trig";
         } else if ((retraceCancelTime && String(retraceCancelTime).trim()) || cancelNorm.includes("retrace")) {
             badgeState = "used_ob";
+        } else if (cancelledBeforeEntry && cancelNorm.includes("first_failed")) {
+            badgeState = "first_failed";
         } else if (cancelledBeforeEntry && (cancelNorm.includes("inval") || cancelNorm.includes("breach") || cancelNorm.includes("broken"))) {
             badgeState = "inval";
         } else if (filledOnTriggerCandle) {
@@ -350,6 +379,18 @@ function buildTriggeredEdgeOverlays(trades = [], obs = []) {
             ghost_r: numericOrNull(trade.ghost_r ?? trade.ghostR),
             ghost_fill_session: String(trade.ghost_fill_session || trade.ghostFillSession || ""),
             ghost_fill_delay_candles: numericOrNull(trade.ghost_fill_delay_candles ?? trade.ghostFillDelayCandles),
+            // ── FFT debug fields ─────────────────────────────────────────────
+            isFftCancel,
+            fftCancelTime,
+            tappedCandleIndex:       numericOrNull(trade.tapped_candle_index ?? trade.tappedCandleIndex),
+            triggerCandleIndex:      numericOrNull(trade.trigger_candle_index ?? trade.triggerCandleIndex),
+            armCandleIndex:          numericOrNull(trade.arm_candle_index ?? trade.armCandleIndex),
+            exitedObBeforeArm:       trade.exited_ob_before_arm ?? trade.exitedObBeforeArm ?? null,
+            obOccupiedAtArm:         trade.ob_occupied_at_arm ?? trade.obOccupiedAtArm ?? null,
+            armedAfterObExit:        trade.armed_after_ob_exit ?? trade.armedAfterObExit ?? null,
+            obExitTime:              firstAvailable(trade.ob_exit_time, trade.obExitTime) || null,
+            ghostCandidate:          trade.ghost_candidate ?? trade.ghostCandidate ?? null,
+            fftMoveAwayPipsAtCancel: numericOrNull(trade.fft_move_away_pips_at_cancel ?? trade.fftMoveAwayPipsAtCancel),
         });
     }
     return out;
@@ -671,11 +712,14 @@ export function useResolvedScenario(scenario, bundle, fallbackState = {}) {
                 ? `${resolvedThreshold}%`
                 : `${resolvedThreshold}%`)
             : "";
+        const dmFill = typeof resolvedFillMode === "string" ? resolvedFillMode.match(/^d(\d+)$/) : null;
         const fmtFill = resolvedFillMode === "same"
             ? " · Same"
             : resolvedFillMode === "next"
                 ? " · Next"
-                : "";
+                : dmFill
+                    ? ` · Delay +${dmFill[1]}`
+                    : "";
         if (resolvedFamily === "triggered_edge") {
             return {
                 label: `Triggered Edge${fmtThreshold ? ` ${fmtThreshold}` : ""}${fmtFill}`,
