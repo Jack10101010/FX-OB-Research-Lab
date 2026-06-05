@@ -6,6 +6,7 @@ import { RunConfigStrip } from "@/components/lab/RunConfigStrip";
 import { HeroBadge, NeonButton } from "@/components/lab/controls";
 import { getRunDisplayName, useDataset } from "@/data/store";
 import { variantLabel } from "../analytics/entryFormatters";
+import { PairedRunSelector } from "./PairedRunSelector";
 
 // ── Run Config Button ─────────────────────────────────────────────────────────
 // Compact button that reveals the full RunConfigStrip in a floating popover.
@@ -146,37 +147,52 @@ export function EntryWorkspaceHeader({ trades, activeVariant, exactRows }) {
     const hasExact      = exactRows?.some(r => r.exact && !r.isBaseline);
     const modelCount    = exactRows?.filter(r => r.exact && !r.isBaseline).length ?? 0;
 
+    // Show the paired-run selector only when there is more than one loaded run.
+    // PairedRunSelector is self-contained and renders nothing when options === 0,
+    // but gate it here too to avoid a visible empty strip.
+    const showPairedSelector = activeRunId && RUNS.length > 1;
+
     return (
-        <LabRunHero
-            pageLabel="Entries Research Workspace"
-            title={projectName || runName || "No run selected"}
-            runLine={[
-                runName && projectName ? `Run: ${runName}` : null,
-                trades.length ? `${trades.length} trades` : null,
-                variantLabel(activeVariant),
-            ].filter(Boolean).join(" · ")}
-            description={<ScopePanel hasExact={hasExact} modelCount={modelCount} exactRows={exactRows} />}
-            className="mt-4 mb-0"
-            showOpenProject={false}
-            showDefaultStatusBadges={false}
-            actions={(
-                <>
-                    <RunConfigButton run={activeRunData} />
-                    {!activeRunId && (
-                        <Link to="/runs">
-                            <NeonButton tone="ghost">Select a Run →</NeonButton>
-                        </Link>
-                    )}
-                    {activeRunId && (
-                        <Link to={`/runs/${encodeURIComponent(activeRunId)}`}>
-                            <NeonButton tone="ghost">Run Workspace</NeonButton>
-                        </Link>
-                    )}
-                    <HeroBadge tone={hasExact ? "success" : "warning"}>
-                        {hasExact ? `${modelCount} Models` : "Baseline Only"}
-                    </HeroBadge>
-                </>
+        <>
+            <LabRunHero
+                pageLabel="Entries Research Workspace"
+                title={projectName || runName || "No run selected"}
+                runLine={[
+                    runName && projectName ? `Run: ${runName}` : null,
+                    trades.length ? `${trades.length} trades` : null,
+                    variantLabel(activeVariant),
+                ].filter(Boolean).join(" · ")}
+                description={<ScopePanel hasExact={hasExact} modelCount={modelCount} exactRows={exactRows} />}
+                className="mt-4 mb-0"
+                showOpenProject={false}
+                showDefaultStatusBadges={false}
+                actions={(
+                    <>
+                        <RunConfigButton run={activeRunData} />
+                        {!activeRunId && (
+                            <Link to="/runs">
+                                <NeonButton tone="ghost">Select a Run →</NeonButton>
+                            </Link>
+                        )}
+                        {activeRunId && (
+                            <Link to={`/runs/${encodeURIComponent(activeRunId)}`}>
+                                <NeonButton tone="ghost">Run Workspace</NeonButton>
+                            </Link>
+                        )}
+                        <HeroBadge tone={hasExact ? "success" : "warning"}>
+                            {hasExact ? `${modelCount} Models` : "Baseline Only"}
+                        </HeroBadge>
+                    </>
+                )}
+            />
+
+            {/* Paired FFT-OFF run selector — appears below the hero when
+                multiple runs are loaded. Self-contained; reads/writes store. */}
+            {showPairedSelector && (
+                <div className="mt-2 flex justify-end px-6">
+                    <PairedRunSelector />
+                </div>
             )}
-        />
+        </>
     );
 }

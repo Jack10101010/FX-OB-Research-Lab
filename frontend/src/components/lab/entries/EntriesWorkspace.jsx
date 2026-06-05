@@ -1,5 +1,6 @@
 import React, { useMemo } from "react";
 import { useDataset } from "@/data/store";
+import { extractOffTrades } from "@/data/fftPairingResolver";
 import { useEntryWorkspace } from "./shared/useEntryWorkspace";
 import { WorkspaceTabBar } from "./shared/WorkspaceTabBar";
 import { GlobalFilterBar } from "./shared/GlobalFilterBar";
@@ -41,9 +42,16 @@ function resolveEntryResults(run) {
 }
 
 export function EntriesWorkspace() {
-    const { ACTIVE_RUN, TRADES, ACTIVE_TRADE_VARIANT, activeRunId, runs } = useDataset();
+    const { ACTIVE_RUN, TRADES, ACTIVE_TRADE_VARIANT, activeRunId, runs, getRunData } = useDataset();
     const trades     = useMemo(() => Array.isArray(TRADES) ? TRADES : EMPTY_TRADES, [TRADES]);
     const activeRun  = activeRunId ? runs?.[activeRunId] : null;
+
+    const pairedFftOffRunId = activeRun?.pairedFftOffRunId ?? null;
+    const pairedOffBundle   = pairedFftOffRunId ? getRunData?.(pairedFftOffRunId) : null;
+    const offTrades = useMemo(
+        () => extractOffTrades(pairedOffBundle, ACTIVE_TRADE_VARIANT),
+        [pairedOffBundle, ACTIVE_TRADE_VARIANT],
+    );
 
     const {
         activeTab, setActiveTab,
@@ -88,6 +96,7 @@ export function EntriesWorkspace() {
         colVis, setColVis,
         selectedModelKey, setSelectedModelKey,
         filters,
+        offTrades,
     };
 
     return (
