@@ -1,5 +1,5 @@
 import React from "react";
-import { X, SlidersHorizontal, Database, Layers, Zap, GitBranch } from "lucide-react";
+import { X, SlidersHorizontal, Database, Layers, Zap, GitBranch, Activity } from "lucide-react";
 import { useMasterControls } from "./MasterControlsContext";
 import { CONFIG_REGISTRY } from "@/data/configRegistry";
 import { useDataset } from "@/data/store";
@@ -31,7 +31,12 @@ const TIER_META = {
 // ─── Drawer ──────────────────────────────────────────────────────────────────
 
 export function MasterControlsDrawer() {
-    const { isOpen, closeMasterControls } = useMasterControls();
+    const {
+        isOpen, closeMasterControls,
+        activeConfig,
+        dirtyCount, highestDirtyTier, hasDirtyFields,
+        validationErrorList, hasValidationErrors,
+    } = useMasterControls();
     const { activeRunId } = useDataset();
 
     return (
@@ -82,11 +87,32 @@ export function MasterControlsDrawer() {
                             {activeRunId ? (
                                 <>
                                     <p className="text-[11px] text-[hsl(var(--accent-primary))] font-mono truncate">{activeRunId}</p>
-                                    <p className="text-[10px] text-muted-lab mt-0.5">Run loaded — editable controls in Phase 3</p>
+                                    <p className="text-[10px] text-muted-lab mt-0.5">
+                                        {activeConfig ? "Config loaded" : "Config unavailable"}
+                                    </p>
                                 </>
                             ) : (
                                 <p className="text-[11px] text-muted-lab">No active run — import a bundle via the toolbar</p>
                             )}
+                        </div>
+                    </section>
+
+                    {/* Draft state — Phase 3C debug readout */}
+                    <section>
+                        <SectionLabel icon={<Activity size={11} />} label="Draft State" />
+                        <div className="mt-2 space-y-1.5">
+                            <StatusRow label="Config" value={activeConfig ? "Loaded" : "None"} ok={!!activeConfig} />
+                            <StatusRow
+                                label="Dirty fields"
+                                value={hasDirtyFields ? `${dirtyCount} (tier ${highestDirtyTier})` : "None"}
+                                ok={!hasDirtyFields}
+                            />
+                            <StatusRow
+                                label="Validation"
+                                value={hasValidationErrors ? `${validationErrorList.length} error${validationErrorList.length !== 1 ? "s" : ""}` : "OK"}
+                                ok={!hasValidationErrors}
+                                warn={hasValidationErrors}
+                            />
                         </div>
                     </section>
 
@@ -152,7 +178,7 @@ export function MasterControlsDrawer() {
                 {/* Footer */}
                 <div className="flex-shrink-0 px-5 py-3 border-t border-[hsl(var(--border-soft))]">
                     <p className="text-[10px] text-muted-lab">
-                        Phase 2 — shell only · {REGISTRY_SUMMARY.total} cfg fields · {REGISTRY_SUMMARY.emitted} emitted
+                        Phase 3C — context state · {REGISTRY_SUMMARY.total} cfg fields · {REGISTRY_SUMMARY.emitted} emitted
                     </p>
                 </div>
             </div>
@@ -225,6 +251,20 @@ function PhasePlaceholder({ phase, label, desc }) {
                 <span className="text-[11px] text-white">{label}</span>
             </div>
             <p className="text-[10px] text-muted-lab mt-1">{desc}</p>
+        </div>
+    );
+}
+
+function StatusRow({ label, value, ok, warn }) {
+    const valueClass = warn
+        ? "text-[hsl(var(--accent-warn,35_90%_56%))]"
+        : ok
+            ? "text-[hsl(var(--accent-primary))]"
+            : "text-muted-lab";
+    return (
+        <div className="flex items-center justify-between px-3 py-1.5 rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel)/0.3)]">
+            <span className="text-[11px] text-muted-lab">{label}</span>
+            <span className={`text-[11px] font-medium ${valueClass}`}>{value}</span>
         </div>
     );
 }

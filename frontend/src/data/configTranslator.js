@@ -44,7 +44,10 @@
 //   applyFirstPresent(patch, source, targetKey, sourceKeys, mapper)
 //   removeEmptyPatchValues(patch)       → object
 //   LOAD_FIELD_LABELS                   → { [cfgKey]: string }
+//   getDefaultBuilderConfig()           → default cfg object from registry defaultValues
 // ─────────────────────────────────────────────────────────────────────────────
+
+import { CONFIG_REGISTRY } from "@/data/configRegistry";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // §1  Core type utilities
@@ -875,4 +878,23 @@ export function buildRunConfigLoadReport(current, run) {
         loadedFields:  [...loaded].map((field) => LOAD_FIELD_LABELS[field] || field),
         missingFields,
     };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §10  Default config builder
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Build a default frontend cfg object by pulling defaultValue from every
+ * CONFIG_REGISTRY entry.  Arrays are shallow-cloned so callers can mutate
+ * without affecting the registry.
+ */
+export function getDefaultBuilderConfig() {
+    const cfg = {};
+    for (const entry of CONFIG_REGISTRY) {
+        cfg[entry.key] = Array.isArray(entry.defaultValue)
+            ? [...entry.defaultValue]
+            : entry.defaultValue;
+    }
+    return cfg;
 }
