@@ -378,9 +378,10 @@ export function ScenarioSelector({ resolvedScenario, onScenarioChange, onVariant
                                 />
                             )}
                             <FftChip
-                                label="Net R"
+                                label="Ghost Net R"
                                 value={fmtFftR(fftStats.ghostNetR)}
                                 tone={fftStats.ghostNetR > 0.005 ? "success" : fftStats.ghostNetR < -0.005 ? "danger" : "muted"}
+                                title="Ghost-simulated net R — unverified. Load a paired FFT-OFF run for authoritative impact."
                             />
                         </>
                     )}

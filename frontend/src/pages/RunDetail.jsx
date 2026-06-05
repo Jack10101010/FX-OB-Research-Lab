@@ -2169,8 +2169,13 @@ export default function RunDetail() {
                     : null;
                 return (
                     <>
-                        <div className="px-6 mt-4 mb-1 text-[9px] font-ui uppercase tracking-[0.12em] text-[hsl(var(--accent-primary)/0.6)]">
-                            ◆ Ghost Tracking — Observational
+                        <div className="px-6 mt-4 mb-1">
+                            <div className="text-[9px] font-ui uppercase tracking-[0.12em] text-[hsl(var(--accent-primary)/0.6)]">
+                                ◆ Ghost Tracking — Observational
+                            </div>
+                            <div className="text-[8px] font-ui text-muted-lab opacity-40 mt-0.5">
+                                All ghost candidates · not FFT-specific
+                            </div>
                         </div>
                         <div className="kpi-strip">
                             <MetricChip
@@ -2220,10 +2225,12 @@ export default function RunDetail() {
 
             {/* ── FFT Protection KPI strip — shown only when FFT cancels are present ── */}
             {(() => {
-                const allTrades = Array.isArray(trades) ? trades : [];
+                const allTrades = Array.isArray(displayTrades) ? displayTrades : [];
                 const fft = computeFftAnalytics(allTrades);
                 if (fft.fftCancels === 0) return null;
-                const netRTone = fft.ghostNetR > 0.005 ? "primary" : fft.ghostNetR < -0.005 ? "danger" : "muted";
+                // Ghost R tone is always neutral — ghost metrics are unverified until a
+                // paired FFT-OFF run is available. Success/danger tone would imply authority.
+                const netRTone = "muted";
                 const wrSub = fft.ghostWinRate != null
                     ? `${fft.ghostWinRate.toFixed(1)}% ghost win rate`
                     : fft.hasGhostData ? "—" : "no ghost sim";
@@ -2267,9 +2274,9 @@ export default function RunDetail() {
                             />
                             <MetricChip
                                 size="compact"
-                                label="Ghost Net R"
+                                label="Ghost Net R (unverified)"
                                 value={fft.hasGhostData ? fmtFftR(fft.ghostNetR) : "—"}
-                                sub="if none were cancelled"
+                                sub="simulated · load paired run for actuals"
                                 tone={fft.hasGhostData ? netRTone : "muted"}
                                 icon={Activity}
                             />

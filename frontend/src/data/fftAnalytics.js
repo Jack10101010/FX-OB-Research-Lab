@@ -189,6 +189,22 @@ export function computeFftAnalytics(trades) {
 // ── compareFftToBaseline ─────────────────────────────────────────────────────
 
 /**
+ * @deprecated DO NOT USE FOR RESEARCH DECISIONS.
+ *
+ * This function compares ghost metrics from two separate runs (ghost-to-ghost).
+ * Ghost outcomes are NOT authoritative: they diverge on the `armed_after_ob_exit`
+ * path and cannot predict downstream invalidation conditions. Comparing two
+ * unreliable ghost arrays does not produce a reliable delta.
+ *
+ * For cross-run FFT comparison, use computePairedFftAnalytics() from
+ * fftPairingAnalytics.js, which matches each cancel to the actual OFF-run outcome
+ * via ob_id + direction + entry_model_key.
+ *
+ * This export is retained to avoid breaking any future imports. It must not
+ * appear on any UI surface.
+ *
+ * ---
+ *
  * Compute delta stats between an FFT-enabled run and a baseline (FFT-off) run.
  * Both arguments should be the output of computeFftAnalytics().
  *

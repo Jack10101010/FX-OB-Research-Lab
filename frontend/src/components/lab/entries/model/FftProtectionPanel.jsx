@@ -331,7 +331,7 @@ export function FftProtectionPanel({ trades = [], offTrades = [] }) {
         headerNetR < -0.005 ? "danger"  : "muted";
     const headerLabel  = hasPairedData && pairedStats.hasHighConfPairs
         ? `${headerNetR >= 0 ? "+" : ""}${headerNetR.toFixed(2)}R paired`
-        : (hasGhostData ? `${fmtFftR(ghostNetR)} ghost` : null);
+        : (hasGhostData ? `${fmtFftR(ghostNetR)} ghost (unverified)` : null);
 
     const ghostNetRTone =
         ghostNetR > 0.005  ? "success" :
@@ -359,6 +359,14 @@ export function FftProtectionPanel({ trades = [], offTrades = [] }) {
             <div className="text-[9.5px] font-ui text-muted-lab opacity-70 mb-3">
                 First Failed Visit · cancel analytics
             </div>
+
+            {/* Unverified notice — shown when no paired OFF run is loaded */}
+            {!hasPairedData && hasGhostData && (
+                <div className="mb-3 px-2 py-1.5 border border-dashed border-[hsl(var(--warning)/0.30)] bg-[hsl(var(--warning)/0.05)] text-[8.5px] font-ui text-[hsl(var(--warning)/0.70)] italic leading-snug">
+                    Ghost results are simulated and may diverge from the paired FFT-OFF run.
+                    Load/compare a paired FFT-OFF run for authoritative impact.
+                </div>
+            )}
 
             {/* Cancel count */}
             <StatRow
@@ -426,11 +434,11 @@ export function FftProtectionPanel({ trades = [], offTrades = [] }) {
                                     sub="if none were cancelled"
                                     tone={ghostNetRTone}
                                 />
-                                {hasPairedData && (
-                                    <div className="pt-1 text-[8.5px] font-ui text-[hsl(var(--warning)/0.65)] opacity-80 italic">
-                                        Ghost may diverge from paired OFF — verify with table above.
-                                    </div>
-                                )}
+                                <div className="pt-1 text-[8.5px] font-ui text-[hsl(var(--warning)/0.65)] opacity-80 italic">
+                                    {hasPairedData
+                                        ? "Ghost may diverge from paired OFF — verify with table above."
+                                        : "Ghost outcomes are simulated estimates and may not reflect actual behaviour."}
+                                </div>
                             </div>
                         </>
                     )}
