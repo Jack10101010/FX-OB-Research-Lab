@@ -27,8 +27,8 @@
 ## Current Repo Facts (verify, don't trust blindly)
 
 - Branch: `codex-dev`
-- `origin/codex-dev` is at `c534408`; local `codex-dev` is **3 commits ahead (unpushed)**:
-  `a953df4`, `38f8a60`, `5d0806e`.
+- `HEAD` and `origin/codex-dev` are **both at `bdc7473`** — the branch is in sync with origin,
+  **no unpushed commits** (as of this refresh; `git log --oneline origin/codex-dev..HEAD` is empty).
 - Re-run `git status --short` and `git log --oneline --decorate -10` yourself — other
   chats change this constantly.
 
@@ -52,6 +52,7 @@
   - Classification files
   - Strategy Map files
 - **Latest relevant commits:**
+  - `bdc7473` feat(master-controls): add preview results display (Phase 4B)
   - `5d0806e` feat(master-controls): add preview run context (Phase 4A)
   - `38f8a60` fix(master-controls): polish drawer state feedback
   - `077b826` fix(master-controls): preserve entry metadata roundtrip
@@ -61,16 +62,15 @@
   - `f121157` feat(master-controls): add config registry metadata
   - `3154dab` refactor(master-controls): extract shared config translator
 - **Latest state:**
-  - Phase 4A committed: preview run context.
-  - Phase 4B (preview results display) implemented but **pending commit** — confirm via
-    `git status` that `MasterControlsDrawer.jsx` is still modified.
+  - Phase 4A committed: preview run context (`5d0806e`).
+  - Phase 4B committed: preview results display (`bdc7473`) — `MasterControlsDrawer.jsx`
+    is no longer dirty.
   - Phase 4C (promotion / save-as-run) **not started**.
 - **Open risks:** preview bundle isolation must hold — no `addRunBundle`, no
   `setActiveRunId`, no run-history entry, no store mutation from preview.
 - **Next action:**
-  1. Commit Phase 4B if the diff is clean (only `MasterControlsDrawer.jsx`).
-  2. Manual QA the preview results panel.
-  3. Then audit / design Phase 4C promotion / save-as-run.
+  1. Manual QA the preview results panel (Phase 4B now committed).
+  2. Then audit / design Phase 4C promotion / save-as-run.
 
 ### Session Lab
 
@@ -151,6 +151,36 @@
   Strategy Map. Coordinate.
 - **Next action:** continue classification work; treat `tradeUniverse.js` carefully.
 
+### OB Retest / Retest Lab
+
+- **Status:** active / new
+- **Owner / chat label:** _unassigned — claim it here_
+- **Purpose:** Research and implement OB retest analysis logic and Retest Lab surfaces.
+- **Expected files:**
+  - `frontend/src/data/obRetest.js`
+  - `frontend/src/data/__validation__/obRetest.logictest.cjs`
+  - `OB-RETEST-ANALYSIS-*.md`
+  - future retest UI files (e.g. `frontend/src/components/lab/retest/*`) **only when explicitly scoped**
+- **Do not touch:**
+  - Master Controls files
+  - Session Lab files
+  - Entry / FFT files
+  - Strategy Map files unless a retest overlay is explicitly scoped
+- **Latest relevant commits:** none on `codex-dev` yet (currently untracked files only).
+- **Currently dirty / untracked:**
+  - `frontend/src/data/obRetest.js`
+  - `frontend/src/data/__validation__/obRetest.logictest.cjs`
+  - `frontend/src/components/lab/retest/` (untracked dir)
+  - `OB-RETEST-ANALYSIS-1.md`
+  - `OB-RETEST-ANALYSIS-2-PHASE-1-PLAN.md`
+- **Open risks:**
+  - New untracked source files exist (`obRetest.js`, its `.cjs` logic test, and the
+    `retest/` component dir).
+  - Needs ownership before commit.
+  - Confirm whether this work should be committed now or left pending.
+- **Next action:** Audit / validate the OB retest files, then commit as a separate
+  workstream if ready.
+
 ### Ghost / Backend Research Docs
 
 - **Status:** docs / research
@@ -192,6 +222,11 @@ Before coding, report:
 5. Dirty files you will NOT touch
 6. Commits ahead of origin
 7. Whether it is safe to proceed
+
+Then compare PROJECT_STATUS.md and WORKSTREAMS.md against the live git state
+(HEAD, origin position, dirty files, latest commits). **If either doc is stale,
+refresh it before coding** — update the branch position, pending steps, latest
+commits, and dirty-tree lists so the next chat inherits accurate state.
 
 If this task does not fit an existing workstream, add a new workstream entry to
 WORKSTREAMS.md before coding.
