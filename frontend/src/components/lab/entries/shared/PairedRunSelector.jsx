@@ -62,8 +62,28 @@ export function PairedRunSelector() {
         [runs, activeRunId],
     );
 
-    // Nothing to pair with
-    if (!activeRunId || options.length === 0) return null;
+    // No active run
+    if (!activeRunId) return null;
+
+    // No pairable runs loaded — render disabled state so control is discoverable
+    if (options.length === 0) {
+        return (
+            <div className="flex flex-col gap-1.5 min-w-[220px] max-w-xs opacity-50 pointer-events-none select-none">
+                <div className="flex items-center justify-between gap-2">
+                    <span className="text-[9px] font-ui uppercase tracking-[0.12em] text-muted-lab opacity-60 shrink-0">
+                        Paired FFT-OFF run
+                    </span>
+                    <StatusChip paired={false} missing={false} />
+                </div>
+                <div className="w-full text-[11px] font-ui px-2 py-1.5 rounded-[3px] bg-[hsl(var(--panel-2))] border border-[hsl(var(--border-soft))] text-muted-lab italic">
+                    No pairable runs loaded
+                </div>
+                <p className="text-[8.5px] font-ui text-muted-lab opacity-45 leading-snug">
+                    Load a second run (FFT-OFF) to enable authoritative cancel impact metrics.
+                </p>
+            </div>
+        );
+    }
 
     // Resolve paired bundle for status display
     const pairedBundle = pairedFftOffRunId ? getRunData?.(pairedFftOffRunId) : null;

@@ -147,10 +147,10 @@ export function EntryWorkspaceHeader({ trades, activeVariant, exactRows }) {
     const hasExact      = exactRows?.some(r => r.exact && !r.isBaseline);
     const modelCount    = exactRows?.filter(r => r.exact && !r.isBaseline).length ?? 0;
 
-    // Show the paired-run selector only when there is more than one loaded run.
-    // PairedRunSelector is self-contained and renders nothing when options === 0,
-    // but gate it here too to avoid a visible empty strip.
-    const showPairedSelector = activeRunId && RUNS.length > 1;
+    // Show the paired-run selector whenever an active run exists.
+    // When no other runs are loaded, PairedRunSelector renders a disabled
+    // "No pairable runs loaded" state so the control is discoverable.
+    const showPairedSelector = Boolean(activeRunId);
 
     return (
         <>

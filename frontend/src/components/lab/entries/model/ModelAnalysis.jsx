@@ -186,18 +186,17 @@ export function ModelAnalysis({
             )}
 
             {/* Trigger Behavior tier — ghost outcomes + FFT protection analytics.
-                Shown when:
-                  (a) we are in a triggered-edge lifecycle context AND
-                  (b) either ghost_candidate trades OR FFT cancels are present.
-                Phase 0: observational data only — no cancellation logic. */}
-            {lifecycleRow && (hasGhostData || hasFftCancels) && (
+                Ghost panel: requires lifecycleRow (triggered-edge context).
+                FFT panel:   independent of lifecycleRow — FFT cancels appear in
+                             base runs too (no entry model rows needed). */}
+            {(lifecycleRow && hasGhostData) || hasFftCancels ? (
                 <>
                     <TierDivider
                         label="Trigger Behavior"
                         sub="Ghost outcomes · FFT protection analytics · observational only"
                     />
                     <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-                        {hasGhostData && <GhostOutcomePanel trades={trades} />}
+                        {lifecycleRow && hasGhostData && <GhostOutcomePanel trades={trades} />}
                         {hasFftCancels && (
                             <FftProtectionPanel
                                 trades={trades}
@@ -206,6 +205,15 @@ export function ModelAnalysis({
                         )}
                     </div>
                 </>
+            ) : null}
+
+            {/* FFT Protection empty state — shown when no FFT cancels are present
+                in the current scenario's trades, so the researcher knows why the
+                panel is absent rather than assuming a data or wiring issue. */}
+            {!hasFftCancels && (
+                <p className="text-[9px] font-ui text-muted-lab opacity-35 italic px-0.5 -mt-1">
+                    FFT Protection — no FFT cancels in this scenario&apos;s trades
+                </p>
             )}
 
             {/* ── Backend Directional Scenarios ─────────────────────────── */}
