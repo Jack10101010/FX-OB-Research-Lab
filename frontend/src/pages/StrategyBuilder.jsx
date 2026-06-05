@@ -22,12 +22,13 @@ const LAST_CONFIG_KEY = "fxob_strategy_builder_last_config";
 const LAST_RUN_KEY = "fxob_strategy_builder_last_run";
 
 function getDefaultDates() {
-    const today = new Date();
-    today.setUTCHours(0, 0, 0, 0);
-    const to = today.toISOString().slice(0, 10);
-    const from = new Date(today);
+    // TODO: replace DATASET_MAX_DATE with actual max candle timestamp from dataset metadata
+    // once the sidecar exposes a /datasets/:file/info endpoint.
+    const DATASET_MAX_DATE = "2026-05-18"; // EURUSD_1m.csv coverage ceiling
+    const to = new Date(DATASET_MAX_DATE + "T00:00:00Z");
+    const from = new Date(to);
     from.setUTCMonth(from.getUTCMonth() - 3);
-    return { dateFrom: from.toISOString().slice(0, 10), dateTo: to };
+    return { dateFrom: from.toISOString().slice(0, 10), dateTo: DATASET_MAX_DATE };
 }
 
 export default function StrategyBuilder() {
@@ -89,6 +90,8 @@ export default function StrategyBuilder() {
         triggeredEdgeDelays: [0, 1],
         triggeredEdgeCancelOnRetrace: false,
         triggeredEdgeCancelOnFirstFailedTag: false,
+        triggeredEdgeFftMoveAwayPips: 0,
+        triggeredEdgeFftMoveAwayObMultiple: 0,
         triggeredEdgeCancelRetracePips: 0,
         triggeredEdgeCancelRetraceObPct: 0,
         entryMode: "single",
@@ -980,6 +983,20 @@ export default function StrategyBuilder() {
                                     </div>
                                     <NeonToggle checked={Boolean(cfg.triggeredEdgeCancelOnFirstFailedTag)} onChange={set("triggeredEdgeCancelOnFirstFailedTag")} />
                                 </div>
+                                {cfg.triggeredEdgeCancelOnFirstFailedTag && (
+                                    <div className="mt-3 space-y-1.5">
+                                        <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab">Move-Away Distance</div>
+                                        <div className="text-[10px] text-muted-lab">0 = immediate cancel. Price must leave the order block and move away by the configured distance before FFT cancellation is allowed.</div>
+                                        <div className="grid grid-cols-2 gap-3 mt-2">
+                                            <Field label="Move Away (Pips)" hint="Cancel only after price exits the OB and moves this many additional pips away. 0 = immediate.">
+                                                <NeonInput type="number" min="0" step="0.1" value={cfg.triggeredEdgeFftMoveAwayPips ?? 0} onChange={(e) => set("triggeredEdgeFftMoveAwayPips")(Number(e.target.value))} />
+                                            </Field>
+                                            <Field label="Move Away (OB Multiple)" hint="Threshold = OB height × multiple. The stricter of pips / multiple applies. 0 = disabled.">
+                                                <NeonInput type="number" min="0" step="0.05" value={cfg.triggeredEdgeFftMoveAwayObMultiple ?? 0} onChange={(e) => set("triggeredEdgeFftMoveAwayObMultiple")(Number(e.target.value))} />
+                                            </Field>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
 
                             {/* Coming later — display-only, no backend config emitted */}
@@ -1451,7 +1468,8 @@ function buildBacktesterConfig(cfg) {
     let entryModels, obEntryDepthPct, entryPenetrationThresholds, batchEntryPenetration,
         teThresholds, teEntryLevelPct, teSameCandleModes, teCandleDelays,
         teCancelOnRetrace, teCancelRetracePips, teCancelRetraceObPct,
-        teCancelOnFirstFailedTag;
+        teCancelOnFirstFailedTag,
+        teFftMoveAwayPips, teFftMoveAwayObMultiple;
 
     const isSingle = cfg.entryMode === "single";
 
@@ -1471,6 +1489,8 @@ function buildBacktesterConfig(cfg) {
             teCancelRetracePips = 0;
             teCancelRetraceObPct = 0;
             teCancelOnFirstFailedTag = false;
+            teFftMoveAwayPips = 0;
+            teFftMoveAwayObMultiple = 0;
         } else if (model === "triggered_edge") {
             const thr = Number(cfg.singleTriggeredEdgeThreshold ?? 25);
             entryModels = ["triggered_edge"];
@@ -1487,6 +1507,8 @@ function buildBacktesterConfig(cfg) {
             teCancelRetracePips = Math.max(0, Number(cfg.triggeredEdgeCancelRetracePips) || 0);
             teCancelRetraceObPct = Math.max(0, Number(cfg.triggeredEdgeCancelRetraceObPct) || 0);
             teCancelOnFirstFailedTag = Boolean(cfg.triggeredEdgeCancelOnFirstFailedTag);
+            teFftMoveAwayPips = teCancelOnFirstFailedTag ? Math.max(0, Number(cfg.triggeredEdgeFftMoveAwayPips) || 0) : 0;
+            teFftMoveAwayObMultiple = teCancelOnFirstFailedTag ? Math.max(0, Number(cfg.triggeredEdgeFftMoveAwayObMultiple) || 0) : 0;
         } else {
             // baseline
             entryModels = ["baseline"];
@@ -1501,6 +1523,8 @@ function buildBacktesterConfig(cfg) {
             teCancelRetracePips = 0;
             teCancelRetraceObPct = 0;
             teCancelOnFirstFailedTag = false;
+            teFftMoveAwayPips = 0;
+            teFftMoveAwayObMultiple = 0;
         }
     } else {
         // Research Export — existing multi-model behavior
@@ -1525,6 +1549,8 @@ function buildBacktesterConfig(cfg) {
         teCancelRetracePips = teEnabled ? Math.max(0, Number(cfg.triggeredEdgeCancelRetracePips) || 0) : 0;
         teCancelRetraceObPct = teEnabled ? Math.max(0, Number(cfg.triggeredEdgeCancelRetraceObPct) || 0) : 0;
         teCancelOnFirstFailedTag = teEnabled ? Boolean(cfg.triggeredEdgeCancelOnFirstFailedTag) : false;
+        teFftMoveAwayPips = teEnabled && teCancelOnFirstFailedTag ? Math.max(0, Number(cfg.triggeredEdgeFftMoveAwayPips) || 0) : 0;
+        teFftMoveAwayObMultiple = teEnabled && teCancelOnFirstFailedTag ? Math.max(0, Number(cfg.triggeredEdgeFftMoveAwayObMultiple) || 0) : 0;
     }
 
     // ── Directional entry assignment (Phase 2) ─────────────────────────────────
@@ -1584,6 +1610,8 @@ function buildBacktesterConfig(cfg) {
         triggered_edge_cancel_retrace_pips: teCancelRetracePips,
         triggered_edge_cancel_retrace_ob_pct: teCancelRetraceObPct,
         triggered_edge_cancel_on_first_failed_tag: teCancelOnFirstFailedTag,
+        triggered_edge_fft_move_away_pips: teFftMoveAwayPips,
+        triggered_edge_fft_move_away_ob_multiple: teFftMoveAwayObMultiple,
         // ── Directional entry (Phase 2 — backend Phase 3 required for true simulation) ──
         directional_entry_mode: cfg.directionalEntryMode || "symmetric",
         ...(directionalEntryConfig ? { directional_entry_config: directionalEntryConfig } : {}),
@@ -2024,6 +2052,8 @@ const LOAD_FIELD_LABELS = {
     triggeredEdgeCancelRetracePips: "triggered edge retrace cancel pips",
     triggeredEdgeCancelRetraceObPct: "triggered edge retrace cancel OB %",
     triggeredEdgeCancelOnFirstFailedTag: "triggered edge first-failed-tag cancel",
+    triggeredEdgeFftMoveAwayPips: "FFT move-away pips",
+    triggeredEdgeFftMoveAwayObMultiple: "FFT move-away OB multiple",
     entryMode: "entry mode",
     selectedEntryModel: "selected entry model",
     singlePenetrationPct: "single penetration threshold",
@@ -2133,6 +2163,8 @@ function buildRunConfigLoadReport(current, run) {
     applyFirstPresent(patch, source, "triggeredEdgeCancelRetracePips", ["triggered_edge_cancel_retrace_pips", "triggeredEdgeCancelRetracePips"], toNumber);
     applyFirstPresent(patch, source, "triggeredEdgeCancelRetraceObPct", ["triggered_edge_cancel_retrace_ob_pct", "triggeredEdgeCancelRetraceObPct"], toNumber);
     applyFirstPresent(patch, source, "triggeredEdgeCancelOnFirstFailedTag", ["triggered_edge_cancel_on_first_failed_tag", "triggeredEdgeCancelOnFirstFailedTag"], toBool);
+    applyFirstPresent(patch, source, "triggeredEdgeFftMoveAwayPips", ["triggered_edge_fft_move_away_pips", "triggeredEdgeFftMoveAwayPips"], toNumber);
+    applyFirstPresent(patch, source, "triggeredEdgeFftMoveAwayObMultiple", ["triggered_edge_fft_move_away_ob_multiple", "triggeredEdgeFftMoveAwayObMultiple"], toNumber);
     if ("entryResearchExports" in patch || "entryPenetrationThresholds" in patch) {
         patch.entryResearchExportMode = mapConfigEntryResearchExportMode(source.entry_models || source.entryModels, source);
     }

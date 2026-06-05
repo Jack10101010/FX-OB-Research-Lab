@@ -428,6 +428,8 @@ export function parseTradesCSV(text) {
             retraceCancelTime: String(pick(r, "retrace_cancel_time", "retraceCancelTime") || ""),
             retrace_cancel_distance_pips: numOrNull(pick(r, "retrace_cancel_distance_pips", "retraceCancelDistancePips")),
             retraceCancelDistancePips: numOrNull(pick(r, "retrace_cancel_distance_pips", "retraceCancelDistancePips")),
+            fft_move_away_pips_at_cancel: numOrNull(pick(r, "fft_move_away_pips_at_cancel", "fftMoveAwayPipsAtCancel")),
+            fftMoveAwayPipsAtCancel: numOrNull(pick(r, "fft_move_away_pips_at_cancel", "fftMoveAwayPipsAtCancel")),
             // TE delay-window fields (exported by backend, used by FFT Debug layer)
             arm_candle_index: numOrNull(pick(r, "arm_candle_index", "armCandleIndex")),
             armCandleIndex: numOrNull(pick(r, "arm_candle_index", "armCandleIndex")),

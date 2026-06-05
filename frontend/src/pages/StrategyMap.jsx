@@ -1288,6 +1288,7 @@ function buildTriggeredEdgeOverlays(trades = [], obs = []) {
             armedAfterObExit: trade.armed_after_ob_exit ?? trade.armedAfterObExit ?? null,
             obExitTime: firstAvailable(trade.ob_exit_time, trade.obExitTime) || null,
             ghostCandidate: trade.ghost_candidate ?? trade.ghostCandidate ?? null,
+            fftMoveAwayPipsAtCancel: numericOrNull(trade.fft_move_away_pips_at_cancel ?? trade.fftMoveAwayPipsAtCancel),
         });
     }
     return out;
@@ -2156,6 +2157,18 @@ function LifecycleDetailPanel({ overlay: ov, onClose, trades = [], showFftDebug 
                 const noFftRecorded = !ov.isFftCancel && tappedFlag;
                 const fmtBool = (v) => v === true ? "true" : v === false ? "false" : "—";
                 const fmtNum = (v) => (v != null && v !== "") ? String(v) : "—";
+                const fftMoveAwayPips = numericOrNull(runConfig?.triggered_edge_fft_move_away_pips);
+                const fftMoveAwayObMultiple = numericOrNull(runConfig?.triggered_edge_fft_move_away_ob_multiple);
+                const hasThreshold = (fftMoveAwayPips != null && fftMoveAwayPips > 0) || (fftMoveAwayObMultiple != null && fftMoveAwayObMultiple > 0);
+                const fftMode = hasThreshold ? "Move Away" : "Immediate";
+                const thresholdLabel = hasThreshold
+                    ? (fftMoveAwayPips > 0 && fftMoveAwayObMultiple > 0)
+                        ? `${fftMoveAwayPips} pips / ${fftMoveAwayObMultiple}× OB`
+                        : fftMoveAwayPips > 0
+                            ? `${fftMoveAwayPips} pips`
+                            : `${fftMoveAwayObMultiple}× OB`
+                    : "0.0 pips";
+                const moveAwayAtCancel = ov.fftMoveAwayPipsAtCancel != null ? `${Number(ov.fftMoveAwayPipsAtCancel).toFixed(1)} pips` : "—";
                 return (
                     <div className="border-t border-[hsl(var(--border-soft))] mt-1.5 pt-1.5">
                         <div className="font-ui text-[9px] uppercase tracking-wider mb-1" style={{ color: "rgba(219,39,119,0.9)" }}>
@@ -2164,6 +2177,9 @@ function LifecycleDetailPanel({ overlay: ov, onClose, trades = [], showFftDebug 
                         <div className="space-y-0.5">
                             {[
                                 ["FFT enabled in config",    fftEnabledLabel],
+                                ["FFT mode",                 fftMode],
+                                ["Move-away threshold",      thresholdLabel],
+                                ["Move-away at cancel",      moveAwayAtCancel],
                                 ["tapped_before_trigger",    fmtBool(tappedFlag)],
                                 ["First tap time",           fmtShort(ov.tappedTime) || "—"],
                                 ["Trigger threshold",        ov.triggerPenetrationPct != null ? `${ov.triggerPenetrationPct}%` : "—"],
