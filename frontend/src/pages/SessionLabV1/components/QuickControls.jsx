@@ -67,6 +67,7 @@ export default function QuickControls({
 
   const isFiltered = deepDiveFilterMeta?.isFiltered ?? false;
   const deepDiveTrades = deepDiveFilterMeta?.includedTrades?.length ?? sessionTradeCount ?? 0;
+  const cancelledEnabled = deepDiveFilters?.outcome?.cancelled ?? true;
 
   return (
     <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel))] p-4" data-testid="quick-controls">
@@ -99,6 +100,7 @@ export default function QuickControls({
           <p className="text-[10px] text-muted-lab font-num mb-3">Filters the selected-session analytics below.</p>
 
           <div className="space-y-3">
+            {/* Entry Model */}
             <div>
               <SectionLabel className="mb-2">Entry Model</SectionLabel>
               <div className="space-y-0.5">
@@ -126,6 +128,7 @@ export default function QuickControls({
               </div>
             </div>
 
+            {/* Trigger Delay */}
             <div className="border-t border-[hsl(var(--border-soft))] pt-3">
               <SectionLabel className="mb-2">Trigger Delay</SectionLabel>
               <div className="space-y-0.5">
@@ -156,6 +159,97 @@ export default function QuickControls({
                   onChange={() => flipFilter("teDelay", "d3")}
                   color="#22D3EE"
                   testId="qc-td-d3"
+                />
+              </div>
+            </div>
+
+            {/* Outcome */}
+            <div className="border-t border-[hsl(var(--border-soft))] pt-3">
+              <SectionLabel className="mb-2">Outcome</SectionLabel>
+              <div className="space-y-0.5">
+                <Row
+                  label="Wins"
+                  active={deepDiveFilters.outcome.win}
+                  onChange={() => flipFilter("outcome", "win")}
+                  color="#22C55E"
+                  testId="qc-out-win"
+                />
+                <Row
+                  label="Losses"
+                  active={deepDiveFilters.outcome.loss}
+                  onChange={() => flipFilter("outcome", "loss")}
+                  color="#EF4444"
+                  testId="qc-out-loss"
+                />
+                <Row
+                  label="Breakeven"
+                  active={deepDiveFilters.outcome.breakeven}
+                  onChange={() => flipFilter("outcome", "breakeven")}
+                  color="#64748B"
+                  testId="qc-out-breakeven"
+                />
+                <Row
+                  label="Cancelled"
+                  active={deepDiveFilters.outcome.cancelled}
+                  onChange={() => flipFilter("outcome", "cancelled")}
+                  color="#F59E0B"
+                  testId="qc-out-cancelled"
+                />
+                <Row
+                  label="Unfilled"
+                  active={deepDiveFilters.outcome.unfilled}
+                  onChange={() => flipFilter("outcome", "unfilled")}
+                  color="#94A3B8"
+                  testId="qc-out-unfilled"
+                />
+              </div>
+            </div>
+
+            {/* Cancel Reason — dimmed when Cancelled outcome is off */}
+            <div className="border-t border-[hsl(var(--border-soft))] pt-3">
+              <SectionLabel className="mb-1">Cancel Reason</SectionLabel>
+              {!cancelledEnabled && (
+                <p className="text-[10px] text-muted-lab font-num mb-2 italic">
+                  Enable &quot;Cancelled&quot; above to sub-filter by reason.
+                </p>
+              )}
+              <div
+                className={`space-y-0.5 transition-opacity ${cancelledEnabled ? "" : "opacity-40 pointer-events-none"}`}
+              >
+                <Row
+                  label="First Failed Tag"
+                  active={deepDiveFilters.cancelReason.firstFailedTag}
+                  onChange={() => flipFilter("cancelReason", "firstFailedTag")}
+                  color="#22D3EE"
+                  testId="qc-cr-fft"
+                />
+                <Row
+                  label="Retrace"
+                  active={deepDiveFilters.cancelReason.retrace}
+                  onChange={() => flipFilter("cancelReason", "retrace")}
+                  color="#A78BFA"
+                  testId="qc-cr-retrace"
+                />
+                <Row
+                  label="News"
+                  active={deepDiveFilters.cancelReason.news}
+                  onChange={() => flipFilter("cancelReason", "news")}
+                  color="#F59E0B"
+                  testId="qc-cr-news"
+                />
+                <Row
+                  label="Session Filter"
+                  active={deepDiveFilters.cancelReason.session}
+                  onChange={() => flipFilter("cancelReason", "session")}
+                  color="#64748B"
+                  testId="qc-cr-session"
+                />
+                <Row
+                  label="Other"
+                  active={deepDiveFilters.cancelReason.other}
+                  onChange={() => flipFilter("cancelReason", "other")}
+                  color="#94A3B8"
+                  testId="qc-cr-other"
                 />
               </div>
             </div>

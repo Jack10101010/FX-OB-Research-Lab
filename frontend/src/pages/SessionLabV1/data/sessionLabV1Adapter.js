@@ -1492,33 +1492,79 @@ export function buildStreaksData(sessionTrades) {
   return { wlSequence, streakSummary, streakDistribution, mode: "real" };
 }
 
-// ─── Phase A: Deep Dive Exploration Filters ───────────────────────────────────
+// ─── Phase A+B: Deep Dive Exploration Filters ────────────────────────────────
+// normReason is already defined in Phase C3 above — reused here.
+
+/**
+ * Resolve which Phase B cancelReason bucket a cancelled trade belongs to.
+ * Called only when the trade is already confirmed to be an excluded-setup.
+ */
+function resolveCancelReasonBucket(t) {
+  const cat = classifyTrade(t);
+  if (cat === "NEWS_CANCELLED")   return "news";    // outcome-derived; takes precedence
+  if (cat === "SESSION_FILTERED") return "session"; // outcome-derived; takes precedence
+  const norm = normReason(t.cancel_reason || t.cancelReason || "");
+  if (norm === "FIRST_FAILED_TAG") return "firstFailedTag";
+  if (norm === "RETRACE_CANCEL")   return "retrace";
+  if (norm.includes("NEWS"))       return "news";
+  if (norm.includes("SESSION"))    return "session";
+  return "other"; // OPEN, UNKNOWN, INVALID_CANCELLED with no matching reason
+}
+
+/**
+ * Map a trade to its Phase B outcome bucket key.
+ */
+function outcomeBucketForTrade(t) {
+  const cat = classifyTrade(t);
+  if (cat === "WIN"              || cat === "NEWS_FLATTEN_WIN")  return "win";
+  if (cat === "LOSS"             || cat === "NEWS_FLATTEN_LOSS") return "loss";
+  if (cat === "BREAKEVEN"        || cat === "NEWS_FLATTEN_FLAT") return "breakeven";
+  if (cat === "UNFILLED")                                        return "unfilled";
+  return "cancelled"; // INVALID_CANCELLED, NEWS_CANCELLED, SESSION_FILTERED, OPEN, UNKNOWN
+}
+
+/** Count includedTrades into { win, loss, breakeven, cancelled, unfilled }. */
+function countOutcomes(trades) {
+  const counts = { win: 0, loss: 0, breakeven: 0, cancelled: 0, unfilled: 0 };
+  for (const t of trades) counts[outcomeBucketForTrade(t)]++;
+  return counts;
+}
 
 /**
  * Apply exploratory Deep Dive filters on top of already direction/structure-filtered
  * session trades.
  *
- * Phase A scope: entryModel + teDelay.
- * Phase B will extend with outcome + cancelReason.
+ * Phase A: entryModel + teDelay
+ * Phase B: outcome + cancelReason
  *
  * These filters are purely exploratory — they affect Deep Dive tabs only.
  * They do NOT affect RunImpactSummary, VisualSummaryStrip, or session card metrics.
  *
  * @param {object[]} sessionTrades — already filtered by sessionRules direction/structure
  * @param {object}   filters       — deepDiveFilters state shape
- * @returns {{ includedTrades, excludedCount, activeFilterCount, isFiltered }}
+ * @returns {{ includedTrades, excludedCount, activeFilterCount, isFiltered, byOutcome }}
  */
 export function applyDeepDiveFilters(sessionTrades, filters) {
   if (!Array.isArray(sessionTrades) || !sessionTrades.length || !filters) {
     return {
-      includedTrades: sessionTrades ?? [],
-      excludedCount: 0,
+      includedTrades:    sessionTrades ?? [],
+      excludedCount:     0,
       activeFilterCount: 0,
-      isFiltered: false,
+      isFiltered:        false,
+      byOutcome:         { win: 0, loss: 0, breakeven: 0, cancelled: 0, unfilled: 0 },
     };
   }
 
   const { entryModel, teDelay } = filters;
+
+  // Undefined-safe: if Phase B keys absent, treat as all-on
+  const outcome = filters.outcome ?? {
+    win: true, loss: true, breakeven: true, cancelled: true, unfilled: true,
+  };
+  const cancelReason = filters.cancelReason ?? {
+    firstFailedTag: true, retrace: true, news: true, session: true, other: true,
+  };
+
   const emAllOn =
     entryModel.baseline &&
     entryModel.penetration &&
@@ -1528,36 +1574,64 @@ export function applyDeepDiveFilters(sessionTrades, filters) {
     teDelay.next &&
     teDelay.d2 &&
     teDelay.d3;
+  const outAllOn =
+    outcome.win &&
+    outcome.loss &&
+    outcome.breakeven &&
+    outcome.cancelled &&
+    outcome.unfilled;
+  const crAllOn =
+    cancelReason.firstFailedTag &&
+    cancelReason.retrace &&
+    cancelReason.news &&
+    cancelReason.session &&
+    cancelReason.other;
+  // cancelReason gate is only active when cancelled trades are included AND not all CR toggles on
+  const crActive = outcome.cancelled && !crAllOn;
 
-  // Short-circuit: no filtering needed when all toggles are on.
-  if (emAllOn && tdAllOn) {
+  // Short-circuit: no filtering needed when all groups are unfiltered.
+  if (emAllOn && tdAllOn && outAllOn && !crActive) {
     return {
-      includedTrades: sessionTrades,
-      excludedCount: 0,
+      includedTrades:    sessionTrades,
+      excludedCount:     0,
       activeFilterCount: 0,
-      isFiltered: false,
+      isFiltered:        false,
+      byOutcome:         countOutcomes(sessionTrades),
     };
   }
 
   const included = sessionTrades.filter((t) => {
-    // Entry model gate
+    // Gate 1 — Entry model
     if (!emAllOn) {
       const raw = String(t.entry_model_key || t.entry_model || t.entryFamily || "").toLowerCase();
       const isTE  = raw.includes("triggered") || raw.startsWith("te");
       const isPen = raw.includes("penetration");
-      // Anything not TE and not penetration is treated as baseline
       if (!isTE && !isPen && !entryModel.baseline)      return false;
       if (isPen  &&          !entryModel.penetration)   return false;
       if (isTE   &&          !entryModel.triggeredEdge) return false;
     }
 
-    // TE delay gate — delay >= 4 treated as d3 for Phase A
+    // Gate 2 — TE delay (delay >= 4 treated as d3)
     if (!tdAllOn) {
       const n = Number(t.fill_delay_candles ?? t.fillDelayCandles ?? t.trigger_delay ?? 0);
       if (n === 0 && !teDelay.same) return false;
       if (n === 1 && !teDelay.next) return false;
       if (n === 2 && !teDelay.d2)   return false;
-      if (n >= 3  && !teDelay.d3)   return false;  // 3+ treated as d3 bucket
+      if (n >= 3  && !teDelay.d3)   return false;
+    }
+
+    // Gate 3 — Outcome
+    if (!outAllOn) {
+      const bucket = outcomeBucketForTrade(t);
+      if (!outcome[bucket]) return false;
+    }
+
+    // Gate 4 — Cancel reason (only applies to cancelled trades when outcome.cancelled is on)
+    if (crActive) {
+      if (EXCLUDED_CATEGORIES.has(classifyTrade(t)) && classifyTrade(t) !== "UNFILLED") {
+        const bucket = resolveCancelReasonBucket(t);
+        if (!cancelReason[bucket]) return false;
+      }
     }
 
     return true;
@@ -1566,7 +1640,8 @@ export function applyDeepDiveFilters(sessionTrades, filters) {
   return {
     includedTrades:    included,
     excludedCount:     sessionTrades.length - included.length,
-    activeFilterCount: [!emAllOn, !tdAllOn].filter(Boolean).length,
+    activeFilterCount: [!emAllOn, !tdAllOn, !outAllOn, crActive].filter(Boolean).length,
     isFiltered:        included.length < sessionTrades.length,
+    byOutcome:         countOutcomes(included),
   };
 }

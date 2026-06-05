@@ -48,8 +48,10 @@ const V1_TO_CANONICAL = {
 };
 
 const DEFAULT_DEEP_DIVE_FILTERS = {
-  entryModel: { baseline: true, penetration: true, triggeredEdge: true },
-  teDelay:    { same: true, next: true, d2: true, d3: true },
+  entryModel:   { baseline: true, penetration: true, triggeredEdge: true },
+  teDelay:      { same: true, next: true, d2: true, d3: true },
+  outcome:      { win: true, loss: true, breakeven: true, cancelled: true, unfilled: true },
+  cancelReason: { firstFailedTag: true, retrace: true, news: true, session: true, other: true },
 };
 
 export default function SessionLabPage() {
