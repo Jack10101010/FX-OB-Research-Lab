@@ -115,11 +115,17 @@ export function MasterControlsProvider({ children }) {
         return max;
     }, [dirtyFields]);
 
-    // ── Validation — run against effectiveConfig using registry rules ────────
+    // ── Validation — run only against user-edited (dirty) fields ────────────
+    // Validating effectiveConfig (= activeConfig when no draft) causes false
+    // positives: e.g. maxObSizePips has defaultValue 100 but validation.max 50,
+    // so a freshly-loaded run always produces a spurious error.
+    // Fix: when there is no draft, return empty immediately. When there is a
+    // draft, only validate the keys the user actually changed.
     const validationErrors = useMemo(() => {
-        if (!effectiveConfig) return {};
+        if (!draftConfig || dirtyFields.size === 0) return {};
         const errors = {};
-        for (const [key, value] of Object.entries(effectiveConfig)) {
+        for (const key of dirtyFields) {
+            const value = draftConfig[key];
             const entry = REGISTRY_BY_KEY[key];
             if (!entry?.editable || !entry?.validation) continue;
             const { min, max } = entry.validation;
@@ -132,7 +138,7 @@ export function MasterControlsProvider({ children }) {
             }
         }
         return errors;
-    }, [effectiveConfig]);
+    }, [draftConfig, dirtyFields]);
 
     const validationErrorList = useMemo(
         () => Object.entries(validationErrors).map(([key, message]) => ({

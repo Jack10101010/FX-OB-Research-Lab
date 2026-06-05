@@ -158,7 +158,7 @@ export function MasterControlsDrawer() {
                 {/* Scrollable body */}
                 <div className="flex-1 overflow-y-auto scrollbar-thin px-5 py-5 space-y-6">
 
-                    {/* Active Run */}
+                    {/* ── 1. Active Run ────────────────────────────────────── */}
                     <section>
                         <SectionLabel icon={<Zap size={11} />} label="Active Run" />
                         <div className="mt-2 px-3 py-2.5 rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel)/0.5)]">
@@ -175,7 +175,46 @@ export function MasterControlsDrawer() {
                         </div>
                     </section>
 
-                    {/* ── Active Config — Phase 3D/3E config view ── */}
+                    {/* ── 2. Draft State — Phase 3C/3F debug readout ───────── */}
+                    <section>
+                        <SectionLabel icon={<Activity size={11} />} label="Draft State" />
+                        <div className="mt-2 space-y-1.5">
+                            <StatusRow label="Config" value={activeConfig ? "Loaded" : "None"} ok={!!activeConfig} />
+                            <StatusRow
+                                label="Dirty fields"
+                                value={hasDirtyFields ? `${dirtyCount} (tier ${highestDirtyTier})` : "None"}
+                                ok={!hasDirtyFields}
+                            />
+                            <StatusRow
+                                label="Validation"
+                                value={hasValidationErrors ? `${validationErrorList.length} error${validationErrorList.length !== 1 ? "s" : ""}` : "OK"}
+                                ok={!hasValidationErrors}
+                                warn={hasValidationErrors}
+                            />
+                            {/* Validation error detail list */}
+                            {hasValidationErrors && (
+                                <div className="rounded border border-[hsl(0_60%_50%/0.25)] bg-[hsl(0_60%_50%/0.06)] px-2.5 py-1.5 space-y-1.5">
+                                    {validationErrorList.length > 0 ? (
+                                        validationErrorList.map(({ key, label, message }) => (
+                                            <div key={key}>
+                                                <span className="text-[9px] font-mono text-[hsl(0_65%_65%)]">
+                                                    {label}{" "}
+                                                    <span className="opacity-55">({key})</span>
+                                                </span>
+                                                <p className="text-[9px] text-[hsl(0_70%_58%)] leading-snug">{message}</p>
+                                            </div>
+                                        ))
+                                    ) : (
+                                        <p className="text-[9px] text-[hsl(0_65%_55%)]">
+                                            Validation count is non-zero but no error details were provided.
+                                        </p>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    </section>
+
+                    {/* ── 3. Active Config — Phase 3D/3E config view ───────── */}
                     <section>
                         {/* Section header with both toggles */}
                         <div className="flex items-center justify-between">
@@ -196,13 +235,21 @@ export function MasterControlsDrawer() {
                                         {showEditMode ? "Viewing draft edits" : "Edit safe fields"}
                                     </button>
                                 )}
-                                <button
-                                    type="button"
-                                    onClick={() => setShowAdvanced((v) => !v)}
-                                    className="text-[10px] text-muted-lab hover:text-white transition-colors leading-none"
-                                >
-                                    {showAdvanced ? "Hide advanced" : "Show advanced"}
-                                </button>
+                                {/* Advanced toggle + chip */}
+                                <div className="flex items-center gap-1.5">
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowAdvanced((v) => !v)}
+                                        className="text-[10px] text-muted-lab hover:text-white transition-colors leading-none"
+                                    >
+                                        {showAdvanced ? "Hide advanced" : "Show advanced"}
+                                    </button>
+                                    {showAdvanced && (
+                                        <span className="text-[8px] px-1 py-0.5 rounded border border-[hsl(196_80%_55%/0.4)] bg-[hsl(196_80%_55%/0.12)] text-[hsl(196_80%_65%)] font-semibold leading-none">
+                                            ADV
+                                        </span>
+                                    )}
+                                </div>
                             </div>
                         </div>
 
@@ -241,26 +288,7 @@ export function MasterControlsDrawer() {
                         )}
                     </section>
 
-                    {/* Draft state — Phase 3C debug readout */}
-                    <section>
-                        <SectionLabel icon={<Activity size={11} />} label="Draft State" />
-                        <div className="mt-2 space-y-1.5">
-                            <StatusRow label="Config" value={activeConfig ? "Loaded" : "None"} ok={!!activeConfig} />
-                            <StatusRow
-                                label="Dirty fields"
-                                value={hasDirtyFields ? `${dirtyCount} (tier ${highestDirtyTier})` : "None"}
-                                ok={!hasDirtyFields}
-                            />
-                            <StatusRow
-                                label="Validation"
-                                value={hasValidationErrors ? `${validationErrorList.length} error${validationErrorList.length !== 1 ? "s" : ""}` : "OK"}
-                                ok={!hasValidationErrors}
-                                warn={hasValidationErrors}
-                            />
-                        </div>
-                    </section>
-
-                    {/* Registry summary */}
+                    {/* ── 4. Registry summary ───────────────────────────────── */}
                     <section>
                         <SectionLabel icon={<Database size={11} />} label="Config Registry" />
                         <div className="mt-2 grid grid-cols-3 gap-2">
@@ -270,7 +298,7 @@ export function MasterControlsDrawer() {
                         </div>
                     </section>
 
-                    {/* Control Groups */}
+                    {/* ── 5. Control Groups ─────────────────────────────────── */}
                     <section>
                         <SectionLabel icon={<Layers size={11} />} label="Control Groups" />
                         <div className="mt-2 space-y-1.5">
@@ -285,7 +313,7 @@ export function MasterControlsDrawer() {
                         </div>
                     </section>
 
-                    {/* Rerun tiers */}
+                    {/* ── 6. Rerun tiers ────────────────────────────────────── */}
                     <section>
                         <SectionLabel icon={<GitBranch size={11} />} label="Rerun Tiers" />
                         <div className="mt-2 space-y-1.5">
@@ -295,7 +323,7 @@ export function MasterControlsDrawer() {
                         </div>
                     </section>
 
-                    {/* Phase roadmap */}
+                    {/* ── 7. Phase roadmap ──────────────────────────────────── */}
                     <section>
                         <SectionLabel label="Roadmap" />
                         <div className="mt-2 space-y-2">
@@ -322,7 +350,7 @@ export function MasterControlsDrawer() {
                 {/* Footer */}
                 <div className="flex-shrink-0 px-5 py-3 border-t border-[hsl(var(--border-soft))]">
                     <p className="text-[10px] text-muted-lab">
-                        Phase 3E — draft editing · {REGISTRY_SUMMARY.total} cfg fields · {REGISTRY_SUMMARY.emitted} emitted
+                        Phase 3F — QA polish · {REGISTRY_SUMMARY.total} cfg fields · {REGISTRY_SUMMARY.emitted} emitted
                     </p>
                 </div>
             </div>
@@ -410,19 +438,26 @@ function ConfigSubgroupBlock({ subgroup, entries, config, dirtyFields, validatio
 function ConfigFieldRow({ entry, value, isDirty, errorMsg, isLast, showEditMode, setDraftField }) {
     // An editable control is shown only for the explicitly safe subset
     const isEditable = showEditMode && entry.editable && SAFE_EDITABLE_SUBSET.has(entry.key);
+    // Advanced-mode rows get a subtle cyan left accent bar (inset box-shadow avoids
+    // clipping by the parent container's overflow-hidden + rounded styles).
+    const isAdvanced = entry.advancedMode === true;
 
     return (
         <div
             className={[
                 "px-2.5 py-1.5",
-                isDirty ? "bg-[hsl(38_80%_50%/0.07)]" : "",
-                !isLast ? "border-b border-[hsl(var(--border-soft))]" : "",
+                isDirty    ? "bg-[hsl(38_80%_50%/0.07)]" : "",
+                isAdvanced ? "shadow-[inset_2px_0_0_hsl(196_80%_55%/0.45)]" : "",
+                !isLast    ? "border-b border-[hsl(var(--border-soft))]" : "",
             ].filter(Boolean).join(" ")}
         >
             <div className="flex items-center gap-1.5">
                 {/* Label — always visible */}
                 <span
-                    className="flex-1 min-w-0 text-[11px] text-muted-lab truncate"
+                    className={[
+                        "flex-1 min-w-0 text-[11px] truncate",
+                        isAdvanced ? "text-[hsl(196_70%_60%)]" : "text-muted-lab",
+                    ].join(" ")}
                     title={entry.label}
                 >
                     {entry.label}
