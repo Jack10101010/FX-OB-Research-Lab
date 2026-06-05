@@ -21,6 +21,9 @@ import {
 } from "@/data/tradeClassification";
 import { formatDirectionalScenarioLabel } from "@/components/lab/entries/analytics/entryFormatters";
 import { derivePrimaryResultView } from "@/data/tradeUniverse";
+// Phase 2B: Trade Classification badges in trade list sidebar
+import { buildTradeClassification } from "@/data/tradeClassificationDims";
+import { ClassificationBadge } from "@/components/lab/ClassificationBadge";
 
 const STRATEGY_MAP_UI_KEY = "fxob_strategy_map_ui_v1";
 const DEFAULT_CHART_HEIGHT = 460;
@@ -1748,6 +1751,23 @@ function StrategyTradeListPanel({
                                         <Pill tone={outcomeTone(trade)}>{formatTradeOutcome(tradeOutcomeValue(trade))}</Pill>
                                     </div>
                                 </div>
+                                {(() => {
+                                    try {
+                                        const cls = buildTradeClassification(trade);
+                                        const ctxTags = cls.entry_context.filter((t) => t !== "clean");
+                                        if (cls.entry_model === "baseline" && ctxTags.length === 0) return null;
+                                        return (
+                                            <div className="mt-1 flex gap-1 flex-wrap">
+                                                {cls.entry_model !== "baseline" && (
+                                                    <ClassificationBadge tag={cls.entry_model} />
+                                                )}
+                                                {ctxTags.map((t) => <ClassificationBadge key={t} tag={t} />)}
+                                            </div>
+                                        );
+                                    } catch {
+                                        return null;
+                                    }
+                                })()}
                                 {selected && (
                                     <div className="mt-2 pt-2 border-t border-[hsl(var(--border-soft))] grid grid-cols-2 gap-x-3 gap-y-1.5">
                                         <TradeDetail label="Raw Trade ID" value={rawTradeId(trade)} />

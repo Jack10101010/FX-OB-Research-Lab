@@ -42,6 +42,9 @@ import { useTradeUniverse } from "@/data/useTradeUniverse";
 import { buildAvailableOptions, collectAllEntryKeys, entryTradesByMode, buildCanonicalKey, derivePrimaryResultView } from "@/data/tradeUniverse";
 // RW-4A: directional scenario label formatter
 import { formatDirectionalScenarioLabel } from "@/components/lab/entries/analytics/entryFormatters";
+// Phase 2A: Trade Classification ledger column
+import { buildTradeClassification } from "@/data/tradeClassificationDims";
+import { ClassificationBadge } from "@/components/lab/ClassificationBadge";
 
 // RB-8a/8b: account config lives in the global store (state.accountSettings),
 // read/written via useResultsLens (lens.accountSettings / lens.setAccountSettings)
@@ -2728,6 +2731,20 @@ export default function RunDetail() {
                             { key: "tp",        label: "TP",      align: "right", mono: true, render: (r) => formatPrice(r.tp) },
                             { key: "r",         label: "R",       align: "right", render: (r) => <LedgerR trade={r} value={r.r} /> },
                             { key: "outcome",   label: "Result",  render: (r) => <Pill tone={resultTone(r)}>{formatOutcome(r)}</Pill> },
+                            { key: "classification", label: "Class", render: (r) => {
+                                try {
+                                    const cls = buildTradeClassification(r);
+                                    const ctxTags = cls.entry_context.filter((t) => t !== "clean");
+                                    return (
+                                        <div className="flex gap-1 flex-wrap">
+                                            <ClassificationBadge tag={cls.entry_model} />
+                                            {ctxTags.map((t) => <ClassificationBadge key={t} tag={t} />)}
+                                        </div>
+                                    );
+                                } catch {
+                                    return null;
+                                }
+                            }},
                         ]}
                         rows={filteredLedgerRows}
                     />
