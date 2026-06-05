@@ -174,11 +174,26 @@ export function IntrabarInspector({
     const [trailMinutes, setTrailMinutes] = useState(DEFAULT_TRAIL_MIN);
 
     // Compute initial right-aligned position if none was persisted.
+    // Also clamp a stale persisted position back into the visible area (e.g.
+    // if the chart panel is narrower than when the position was last saved).
     useLayoutEffect(() => {
-        if (position) return;
         const parent = wrapperRef.current?.offsetParent;
-        const parentW = parent?.clientWidth || 800;
-        setPosition({ top: 8, left: Math.max(8, parentW - INSPECTOR_WIDTH - 8) });
+        if (!parent) return;
+        const parentW = parent.clientWidth || 800;
+        const parentH = parent.clientHeight || 600;
+        if (!position) {
+            setPosition({ top: 8, left: Math.max(8, parentW - INSPECTOR_WIDTH - 8) });
+            return;
+        }
+        const maxLeft = Math.max(0, parentW - INSPECTOR_WIDTH);
+        const maxTop = Math.max(0, parentH - HEADER_HEIGHT);
+        const clampedLeft = Math.max(0, Math.min(maxLeft, position.left));
+        const clampedTop = Math.max(0, Math.min(maxTop, position.top));
+        if (clampedLeft !== position.left || clampedTop !== position.top) {
+            const clamped = { top: clampedTop, left: clampedLeft };
+            savePos(clamped);
+            setPosition(clamped);
+        }
     }, [position]);
 
     // Window-level drag handlers (mirrors CandleChart's resize pattern).

@@ -99,6 +99,7 @@ export function ModelAnalysis({
     selectedModelKey,
     setSelectedModelKey,
     filters,
+    offTrades,          // optional — trades from a paired FFT-OFF run for authoritative pairing
 }) {
     // Build equity curves only when tradesByMode is available
     const curvesData = useMemo(() => {
@@ -197,7 +198,12 @@ export function ModelAnalysis({
                     />
                     <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
                         {hasGhostData && <GhostOutcomePanel trades={trades} />}
-                        {hasFftCancels && <FftProtectionPanel trades={trades} />}
+                        {hasFftCancels && (
+                            <FftProtectionPanel
+                                trades={trades}
+                                offTrades={offTrades || []}
+                            />
+                        )}
                     </div>
                 </>
             )}
