@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from "react";
-import { X, SlidersHorizontal, Database, Layers, Zap, GitBranch, Activity, Settings2 } from "lucide-react";
+import { X, SlidersHorizontal, Database, Layers, Zap, GitBranch, Activity, Settings2, Play, AlertTriangle } from "lucide-react";
 import { useMasterControls } from "./MasterControlsContext";
 import { CONFIG_REGISTRY, getVisibleEntries } from "@/data/configRegistry";
 import { useDataset } from "@/data/store";
@@ -107,6 +107,7 @@ export function MasterControlsDrawer() {
         dirtyCount, highestDirtyTier, hasDirtyFields,
         validationErrors, validationErrorList, hasValidationErrors,
         setDraftField, resetDraft,
+        preview, startPreview, cancelPreview, clearPreview, previewIsStale,
     } = useMasterControls();
     const { activeRunId } = useDataset();
 
@@ -214,7 +215,92 @@ export function MasterControlsDrawer() {
                         </div>
                     </section>
 
-                    {/* ── 3. Active Config — Phase 3D/3E config view ───────── */}
+                    {/* ── 3. Run Preview — Phase 4A ────────────────────────── */}
+                    <section>
+                        <SectionLabel icon={<Play size={11} />} label="Run Preview" />
+
+                        {/* Status summary row */}
+                        <div className="mt-2 space-y-1.5">
+                            <StatusRow
+                                label="Dirty fields"
+                                value={hasDirtyFields ? `${dirtyCount} (max tier ${highestDirtyTier})` : "None"}
+                                ok={!hasDirtyFields}
+                            />
+                            <StatusRow
+                                label="Validation"
+                                value={hasValidationErrors ? `${validationErrorList.length} error${validationErrorList.length !== 1 ? "s" : ""}` : "OK"}
+                                ok={!hasValidationErrors}
+                                warn={hasValidationErrors}
+                            />
+                            <StatusRow
+                                label="Preview"
+                                value={previewStatusLabel(preview.status)}
+                                ok={preview.status === "done"}
+                                warn={preview.status === "failed"}
+                            />
+                        </div>
+
+                        {/* Error text when failed */}
+                        {preview.status === "failed" && preview.error && (
+                            <div className="mt-1.5 rounded border border-[hsl(0_60%_50%/0.25)] bg-[hsl(0_60%_50%/0.06)] px-2.5 py-1.5">
+                                <p className="text-[10px] text-[hsl(0_70%_58%)] leading-snug break-all">{preview.error}</p>
+                            </div>
+                        )}
+
+                        {/* Stale warning */}
+                        {previewIsStale && (
+                            <div className="mt-1.5 flex items-start gap-1.5 rounded border border-[hsl(38_85%_55%/0.3)] bg-[hsl(38_85%_55%/0.07)] px-2.5 py-1.5">
+                                <AlertTriangle size={11} className="shrink-0 mt-0.5 text-[hsl(38_85%_55%)]" />
+                                <p className="text-[10px] text-[hsl(38_85%_55%)] leading-snug">
+                                    Draft changed since this preview started. Rerun preview before trusting results.
+                                </p>
+                            </div>
+                        )}
+
+                        {/* Action buttons */}
+                        <div className="mt-2 flex flex-wrap gap-2">
+                            {/* Run Preview button — disabled when guards not met */}
+                            <button
+                                type="button"
+                                onClick={startPreview}
+                                disabled={!effectiveConfig || hasValidationErrors || preview.status !== "idle"}
+                                className={[
+                                    "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded",
+                                    "text-[10px] font-medium border transition-colors",
+                                    (!effectiveConfig || hasValidationErrors || preview.status !== "idle")
+                                        ? "opacity-40 cursor-not-allowed text-muted-lab bg-[hsl(var(--panel-2))] border-[hsl(var(--border-soft))]"
+                                        : "text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.10)] border-[hsl(var(--accent-primary)/0.3)] hover:bg-[hsl(var(--accent-primary)/0.18)]",
+                                ].join(" ")}
+                            >
+                                <Play size={10} />
+                                Run Preview
+                            </button>
+
+                            {/* Cancel button — shown while in-flight */}
+                            {(preview.status === "queued" || preview.status === "running" || preview.status === "importing") && (
+                                <button
+                                    type="button"
+                                    onClick={cancelPreview}
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded text-[10px] font-medium border transition-colors text-[hsl(0_65%_58%)] bg-[hsl(0_60%_50%/0.07)] border-[hsl(0_60%_50%/0.25)] hover:bg-[hsl(0_60%_50%/0.12)]"
+                                >
+                                    Cancel preview
+                                </button>
+                            )}
+
+                            {/* Clear button — shown after done or failed */}
+                            {(preview.status === "done" || preview.status === "failed") && (
+                                <button
+                                    type="button"
+                                    onClick={clearPreview}
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded text-[10px] font-medium border transition-colors text-muted-lab bg-[hsl(var(--panel-2))] border-[hsl(var(--border-soft))] hover:text-white"
+                                >
+                                    Clear preview
+                                </button>
+                            )}
+                        </div>
+                    </section>
+
+                    {/* ── 4. Active Config — Phase 3D/3E config view ───────── */}
                     <section>
                         {/* Section header with both toggles */}
                         <div className="flex items-center justify-between">
@@ -288,7 +374,7 @@ export function MasterControlsDrawer() {
                         )}
                     </section>
 
-                    {/* ── 4. Registry summary ───────────────────────────────── */}
+                    {/* ── 5. Registry summary ───────────────────────────────── */}
                     <section>
                         <SectionLabel icon={<Database size={11} />} label="Config Registry" />
                         <div className="mt-2 grid grid-cols-3 gap-2">
@@ -298,7 +384,7 @@ export function MasterControlsDrawer() {
                         </div>
                     </section>
 
-                    {/* ── 5. Control Groups ─────────────────────────────────── */}
+                    {/* ── 6. Control Groups ─────────────────────────────────── */}
                     <section>
                         <SectionLabel icon={<Layers size={11} />} label="Control Groups" />
                         <div className="mt-2 space-y-1.5">
@@ -313,7 +399,7 @@ export function MasterControlsDrawer() {
                         </div>
                     </section>
 
-                    {/* ── 6. Rerun tiers ────────────────────────────────────── */}
+                    {/* ── 7. Rerun tiers ────────────────────────────────────── */}
                     <section>
                         <SectionLabel icon={<GitBranch size={11} />} label="Rerun Tiers" />
                         <div className="mt-2 space-y-1.5">
@@ -323,7 +409,7 @@ export function MasterControlsDrawer() {
                         </div>
                     </section>
 
-                    {/* ── 7. Phase roadmap ──────────────────────────────────── */}
+                    {/* ── 8. Phase roadmap ──────────────────────────────────── */}
                     <section>
                         <SectionLabel label="Roadmap" />
                         <div className="mt-2 space-y-2">
@@ -350,7 +436,7 @@ export function MasterControlsDrawer() {
                 {/* Footer */}
                 <div className="flex-shrink-0 px-5 py-3 border-t border-[hsl(var(--border-soft))]">
                     <p className="text-[10px] text-muted-lab">
-                        Phase 3F — QA polish · {REGISTRY_SUMMARY.total} cfg fields · {REGISTRY_SUMMARY.emitted} emitted
+                        Phase 4A — Run Preview · {REGISTRY_SUMMARY.total} cfg fields · {REGISTRY_SUMMARY.emitted} emitted
                     </p>
                 </div>
             </div>
@@ -680,6 +766,19 @@ function PhasePlaceholder({ phase, label, desc }) {
             <p className="text-[10px] text-muted-lab mt-1">{desc}</p>
         </div>
     );
+}
+
+function previewStatusLabel(status) {
+    switch (status) {
+        case "idle":      return "No preview run yet";
+        case "queued":    return "Running preview…";
+        case "running":   return "Running preview…";
+        case "completed": return "Completed — importing…";
+        case "importing": return "Importing preview bundle…";
+        case "done":      return "Preview ready";
+        case "failed":    return "Failed";
+        default:          return status;
+    }
 }
 
 function StatusRow({ label, value, ok, warn }) {

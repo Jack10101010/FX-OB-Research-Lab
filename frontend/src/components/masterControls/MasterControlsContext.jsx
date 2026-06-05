@@ -8,7 +8,24 @@ import React, {
 } from "react";
 import { useDataset, getRunData } from "@/data/store";
 import { REGISTRY_BY_KEY } from "@/data/configRegistry";
-import { buildRunConfigLoadReport, getDefaultBuilderConfig } from "@/data/configTranslator";
+import { buildRunConfigLoadReport, getDefaultBuilderConfig, buildBacktesterConfig } from "@/data/configTranslator";
+import { startSidecarRun, getSidecarRun, getSidecarRunBundle, cancelSidecarRun } from "@/data/sidecarClient";
+import { ingestRunBundle } from "@/data/importer";
+
+// ─── Preview state ────────────────────────────────────────────────────────────
+// Allowed statuses:
+//   "idle" | "queued" | "running" | "completed" | "importing" | "done" | "failed"
+// The preview bundle is stored here only — never passed to addRunBundle / store.
+// activeRunId is never modified by preview operations.
+
+const EMPTY_PREVIEW = {
+    status:         "idle",
+    job:            null,
+    bundle:         null,
+    error:          "",
+    startedAt:      null,
+    snapshotConfig: null,
+};
 
 // ─── Context default (shape only — values are overridden by the Provider) ────
 
@@ -39,6 +56,13 @@ const MasterControlsContext = createContext({
     // Actions
     setDraftField:        () => {},
     resetDraft:           () => {},
+
+    // Preview — Phase 4A
+    preview:              EMPTY_PREVIEW,
+    startPreview:         () => {},
+    cancelPreview:        () => {},
+    clearPreview:         () => {},
+    previewIsStale:       false,
 });
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
@@ -59,9 +83,13 @@ export function MasterControlsProvider({ children }) {
     // null  → no edits; the effective config falls back to activeConfig
     const [draftConfig, setDraftConfigState] = useState(null);
 
-    // Reset draft whenever the active run changes
+    // ── Preview state — Phase 4A ─────────────────────────────────────────────
+    const [preview, setPreview] = useState(EMPTY_PREVIEW);
+
+    // Reset draft AND preview whenever the active run changes
     useEffect(() => {
         setDraftConfigState(null);
+        setPreview(EMPTY_PREVIEW);
     }, [activeRunId]);
 
     // ── activeConfig — derived from the active run bundle ───────────────────
@@ -171,6 +199,182 @@ export function MasterControlsProvider({ children }) {
         setDraftConfigState(null);
     }, []);
 
+    // ── Preview actions — Phase 4A ────────────────────────────────────────────
+
+    /**
+     * Start a preview run from the current effectiveConfig.
+     * Guards: status must be "idle", no validation errors, effectiveConfig must exist.
+     * The preview bundle is held in context only — addRunBundle is NEVER called.
+     */
+    const startPreview = useCallback(async () => {
+        if (preview.status !== "idle") return;
+        if (hasValidationErrors) return;
+        if (!effectiveConfig) return;
+
+        // Deep copy via JSON round-trip — cfg contains only plain primitives/arrays
+        const snapshotConfig = JSON.parse(JSON.stringify(effectiveConfig));
+
+        // Build full backend config from the frontend cfg state
+        const fullConfig = buildBacktesterConfig(snapshotConfig);
+
+        // Strip all keys beginning with "_" — matches StrategyBuilder dd44c84 behavior.
+        // buildBacktesterConfig emits _entry_mode/_selected_entry_model which must NOT
+        // be sent to the sidecar; they are frontend-only round-trip hints.
+        const sidecarPayload = Object.fromEntries(
+            Object.entries(fullConfig).filter(([k]) => !k.startsWith("_"))
+        );
+
+        try {
+            const job = await startSidecarRun(sidecarPayload);
+            setPreview({
+                status:         "queued",
+                job,
+                bundle:         null,
+                error:          "",
+                startedAt:      new Date().toISOString(),
+                snapshotConfig,
+            });
+        } catch (err) {
+            setPreview({
+                ...EMPTY_PREVIEW,
+                status: "failed",
+                error:  err?.message || String(err),
+            });
+        }
+    }, [preview.status, hasValidationErrors, effectiveConfig]);
+
+    /**
+     * Clear preview state without server interaction.
+     */
+    const clearPreview = useCallback(() => {
+        setPreview(EMPTY_PREVIEW);
+    }, []);
+
+    /**
+     * Cancel a queued/running preview.
+     * cancelSidecarRun POSTs to /cancel/{runId}. The sidecar job object may carry
+     * both run_id and job_id as distinct fields; the cancel endpoint uses run_id.
+     * Mirror StrategyBuilder's resolution: prefer run_id, fallback to job_id (line 283).
+     * Local state is always cleared regardless of server response.
+     */
+    const cancelPreview = useCallback(async () => {
+        // Prefer run_id (cancel endpoint) over job_id (status/bundle endpoint)
+        const cancelId = preview.job?.run_id || preview.job?.job_id;
+        if (cancelId && (preview.status === "queued" || preview.status === "running")) {
+            try {
+                await cancelSidecarRun(cancelId);
+            } catch (err) {
+                // Best-effort — clear locally regardless of server response
+                console.warn("[MasterControls] cancelSidecarRun failed:", err);
+            }
+        }
+        setPreview(EMPTY_PREVIEW);
+    }, [preview.status, preview.job]);
+
+    // ── Polling effect — drives "queued"/"running" → "completed"/"failed" ────
+    useEffect(() => {
+        const jobId = preview.job?.job_id;
+        if (!jobId || (preview.status !== "queued" && preview.status !== "running")) return;
+
+        const intervalId = setInterval(async () => {
+            try {
+                const latest = await getSidecarRun(jobId);
+                const latestStatus = String(latest?.status || "").toLowerCase();
+
+                setPreview((prev) => {
+                    // Re-check inside setter to avoid acting on stale closure
+                    if (prev.status !== "queued" && prev.status !== "running") return prev;
+
+                    if (latestStatus === "completed" || latestStatus === "succeeded") {
+                        return { ...prev, job: latest, status: "completed" };
+                    }
+                    if (latestStatus === "failed" || latestStatus === "error" || latestStatus === "cancelled") {
+                        const errorText = latest?.stderr_tail || latest?.error || `Run ${latestStatus}`;
+                        return { ...prev, job: latest, status: "failed", error: String(errorText) };
+                    }
+                    // Still in progress — update job metadata, render as "running"
+                    return { ...prev, job: latest, status: "running" };
+                });
+            } catch (err) {
+                setPreview((prev) => ({
+                    ...prev,
+                    status: "failed",
+                    error:  err?.message || "Polling error",
+                }));
+            }
+        }, 2000);
+
+        return () => clearInterval(intervalId);
+    }, [preview.status, preview.job?.job_id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // ── Import effect — drives "completed" → "importing" → "done"/"failed" ──
+    useEffect(() => {
+        if (preview.status !== "completed") return;
+        const jobId = preview.job?.job_id;
+        const snapshotConfig = preview.snapshotConfig;
+        if (!jobId) return;
+
+        let cancelled = false;
+
+        const doImport = async () => {
+            setPreview((prev) => ({ ...prev, status: "importing" }));
+            try {
+                // Sidecar /runs/{id}/bundle returns { files: [{ name, content }] }
+                const payload = await getSidecarRunBundle(jobId);
+                const files = (payload.files || []).map(
+                    (f) => new File([f.content || ""], f.name, { type: "text/plain" })
+                );
+                const result = await ingestRunBundle(files);
+
+                if (cancelled) return;
+
+                if (!result.ok) {
+                    const msg = [
+                        ...(result.validationErrors || []).map((e) => e.message || String(e)),
+                        ...(result.errors || []).map((e) => e.error || String(e)),
+                    ].filter(Boolean)[0] || "Preview bundle import failed";
+                    setPreview((prev) => ({ ...prev, status: "failed", error: msg }));
+                    return;
+                }
+
+                // Inject frontend-only metadata from snapshotConfig into bundle.config so
+                // that buildRunConfigLoadReport can recover entryMode/selectedEntryModel
+                // if this preview is later promoted to a real run (Phase 4C).
+                // addRunBundle is NOT called — bundle stays in context only.
+                if (result.bundle.config) {
+                    if (snapshotConfig?._entry_mode !== undefined)
+                        result.bundle.config._entry_mode = snapshotConfig._entry_mode;
+                    if (snapshotConfig?._selected_entry_model !== undefined)
+                        result.bundle.config._selected_entry_model = snapshotConfig._selected_entry_model;
+                }
+
+                setPreview((prev) => ({
+                    ...prev,
+                    status: "done",
+                    bundle: result.bundle,
+                }));
+            } catch (err) {
+                if (!cancelled) {
+                    setPreview((prev) => ({
+                        ...prev,
+                        status: "failed",
+                        error:  err?.message || "Preview import failed",
+                    }));
+                }
+            }
+        };
+
+        doImport();
+        return () => { cancelled = true; };
+    }, [preview.status]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // ── previewIsStale — true when effectiveConfig has drifted since preview ─
+    const previewIsStale = useMemo(() => {
+        if (preview.status !== "done") return false;
+        if (!preview.snapshotConfig || !effectiveConfig) return false;
+        return JSON.stringify(preview.snapshotConfig) !== JSON.stringify(effectiveConfig);
+    }, [preview.status, preview.snapshotConfig, effectiveConfig]);
+
     // ── Context value ────────────────────────────────────────────────────────
 
     const value = useMemo(() => ({
@@ -196,6 +400,12 @@ export function MasterControlsProvider({ children }) {
         // Actions
         setDraftField,
         resetDraft,
+        // Preview — Phase 4A
+        preview,
+        startPreview,
+        cancelPreview,
+        clearPreview,
+        previewIsStale,
     }), [
         isOpen,
         openMasterControls,
@@ -214,6 +424,11 @@ export function MasterControlsProvider({ children }) {
         hasValidationErrors,
         setDraftField,
         resetDraft,
+        preview,
+        startPreview,
+        cancelPreview,
+        clearPreview,
+        previewIsStale,
     ]);
 
     return (
