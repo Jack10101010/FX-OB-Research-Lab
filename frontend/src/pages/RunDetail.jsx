@@ -42,9 +42,10 @@ import { useTradeUniverse } from "@/data/useTradeUniverse";
 import { buildAvailableOptions, collectAllEntryKeys, entryTradesByMode, buildCanonicalKey, derivePrimaryResultView } from "@/data/tradeUniverse";
 // RW-4A: directional scenario label formatter
 import { formatDirectionalScenarioLabel } from "@/components/lab/entries/analytics/entryFormatters";
-// Phase 2A: Trade Classification ledger column
+// Phase 2A/2C: Trade Classification ledger column + filters
 import { buildTradeClassification } from "@/data/tradeClassificationDims";
 import { ClassificationBadge } from "@/components/lab/ClassificationBadge";
+import { getTagMeta } from "@/data/classificationRegistry";
 
 // RB-8a/8b: account config lives in the global store (state.accountSettings),
 // read/written via useResultsLens (lens.accountSettings / lens.setAccountSettings)
@@ -539,6 +540,8 @@ export default function RunDetail() {
     const [ledgerSessionFilter,   setLedgerSessionFilter]   = React.useState("All");
     const [ledgerDirectionFilter, setLedgerDirectionFilter] = React.useState("All");
     const [ledgerSearch,          setLedgerSearch]          = React.useState("");
+    const [ledgerModelFilters,    setLedgerModelFilters]    = React.useState([]);
+    const [ledgerContextFilters,  setLedgerContextFilters]  = React.useState([]);
     const [activeResultsTab,      setActiveResultsTab]      = React.useState("config");
     const [resultsLayoutMode,     setResultsLayoutMode]     = React.useState("tabbed");
     const [runDetailSettingsOpen, setRunDetailSettingsOpen] = React.useState(false);
@@ -849,6 +852,21 @@ export default function RunDetail() {
             ? `${accountModeOptions.find((o) => o.value === accountSettings.mode)?.label || accountSettings.mode} · ${accountSettings.currency}`
             : null,
     };
+    // Derive which classification tags actually appear in the current trade set.
+    // Used to build the filter chip rows — only shows tags present in data.
+    const ledgerClassificationOptions = React.useMemo(() => {
+        const models = new Set();
+        const contexts = new Set();
+        for (const trade of Array.isArray(displayTrades) ? displayTrades : []) {
+            try {
+                const cls = buildTradeClassification(trade);
+                models.add(cls.entry_model);
+                for (const t of cls.entry_context) contexts.add(t);
+            } catch { /* ignore malformed trade */ }
+        }
+        return { models: [...models], contexts: [...contexts] };
+    }, [displayTrades]);
+
     const filteredLedgerRows = React.useMemo(() => {
         const rows = Array.isArray(displayTrades) ? displayTrades : [];
         const query = ledgerSearch.trim().toLowerCase();
@@ -863,6 +881,13 @@ export default function RunDetail() {
                 }
             }
             if (ledgerDirectionFilter !== "All" && trade.direction !== ledgerDirectionFilter) return false;
+            if (ledgerModelFilters.length > 0 || ledgerContextFilters.length > 0) {
+                try {
+                    const cls = buildTradeClassification(trade);
+                    if (ledgerModelFilters.length > 0 && !ledgerModelFilters.includes(cls.entry_model)) return false;
+                    if (ledgerContextFilters.length > 0 && !cls.entry_context.some((t) => ledgerContextFilters.includes(t))) return false;
+                } catch { /* fail safe — don't exclude on classification error */ }
+            }
             if (query) {
                 const haystack = [
                     trade.displayTradeId,
@@ -880,7 +905,7 @@ export default function RunDetail() {
             }
             return true;
         });
-    }, [displayTrades, ledgerResultFilter, ledgerSessionFilter, ledgerDirectionFilter, ledgerSearch, runRr]);
+    }, [displayTrades, ledgerResultFilter, ledgerSessionFilter, ledgerDirectionFilter, ledgerSearch, runRr, ledgerModelFilters, ledgerContextFilters]);
 
     // ── Equity research filters: filtered subset of trades for chart ─────────
     const filteredTradesForEquity = React.useMemo(() => {
@@ -2697,6 +2722,76 @@ export default function RunDetail() {
                             onChange={(e) => setLedgerSearch(e.target.value)}
                         />
                     </div>
+                    {/* Classification filter chips — Model and Context dimensions.
+                        Only rendered when the current trade set contains non-baseline
+                        / non-clean tags (hides itself on all-baseline runs). */}
+                    {(ledgerClassificationOptions.models.some((t) => t !== "baseline")
+                      || ledgerClassificationOptions.contexts.some((t) => t !== "clean")) && (
+                        <div className="mb-3 space-y-1.5">
+                            {ledgerClassificationOptions.models.some((t) => t !== "baseline") && (
+                                <div className="flex flex-wrap gap-1 items-center">
+                                    <span className="font-ui text-[10px] uppercase tracking-wider text-[hsl(var(--text-3))] mr-1">Model</span>
+                                    {ledgerClassificationOptions.models.map((tag) => {
+                                        const meta = getTagMeta(tag);
+                                        const ftTone = (meta.tone === "info" || meta.tone === "secondary") ? "primary" : meta.tone;
+                                        return (
+                                            <FilterToggle
+                                                key={tag}
+                                                active={ledgerModelFilters.includes(tag)}
+                                                onClick={() => setLedgerModelFilters((prev) =>
+                                                    prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
+                                                )}
+                                                tone={ftTone}
+                                                size="compact"
+                                            >
+                                                {meta.label}
+                                            </FilterToggle>
+                                        );
+                                    })}
+                                    {ledgerModelFilters.length > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setLedgerModelFilters([])}
+                                            className="font-ui text-[10px] text-[hsl(var(--text-3))] hover:text-[hsl(var(--accent-primary))] ml-1 transition-colors"
+                                        >
+                                            Clear
+                                        </button>
+                                    )}
+                                </div>
+                            )}
+                            {ledgerClassificationOptions.contexts.some((t) => t !== "clean") && (
+                                <div className="flex flex-wrap gap-1 items-center">
+                                    <span className="font-ui text-[10px] uppercase tracking-wider text-[hsl(var(--text-3))] mr-1">Context</span>
+                                    {ledgerClassificationOptions.contexts.map((tag) => {
+                                        const meta = getTagMeta(tag);
+                                        const ftTone = (meta.tone === "info" || meta.tone === "secondary") ? "primary" : meta.tone;
+                                        return (
+                                            <FilterToggle
+                                                key={tag}
+                                                active={ledgerContextFilters.includes(tag)}
+                                                onClick={() => setLedgerContextFilters((prev) =>
+                                                    prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
+                                                )}
+                                                tone={ftTone}
+                                                size="compact"
+                                            >
+                                                {meta.label}
+                                            </FilterToggle>
+                                        );
+                                    })}
+                                    {ledgerContextFilters.length > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setLedgerContextFilters([])}
+                                            className="font-ui text-[10px] text-[hsl(var(--text-3))] hover:text-[hsl(var(--accent-primary))] ml-1 transition-colors"
+                                        >
+                                            Clear
+                                        </button>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    )}
                     {/* Sanity strip summarizing whatever the ledger filters currently
                         show. When filters are off this equals the full primary-variant
                         roll-up (matches the KPI strip). When filters narrow rows down,
@@ -2710,6 +2805,8 @@ export default function RunDetail() {
                                 || ledgerSessionFilter !== "All"
                                 || ledgerDirectionFilter !== "All"
                                 || ledgerSearch
+                                || ledgerModelFilters.length > 0
+                                || ledgerContextFilters.length > 0
                                     ? "Filtered ledger rows"
                                     : "All performance trades"
                             }
