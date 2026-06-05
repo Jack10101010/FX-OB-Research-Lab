@@ -12,6 +12,8 @@ import { deriveOBRightTime } from "@/data/obLifecycle";
 import { Search, AlertTriangle } from "lucide-react";
 import { ActiveRunContext } from "@/components/lab/ActiveRunContext";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { buildTradeClassification } from "@/data/tradeClassificationDims";
+import { ClassificationBadge } from "@/components/lab/ClassificationBadge";
 
 export default function TradeInspector() {
     const { CANDLES, OB_BOXES, OB_BOXES_ENRICHED, ACTIVE_RUN, activeRunId, getRunData, ACTIVE_TRADE_VARIANT, AVAILABLE_TRADE_VARIANTS } = useDataset();
@@ -384,6 +386,27 @@ export default function TradeInspector() {
                             <Row k="R Result" v={<ColoredR value={trade.r} />} />
                             <RBreakdownRows trade={trade} />
                             <Row k="Outcome" v={<Pill tone={trade.outcome === "Win" ? "success" : "danger"}>{trade.outcome}</Pill>} />
+                            {/* Trade Classification — Phase 1 */}
+                            {(() => {
+                                const cls = buildTradeClassification(trade);
+                                return (
+                                    <>
+                                        <div className="divider-glow my-2" />
+                                        <Row k="Entry Model" v={<ClassificationBadge tag={cls.entry_model} />} />
+                                        {cls.entry_context.some(t => t !== "clean") && (
+                                            <Row k="Entry Context" v={
+                                                <div className="flex gap-1 flex-wrap">
+                                                    {cls.entry_context
+                                                        .filter(t => t !== "clean")
+                                                        .map(t => <ClassificationBadge key={t} tag={t} />)
+                                                    }
+                                                </div>
+                                            } />
+                                        )}
+                                        <Row k="Exit Type" v={<ClassificationBadge tag={cls.exit_type} />} />
+                                    </>
+                                );
+                            })()}
                             <Row k="Mapping" v={<Pill tone={mappingQuality === "exact" ? "success" : mappingQuality === "nearest_prior" ? "warning" : "danger"}>{mappingQuality}</Pill>} />
                             <Row k="Reverse Conflict" v={trade.reverseConflict ? <Pill tone="warning">YES</Pill> : <span className="text-muted-lab">No</span>} />
                         </> : <span className="text-muted-lab">No trade details available.</span>}
