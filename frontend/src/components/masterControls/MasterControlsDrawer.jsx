@@ -247,7 +247,7 @@ export function MasterControlsDrawer() {
                             </div>
                         )}
 
-                        {/* Stale warning */}
+                        {/* Stale warning — kept adjacent to the preview results below */}
                         {previewIsStale && (
                             <div className="mt-1.5 flex items-start gap-1.5 rounded border border-[hsl(38_85%_55%/0.3)] bg-[hsl(38_85%_55%/0.07)] px-2.5 py-1.5">
                                 <AlertTriangle size={11} className="shrink-0 mt-0.5 text-[hsl(38_85%_55%)]" />
@@ -255,6 +255,15 @@ export function MasterControlsDrawer() {
                                     Draft changed since this preview started. Rerun preview before trusting results.
                                 </p>
                             </div>
+                        )}
+
+                        {/* ── Preview Results — Phase 4B (display only) ────────────
+                            Renders a lightweight read-out of the in-context preview
+                            bundle. NEVER touches the store: no addRunBundle, no
+                            setActiveRunId, no promotion. The bundle lives only in
+                            MasterControlsContext.preview.bundle. */}
+                        {preview.status === "done" && preview.bundle && (
+                            <PreviewResults bundle={preview.bundle} isStale={previewIsStale} />
                         )}
 
                         {/* Action buttons */}
@@ -779,6 +788,292 @@ function previewStatusLabel(status) {
         case "failed":    return "Failed";
         default:          return status;
     }
+}
+
+// ─── Preview results — Phase 4B (display only, never persisted) ───────────────
+
+/** Return the first finite number from the given candidates, else null. */
+function firstFiniteNumber(...values) {
+    for (const v of values) {
+        if (v === null || v === undefined || v === "") continue;
+        const n = Number(v);
+        if (Number.isFinite(n)) return n;
+    }
+    return null;
+}
+
+/** Count wins/losses from a trade array, preferring the parsed `outcome`. */
+function countWinsLosses(trades) {
+    let wins = 0;
+    let losses = 0;
+    for (const t of trades) {
+        const outcome = String(t?.outcome ?? "").toLowerCase();
+        if (outcome === "win") {
+            wins++;
+        } else if (outcome === "loss") {
+            losses++;
+        } else if (!outcome) {
+            // No outcome label — fall back to the sign of R.
+            const r = Number(t?.r);
+            if (Number.isFinite(r)) {
+                if (r > 0) wins++;
+                else if (r < 0) losses++;
+            }
+        }
+    }
+    return { wins, losses };
+}
+
+/**
+ * Max drawdown (positive R magnitude) from a cumulative equity curve, or from a
+ * trade array as a fallback. Returns null when neither source is usable.
+ */
+function computeMaxDrawdown(equityCurve, trades) {
+    let series = [];
+    if (Array.isArray(equityCurve) && equityCurve.length) {
+        series = equityCurve.map((p) => Number(p?.netR)).filter(Number.isFinite);
+    } else if (Array.isArray(trades) && trades.length) {
+        let cum = 0;
+        series = trades.map((t) => { cum += Number(t?.r) || 0; return cum; });
+    }
+    if (!series.length) return null;
+    let peak = series[0];
+    let maxDd = 0;
+    for (const v of series) {
+        if (v > peak) peak = v;
+        const dd = peak - v;
+        if (dd > maxDd) maxDd = dd;
+    }
+    return maxDd;
+}
+
+/**
+ * Extract lightweight metrics from a preview bundle (the object produced by
+ * ingestRunBundle and held in MasterControlsContext.preview.bundle).
+ *
+ * Strategy: prefer bundle.summary (already canonical from the importer), then
+ * fall back to the primary variant in bundle.tradesByVariant / bundle.trades.
+ * Fully defensive — any malformed input returns { ok: false } rather than throwing.
+ */
+function extractPreviewMetrics(bundle) {
+    if (!bundle || typeof bundle !== "object") return { ok: false };
+    try {
+        const summary = bundle.summary && typeof bundle.summary === "object" ? bundle.summary : {};
+        const tbv = bundle.tradesByVariant && typeof bundle.tradesByVariant === "object" ? bundle.tradesByVariant : {};
+
+        // Run label / id — summary fields first, then bundle, then ids.
+        const label =
+            summary.displayName || summary.name ||
+            bundle.displayName || bundle.name ||
+            bundle.id || summary.id || null;
+
+        // Selected / primary variant.
+        const variant =
+            bundle.primaryVariant ||
+            summary.primaryVariant || summary.primary_variant ||
+            summary.executionMode || summary.execution_mode ||
+            null;
+
+        // Best-effort fallback trade list: named variant → primary trades →
+        // largest variant array → empty.
+        const variantArrays = Object.values(tbv).filter(Array.isArray);
+        const fallbackTrades =
+            (variant && Array.isArray(tbv[variant]) ? tbv[variant] : null) ||
+            (Array.isArray(bundle.trades) ? bundle.trades : null) ||
+            variantArrays.slice().sort((a, b) => b.length - a.length)[0] ||
+            [];
+
+        let usedFallback = false;
+
+        // Trades.
+        let trades = firstFiniteNumber(summary.trades, summary.trade_count, summary.tradeCount, summary.total_trades, summary.n_trades);
+        if (trades == null) { trades = fallbackTrades.length; usedFallback = true; }
+
+        // Wins / losses.
+        let wins = firstFiniteNumber(summary.wins, summary.win_count, summary.winCount);
+        let losses = firstFiniteNumber(summary.losses, summary.loss_count, summary.lossCount);
+        if (wins == null || losses == null) {
+            const counted = countWinsLosses(fallbackTrades);
+            if (wins == null) { wins = counted.wins; usedFallback = true; }
+            if (losses == null) { losses = counted.losses; usedFallback = true; }
+        }
+
+        // Win rate (percentage).
+        let winRate = firstFiniteNumber(summary.winRate, summary.win_rate, summary.winRatePct);
+        if (winRate == null) {
+            const denom = (Number(wins) || 0) + (Number(losses) || 0);
+            winRate = denom > 0 ? (Number(wins) / denom) * 100 : null;
+            if (winRate != null) usedFallback = true;
+        }
+
+        // Net R / total R.
+        let netR = firstFiniteNumber(summary.netR, summary.net_r, summary.pnl_r, summary.totalR, summary.total_r);
+        if (netR == null) {
+            netR = fallbackTrades.reduce((s, t) => s + (Number(t?.r) || 0), 0);
+            usedFallback = true;
+        }
+
+        // Max drawdown.
+        let maxDd = firstFiniteNumber(summary.maxDd, summary.maxDD, summary.max_drawdown, summary.maxDrawdown, summary.max_dd);
+        if (maxDd == null) {
+            maxDd = computeMaxDrawdown(bundle.equityCurve, fallbackTrades);
+            if (maxDd != null) usedFallback = true;
+        }
+
+        const totalTrades = Number.isFinite(trades) ? trades : 0;
+
+        return {
+            ok: true,
+            label: label != null ? String(label) : null,
+            variant: variant != null ? String(variant) : null,
+            trades: totalTrades,
+            wins: Number.isFinite(wins) ? wins : null,
+            losses: Number.isFinite(losses) ? losses : null,
+            winRate: Number.isFinite(winRate) ? winRate : null,
+            netR: Number.isFinite(netR) ? netR : null,
+            maxDd: Number.isFinite(maxDd) ? maxDd : null,
+            noTrades: totalTrades === 0,
+            usedFallback,
+        };
+    } catch {
+        return { ok: false };
+    }
+}
+
+function fmtPreviewInt(v) {
+    if (v == null || !Number.isFinite(Number(v))) return "—";
+    return String(Math.round(Number(v)));
+}
+
+function fmtPreviewPct(v) {
+    if (v == null || !Number.isFinite(Number(v))) return "—";
+    return `${Number(v).toFixed(1)}%`;
+}
+
+function fmtPreviewR(v) {
+    if (v == null || !Number.isFinite(Number(v))) return "—";
+    const n = Number(v);
+    const sign = n >= 0 ? "+" : "−";
+    return `${sign}${Math.abs(n).toFixed(1)}R`;
+}
+
+function fmtPreviewDd(v) {
+    if (v == null || !Number.isFinite(Number(v))) return "—";
+    const m = Math.abs(Number(v));
+    return m === 0 ? "0.0R" : `−${m.toFixed(1)}R`;
+}
+
+function PreviewStat({ label, value, tone }) {
+    const valueClass =
+        tone === "pos" ? "text-[hsl(142_55%_55%)]"
+        : tone === "neg" ? "text-[hsl(0_65%_62%)]"
+        : "text-white";
+    return (
+        <div className="flex flex-col px-2 py-1.5 rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel)/0.4)]">
+            <span className="text-[9px] uppercase tracking-wider text-muted-lab">{label}</span>
+            <span className={`mt-0.5 text-[13px] font-semibold font-mono leading-tight ${valueClass}`}>{value}</span>
+        </div>
+    );
+}
+
+function PreviewIsolationNote() {
+    return (
+        <p className="mt-2 pt-1.5 border-t border-[hsl(var(--border-soft))] text-[9px] text-muted-lab leading-snug">
+            Preview is temporary and not saved to run history.
+        </p>
+    );
+}
+
+function PreviewResults({ bundle, isStale }) {
+    const metrics = useMemo(() => extractPreviewMetrics(bundle), [bundle]);
+
+    // Defensive: bundle exists but no usable metrics could be read.
+    if (!metrics.ok) {
+        return (
+            <div className="mt-2 rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel)/0.3)] px-3 py-2.5">
+                <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-semibold uppercase tracking-widest text-[hsl(var(--accent-primary))]">Preview Results</span>
+                </div>
+                <p className="mt-1.5 text-[10px] text-[hsl(38_85%_55%)] leading-snug">
+                    Preview bundle loaded, but metrics could not be read.
+                </p>
+                <PreviewIsolationNote />
+            </div>
+        );
+    }
+
+    const netRTone = metrics.netR == null ? undefined : metrics.netR >= 0 ? "pos" : "neg";
+
+    return (
+        <div className="mt-2 rounded border border-[hsl(var(--accent-primary)/0.25)] bg-[hsl(var(--accent-primary)/0.04)] px-3 py-2.5">
+            {/* Header */}
+            <div className="flex items-center gap-2">
+                <span className="text-[10px] font-semibold uppercase tracking-widest text-[hsl(var(--accent-primary))]">Preview Results</span>
+                <span className="text-[8px] px-1 py-0.5 rounded border border-[hsl(var(--accent-primary)/0.4)] bg-[hsl(var(--accent-primary)/0.12)] text-[hsl(var(--accent-primary))] font-semibold leading-none">
+                    TEMP
+                </span>
+            </div>
+
+            {/* Run label + variant */}
+            {(metrics.label || metrics.variant) && (
+                <div className="mt-1.5 space-y-0.5">
+                    {metrics.label && (
+                        <p className="text-[11px] text-white font-mono truncate" title={metrics.label}>{metrics.label}</p>
+                    )}
+                    {metrics.variant && (
+                        <p className="text-[10px] text-muted-lab truncate">
+                            Variant: <span className="text-white">{metrics.variant}</span>
+                        </p>
+                    )}
+                </div>
+            )}
+
+            {/* Stale reminder — placed directly with the results it qualifies */}
+            {isStale && (
+                <div className="mt-1.5 flex items-start gap-1.5 rounded border border-[hsl(38_85%_55%/0.3)] bg-[hsl(38_85%_55%/0.07)] px-2 py-1">
+                    <AlertTriangle size={10} className="shrink-0 mt-0.5 text-[hsl(38_85%_55%)]" />
+                    <p className="text-[9px] text-[hsl(38_85%_55%)] leading-snug">
+                        Draft changed since this preview — results may be stale.
+                    </p>
+                </div>
+            )}
+
+            {/* No-trades warning */}
+            {metrics.noTrades && (
+                <div className="mt-1.5 flex items-start gap-1.5 rounded border border-[hsl(38_85%_55%/0.3)] bg-[hsl(38_85%_55%/0.07)] px-2 py-1">
+                    <AlertTriangle size={10} className="shrink-0 mt-0.5 text-[hsl(38_85%_55%)]" />
+                    <p className="text-[9px] text-[hsl(38_85%_55%)] leading-snug">
+                        No trades found in this preview run.
+                    </p>
+                </div>
+            )}
+
+            {/* Compact stat cards */}
+            <div className="mt-2 grid grid-cols-2 gap-1.5">
+                <PreviewStat label="Trades"   value={fmtPreviewInt(metrics.trades)} />
+                <PreviewStat label="Win rate" value={fmtPreviewPct(metrics.winRate)} />
+                <PreviewStat label="Net R"    value={fmtPreviewR(metrics.netR)} tone={netRTone} />
+                <PreviewStat label="Max DD"   value={fmtPreviewDd(metrics.maxDd)} />
+            </div>
+
+            {/* Wins / losses detail */}
+            <div className="mt-1.5 flex items-center gap-3 px-0.5">
+                <span className="text-[9px] text-muted-lab">
+                    Wins <span className="text-[hsl(142_55%_55%)] font-medium">{fmtPreviewInt(metrics.wins)}</span>
+                </span>
+                <span className="text-[9px] text-muted-lab">
+                    Losses <span className="text-[hsl(0_65%_62%)] font-medium">{fmtPreviewInt(metrics.losses)}</span>
+                </span>
+                {metrics.usedFallback && (
+                    <span className="ml-auto text-[8px] text-muted-lab opacity-70" title="Some metrics were derived from trade rows rather than the summary block.">
+                        derived
+                    </span>
+                )}
+            </div>
+
+            <PreviewIsolationNote />
+        </div>
+    );
 }
 
 function StatusRow({ label, value, ok, warn }) {
