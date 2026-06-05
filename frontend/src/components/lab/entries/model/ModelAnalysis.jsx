@@ -16,6 +16,7 @@ import { TriggeredEdgeFunnelPanel } from "./TriggeredEdgeFunnelPanel";
 import { SameNextCandlePanel }    from "./SameNextCandlePanel";
 import { CancelReasonPanel }      from "./CancelReasonPanel";
 import { GhostOutcomePanel }      from "./GhostOutcomePanel";
+import { FftProtectionPanel }     from "./FftProtectionPanel";
 import { DirectionalScenariosPanel } from "./DirectionalScenariosPanel";
 import { buildAllModelCurves }    from "../analytics/equityCurveAnalytics";
 import { PROFILE_KEYS }           from "../analytics/entryRegistry";
@@ -110,6 +111,17 @@ export function ModelAnalysis({
         return (trades || []).some(t => t?.ghost_candidate === true);
     }, [trades]);
 
+    // FFT cancel presence check — drives FftProtectionPanel visibility.
+    // Checks cancel_reason (camelCase + snake_case) and outcome string.
+    const hasFftCancels = useMemo(() => {
+        return (trades || []).some(t => {
+            const cr = String(t?.cancel_reason ?? t?.cancelReason ?? "").toLowerCase();
+            if (cr === "first_failed_tag") return true;
+            const oc = String(t?.outcome ?? "").toUpperCase();
+            return oc === "FIRST_FAILED_TAG_CANCEL";
+        });
+    }, [trades]);
+
     // Phase 2: Lifecycle row — controls Tier 1.5 visibility.
     //
     // Three-way selection rule:
@@ -172,18 +184,20 @@ export function ModelAnalysis({
                 </div>
             )}
 
-            {/* Trigger Behavior tier — ghost outcomes, shown only when:
-                (a) we are in a triggered-edge lifecycle context AND
-                (b) ghost_candidate trades are present in the dataset.
+            {/* Trigger Behavior tier — ghost outcomes + FFT protection analytics.
+                Shown when:
+                  (a) we are in a triggered-edge lifecycle context AND
+                  (b) either ghost_candidate trades OR FFT cancels are present.
                 Phase 0: observational data only — no cancellation logic. */}
-            {lifecycleRow && hasGhostData && (
+            {lifecycleRow && (hasGhostData || hasFftCancels) && (
                 <>
                     <TierDivider
                         label="Trigger Behavior"
-                        sub="Ghost outcome distribution · observational only"
+                        sub="Ghost outcomes · FFT protection analytics · observational only"
                     />
                     <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-                        <GhostOutcomePanel trades={trades} />
+                        {hasGhostData && <GhostOutcomePanel trades={trades} />}
+                        {hasFftCancels && <FftProtectionPanel trades={trades} />}
                     </div>
                 </>
             )}

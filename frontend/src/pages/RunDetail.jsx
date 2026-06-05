@@ -36,6 +36,7 @@ import {
     PERFORMANCE_CATEGORIES,
 } from "@/data/tradeClassification";
 import { TradeSanityStrip } from "@/components/lab/TradeSanityStrip";
+import { computeFftAnalytics, fmtFftR, fmtFftPips } from "@/data/fftAnalytics";
 // RW-2: scenario-aware result-view selector (display-only; analytics wired in RW-3).
 import { useTradeUniverse } from "@/data/useTradeUniverse";
 import { buildAvailableOptions, collectAllEntryKeys, entryTradesByMode, buildCanonicalKey, derivePrimaryResultView } from "@/data/tradeUniverse";
@@ -2212,6 +2213,76 @@ export default function RunDetail() {
                                 tone={ghostNetR != null ? (ghostNetR >= 0 ? "primary" : "danger") : "muted"}
                                 icon={Activity}
                             />
+                        </div>
+                    </>
+                );
+            })()}
+
+            {/* ── FFT Protection KPI strip — shown only when FFT cancels are present ── */}
+            {(() => {
+                const allTrades = Array.isArray(trades) ? trades : [];
+                const fft = computeFftAnalytics(allTrades);
+                if (fft.fftCancels === 0) return null;
+                const netRTone = fft.ghostNetR > 0.005 ? "primary" : fft.ghostNetR < -0.005 ? "danger" : "muted";
+                const wrSub = fft.ghostWinRate != null
+                    ? `${fft.ghostWinRate.toFixed(1)}% ghost win rate`
+                    : fft.hasGhostData ? "—" : "no ghost sim";
+                return (
+                    <>
+                        <div className="px-6 mt-4 mb-1 text-[9px] font-ui uppercase tracking-[0.12em] text-[hsl(var(--warning)/0.65)]">
+                            ◆ FFT Protection — First Failed Visit
+                        </div>
+                        <div className="kpi-strip">
+                            <MetricChip
+                                size="compact"
+                                label="FFT Cancels"
+                                value={String(fft.fftCancels)}
+                                sub="pre-trigger cancels"
+                                tone="warning"
+                                icon={XIcon}
+                            />
+                            <MetricChip
+                                size="compact"
+                                label="Ghost Wins"
+                                value={String(fft.ghostWins)}
+                                sub={wrSub}
+                                tone={fft.hasGhostData ? "success" : "muted"}
+                                icon={TrendingUp}
+                            />
+                            <MetricChip
+                                size="compact"
+                                label="Ghost Losses"
+                                value={String(fft.ghostLosses)}
+                                sub="would have stopped out"
+                                tone={fft.hasGhostData ? "danger" : "muted"}
+                                icon={AlertTriangle}
+                            />
+                            <MetricChip
+                                size="compact"
+                                label="Ghost Unfilled"
+                                value={String(fft.ghostUnfilled)}
+                                sub="never triggered after cancel"
+                                tone="muted"
+                                icon={Hash}
+                            />
+                            <MetricChip
+                                size="compact"
+                                label="Ghost Net R"
+                                value={fft.hasGhostData ? fmtFftR(fft.ghostNetR) : "—"}
+                                sub="if none were cancelled"
+                                tone={fft.hasGhostData ? netRTone : "muted"}
+                                icon={Activity}
+                            />
+                            {fft.hasMoveAwayData && (
+                                <MetricChip
+                                    size="compact"
+                                    label="Avg Move-Away"
+                                    value={`${fmtFftPips(fft.avgMoveAwayAtCancel)} pips`}
+                                    sub="past OB edge at cancel"
+                                    tone="muted"
+                                    icon={Target}
+                                />
+                            )}
                         </div>
                     </>
                 );
