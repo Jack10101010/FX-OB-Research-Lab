@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { X, SlidersHorizontal, Database, Layers, Zap, GitBranch, Activity, Settings2 } from "lucide-react";
 import { useMasterControls } from "./MasterControlsContext";
 import { CONFIG_REGISTRY, getVisibleEntries } from "@/data/configRegistry";
@@ -39,11 +39,34 @@ const TIER_META = {
     3: { label: "Tier 3 — Full rerun",        desc: "Rerun required" },
 };
 
+// ─── Phase 3E — safe editable subset ─────────────────────────────────────────
+
+/**
+ * Only keys in this set receive editable controls in the drawer.
+ * All other fields remain read-only regardless of edit mode.
+ */
+const SAFE_EDITABLE_SUBSET = new Set([
+    // Execution — Tier 2 (rescore, no full rerun)
+    "rr",
+    "stopBuffer",
+    "entryBuffer",
+    // Cost — Tier 2
+    "spread",
+    "slippage",
+    "commission",
+    // Session chips — Tier 1 (frontend filter only)
+    "london",
+    "lull",
+    "newYork",
+    "asia",
+    "outside",
+]);
+
 // ─── Config view helpers ──────────────────────────────────────────────────────
 
 /**
  * Build a list of { group, subgroups: [{ subgroup, entries }] } for the
- * read-only config overview, respecting the showAdvanced toggle.
+ * config overview, respecting the showAdvanced toggle.
  */
 function buildGroupedConfig(showAdvanced) {
     const visible = getVisibleEntries(showAdvanced);
@@ -51,8 +74,7 @@ function buildGroupedConfig(showAdvanced) {
     for (const group of GROUP_ORDER) {
         const groupEntries = visible.filter((e) => e.group === group);
         if (groupEntries.length === 0) continue;
-        // Preserve original insertion order of subgroups
-        const seen = new Map(); // subgroup key → entry[]
+        const seen = new Map(); // subgroup → entry[]
         for (const entry of groupEntries) {
             const sg = entry.subgroup ?? null;
             if (!seen.has(sg)) seen.set(sg, []);
@@ -66,7 +88,7 @@ function buildGroupedConfig(showAdvanced) {
     return result;
 }
 
-/** Format a cfg value for display. */
+/** Format a cfg value for display in read-only mode. */
 function fmtCfgValue(v) {
     if (v === null || v === undefined || v === "") return "—";
     if (typeof v === "boolean") return v ? "Enabled" : "Disabled";
@@ -84,13 +106,15 @@ export function MasterControlsDrawer() {
         dirtyFields,
         dirtyCount, highestDirtyTier, hasDirtyFields,
         validationErrors, validationErrorList, hasValidationErrors,
+        setDraftField, resetDraft,
     } = useMasterControls();
     const { activeRunId } = useDataset();
 
-    // Local toggle — advanced fields hidden by default
+    // Local toggles
     const [showAdvanced, setShowAdvanced] = useState(false);
+    const [showEditMode, setShowEditMode] = useState(false);
 
-    // Grouped registry entries, recomputed only when the toggle changes
+    // Grouped registry entries — recomputed only when the advanced toggle changes
     const groupedConfig = useMemo(() => buildGroupedConfig(showAdvanced), [showAdvanced]);
 
     return (
@@ -151,19 +175,47 @@ export function MasterControlsDrawer() {
                         </div>
                     </section>
 
-                    {/* ── Active Config — Phase 3D read-only overview ── */}
+                    {/* ── Active Config — Phase 3D/3E config view ── */}
                     <section>
+                        {/* Section header with both toggles */}
                         <div className="flex items-center justify-between">
                             <SectionLabel icon={<Settings2 size={11} />} label="Active Config" />
-                            <button
-                                type="button"
-                                onClick={() => setShowAdvanced((v) => !v)}
-                                className="text-[10px] text-muted-lab hover:text-white transition-colors leading-none"
-                            >
-                                {showAdvanced ? "Hide advanced" : "Show advanced"}
-                            </button>
+                            <div className="flex items-center gap-2.5">
+                                {/* Edit mode toggle — only shown when config is available */}
+                                {effectiveConfig && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowEditMode((v) => !v)}
+                                        className={[
+                                            "text-[10px] transition-colors leading-none",
+                                            showEditMode
+                                                ? "text-[hsl(var(--accent-primary))] font-medium"
+                                                : "text-muted-lab hover:text-white",
+                                        ].join(" ")}
+                                    >
+                                        {showEditMode ? "Viewing draft edits" : "Edit safe fields"}
+                                    </button>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={() => setShowAdvanced((v) => !v)}
+                                    className="text-[10px] text-muted-lab hover:text-white transition-colors leading-none"
+                                >
+                                    {showAdvanced ? "Hide advanced" : "Show advanced"}
+                                </button>
+                            </div>
                         </div>
 
+                        {/* Draft actions bar — shown only when there are unsaved changes */}
+                        {hasDirtyFields && (
+                            <DraftActionsBar
+                                dirtyCount={dirtyCount}
+                                highestDirtyTier={highestDirtyTier}
+                                onReset={resetDraft}
+                            />
+                        )}
+
+                        {/* Empty state or grouped config view */}
                         {!effectiveConfig ? (
                             <div className="mt-2 px-3 py-4 rounded border border-dashed border-[hsl(var(--border-soft))] bg-[hsl(var(--panel)/0.2)]">
                                 <p className="text-[11px] text-muted-lab text-center leading-relaxed">
@@ -181,6 +233,8 @@ export function MasterControlsDrawer() {
                                         config={effectiveConfig}
                                         dirtyFields={dirtyFields}
                                         validationErrors={validationErrors}
+                                        showEditMode={showEditMode}
+                                        setDraftField={setDraftField}
                                     />
                                 ))}
                             </div>
@@ -268,7 +322,7 @@ export function MasterControlsDrawer() {
                 {/* Footer */}
                 <div className="flex-shrink-0 px-5 py-3 border-t border-[hsl(var(--border-soft))]">
                     <p className="text-[10px] text-muted-lab">
-                        Phase 3D — read-only config view · {REGISTRY_SUMMARY.total} cfg fields · {REGISTRY_SUMMARY.emitted} emitted
+                        Phase 3E — draft editing · {REGISTRY_SUMMARY.total} cfg fields · {REGISTRY_SUMMARY.emitted} emitted
                     </p>
                 </div>
             </div>
@@ -276,12 +330,34 @@ export function MasterControlsDrawer() {
     );
 }
 
-// ─── Active Config sub-components ─────────────────────────────────────────────
+// ─── Draft actions bar ────────────────────────────────────────────────────────
 
-function ConfigGroupBlock({ group, subgroups, config, dirtyFields, validationErrors }) {
+function DraftActionsBar({ dirtyCount, highestDirtyTier, onReset }) {
+    return (
+        <div className="mt-2 flex items-center justify-between px-2.5 py-1.5 rounded border border-[hsl(38_85%_55%/0.3)] bg-[hsl(38_85%_55%/0.07)]">
+            <span className="text-[10px] text-[hsl(38_85%_55%)]">
+                {dirtyCount} field{dirtyCount !== 1 ? "s" : ""} changed
+                {highestDirtyTier > 0 && (
+                    <span className="opacity-70"> · max tier {highestDirtyTier}</span>
+                )}
+            </span>
+            <button
+                type="button"
+                onClick={onReset}
+                className="ml-3 text-[10px] text-muted-lab hover:text-white transition-colors shrink-0"
+            >
+                Reset draft
+            </button>
+        </div>
+    );
+}
+
+// ─── Config group / subgroup / field row ──────────────────────────────────────
+
+function ConfigGroupBlock({ group, subgroups, config, dirtyFields, validationErrors, showEditMode, setDraftField }) {
     return (
         <div className="space-y-2">
-            {/* Group header — horizontal rule with label */}
+            {/* Group header — rule with label */}
             <div className="flex items-center gap-2">
                 <span className="shrink-0 text-[9px] font-bold uppercase tracking-widest text-[hsl(var(--accent-primary)/0.55)]">
                     {GROUP_LABELS[group] ?? group}
@@ -289,7 +365,6 @@ function ConfigGroupBlock({ group, subgroups, config, dirtyFields, validationErr
                 <div className="flex-1 h-px bg-[hsl(var(--border-soft))]" />
             </div>
 
-            {/* Subgroups */}
             {subgroups.map(({ subgroup, entries }) => (
                 <ConfigSubgroupBlock
                     key={subgroup ?? "_root"}
@@ -298,13 +373,15 @@ function ConfigGroupBlock({ group, subgroups, config, dirtyFields, validationErr
                     config={config}
                     dirtyFields={dirtyFields}
                     validationErrors={validationErrors}
+                    showEditMode={showEditMode}
+                    setDraftField={setDraftField}
                 />
             ))}
         </div>
     );
 }
 
-function ConfigSubgroupBlock({ subgroup, entries, config, dirtyFields, validationErrors }) {
+function ConfigSubgroupBlock({ subgroup, entries, config, dirtyFields, validationErrors, showEditMode, setDraftField }) {
     return (
         <div>
             {subgroup && (
@@ -321,6 +398,8 @@ function ConfigSubgroupBlock({ subgroup, entries, config, dirtyFields, validatio
                         isDirty={dirtyFields instanceof Set ? dirtyFields.has(entry.key) : false}
                         errorMsg={validationErrors?.[entry.key] ?? null}
                         isLast={idx === entries.length - 1}
+                        showEditMode={showEditMode}
+                        setDraftField={setDraftField}
                     />
                 ))}
             </div>
@@ -328,8 +407,10 @@ function ConfigSubgroupBlock({ subgroup, entries, config, dirtyFields, validatio
     );
 }
 
-function ConfigFieldRow({ entry, value, isDirty, errorMsg, isLast }) {
-    const displayValue = fmtCfgValue(value);
+function ConfigFieldRow({ entry, value, isDirty, errorMsg, isLast, showEditMode, setDraftField }) {
+    // An editable control is shown only for the explicitly safe subset
+    const isEditable = showEditMode && entry.editable && SAFE_EDITABLE_SUBSET.has(entry.key);
+
     return (
         <div
             className={[
@@ -339,7 +420,7 @@ function ConfigFieldRow({ entry, value, isDirty, errorMsg, isLast }) {
             ].filter(Boolean).join(" ")}
         >
             <div className="flex items-center gap-1.5">
-                {/* Label */}
+                {/* Label — always visible */}
                 <span
                     className="flex-1 min-w-0 text-[11px] text-muted-lab truncate"
                     title={entry.label}
@@ -347,13 +428,31 @@ function ConfigFieldRow({ entry, value, isDirty, errorMsg, isLast }) {
                     {entry.label}
                 </span>
 
-                {/* Value */}
-                <span
-                    className="shrink-0 text-[11px] text-white max-w-[110px] truncate text-right"
-                    title={displayValue}
-                >
-                    {displayValue}
-                </span>
+                {/* Value display or editable control */}
+                {isEditable ? (
+                    entry.inputType === "boolean" ? (
+                        <BoolToggle
+                            entryKey={entry.key}
+                            value={value}
+                            setDraftField={setDraftField}
+                        />
+                    ) : (
+                        // number fields (all remaining safe subset entries are numbers)
+                        <NumberFieldInput
+                            entryKey={entry.key}
+                            value={value}
+                            validation={entry.validation}
+                            setDraftField={setDraftField}
+                        />
+                    )
+                ) : (
+                    <span
+                        className="shrink-0 text-[11px] text-white max-w-[110px] truncate text-right"
+                        title={fmtCfgValue(value)}
+                    >
+                        {fmtCfgValue(value)}
+                    </span>
+                )}
 
                 {/* Tier chip */}
                 <TierChip tier={entry.tier} />
@@ -369,6 +468,88 @@ function ConfigFieldRow({ entry, value, isDirty, errorMsg, isLast }) {
                 </p>
             )}
         </div>
+    );
+}
+
+// ─── Editable controls ────────────────────────────────────────────────────────
+
+/**
+ * Compact number input.
+ * Maintains local string state to allow mid-type states like "3." without
+ * snapping back. Drafts are updated live on complete values; finalized on blur.
+ * Syncs back when the external value changes (resetDraft, run switch).
+ */
+function NumberFieldInput({ entryKey, value, validation, setDraftField }) {
+    const [raw, setRaw] = useState(() => (value != null ? String(value) : ""));
+
+    // Sync when the prop changes from outside (e.g. resetDraft clears draftConfig)
+    useEffect(() => {
+        setRaw(value != null ? String(value) : "");
+    }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    const handleChange = (e) => {
+        const s = e.target.value;
+        setRaw(s);
+        // Only commit to draft when the string is a complete number.
+        // Strings ending in "." or "-" are mid-type; committing them would
+        // cause a value round-trip that resets the input.
+        if (s !== "" && !s.endsWith(".") && s !== "-") {
+            const n = parseFloat(s);
+            if (Number.isFinite(n)) setDraftField(entryKey, n);
+        }
+    };
+
+    const handleBlur = () => {
+        const n = parseFloat(raw);
+        if (!Number.isFinite(n)) {
+            // Revert to the last committed value
+            setRaw(value != null ? String(value) : "");
+        } else {
+            setRaw(String(n));
+            setDraftField(entryKey, n);
+        }
+    };
+
+    return (
+        <input
+            type="number"
+            value={raw}
+            min={validation?.min}
+            max={validation?.max}
+            step={validation?.step ?? 1}
+            onChange={handleChange}
+            onBlur={handleBlur}
+            className={[
+                "shrink-0 w-[76px] h-6 px-1.5",
+                "text-[11px] text-white font-mono",
+                "bg-[hsl(var(--panel-2))] rounded",
+                "border border-[hsl(var(--border-soft))]",
+                "focus:outline-none focus:border-[hsl(var(--accent-primary)/0.6)]",
+                "transition-colors",
+            ].join(" ")}
+        />
+    );
+}
+
+/**
+ * Compact boolean toggle button.
+ * Clicking flips the boolean and calls setDraftField immediately.
+ */
+function BoolToggle({ entryKey, value, setDraftField }) {
+    const on = Boolean(value);
+    return (
+        <button
+            type="button"
+            onClick={() => setDraftField(entryKey, !on)}
+            className={[
+                "shrink-0 h-5 px-2 rounded text-[10px] font-medium border transition-colors",
+                on
+                    ? "text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.15)] border-[hsl(var(--accent-primary)/0.3)]"
+                    : "text-muted-lab bg-[hsl(var(--panel-2))] border-[hsl(var(--border-soft))] hover:text-white",
+            ].join(" ")}
+        >
+            {on ? "On" : "Off"}
+        </button>
     );
 }
 
