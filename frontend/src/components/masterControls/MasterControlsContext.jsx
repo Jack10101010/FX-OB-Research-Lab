@@ -6,7 +6,7 @@ import React, {
     useMemo,
     useEffect,
 } from "react";
-import { useDataset, getRunData } from "@/data/store";
+import { useDataset, getRunData, addRunBundle } from "@/data/store";
 import { REGISTRY_BY_KEY } from "@/data/configRegistry";
 import { buildRunConfigLoadReport, getDefaultBuilderConfig, buildBacktesterConfig } from "@/data/configTranslator";
 import { startSidecarRun, getSidecarRun, getSidecarRunBundle, cancelSidecarRun } from "@/data/sidecarClient";
@@ -63,6 +63,8 @@ const MasterControlsContext = createContext({
     cancelPreview:        () => {},
     clearPreview:         () => {},
     previewIsStale:       false,
+    // Promotion — Phase 4C
+    promotePreview:       () => {},
 });
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
@@ -251,6 +253,25 @@ export function MasterControlsProvider({ children }) {
     }, []);
 
     /**
+     * Promote the completed preview bundle into a permanent run — Phase 4C.
+     *
+     * This is the ONE deliberate point where the preview bundle crosses into the
+     * store. addRunBundle() does all the work: it assigns a unique run id (so it
+     * never overwrites an existing run), inserts the bundle, switches activeRunId
+     * to it, resets the selected variant + scenario, and persists. We then clear
+     * the local preview state (the activeRunId change also resets draft/preview via
+     * the effect above, but clearing explicitly keeps the transition deterministic).
+     *
+     * Guarded so it is a no-op unless a finished preview bundle exists. No compare,
+     * project assignment, export, rename, or duplicate detection — see Phase 4C scope.
+     */
+    const promotePreview = useCallback(() => {
+        if (preview.status !== "done" || !preview.bundle) return;
+        addRunBundle(preview.bundle);
+        setPreview(EMPTY_PREVIEW);
+    }, [preview.status, preview.bundle]);
+
+    /**
      * Cancel a queued/running preview.
      * cancelSidecarRun POSTs to /cancel/{runId}. The sidecar job object may carry
      * both run_id and job_id as distinct fields; the cancel endpoint uses run_id.
@@ -406,6 +427,8 @@ export function MasterControlsProvider({ children }) {
         cancelPreview,
         clearPreview,
         previewIsStale,
+        // Promotion — Phase 4C
+        promotePreview,
     }), [
         isOpen,
         openMasterControls,
@@ -429,6 +452,7 @@ export function MasterControlsProvider({ children }) {
         cancelPreview,
         clearPreview,
         previewIsStale,
+        promotePreview,
     ]);
 
     return (

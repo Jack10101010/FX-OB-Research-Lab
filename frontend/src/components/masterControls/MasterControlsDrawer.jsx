@@ -108,6 +108,7 @@ export function MasterControlsDrawer() {
         validationErrors, validationErrorList, hasValidationErrors,
         setDraftField, resetDraft,
         preview, startPreview, cancelPreview, clearPreview, previewIsStale,
+        promotePreview,
     } = useMasterControls();
     const { activeRunId } = useDataset();
 
@@ -293,6 +294,20 @@ export function MasterControlsDrawer() {
                                     className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded text-[10px] font-medium border transition-colors text-[hsl(0_65%_58%)] bg-[hsl(0_60%_50%/0.07)] border-[hsl(0_60%_50%/0.25)] hover:bg-[hsl(0_60%_50%/0.12)]"
                                 >
                                     Cancel preview
+                                </button>
+                            )}
+
+                            {/* Save As Run — Phase 4C: promote the finished preview bundle
+                                into a permanent run. addRunBundle assigns a unique id,
+                                makes it the active run, and clears the preview. */}
+                            {preview.status === "done" && preview.bundle && (
+                                <button
+                                    type="button"
+                                    onClick={promotePreview}
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded text-[10px] font-medium border transition-colors text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.10)] border-[hsl(var(--accent-primary)/0.3)] hover:bg-[hsl(var(--accent-primary)/0.18)]"
+                                >
+                                    <Database size={10} />
+                                    Save As Run
                                 </button>
                             )}
 
