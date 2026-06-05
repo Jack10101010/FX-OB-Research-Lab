@@ -72,8 +72,9 @@ function App() {
                         <Route path="/walk-forward" element={withRouteBoundary(<WalkForwardLab />)} />
                         <Route path="/hypothesis-lab" element={withRouteBoundary(<HypothesisLab />)} />
                         <Route path="/failures-lab" element={withRouteBoundary(<FailuresLab />)} />
-                        <Route path="/session-lab" element={withRouteBoundary(<SessionLab />)} />
-                        <Route path="/session-lab-v1" element={<SessionLabV1 />} />
+                        <Route path="/session-lab" element={withRouteBoundary(<SessionLabV1 />)} />
+                        <Route path="/session-lab-classic" element={withRouteBoundary(<SessionLab />)} />
+                        <Route path="/session-lab-v1" element={<Navigate to="/session-lab" replace />} />
                         <Route path="/parity" element={withRouteBoundary(<ParityDebugger />)} />
                         <Route path="/monte-carlo" element={withRouteBoundary(<MonteCarlo />)} />
                         <Route path="/settings" element={withRouteBoundary(<Settings />)} />

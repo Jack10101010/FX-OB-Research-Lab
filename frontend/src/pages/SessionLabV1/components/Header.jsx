@@ -1,5 +1,5 @@
 import React from "react";
-import { Settings, Download, Share2, BookmarkPlus, RotateCcw, FlaskConical, Calendar, Globe2 } from "lucide-react";
+import { Settings, RotateCcw, FlaskConical, Globe2 } from "lucide-react";
 
 const SegmentedControl = ({ value, options, onChange, testId }) => (
   <div
@@ -76,11 +76,6 @@ export default function Header({
 
       {/* RIGHT: controls */}
       <div className="flex flex-wrap items-center gap-2">
-        {/* Date range chip */}
-        <div className="inline-flex items-center gap-1.5 rounded-lg border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] px-3 py-2 text-[11px] text-[hsl(var(--text-2))]">
-          <Calendar size={12} />
-          <span className="font-num">Last 30D</span>
-        </div>
         {/* UTC chip */}
         <div className="inline-flex items-center gap-1.5 rounded-lg border border-[hsl(var(--accent-primary))]/30 bg-[hsl(var(--accent-primary)/0.08)] px-3 py-2 text-[11px] text-[hsl(var(--accent-primary))]">
           <Globe2 size={12} />
@@ -122,9 +117,6 @@ export default function Header({
 
         <HeaderButton icon={Settings} label="Session Settings" onClick={onOpenSettings} testId="btn-session-settings" />
         <HeaderButton icon={RotateCcw} label="Reset All Rules" onClick={onResetAll} testId="btn-reset-all" />
-        <HeaderButton icon={Download} label="Export" testId="btn-export" />
-        <HeaderButton icon={Share2} label="Share" testId="btn-share" />
-        <HeaderButton icon={BookmarkPlus} label="Save View" primary testId="btn-save-view" />
       </div>
     </header>
   );

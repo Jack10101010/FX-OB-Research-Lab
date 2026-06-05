@@ -43,8 +43,8 @@ const NAV_GROUPS = [
             { to: "/news-lab",        label: "News Lab",        icon: Newspaper },
             { to: "/trade-inspector", label: "Trade Inspector", icon: Crosshair },
             { to: "/failures-lab",    label: "Failures Lab",    icon: Microscope },
-            { to: "/session-lab",     label: "Session Lab",     icon: Clock },
-            { to: "/session-lab-v1",  label: "Session Lab V1",  icon: FlaskConical, badge: "Mock" },
+            { to: "/session-lab",         label: "Session Lab",         icon: Clock },
+            { to: "/session-lab-classic", label: "Session Lab Classic",  icon: FlaskConical, badge: "Classic" },
         ],
     },
     {

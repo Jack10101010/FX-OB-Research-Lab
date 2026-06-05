@@ -31,11 +31,11 @@ function Card({ children, className = "", testId }) {
   );
 }
 
-export default function VisualSummaryStrip({ visualData, sessionVisualData }) {
-  const netRBySession     = visualData?.netRBySession ?? MOCK_NET_R_BY_SESSION;
-  const tradesByDirection = sessionVisualData?.tradesByDirection ?? visualData?.tradesByDirection ?? MOCK_TRADES_BY_DIRECTION;
-  const tradesByStructure = sessionVisualData?.tradesByStructure ?? visualData?.tradesByStructure ?? MOCK_TRADES_BY_STRUCTURE;
-  const topEntryModel     = sessionVisualData?.topEntryModel     ?? visualData?.topEntryModel     ?? MOCK_TOP_ENTRY_MODEL;
+export default function VisualSummaryStrip({ visualData }) {
+  const netRBySession     = visualData?.netRBySession     ?? MOCK_NET_R_BY_SESSION;
+  const tradesByDirection = visualData?.tradesByDirection ?? MOCK_TRADES_BY_DIRECTION;
+  const tradesByStructure = visualData?.tradesByStructure ?? MOCK_TRADES_BY_STRUCTURE;
+  const topEntryModel     = visualData?.topEntryModel     ?? MOCK_TOP_ENTRY_MODEL;
 
   // Compute totals + legend dynamically from data arrays
   const dirTotal  = tradesByDirection.reduce((s, d) => s + d.value, 0);
@@ -80,7 +80,7 @@ function NetRBySession({ data }) {
       <div className="flex items-baseline justify-between mb-3">
         <SectionLabel>Net R by Session</SectionLabel>
         <span className="text-[9px] text-muted-lab font-ui uppercase tracking-[0.12em]">
-          Filtered Preview
+          All Sessions
         </span>
       </div>
       <div className="h-44" data-testid="chart-net-r-by-session">

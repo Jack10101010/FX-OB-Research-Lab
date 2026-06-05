@@ -128,8 +128,9 @@ function PreviewToggle({ previewMode, setPreviewMode }) {
 // Main component
 // ─────────────────────────────────────────────────────────────────────────────
 
-export default function RunImpactSummary({ previewMode, setPreviewMode, impactSummary }) {
+export default function RunImpactSummary({ previewMode, setPreviewMode, impactSummary, resultViewLabel }) {
   const { baseline, preview, delta } = impactSummary ?? MOCK_IMPACT_SUMMARY;
+  const baselineEyebrow = resultViewLabel ?? "Current Result View";
 
   const baseNetRPos    = baseline.netR >= 0;
   const previewNetRPos = preview.netR  >= 0;
@@ -146,6 +147,9 @@ export default function RunImpactSummary({ previewMode, setPreviewMode, impactSu
             Run Impact Summary
           </span>
           <span className="row-chip row-chip-secondary">Live</span>
+          {resultViewLabel && resultViewLabel !== "Baseline" && (
+            <span className="row-chip row-chip-cyan">{resultViewLabel}</span>
+          )}
         </div>
         <PreviewToggle previewMode={previewMode} setPreviewMode={setPreviewMode} />
       </div>
@@ -155,7 +159,7 @@ export default function RunImpactSummary({ previewMode, setPreviewMode, impactSu
         {/* Original */}
         <div className="flex-1 min-w-0 px-4 py-3 lg:border-r lg:border-[hsl(var(--border-soft))]">
           <RunCol
-            eyebrow="Original Run"
+            eyebrow={baselineEyebrow}
             netR={`${baseNetRPos ? "+" : ""}${baseline.netR}R`}
             netRClass={baseNetRPos ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]"}
             stats={[
@@ -173,7 +177,7 @@ export default function RunImpactSummary({ previewMode, setPreviewMode, impactSu
         {/* Filtered */}
         <div className="flex-1 min-w-0 px-4 py-3 lg:border-r lg:border-[hsl(var(--border-soft))]">
           <RunCol
-            eyebrow="Filtered Preview"
+            eyebrow="After Session Rules"
             netR={`${previewNetRPos ? "+" : ""}${preview.netR}R`}
             netRClass={previewNetRPos ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]"}
             stats={[

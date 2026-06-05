@@ -4,7 +4,7 @@ import {
   ToggleChip,
   fmtR,
 } from "./primitives";
-import { Moon, Building2, Coffee, Building, Sparkles, Globe, MoreHorizontal } from "lucide-react";
+import { Moon, Building2, Coffee, Building, Sparkles, Globe } from "lucide-react";
 
 const ICONS = {
   asia: Moon,
@@ -43,17 +43,6 @@ function SessionCard({ session, selected, onSelect, onToggle }) {
         dimmed ? "opacity-50 grayscale-[40%]" : "",
       ].join(" ")}
     >
-      {/* Options */}
-      <div className="absolute top-3 right-3">
-        <button
-          data-testid={`session-card-${session.key}-options`}
-          onClick={(e) => e.stopPropagation()}
-          className="text-muted-lab hover:text-[hsl(var(--text))] p-1 rounded"
-        >
-          <MoreHorizontal size={14} />
-        </button>
-      </div>
-
       {/* Title row */}
       <div className="flex items-start gap-3 mb-3">
         <div
@@ -216,7 +205,7 @@ export default function SessionControlCenter({ sessions, selectedKey, onSelect, 
       <div className="flex flex-wrap items-center gap-3 mb-5">
         <SectionLabel>Session Control Center</SectionLabel>
         <span className="text-[10px] text-muted-lab font-ui">
-          Toggle sessions, directions and structures — preview updates instantly.
+          Select a session to drill in. Toggle rules to update the Run Impact Summary.
         </span>
       </div>
 
@@ -234,6 +223,9 @@ export default function SessionControlCenter({ sessions, selectedKey, onSelect, 
           ))}
         </div>
       </div>
+      <p className="mt-3 text-[10px] text-muted-lab font-num">
+        Session metrics are unfiltered. Toggle rules only affect the Run Impact Summary above.
+      </p>
     </div>
   );
 }

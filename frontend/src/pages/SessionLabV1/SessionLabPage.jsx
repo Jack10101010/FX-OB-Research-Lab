@@ -50,7 +50,7 @@ export default function SessionLabPage() {
   const runId = dataset.ACTIVE_RUN?.id ?? null;
   const bundle = runId ? dataset.getRunData(runId) : null;
   const primaryScenario = useMemo(() => derivePrimaryResultView(bundle), [bundle]);
-  const { trades: allTrades = [] } = useTradeUniverse(runId, primaryScenario);
+  const { trades: allTrades = [], label: resultViewLabel = "Baseline" } = useTradeUniverse(runId, primaryScenario);
   const hasRealData = Array.isArray(allTrades) && allTrades.length > 0;
 
   // Rule state for real data (keyed by canonical session name)
@@ -253,7 +253,7 @@ export default function SessionLabPage() {
                 className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--success))]"
                 style={{ boxShadow: "0 0 6px hsl(var(--success))" }}
               />
-              Live Data · {allTrades.length} trades
+              Live Data · {resultViewLabel} · {allTrades.length} trades
             </span>
           ) : (
             <span
@@ -270,6 +270,7 @@ export default function SessionLabPage() {
           previewMode={previewMode}
           setPreviewMode={setPreviewMode}
           impactSummary={impactSummary}
+          resultViewLabel={resultViewLabel}
         />
 
         <SessionControlCenter
@@ -279,7 +280,7 @@ export default function SessionLabPage() {
           onToggle={toggleSessionField}
         />
 
-        <VisualSummaryStrip visualData={visualData} sessionVisualData={sessionVisualData} />
+        <VisualSummaryStrip visualData={visualData} />
 
         {/* Deep Dive: top row = Deep Dive + Quick Controls; Impact full width below */}
         <div className="space-y-6">
