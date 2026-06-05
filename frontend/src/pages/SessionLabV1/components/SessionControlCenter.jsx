@@ -220,16 +220,19 @@ export default function SessionControlCenter({ sessions, selectedKey, onSelect, 
         </span>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-        {sessions.map((s) => (
-          <SessionCard
-            key={s.key}
-            session={s}
-            selected={s.key === selectedKey}
-            onSelect={onSelect}
-            onToggle={onToggle}
-          />
-        ))}
+      <div className="overflow-x-auto session-cards-scroll pb-3 -mb-1">
+        <div className="flex gap-4" style={{ minWidth: "max-content" }}>
+          {sessions.map((s) => (
+            <div key={s.key} className="w-[218px] shrink-0">
+              <SessionCard
+                session={s}
+                selected={s.key === selectedKey}
+                onSelect={onSelect}
+                onToggle={onToggle}
+              />
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
