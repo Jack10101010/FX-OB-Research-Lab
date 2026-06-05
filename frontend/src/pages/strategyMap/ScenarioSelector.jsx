@@ -14,6 +14,7 @@
 import React from "react";
 import { TradeSanityStrip } from "@/components/lab/TradeSanityStrip";
 import { summarizeTradeSanity } from "@/data/tradeClassification";
+import { computeFftAnalytics, fmtFftR, fmtFftPips } from "@/data/fftAnalytics";
 
 // ---------------------------------------------------------------------------
 // Small primitives
@@ -84,6 +85,9 @@ function fillModeDisplayLabel(fm) {
     if (fm === "both") return "Both";
     if (fm === "same") return "Same";
     if (fm === "next") return "Next";
+    // Delay variants: "d2" → "Delay +2", "d3" → "Delay +3", etc.
+    const dm = typeof fm === "string" ? fm.match(/^d(\d+)$/) : null;
+    if (dm) return `Delay +${dm[1]}`;
     return String(fm);
 }
 
@@ -91,17 +95,42 @@ function buildViewingLabel(resolvedFamily, resolvedThreshold, resolvedFillMode) 
     if (!resolvedFamily || resolvedFamily === "baseline") return "Viewing: Baseline";
     const thresh = resolvedThreshold != null ? ` · ${fmtThreshold(resolvedThreshold)}` : "";
     if (resolvedFamily === "triggered_edge") {
-        const fill = resolvedFillMode === "same"
-            ? " · Same"
-            : resolvedFillMode === "next"
-                ? " · Next"
-                : " · Both";
+        const fill = resolvedFillMode == null ? " · Both"
+            : ` · ${fillModeDisplayLabel(resolvedFillMode)}`;
         return `Viewing: Triggered Edge${thresh}${fill}`;
     }
     if (resolvedFamily === "penetration") {
         return `Viewing: Penetration${thresh}`;
     }
     return `Viewing: ${familyDisplayLabel(resolvedFamily)}${thresh}`;
+}
+
+// ---------------------------------------------------------------------------
+// FftChip — tiny inline stat tile for the FFT summary row.
+// ---------------------------------------------------------------------------
+
+function FftChip({ label, value, tone = "default", title }) {
+    const toneClass = {
+        success: "text-[hsl(var(--success))]",
+        danger:  "text-[hsl(var(--danger))]",
+        warning: "text-[hsl(var(--warning))]",
+        muted:   "text-[hsl(var(--text-2))]",
+        default: "text-[hsl(var(--text))]",
+    }[tone] ?? "text-[hsl(var(--text))]";
+
+    return (
+        <span
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 border border-[hsl(var(--border-soft)/0.4)] bg-[hsl(var(--panel)/0.4)] clip-bevel-sm"
+            title={title}
+        >
+            <span className="text-[8.5px] font-ui uppercase tracking-[0.1em] text-muted-lab opacity-60">
+                {label}
+            </span>
+            <span className={`text-[10px] font-num font-semibold tabular-nums ${toneClass}`}>
+                {value}
+            </span>
+        </span>
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -136,7 +165,8 @@ export function ScenarioSelector({ resolvedScenario, onScenarioChange, onVariant
     // Replaces the old inline computeFills + computeProfitFactor pair, which
     // didn't understand protected / unfilled / news-flatten and so disagreed
     // with the rest of the app on the row-vs-fill count and PF denominator.
-    const sanity = React.useMemo(() => summarizeTradeSanity(trades || []), [trades]);
+    const sanity  = React.useMemo(() => summarizeTradeSanity(trades || []), [trades]);
+    const fftStats = React.useMemo(() => computeFftAnalytics(trades || []), [trades]);
 
     // ── Directional scenario support ─────────────────────────────────────────
     const isDirectionalMode = scenario?.family === "directional";
@@ -311,6 +341,61 @@ export function ScenarioSelector({ resolvedScenario, onScenarioChange, onVariant
                 row. Driven by summarizeTradeSanity so the numbers track every
                 other strip in the app (Run Detail ledger, other labs). */}
             <TradeSanityStrip stats={sanity} showBreakdown={true} />
+
+            {/* ── FFT summary row — shown only when FFT cancels are present ── */}
+            {fftStats.fftCancels > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                    {/* Section label */}
+                    <span className="text-[8px] font-ui uppercase tracking-[0.14em] text-[hsl(var(--warning)/0.65)] mr-0.5 shrink-0">
+                        FFT:
+                    </span>
+
+                    {/* FFT Cancels */}
+                    <FftChip
+                        label="Cancels"
+                        value={String(fftStats.fftCancels)}
+                        tone="warning"
+                    />
+
+                    {/* Ghost outcomes — only when ghost sim data is present */}
+                    {fftStats.hasGhostData && (
+                        <>
+                            <FftChip
+                                label="Ghost W"
+                                value={String(fftStats.ghostWins)}
+                                tone="success"
+                            />
+                            <FftChip
+                                label="Ghost L"
+                                value={String(fftStats.ghostLosses)}
+                                tone="danger"
+                            />
+                            {fftStats.ghostUnfilled > 0 && (
+                                <FftChip
+                                    label="Unfilled"
+                                    value={String(fftStats.ghostUnfilled)}
+                                    tone="muted"
+                                />
+                            )}
+                            <FftChip
+                                label="Net R"
+                                value={fmtFftR(fftStats.ghostNetR)}
+                                tone={fftStats.ghostNetR > 0.005 ? "success" : fftStats.ghostNetR < -0.005 ? "danger" : "muted"}
+                            />
+                        </>
+                    )}
+
+                    {/* Move-away distance — when threshold was used */}
+                    {fftStats.hasMoveAwayData && (
+                        <FftChip
+                            label="Avg dist"
+                            value={`${fmtFftPips(fftStats.avgMoveAwayAtCancel)}p`}
+                            tone="muted"
+                            title={`Average pips past OB edge at cancel. Max: ${fmtFftPips(fftStats.maxMoveAwayAtCancel)} pips.`}
+                        />
+                    )}
+                </div>
+            )}
         </div>
     );
 }
@@ -368,10 +453,8 @@ function BadgeCell({ label, value, tone = "default", mono = false, subtle = fals
 function resolvedContextLabel({ resolvedFamily, resolvedThreshold, resolvedFillMode }) {
     if (!resolvedFamily || resolvedFamily === "baseline") return "Baseline";
     const thresh = resolvedThreshold != null ? ` ${fmtThreshold(resolvedThreshold)}` : "";
-    const fill =
-        resolvedFillMode === "same" ? " · Same"
-        : resolvedFillMode === "next" ? " · Next"
-        : " · Both";
+    const fill = resolvedFillMode == null ? " · Both"
+        : ` · ${fillModeDisplayLabel(resolvedFillMode)}`;
     if (resolvedFamily === "triggered_edge") return `Triggered Edge${thresh}${fill}`;
     if (resolvedFamily === "penetration")    return `Penetration${thresh}`;
     return `${familyDisplayLabel(resolvedFamily)}${thresh}${fill}`;

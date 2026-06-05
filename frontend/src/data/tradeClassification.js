@@ -515,7 +515,9 @@ export function buildDirStructMatrix(trades) {
         if (!isPerformanceTrade(trade)) continue;
         totalPerf++;
         const dir = directionBucket(trade) ?? "unknown";
-        const struct = normalizeStructure(trade);
+        // Inline structure normalization (normalizeStructure lives in sessionAnalytics, not here)
+        const rawStruct = String(trade.structure || trade.structure_type || "").toUpperCase();
+        const struct = rawStruct === "BOS" ? "BOS" : rawStruct === "CHOCH" ? "CHoCH" : "Unknown";
         const cell = getCell(dir, struct);
         cell.total++;
         if (isWinTrade(trade)) { cell.win++; totalWin++; }
@@ -588,8 +590,16 @@ export function displayOutcomeLabel(rawOutcome, options = {}) {
 export function displayCancelReason(rawReason) {
     if (!rawReason) return "";
     const norm = normalizeOutcome(rawReason);
-    if (norm === "INVALIDATED_BEFORE_EDGE_ENTRY") return "Protected before edge entry";
-    if (norm === "INVALID" || norm === "INVALIDATED") return "Protected before edge entry";
+    // Canonical cancel reason labels (spec-aligned)
+    if (norm === "FIRST_FAILED_TAG") return "First Failed Visit";
+    if (norm === "RETRACE_CANCEL") return "Move-Away / Retrace Cancel";
+    if (norm === "NEWS_TOUCH_CANCEL") return "News Touch Cancel";
+    if (norm === "SESSION_FILTER_CANCEL") return "Session Filter Cancel";
+    if (norm === "NEWS_BLACKOUT_CANCEL") return "News Blackout Cancel";
+    if (norm === "INVALIDATED_BEFORE_EDGE_ENTRY") return "Invalidated Before Entry";
+    if (norm === "NEVER_FILLED_AFTER_TRIGGER") return "Never Filled After Trigger";
+    if (norm === "NEVER_TRIGGERED") return "Never Triggered";
+    if (norm === "INVALID" || norm === "INVALIDATED") return "Invalidated Before Entry";
     // Generic title-case fallback for any other reason string.
     return String(rawReason)
         .replace(/_/g, " ")

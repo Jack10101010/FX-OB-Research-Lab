@@ -472,8 +472,10 @@ function describeUniverseLabel({ universeType, resolvedFamily, resolvedThreshold
         return "Baseline";
     }
     const thresh = resolvedThreshold != null ? ` ${formatThreshold(resolvedThreshold)}` : "";
+    const dm = typeof resolvedFillMode === "string" ? resolvedFillMode.match(/^d(\d+)$/) : null;
     const fill = resolvedFillMode === "same" ? " · Same"
               : resolvedFillMode === "next" ? " · Next"
+              : dm ? ` · Delay +${dm[1]}`
               : " · Both";
     if (resolvedFamily === "triggered_edge") return `Triggered Edge${thresh}${fill}`;
     if (resolvedFamily === "penetration")    return `Penetration${thresh}`;
