@@ -1,12 +1,23 @@
-import React from "react";
-import { X, SlidersHorizontal, Database, Layers, Zap, GitBranch, Activity } from "lucide-react";
+import React, { useState, useMemo } from "react";
+import { X, SlidersHorizontal, Database, Layers, Zap, GitBranch, Activity, Settings2 } from "lucide-react";
 import { useMasterControls } from "./MasterControlsContext";
-import { CONFIG_REGISTRY } from "@/data/configRegistry";
+import { CONFIG_REGISTRY, getVisibleEntries } from "@/data/configRegistry";
 import { useDataset } from "@/data/store";
 
 // ─── Registry summary (static — computed once at module load) ────────────────
 
 const GROUP_ORDER = ["core", "structure", "execution", "entry", "protection", "session", "news", "cost"];
+
+const GROUP_LABELS = {
+    core:       "Core",
+    structure:  "Structure",
+    execution:  "Execution",
+    entry:      "Entry",
+    protection: "Protection",
+    session:    "Session",
+    news:       "News",
+    cost:       "Cost",
+};
 
 const REGISTRY_SUMMARY = (() => {
     const total      = CONFIG_REGISTRY.length;
@@ -28,16 +39,59 @@ const TIER_META = {
     3: { label: "Tier 3 — Full rerun",        desc: "Rerun required" },
 };
 
+// ─── Config view helpers ──────────────────────────────────────────────────────
+
+/**
+ * Build a list of { group, subgroups: [{ subgroup, entries }] } for the
+ * read-only config overview, respecting the showAdvanced toggle.
+ */
+function buildGroupedConfig(showAdvanced) {
+    const visible = getVisibleEntries(showAdvanced);
+    const result  = [];
+    for (const group of GROUP_ORDER) {
+        const groupEntries = visible.filter((e) => e.group === group);
+        if (groupEntries.length === 0) continue;
+        // Preserve original insertion order of subgroups
+        const seen = new Map(); // subgroup key → entry[]
+        for (const entry of groupEntries) {
+            const sg = entry.subgroup ?? null;
+            if (!seen.has(sg)) seen.set(sg, []);
+            seen.get(sg).push(entry);
+        }
+        result.push({
+            group,
+            subgroups: [...seen.entries()].map(([sg, entries]) => ({ subgroup: sg, entries })),
+        });
+    }
+    return result;
+}
+
+/** Format a cfg value for display. */
+function fmtCfgValue(v) {
+    if (v === null || v === undefined || v === "") return "—";
+    if (typeof v === "boolean") return v ? "Enabled" : "Disabled";
+    if (Array.isArray(v)) return v.length > 0 ? v.join(", ") : "—";
+    const s = String(v);
+    return s === "" ? "—" : s;
+}
+
 // ─── Drawer ──────────────────────────────────────────────────────────────────
 
 export function MasterControlsDrawer() {
     const {
         isOpen, closeMasterControls,
-        activeConfig,
+        activeConfig, effectiveConfig,
+        dirtyFields,
         dirtyCount, highestDirtyTier, hasDirtyFields,
-        validationErrorList, hasValidationErrors,
+        validationErrors, validationErrorList, hasValidationErrors,
     } = useMasterControls();
     const { activeRunId } = useDataset();
+
+    // Local toggle — advanced fields hidden by default
+    const [showAdvanced, setShowAdvanced] = useState(false);
+
+    // Grouped registry entries, recomputed only when the toggle changes
+    const groupedConfig = useMemo(() => buildGroupedConfig(showAdvanced), [showAdvanced]);
 
     return (
         <>
@@ -95,6 +149,42 @@ export function MasterControlsDrawer() {
                                 <p className="text-[11px] text-muted-lab">No active run — import a bundle via the toolbar</p>
                             )}
                         </div>
+                    </section>
+
+                    {/* ── Active Config — Phase 3D read-only overview ── */}
+                    <section>
+                        <div className="flex items-center justify-between">
+                            <SectionLabel icon={<Settings2 size={11} />} label="Active Config" />
+                            <button
+                                type="button"
+                                onClick={() => setShowAdvanced((v) => !v)}
+                                className="text-[10px] text-muted-lab hover:text-white transition-colors leading-none"
+                            >
+                                {showAdvanced ? "Hide advanced" : "Show advanced"}
+                            </button>
+                        </div>
+
+                        {!effectiveConfig ? (
+                            <div className="mt-2 px-3 py-4 rounded border border-dashed border-[hsl(var(--border-soft))] bg-[hsl(var(--panel)/0.2)]">
+                                <p className="text-[11px] text-muted-lab text-center leading-relaxed">
+                                    No active run config loaded yet.
+                                    <span className="block mt-0.5 text-[10px]">Import or select a run first.</span>
+                                </p>
+                            </div>
+                        ) : (
+                            <div className="mt-2 space-y-3">
+                                {groupedConfig.map(({ group, subgroups }) => (
+                                    <ConfigGroupBlock
+                                        key={group}
+                                        group={group}
+                                        subgroups={subgroups}
+                                        config={effectiveConfig}
+                                        dirtyFields={dirtyFields}
+                                        validationErrors={validationErrors}
+                                    />
+                                ))}
+                            </div>
+                        )}
                     </section>
 
                     {/* Draft state — Phase 3C debug readout */}
@@ -178,7 +268,7 @@ export function MasterControlsDrawer() {
                 {/* Footer */}
                 <div className="flex-shrink-0 px-5 py-3 border-t border-[hsl(var(--border-soft))]">
                     <p className="text-[10px] text-muted-lab">
-                        Phase 3C — context state · {REGISTRY_SUMMARY.total} cfg fields · {REGISTRY_SUMMARY.emitted} emitted
+                        Phase 3D — read-only config view · {REGISTRY_SUMMARY.total} cfg fields · {REGISTRY_SUMMARY.emitted} emitted
                     </p>
                 </div>
             </div>
@@ -186,7 +276,128 @@ export function MasterControlsDrawer() {
     );
 }
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
+// ─── Active Config sub-components ─────────────────────────────────────────────
+
+function ConfigGroupBlock({ group, subgroups, config, dirtyFields, validationErrors }) {
+    return (
+        <div className="space-y-2">
+            {/* Group header — horizontal rule with label */}
+            <div className="flex items-center gap-2">
+                <span className="shrink-0 text-[9px] font-bold uppercase tracking-widest text-[hsl(var(--accent-primary)/0.55)]">
+                    {GROUP_LABELS[group] ?? group}
+                </span>
+                <div className="flex-1 h-px bg-[hsl(var(--border-soft))]" />
+            </div>
+
+            {/* Subgroups */}
+            {subgroups.map(({ subgroup, entries }) => (
+                <ConfigSubgroupBlock
+                    key={subgroup ?? "_root"}
+                    subgroup={subgroup}
+                    entries={entries}
+                    config={config}
+                    dirtyFields={dirtyFields}
+                    validationErrors={validationErrors}
+                />
+            ))}
+        </div>
+    );
+}
+
+function ConfigSubgroupBlock({ subgroup, entries, config, dirtyFields, validationErrors }) {
+    return (
+        <div>
+            {subgroup && (
+                <p className="mb-1 pl-0.5 text-[9px] uppercase tracking-wider text-muted-lab font-medium">
+                    {subgroup}
+                </p>
+            )}
+            <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel)/0.3)] overflow-hidden">
+                {entries.map((entry, idx) => (
+                    <ConfigFieldRow
+                        key={entry.key}
+                        entry={entry}
+                        value={config[entry.key]}
+                        isDirty={dirtyFields instanceof Set ? dirtyFields.has(entry.key) : false}
+                        errorMsg={validationErrors?.[entry.key] ?? null}
+                        isLast={idx === entries.length - 1}
+                    />
+                ))}
+            </div>
+        </div>
+    );
+}
+
+function ConfigFieldRow({ entry, value, isDirty, errorMsg, isLast }) {
+    const displayValue = fmtCfgValue(value);
+    return (
+        <div
+            className={[
+                "px-2.5 py-1.5",
+                isDirty ? "bg-[hsl(38_80%_50%/0.07)]" : "",
+                !isLast ? "border-b border-[hsl(var(--border-soft))]" : "",
+            ].filter(Boolean).join(" ")}
+        >
+            <div className="flex items-center gap-1.5">
+                {/* Label */}
+                <span
+                    className="flex-1 min-w-0 text-[11px] text-muted-lab truncate"
+                    title={entry.label}
+                >
+                    {entry.label}
+                </span>
+
+                {/* Value */}
+                <span
+                    className="shrink-0 text-[11px] text-white max-w-[110px] truncate text-right"
+                    title={displayValue}
+                >
+                    {displayValue}
+                </span>
+
+                {/* Tier chip */}
+                <TierChip tier={entry.tier} />
+
+                {/* Dirty marker */}
+                {isDirty && <ChangedChip />}
+            </div>
+
+            {/* Validation error sub-row */}
+            {errorMsg && (
+                <p className="mt-0.5 text-[9px] text-[hsl(0_70%_60%)] leading-tight">
+                    {errorMsg}
+                </p>
+            )}
+        </div>
+    );
+}
+
+// ─── Tier + Changed chips ─────────────────────────────────────────────────────
+
+const TIER_CHIP_CLS = {
+    1: "text-[hsl(142_55%_45%)] bg-[hsl(142_55%_45%/0.12)] border-[hsl(142_55%_45%/0.3)]",
+    2: "text-[hsl(38_85%_55%)] bg-[hsl(38_85%_55%/0.12)] border-[hsl(38_85%_55%/0.3)]",
+    3: "text-[hsl(18_80%_58%)] bg-[hsl(18_80%_58%/0.12)] border-[hsl(18_80%_58%/0.3)]",
+};
+
+function TierChip({ tier }) {
+    const cls = TIER_CHIP_CLS[tier] ?? "text-muted-lab bg-[hsl(var(--panel-2))] border-transparent";
+    return (
+        <span className={`shrink-0 text-[8px] px-1 py-0.5 rounded border font-mono leading-none ${cls}`}>
+            T{tier}
+        </span>
+    );
+}
+
+function ChangedChip() {
+    return (
+        <span className="shrink-0 text-[8px] px-1 py-0.5 rounded border font-semibold leading-none text-[hsl(38_85%_55%)] bg-[hsl(38_85%_55%/0.12)] border-[hsl(38_85%_55%/0.3)]">
+            ~
+        </span>
+    );
+}
+
+// ─── Shared sub-components ────────────────────────────────────────────────────
 
 function SectionLabel({ icon, label }) {
     return (
