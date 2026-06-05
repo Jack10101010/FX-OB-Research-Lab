@@ -1,6 +1,6 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import { Clock, Database, Search, FolderKanban, Activity, ChevronDown, Check } from "lucide-react";
+import { Clock, Database, Search, FolderKanban, Activity, ChevronDown, Check, SlidersHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
     useDataset,
@@ -9,9 +9,11 @@ import {
     getRunDisplayName,
     compactTimeframe,
 } from "@/data/store";
+import { useMasterControls } from "@/components/masterControls/MasterControlsContext";
 
 export function TopBar() {
     const navigate = useNavigate();
+    const { isOpen, toggleMasterControls } = useMasterControls();
     return (
         <div data-testid="app-topbar" className="relative z-20 px-6 py-3 border-b border-[hsl(var(--border-soft))] bg-[hsl(var(--bg-2)/0.6)] backdrop-blur-xl">
             <div className="flex items-center gap-3 flex-wrap">
@@ -30,6 +32,21 @@ export function TopBar() {
                     />
                 </div>
                 <div className="flex-1" />
+                <button
+                    type="button"
+                    data-testid="topbar-master-controls"
+                    onClick={toggleMasterControls}
+                    title="Research Control Plane"
+                    className={cn(
+                        "inline-flex items-center gap-2 px-2.5 py-1 border clip-bevel-sm font-ui transition-colors",
+                        isOpen
+                            ? "border-[hsl(var(--accent-primary)/0.5)] bg-[hsl(var(--accent-primary)/0.08)] text-[hsl(var(--accent-primary))]"
+                            : "border-[hsl(var(--border-soft))] bg-[hsl(var(--panel)/0.6)] text-muted-lab hover:border-[hsl(var(--border-mid))] hover:text-white",
+                    )}
+                >
+                    <SlidersHorizontal className="w-3 h-3 shrink-0" />
+                    <span className="text-[10px] uppercase tracking-wider">Controls</span>
+                </button>
             </div>
         </div>
     );
