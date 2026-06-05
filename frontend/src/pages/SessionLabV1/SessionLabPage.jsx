@@ -34,6 +34,7 @@ import {
   buildImpactOnRunData,
   buildSessionVisualData,
   buildStreaksData,
+  applyDeepDiveFilters,
 } from "./data/sessionLabV1Adapter";
 
 /** Maps V1 lowercase keys → canonical session names used by sessionRules. */
@@ -44,6 +45,11 @@ const V1_TO_CANONICAL = {
   ny:      "New York",
   nypm:    "NY PM",
   outside: "Outside",
+};
+
+const DEFAULT_DEEP_DIVE_FILTERS = {
+  entryModel: { baseline: true, penetration: true, triggeredEdge: true },
+  teDelay:    { same: true, next: true, d2: true, d3: true },
 };
 
 export default function SessionLabPage() {
@@ -59,6 +65,9 @@ export default function SessionLabPage() {
   const [sessionRules, setSessionRules] = useState(() =>
     buildDefaultSessionRules(SESSION_KEYS)
   );
+
+  // Deep Dive exploration filters (Entry Model + TE Delay) — affect Deep Dive tabs only
+  const [deepDiveFilters, setDeepDiveFilters] = useState(DEFAULT_DEEP_DIVE_FILTERS);
 
   // Mock fallback state
   const [mockSessions, setMockSessions] = useState(SESSION_LIST);
@@ -121,60 +130,67 @@ export default function SessionLabPage() {
     });
   }, [allTrades, canonicalSelectedKey, hasRealData, sessionRules]);
 
+  // Apply Deep Dive exploration filters (Entry Model + TE Delay) — does NOT affect Run Impact
+  const deepDiveFilterResult = useMemo(
+    () => applyDeepDiveFilters(selectedSessionTrades, deepDiveFilters),
+    [selectedSessionTrades, deepDiveFilters]
+  );
+  const deepDiveSessionTrades = deepDiveFilterResult.includedTrades;
+
   const overviewData = useMemo(
     () =>
-      selectedSessionTrades.length > 0
-        ? buildOverviewDataFromSessionTrades(selectedSessionTrades)
+      deepDiveSessionTrades.length > 0
+        ? buildOverviewDataFromSessionTrades(deepDiveSessionTrades)
         : null,
-    [selectedSessionTrades]
+    [deepDiveSessionTrades]
   );
 
   const directionData = useMemo(
     () =>
-      selectedSessionTrades.length > 0
-        ? buildDirectionLabData(selectedSessionTrades)
+      deepDiveSessionTrades.length > 0
+        ? buildDirectionLabData(deepDiveSessionTrades)
         : null,
-    [selectedSessionTrades]
+    [deepDiveSessionTrades]
   );
 
   const structureData = useMemo(
     () =>
-      selectedSessionTrades.length > 0
-        ? buildStructureLabData(selectedSessionTrades)
+      deepDiveSessionTrades.length > 0
+        ? buildStructureLabData(deepDiveSessionTrades)
         : null,
-    [selectedSessionTrades]
+    [deepDiveSessionTrades]
   );
 
   const timeAnalysisData = useMemo(
     () =>
-      selectedSessionTrades.length > 0 && canonicalSelectedKey
-        ? buildTimeAnalysisData(selectedSessionTrades, canonicalSelectedKey)
+      deepDiveSessionTrades.length > 0 && canonicalSelectedKey
+        ? buildTimeAnalysisData(deepDiveSessionTrades, canonicalSelectedKey)
         : null,
-    [selectedSessionTrades, canonicalSelectedKey]
+    [deepDiveSessionTrades, canonicalSelectedKey]
   );
 
   const entryModelData = useMemo(
     () =>
-      selectedSessionTrades.length > 0
-        ? buildEntryModelLabData(selectedSessionTrades)
+      deepDiveSessionTrades.length > 0
+        ? buildEntryModelLabData(deepDiveSessionTrades)
         : null,
-    [selectedSessionTrades]
+    [deepDiveSessionTrades]
   );
 
   const orderBlockData = useMemo(
     () =>
-      selectedSessionTrades.length > 0
-        ? buildOrderBlockLabData(selectedSessionTrades)
+      deepDiveSessionTrades.length > 0
+        ? buildOrderBlockLabData(deepDiveSessionTrades)
         : null,
-    [selectedSessionTrades]
+    [deepDiveSessionTrades]
   );
 
   const failureData = useMemo(
     () =>
-      selectedSessionTrades.length > 0
-        ? buildFailureAnalysisData(selectedSessionTrades)
+      deepDiveSessionTrades.length > 0
+        ? buildFailureAnalysisData(deepDiveSessionTrades)
         : null,
-    [selectedSessionTrades]
+    [deepDiveSessionTrades]
   );
 
   const impactOnRunData = useMemo(
@@ -195,10 +211,10 @@ export default function SessionLabPage() {
 
   const streaksData = useMemo(
     () =>
-      selectedSessionTrades.length > 0
-        ? buildStreaksData(selectedSessionTrades)
+      deepDiveSessionTrades.length > 0
+        ? buildStreaksData(deepDiveSessionTrades)
         : null,
-    [selectedSessionTrades]
+    [deepDiveSessionTrades]
   );
 
   const toggleSessionField = (v1Key, field) => {
@@ -311,7 +327,15 @@ export default function SessionLabPage() {
               streaksData={streaksData}
             />
             <div className="xl:sticky xl:top-6 xl:self-start">
-              <QuickControls session={selected} onToggle={toggleSessionField} />
+              <QuickControls
+                session={selected}
+                onToggle={toggleSessionField}
+                deepDiveFilters={deepDiveFilters}
+                onDeepDiveFilterChange={setDeepDiveFilters}
+                deepDiveFilterMeta={deepDiveFilterResult}
+                sessionTradeCount={selectedSessionTrades.length}
+                defaultDeepDiveFilters={DEFAULT_DEEP_DIVE_FILTERS}
+              />
             </div>
           </div>
           <ImpactOnRun impactOnRunData={impactOnRunData} />

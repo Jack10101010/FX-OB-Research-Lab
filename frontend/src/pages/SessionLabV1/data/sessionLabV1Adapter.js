@@ -1491,3 +1491,82 @@ export function buildStreaksData(sessionTrades) {
 
   return { wlSequence, streakSummary, streakDistribution, mode: "real" };
 }
+
+// ─── Phase A: Deep Dive Exploration Filters ───────────────────────────────────
+
+/**
+ * Apply exploratory Deep Dive filters on top of already direction/structure-filtered
+ * session trades.
+ *
+ * Phase A scope: entryModel + teDelay.
+ * Phase B will extend with outcome + cancelReason.
+ *
+ * These filters are purely exploratory — they affect Deep Dive tabs only.
+ * They do NOT affect RunImpactSummary, VisualSummaryStrip, or session card metrics.
+ *
+ * @param {object[]} sessionTrades — already filtered by sessionRules direction/structure
+ * @param {object}   filters       — deepDiveFilters state shape
+ * @returns {{ includedTrades, excludedCount, activeFilterCount, isFiltered }}
+ */
+export function applyDeepDiveFilters(sessionTrades, filters) {
+  if (!Array.isArray(sessionTrades) || !sessionTrades.length || !filters) {
+    return {
+      includedTrades: sessionTrades ?? [],
+      excludedCount: 0,
+      activeFilterCount: 0,
+      isFiltered: false,
+    };
+  }
+
+  const { entryModel, teDelay } = filters;
+  const emAllOn =
+    entryModel.baseline &&
+    entryModel.penetration &&
+    entryModel.triggeredEdge;
+  const tdAllOn =
+    teDelay.same &&
+    teDelay.next &&
+    teDelay.d2 &&
+    teDelay.d3;
+
+  // Short-circuit: no filtering needed when all toggles are on.
+  if (emAllOn && tdAllOn) {
+    return {
+      includedTrades: sessionTrades,
+      excludedCount: 0,
+      activeFilterCount: 0,
+      isFiltered: false,
+    };
+  }
+
+  const included = sessionTrades.filter((t) => {
+    // Entry model gate
+    if (!emAllOn) {
+      const raw = String(t.entry_model_key || t.entry_model || t.entryFamily || "").toLowerCase();
+      const isTE  = raw.includes("triggered") || raw.startsWith("te");
+      const isPen = raw.includes("penetration");
+      // Anything not TE and not penetration is treated as baseline
+      if (!isTE && !isPen && !entryModel.baseline)      return false;
+      if (isPen  &&          !entryModel.penetration)   return false;
+      if (isTE   &&          !entryModel.triggeredEdge) return false;
+    }
+
+    // TE delay gate — delay >= 4 treated as d3 for Phase A
+    if (!tdAllOn) {
+      const n = Number(t.fill_delay_candles ?? t.fillDelayCandles ?? t.trigger_delay ?? 0);
+      if (n === 0 && !teDelay.same) return false;
+      if (n === 1 && !teDelay.next) return false;
+      if (n === 2 && !teDelay.d2)   return false;
+      if (n >= 3  && !teDelay.d3)   return false;  // 3+ treated as d3 bucket
+    }
+
+    return true;
+  });
+
+  return {
+    includedTrades:    included,
+    excludedCount:     sessionTrades.length - included.length,
+    activeFilterCount: [!emAllOn, !tdAllOn].filter(Boolean).length,
+    isFiltered:        included.length < sessionTrades.length,
+  };
+}
