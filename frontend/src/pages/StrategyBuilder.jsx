@@ -264,7 +264,14 @@ export default function StrategyBuilder() {
         setImportError("");
         setImportedRunId("");
         try {
-            const started = await startSidecarRun(sidecarConfig);
+            // Strip underscore-prefixed metadata keys (_entry_mode, _selected_entry_model, …)
+            // before submission — they are frontend-only round-trip helpers and are not
+            // recognised by the backtester config schema.  sidecarConfig itself is left
+            // intact so localStorage persistence and Master Controls can still read them.
+            const sidecarPayload = Object.fromEntries(
+                Object.entries(sidecarConfig).filter(([k]) => !k.startsWith("_"))
+            );
+            const started = await startSidecarRun(sidecarPayload);
             setRunJob(started);
         } catch (error) {
             setRunError(formatSidecarError(error));
