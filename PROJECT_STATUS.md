@@ -3,9 +3,9 @@
 > Living source of truth for parallel Claude / Codex / GPT chats working on this repo.
 > Keep it short, accurate, and current. Update it before you end your session.
 > **Every new chat must also read [WORKSTREAMS.md](./WORKSTREAMS.md) and attach to a workstream before coding.**
-> Last updated: 2026-06-05 — Phase 4B (Preview Results display) is committed (`bdc7473`) and
-> the coordination docs are committed (`4e08b35`). Branch is **in sync with origin — no unpushed
-> commits**. Refreshed against live `git status` / `git log`.
+> Last updated: 2026-06-05 — Phase 4B (Preview Results display) is committed (`bdc7473`) and the
+> coordination docs were refreshed (`f91cb74`). **HEAD = origin/codex-dev = `f91cb74`**; branch is
+> **in sync with origin — no unpushed commits**. Refreshed against live `git status` / `git log`.
 
 ## Rules for Future Chats
 
@@ -167,7 +167,9 @@ Important architecture (do not violate):
 
 From `git log` on `codex-dev` (newest first):
 
+- `f91cb74` docs(status): refresh project coordination state
 - `bdc7473` feat(master-controls): add preview results display (Phase 4B)
+- `4e08b35` docs: add project coordination guardrails
 - `5d0806e` feat(master-controls): add preview run context (Phase 4A)
 - `38f8a60` fix(master-controls): polish drawer state feedback
 - `077b826` fix(master-controls): preserve entry metadata roundtrip
@@ -177,8 +179,8 @@ From `git log` on `codex-dev` (newest first):
 - `f121157` feat(master-controls): add config registry metadata
 - `3154dab` refactor(master-controls): extract shared config translator
 
-Branch position: `HEAD -> codex-dev` is at `bdc7473`, and `origin/codex-dev` is also at
-`bdc7473`. The branch is **in sync with origin — no unpushed commits**
+Branch position: `HEAD -> codex-dev` is at `f91cb74`, and `origin/codex-dev` is also at
+`f91cb74`. The branch is **in sync with origin — no unpushed commits**
 (`git log --oneline origin/codex-dev..HEAD` is empty).
 
 ## Current Pending Step
@@ -201,7 +203,7 @@ re-run `git status --short` yourself; do not trust this list blindly.
 
 ### Modified (tracked)
 
-Live `git status --short` at `bdc7473` — **8 modified tracked files**
+Live `git status --short` at `f91cb74` — **8 modified tracked files**
 (`MasterControlsDrawer.jsx` is gone: committed in `bdc7473`):
 
 | File | Likely workstream |
@@ -213,7 +215,7 @@ Live `git status --short` at `bdc7473` — **8 modified tracked files**
 | `frontend/src/components/lab/IntrabarInspector.jsx` | Entry / FFT |
 | `frontend/src/pages/StrategyBuilder.jsx` | Entry / FFT (FFT pairing controls) |
 | `frontend/src/data/tradeUniverse.js` | Trade Classification / Strategy Map (ambiguous) |
-| `frontend/src/pages/OrderBlockLab.jsx` | Order Block Lab — **newly dirty, owner TBD** |
+| `frontend/src/pages/OrderBlockLab.jsx` | **OB Retest / Retest Lab** — Phase 1 tab wiring (owned, this chat) |
 
 ### Untracked
 
@@ -257,7 +259,7 @@ Classified by likely workstream:
 - The user has accidentally run git commands from the backtester / output folder before.
   **Always verify the current repo path is `FX-OB-Research-Lab` before any git operation**
   (e.g. `git rev-parse --show-toplevel`).
-- The branch is currently **in sync with `origin/codex-dev`** (HEAD = origin = `bdc7473`,
+- The branch is currently **in sync with `origin/codex-dev`** (HEAD = origin = `f91cb74`,
   no unpushed commits as of this refresh). Still confirm with
   `git log --oneline origin/codex-dev..HEAD` before any push — other chats commit constantly.
 - Root-level `package.json` / `package-lock.json` are untracked and look out of place —

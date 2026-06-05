@@ -27,7 +27,7 @@
 ## Current Repo Facts (verify, don't trust blindly)
 
 - Branch: `codex-dev`
-- `HEAD` and `origin/codex-dev` are **both at `bdc7473`** — the branch is in sync with origin,
+- `HEAD` and `origin/codex-dev` are **both at `f91cb74`** — the branch is in sync with origin,
   **no unpushed commits** (as of this refresh; `git log --oneline origin/codex-dev..HEAD` is empty).
 - Re-run `git status --short` and `git log --oneline --decorate -10` yourself — other
   chats change this constantly.
@@ -159,27 +159,28 @@
 - **Expected files:**
   - `frontend/src/data/obRetest.js`
   - `frontend/src/data/__validation__/obRetest.logictest.cjs`
+  - `frontend/src/components/lab/retest/*` (RetestLabTab.jsx, useRetestData.js)
+  - `frontend/src/pages/OrderBlockLab.jsx` — **tab wiring only unless explicitly scoped**
+    (owned by OB Retest Phase 1: import + `tabRetestLab` content + one `TABS` entry)
   - `OB-RETEST-ANALYSIS-*.md`
-  - future retest UI files (e.g. `frontend/src/components/lab/retest/*`) **only when explicitly scoped**
 - **Do not touch:**
   - Master Controls files
   - Session Lab files
   - Entry / FFT files
   - Strategy Map files unless a retest overlay is explicitly scoped
-- **Latest relevant commits:** none on `codex-dev` yet (currently untracked files only).
+- **Latest relevant commits:** none on `codex-dev` yet (Phase 1 staged/committed this session — see PROJECT_STATUS.md log).
 - **Currently dirty / untracked:**
-  - `frontend/src/data/obRetest.js`
-  - `frontend/src/data/__validation__/obRetest.logictest.cjs`
-  - `frontend/src/components/lab/retest/` (untracked dir)
+  - `frontend/src/data/obRetest.js` (untracked)
+  - `frontend/src/data/__validation__/obRetest.logictest.cjs` (untracked)
+  - `frontend/src/components/lab/retest/` (untracked dir: RetestLabTab.jsx, useRetestData.js)
+  - `frontend/src/pages/OrderBlockLab.jsx` (modified — OB Retest Phase 1 tab wiring, owned by this chat)
   - `OB-RETEST-ANALYSIS-1.md`
   - `OB-RETEST-ANALYSIS-2-PHASE-1-PLAN.md`
 - **Open risks:**
-  - New untracked source files exist (`obRetest.js`, its `.cjs` logic test, and the
-    `retest/` component dir).
-  - Needs ownership before commit.
-  - Confirm whether this work should be committed now or left pending.
-- **Next action:** Audit / validate the OB retest files, then commit as a separate
-  workstream if ready.
+  - `OrderBlockLab.jsx` is a shared page surface — keep OB Retest edits to tab wiring only;
+    coordinate before any deeper change so other tabs are untouched.
+- **Next action:** Validate and commit OB Retest Phase 1 as a separate scoped commit
+  (`feat(ob-retest): add retest analysis lab phase 1`).
 
 ### Ghost / Backend Research Docs
 
