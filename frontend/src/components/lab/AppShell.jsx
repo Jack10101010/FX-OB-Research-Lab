@@ -1,12 +1,14 @@
 import React from "react";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
+import AppBlueprintBackground from "./AppBlueprintBackground";
 
 export function AppShell({ children }) {
     return (
-        <div className="min-h-screen flex bg-[hsl(var(--bg))] relative">
-            {/* Ambient grid background */}
-            <div className="pointer-events-none fixed inset-0 grid-bg opacity-[0.18]" />
+        <div className="min-h-screen flex bg-[#050A12] relative">
+            {/* Global blueprint-grid background (base + grid + glow) */}
+            <AppBlueprintBackground />
+            {/* Subtle noise texture overlay */}
             <div className="pointer-events-none fixed inset-0 noise" />
             <Sidebar />
             <div className="flex-1 min-w-0 flex flex-col relative">

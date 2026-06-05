@@ -195,7 +195,7 @@
         background:
             radial-gradient(ellipse at 12% -10%, hsl(var(--accent-primary) / var(--body-blob-primary-opacity, 0.10)), transparent 45%),
             radial-gradient(ellipse at 95% 110%, hsl(var(--accent-secondary) / var(--body-blob-secondary-opacity, 0.08)), transparent 50%),
-            hsl(var(--bg));
+            #050A12;
         background-attachment: fixed;
     }
     input,
@@ -426,6 +426,21 @@
     }
     .scrollbar-thin::-webkit-scrollbar-thumb:hover {
         background: hsl(var(--accent-primary) / 0.5);
+    }
+
+    /* Premium 3px horizontal scrollbar for session card rows */
+    .session-cards-scroll {
+        scrollbar-width: thin;
+        scrollbar-color: hsl(var(--border-mid)) transparent;
+    }
+    .session-cards-scroll::-webkit-scrollbar { height: 3px; }
+    .session-cards-scroll::-webkit-scrollbar-track { background: transparent; }
+    .session-cards-scroll::-webkit-scrollbar-thumb {
+        background: hsl(var(--border-mid));
+        border-radius: 99px;
+    }
+    .session-cards-scroll::-webkit-scrollbar-thumb:hover {
+        background: hsl(var(--accent-primary) / 0.45);
     }
 
     @keyframes pulse-glow {

@@ -228,26 +228,9 @@ export default function SessionLabPage() {
 
   return (
     <div
-      className="min-h-screen w-full bg-[#050A12] text-[#E5EDF7]"
+      className="min-h-screen w-full text-[#E5EDF7]"
       data-testid="session-lab-page"
     >
-      {/* Background grid pattern */}
-      <div
-        className="pointer-events-none fixed inset-0 opacity-[0.04]"
-        style={{
-          backgroundImage:
-            "linear-gradient(rgba(34,211,238,0.6) 1px, transparent 1px), linear-gradient(90deg, rgba(34,211,238,0.6) 1px, transparent 1px)",
-          backgroundSize: "48px 48px",
-        }}
-      />
-      {/* Radial glow */}
-      <div
-        className="pointer-events-none fixed -top-40 left-1/4 h-[600px] w-[800px] rounded-full opacity-[0.07]"
-        style={{
-          background:
-            "radial-gradient(circle, rgba(34,211,238,0.6) 0%, transparent 60%)",
-        }}
-      />
 
       <div className="relative mx-auto max-w-[2200px] px-3 md:px-4 lg:px-4 xl:px-6 2xl:px-8 py-5 md:py-6 space-y-5 md:space-y-6">
         <Header
