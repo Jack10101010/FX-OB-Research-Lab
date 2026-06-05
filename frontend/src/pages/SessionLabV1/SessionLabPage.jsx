@@ -16,6 +16,8 @@ import {
   buildDefaultSessionRules,
   applySessionRules,
   resolveSession,
+  normalizeDirection,
+  normalizeStructure,
 } from "../../components/lab/session/analytics/sessionAnalytics";
 import { SESSION_KEYS } from "../../components/lab/session/config/sessionConfig";
 import {
@@ -100,14 +102,24 @@ export default function SessionLabPage() {
   const selected = sessions.find((s) => s.key === selectedKey) || sessions[0];
 
   // Session-specific trades for deep dive tabs (Phase B)
+  // Filtered by the active sessionRules for the selected session so that
+  // QuickControls + SessionCard toggles both affect Deep Dive tab data.
   const canonicalSelectedKey = V1_TO_CANONICAL[selectedKey];
-  const selectedSessionTrades = useMemo(
-    () =>
-      hasRealData && canonicalSelectedKey
-        ? allTrades.filter((t) => resolveSession(t) === canonicalSelectedKey)
-        : [],
-    [allTrades, canonicalSelectedKey, hasRealData]
-  );
+  const selectedSessionTrades = useMemo(() => {
+    if (!hasRealData || !canonicalSelectedKey) return [];
+    const base = allTrades.filter((t) => resolveSession(t) === canonicalSelectedKey);
+    const rule = sessionRules[canonicalSelectedKey];
+    if (!rule) return base;
+    return base.filter((t) => {
+      const dir = normalizeDirection(t);
+      if (dir === "Long"  && !rule.direction.long)  return false;
+      if (dir === "Short" && !rule.direction.short) return false;
+      const struct = normalizeStructure(t);
+      if (struct === "BOS"   && !rule.structure.BOS)   return false;
+      if (struct === "CHoCH" && !rule.structure.CHoCH) return false;
+      return true;
+    });
+  }, [allTrades, canonicalSelectedKey, hasRealData, sessionRules]);
 
   const overviewData = useMemo(
     () =>

@@ -252,6 +252,7 @@ export default function StrategyMap() {
         )
     );
     const summary = bundle?.summary || activeRunMeta || {};
+    const runConfig = bundle?.config || summary?.config || null;
     const projectId = bundle?.projectId || bundle?.summary?.projectId || activeRunMeta?.projectId || activeRunMeta?.summary?.projectId;
     const heroTitle = summary.projectName || bundle?.projectName || activeRunMeta?.projectName || getRunDisplayName(bundle || activeRunMeta || { id: runId });
     const heroSymbol = bundle?.config?.symbol || summary.symbol || activeRunMeta.symbol || "—";
@@ -833,6 +834,11 @@ export default function StrategyMap() {
                             showGhostWinMarkers={showGhostWinMarkers}
                             showGhostLossMarkers={showGhostLossMarkers}
                             showFftDebug={showFftDebug}
+                            fftMoveAwayConfig={showFftDebug ? {
+                                pips: Number(runConfig?.triggered_edge_fft_move_away_pips) || 0,
+                                obMultiple: Number(runConfig?.triggered_edge_fft_move_away_ob_multiple) || 0,
+                                pipSize: Number(runConfig?.pip_size) || 0.0001,
+                            } : null}
                             onSelectTrade={(id) => {
                                 if (id == null) { setSelectedTradeId(null); return; }
                                 const incomingKey = rrLookupKey(id);
@@ -859,7 +865,7 @@ export default function StrategyMap() {
                                 trades={activeTrades}
                                 onClose={() => setSelectedOverlay(null)}
                                 showFftDebug={showFftDebug}
-                                runConfig={summary?.config || bundle?.config || null}
+                                runConfig={runConfig}
                             />
                         )}
                     </div>
@@ -1147,151 +1153,6 @@ function formatModelPct(value) {
     const text = String(value || "").replace("p", ".");
     const n = Number(text);
     return Number.isFinite(n) ? `${Number.isInteger(n) ? n.toFixed(0) : n}%` : String(value);
-}
-
-
-function buildTriggeredEdgeOverlays(trades = [], obs = []) {
-    if (!trades.length) return [];
-    // Index OBs by normalized numeric key (same as rrLookupKey)
-    const obMap = new Map();
-    (obs || []).forEach((ob) => {
-        const key = rrLookupKey(ob.obId || ob.ob_id || ob.id);
-        if (key) obMap.set(key, ob);
-    });
-    const out = [];
-    for (const trade of trades) {
-        const entryModelKey = String(trade.entry_model_key || trade.entryModelKey || "");
-        if (!entryModelKey.startsWith("entry_triggered_edge")) continue;
-        const obKey = rrLookupKey(trade.obId ?? trade.ob_id);
-        const ob = obKey ? obMap.get(obKey) : null;
-        const top = ob ? numericOrNull(ob.top) : null;
-        const bot = ob ? numericOrNull(ob.bot ?? ob.bottom) : null;
-        const obStartTime = ob ? (ob.time0 ?? ob.startTime ?? ob.start_time ?? null) : null;
-        const obEndTime = ob ? (ob.time1 ?? ob.endTime ?? ob.end_time ?? null) : null;
-        const detectionTime = firstAvailable(
-            trade.detection_time,
-            trade.detectionTime,
-            trade.ob_detection_time,
-            trade.obDetectionTime,
-            ob?.detection_time,
-            ob?.detectionTime,
-            ob?.ob_detection_time,
-            ob?.obDetectionTime,
-            obStartTime,
-        );
-        const rawSide = normalizeOutcome(ob?.direction || ob?.side || ob?.obDirection || trade.direction || trade.side || "");
-        const isBull = rawSide.includes("bull") || rawSide.includes("long");
-        const depth = (top != null && bot != null) ? Math.abs(top - bot) : null;
-        const trigPct = numericOrNull(trade.trigger_penetration_pct ?? trade.triggerPenetrationPct);
-        const entryPct = numericOrNull(trade.entry_level_pct ?? trade.entryLevelPct) ?? 0;
-        let triggerPrice = null;
-        let entryPrice = null;
-        if (depth != null && top != null && bot != null) {
-            triggerPrice = trigPct != null
-                ? (isBull ? top - depth * trigPct / 100 : bot + depth * trigPct / 100)
-                : null;
-            entryPrice = isBull ? top - depth * entryPct / 100 : bot + depth * entryPct / 100;
-        }
-        const triggerTime = trade.trigger_time || trade.triggerTime || null;
-        const tappedTime = trade.tapped_time || trade.tappedTime || null;
-        const armedAt = trade.armed_at || trade.armedAt || null;
-        const edgeRevisitTime = trade.edge_revisit_time || trade.edgeRevisitTime || null;
-        const retraceCancelTime = trade.retrace_cancel_time || trade.retraceCancelTime || null;
-        const exitTime = firstAvailable(trade.exit, trade.exit_time, trade.exitTime, ob?.exitTime, ob?.exit_time);
-        const lineStartTime = firstAvailable(detectionTime, obStartTime);
-        const lineEndTime = firstAvailable(
-            ob?.chartRightTime,
-            ob?.chart_right_time,
-            ob?.time1,
-            ob?.endTime,
-            ob?.end_time,
-            edgeRevisitTime,
-            exitTime,
-            retraceCancelTime,
-            triggerTime,
-            obEndTime,
-        );
-        const cancelReason = trade.cancel_reason || trade.cancelReason || "";
-        const cancelledBeforeEntry = truthyFlag(trade.cancelled_before_entry) || truthyFlag(trade.cancelledBeforeEntry);
-        const isFftCancel = normalizeOutcome(cancelReason).includes("first_failed");
-        // For FFT cancels, exit_time (the candle at which FFT fired) is the cancel timestamp
-        const fftCancelTime = isFftCancel
-            ? firstAvailable(trade.exit_time, trade.exitTime, trade.exit)
-            : null;
-        const filledOnTriggerCandle = truthyFlag(trade.filled_on_trigger_candle) || truthyFlag(trade.filledOnTriggerCandle);
-        const filledOnNextCandle = trade.filled_on_trigger_candle === false || trade.filledOnTriggerCandle === false || String(trade.filled_on_trigger_candle).toLowerCase() === "false" || String(trade.filledOnTriggerCandle).toLowerCase() === "false";
-        const hasTrigger = !!(triggerTime && String(triggerTime).trim());
-        const cancelNorm = normalizeOutcome(cancelReason);
-        const wasCancelled = Boolean(
-            cancelledBeforeEntry
-            || (retraceCancelTime && String(retraceCancelTime).trim())
-            || cancelNorm.includes("cancel")
-            || cancelNorm.includes("inval")
-            || cancelNorm.includes("breach")
-            || cancelNorm.includes("broken")
-        );
-        const triggerLineState = wasCancelled ? "cancelled" : hasTrigger ? "tagged" : "not_tagged";
-        let badgeState = null;
-        if (!hasTrigger) {
-            badgeState = "never_trig";
-        } else if ((retraceCancelTime && String(retraceCancelTime).trim()) || cancelNorm.includes("retrace")) {
-            badgeState = "used_ob";
-        } else if (cancelledBeforeEntry && cancelNorm.includes("first_failed")) {
-            badgeState = "first_failed";
-        } else if (cancelledBeforeEntry && (cancelNorm.includes("inval") || cancelNorm.includes("breach") || cancelNorm.includes("broken"))) {
-            badgeState = "inval";
-        } else if (filledOnTriggerCandle) {
-            badgeState = "same";
-        } else if (filledOnNextCandle) {
-            badgeState = "next";
-        }
-        out.push({
-            tradeId: trade.displayTradeId || trade.id || null,
-            obId: trade.obId ?? trade.ob_id ?? null,
-            direction: isBull ? "bull" : "bear",
-            entryModelKey,
-            triggerPenetrationPct: trigPct,
-            entryLevelPct: entryPct,
-            triggerTime,
-            detectionTime,
-            lineStartTime,
-            lineEndTime,
-            wasTriggered: hasTrigger,
-            wasCancelled,
-            triggerLineState,
-            tappedTime,
-            armedAt,
-            edgeRevisitTime,
-            retraceCancelTime,
-            triggerToEntryMinutes: numericOrNull(trade.trigger_to_entry_minutes ?? trade.triggerToEntryMinutes),
-            cancelReason,
-            cancelledBeforeEntry,
-            tappedBeforeTrigger: truthyFlag(trade.tapped_before_trigger) || truthyFlag(trade.tappedBeforeTrigger),
-            sameCandleEntryAllowed: truthyFlag(trade.same_candle_entry_allowed) || truthyFlag(trade.sameCandleEntryAllowed),
-            armedOnTriggerCandle: truthyFlag(trade.armed_on_trigger_candle) || truthyFlag(trade.armedOnTriggerCandle),
-            filledOnTriggerCandle,
-            obTop: top,
-            obBot: bot,
-            obStartTime,
-            obEndTime,
-            triggerPrice,
-            entryPrice,
-            badgeState,
-            // FFT debug fields
-            isFftCancel,
-            fftCancelTime,
-            tappedCandleIndex: numericOrNull(trade.tapped_candle_index ?? trade.tappedCandleIndex),
-            triggerCandleIndex: numericOrNull(trade.trigger_candle_index ?? trade.triggerCandleIndex),
-            armCandleIndex: numericOrNull(trade.arm_candle_index ?? trade.armCandleIndex),
-            exitedObBeforeArm: trade.exited_ob_before_arm ?? trade.exitedObBeforeArm ?? null,
-            obOccupiedAtArm: trade.ob_occupied_at_arm ?? trade.obOccupiedAtArm ?? null,
-            armedAfterObExit: trade.armed_after_ob_exit ?? trade.armedAfterObExit ?? null,
-            obExitTime: firstAvailable(trade.ob_exit_time, trade.obExitTime) || null,
-            ghostCandidate: trade.ghost_candidate ?? trade.ghostCandidate ?? null,
-            fftMoveAwayPipsAtCancel: numericOrNull(trade.fft_move_away_pips_at_cancel ?? trade.fftMoveAwayPipsAtCancel),
-        });
-    }
-    return out;
 }
 
 function buildStrategyMapNewsEvents(bundle, summary, activeVariant) {

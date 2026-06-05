@@ -292,6 +292,9 @@ export function CandleChart({
     showGhostLossMarkers = false,
     // FFT Debug overlay — pink entry-edge tap/cancel markers
     showFftDebug = false,
+    // FFT move-away threshold config — { pips, obMultiple, pipSize }
+    // When set, draws threshold line above/below OB and places cancel dot at actual cancel price.
+    fftMoveAwayConfig = null,
 }) {
     const containerRef = useRef(null);
     const chartRef = useRef(null);
@@ -1179,27 +1182,76 @@ export function CandleChart({
     // ── FFT Debug: entry-edge tap + cancel markers + tap→cancel line ─────────
     // Renders at the OB entry edge (top for bull, bottom for bear) rather than
     // the midpoint used by the regular lifecycle markers.
+    // When fftMoveAwayConfig is set and threshold > 0:
+    //   - draws a dashed pink threshold line at the activation distance outside the OB
+    //   - places the FFT cancel dot at the actual cancel price (obEdge + actualPips)
     const fftDebugMarkers = (() => {
-        if (!showFftDebug || !triggeredEdgeOverlays?.length) return { dots: [], lines: [] };
+        if (!showFftDebug || !triggeredEdgeOverlays?.length) return { dots: [], lines: [], thresholdLines: [] };
         const chart = chartRef.current;
         const series = seriesRef.current;
-        if (!chart || !series) return { dots: [], lines: [] };
+        if (!chart || !series) return { dots: [], lines: [], thresholdLines: [] };
         const visibleRange = chart.timeScale().getVisibleRange?.();
         const rangeFrom = normalizeChartTimestamp(visibleRange?.from);
         const rangeTo = normalizeChartTimestamp(visibleRange?.to);
         const isVisible = (t) => (rangeFrom == null || t >= rangeFrom) && (rangeTo == null || t <= rangeTo);
         const bounds = containerRef.current?.getBoundingClientRect();
         const maxHeight = bounds?.height || height;
+        // Move-away threshold config
+        const moveAwayPips = fftMoveAwayConfig?.pips ?? 0;
+        const moveAwayObMultiple = fftMoveAwayConfig?.obMultiple ?? 0;
+        const pipSize = fftMoveAwayConfig?.pipSize || 0.0001;
+        const hasThreshold = moveAwayPips > 0 || moveAwayObMultiple > 0;
         const dots = [];
         const lines = [];
+        const thresholdLines = [];
         for (const ov of triggeredEdgeOverlays) {
             if (!showCancelledSetups && (ov.cancelledBeforeEntry || ov.badgeState === "never_trig")) continue;
             // Y = OB entry side: top for bullish, bottom for bearish
-            const rawY = ov.direction === "bull"
+            const rawEntryY = ov.direction === "bull"
                 ? (ov.obTop != null ? series.priceToCoordinate(ov.obTop) : null)
                 : (ov.obBot != null ? series.priceToCoordinate(ov.obBot) : null);
-            if (rawY == null) continue;
-            const y = clamp(rawY, 0, maxHeight);
+            if (rawEntryY == null) continue;
+            const y = clamp(rawEntryY, 0, maxHeight);
+
+            // ── Per-OB threshold computation ──────────────────────────────────
+            let effectivePips = 0;
+            let thresholdLabel = null;
+            let cancelY = y; // default: cancel at entry edge (immediate mode / no data)
+            if (hasThreshold && ov.obTop != null && ov.obBot != null && pipSize > 0) {
+                const obHeightPips = (ov.obTop - ov.obBot) / pipSize;
+                const pipT = moveAwayPips;
+                const obT = obHeightPips * moveAwayObMultiple;
+                effectivePips = Math.max(pipT, obT);
+                const thresholdPriceOffset = effectivePips * pipSize;
+                // Threshold line: above OB top for bullish, below OB bottom for bearish
+                const thresholdPriceLevel = ov.direction === "bull"
+                    ? ov.obTop + thresholdPriceOffset
+                    : ov.obBot - thresholdPriceOffset;
+                const rawThresholdY = series.priceToCoordinate(thresholdPriceLevel);
+                if (rawThresholdY != null) {
+                    const tY = clamp(rawThresholdY, 0, maxHeight);
+                    // Label: show which threshold is active
+                    thresholdLabel = obT > pipT
+                        ? `FFT: ${moveAwayObMultiple}× OB`
+                        : `FFT: ${effectivePips.toFixed(1)} pips`;
+                    thresholdLines.push({
+                        id: `fft-threshold-${ov.tradeId || ov.obId}`,
+                        y: tY,
+                        label: thresholdLabel,
+                    });
+                }
+                // Cancel dot Y: place at actual cancel price when data is available
+                const actualPips = ov.fftMoveAwayPipsAtCancel;
+                if (actualPips != null) {
+                    const actualOffset = Number(actualPips) * pipSize;
+                    const actualPrice = ov.direction === "bull"
+                        ? ov.obTop + actualOffset
+                        : ov.obBot - actualOffset;
+                    const rawCancelY = series.priceToCoordinate(actualPrice);
+                    if (rawCancelY != null) cancelY = clamp(rawCancelY, 0, maxHeight);
+                }
+            }
+
             // TAP dot (indigo) at OB entry edge
             let tapX = null;
             if (ov.tappedTime) {
@@ -1220,7 +1272,7 @@ export function CandleChart({
                     }
                 }
             }
-            // FFT cancel dot (bright pink) at OB entry edge
+            // FFT cancel dot (bright pink) — at actual cancel price when threshold data available
             let cancelX = null;
             if (ov.isFftCancel && ov.fftCancelTime) {
                 const parsed = normalizeChartTimestamp(ov.fftCancelTime);
@@ -1229,13 +1281,19 @@ export function CandleChart({
                     if (snap != null && isVisible(snap)) {
                         cancelX = chart.timeScale().timeToCoordinate(snap);
                         if (cancelX != null) {
+                            const tooltipThreshold = hasThreshold ? `${effectivePips.toFixed(1)} pips` : null;
+                            const tooltipActual = ov.fftMoveAwayPipsAtCancel != null
+                                ? `${Number(ov.fftMoveAwayPipsAtCancel).toFixed(1)} pips`
+                                : null;
                             dots.push({
                                 id: `fft-cancel-${ov.tradeId || ov.obId}`,
-                                x: cancelX, y,
+                                x: cancelX, y: cancelY,
                                 color: "rgba(219,39,119,0.95)",
                                 label: "FFT",
                                 size: "lg",
                                 overlay: ov,
+                                tooltipThreshold,
+                                tooltipActual,
                             });
                         }
                     }
@@ -1252,7 +1310,7 @@ export function CandleChart({
                 });
             }
         }
-        return { dots, lines };
+        return { dots, lines, thresholdLines };
     })();
 
     // ── Phase 2: clickable trade-marker dots ──────────────────────────────────
@@ -1399,6 +1457,10 @@ export function CandleChart({
                     >
                         {b.label}{b.ghostR != null ? ` ${b.ghostR >= 0 ? "+" : ""}${b.ghostR.toFixed(1)}R` : ""}
                     </div>
+                ))}
+                {/* FFT Debug: move-away threshold lines — dashed pink, full-width, labeled */}
+                {fftDebugMarkers.thresholdLines.map((line) => (
+                    <FftThresholdLine key={line.id} line={line} />
                 ))}
                 {/* FFT Debug: tap→cancel horizontal lines at OB entry edge */}
                 {fftDebugMarkers.lines.map((line) => (
@@ -1763,10 +1825,16 @@ function TriggeredEdgeLifecycleMarker({ marker, onClick }) {
 function FftDebugDot({ dot, onClick }) {
     const size = dot.size === "lg" ? 10 : 7;
     const interactive = !!onClick;
+    const titleParts = [
+        dot.label,
+        dot.overlay?.cancelReason ? `· ${dot.overlay.cancelReason}` : null,
+        dot.tooltipThreshold ? `Threshold: ${dot.tooltipThreshold}` : null,
+        dot.tooltipActual ? `Actual: ${dot.tooltipActual}` : null,
+    ].filter(Boolean);
     return (
         <div
             className={`absolute rounded-full ${interactive ? "pointer-events-auto" : "pointer-events-none"}`}
-            title={`${dot.label}${dot.overlay?.cancelReason ? ` · ${dot.overlay.cancelReason}` : ""}`}
+            title={titleParts.join(" | ")}
             onClick={interactive ? (e) => { e.stopPropagation(); onClick(); } : undefined}
             style={{
                 left: dot.x - size / 2,
@@ -1779,6 +1847,44 @@ function FftDebugDot({ dot, onClick }) {
                 boxShadow: `0 0 4px ${dot.color}`,
             }}
         />
+    );
+}
+
+function FftThresholdLine({ line }) {
+    return (
+        <div
+            className="absolute pointer-events-none"
+            style={{
+                left: 0,
+                right: 0,
+                top: line.y,
+                height: 1,
+                zIndex: 16,
+            }}
+        >
+            <div style={{
+                width: "100%",
+                height: "100%",
+                borderTop: "1px dashed rgba(219,39,119,0.65)",
+            }} />
+            {line.label && (
+                <span style={{
+                    position: "absolute",
+                    right: 6,
+                    top: -11,
+                    fontSize: 9,
+                    fontFamily: "ui-monospace, monospace",
+                    color: "rgba(219,39,119,0.90)",
+                    background: "rgba(0,0,0,0.55)",
+                    padding: "1px 4px",
+                    borderRadius: 2,
+                    whiteSpace: "nowrap",
+                    letterSpacing: "0.03em",
+                }}>
+                    {line.label}
+                </span>
+            )}
+        </div>
     );
 }
 
