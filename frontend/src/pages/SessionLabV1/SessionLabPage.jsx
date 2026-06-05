@@ -35,6 +35,7 @@ import {
   buildSessionVisualData,
   buildStreaksData,
   applyDeepDiveFilters,
+  buildObFieldMeta,
 } from "./data/sessionLabV1Adapter";
 
 /** Maps V1 lowercase keys → canonical session names used by sessionRules. */
@@ -52,6 +53,8 @@ const DEFAULT_DEEP_DIVE_FILTERS = {
   teDelay:      { same: true, next: true, d2: true, d3: true },
   outcome:      { win: true, loss: true, breakeven: true, cancelled: true, unfilled: true },
   cancelReason: { firstFailedTag: true, retrace: true, news: true, session: true, other: true },
+  obQuality:    { news: true, clean: true },
+  obAge:        { fresh: true, normal: true, old: true },
 };
 
 export default function SessionLabPage() {
@@ -132,10 +135,17 @@ export default function SessionLabPage() {
     });
   }, [allTrades, canonicalSelectedKey, hasRealData, sessionRules]);
 
-  // Apply Deep Dive exploration filters (Entry Model + TE Delay) — does NOT affect Run Impact
+  // OB field availability — computed from selectedSessionTrades (pre-filter) so QuickControls
+  // OB groups stay visible while the user is toggling OB filters.
+  const obFieldMeta = useMemo(
+    () => buildObFieldMeta(selectedSessionTrades),
+    [selectedSessionTrades]
+  );
+
+  // Apply Deep Dive exploration filters — does NOT affect Run Impact
   const deepDiveFilterResult = useMemo(
-    () => applyDeepDiveFilters(selectedSessionTrades, deepDiveFilters),
-    [selectedSessionTrades, deepDiveFilters]
+    () => applyDeepDiveFilters(selectedSessionTrades, deepDiveFilters, obFieldMeta),
+    [selectedSessionTrades, deepDiveFilters, obFieldMeta]
   );
   const deepDiveSessionTrades = deepDiveFilterResult.includedTrades;
 
@@ -328,7 +338,7 @@ export default function SessionLabPage() {
               failureData={failureData}
               streaksData={streaksData}
             />
-            <div className="xl:sticky xl:top-6 xl:self-start">
+            <div className="xl:sticky xl:top-6 xl:self-start xl:max-h-[calc(100vh-3rem)] xl:overflow-y-auto xl:pr-1">
               <QuickControls
                 session={selected}
                 onToggle={toggleSessionField}
@@ -337,6 +347,7 @@ export default function SessionLabPage() {
                 deepDiveFilterMeta={deepDiveFilterResult}
                 sessionTradeCount={selectedSessionTrades.length}
                 defaultDeepDiveFilters={DEFAULT_DEEP_DIVE_FILTERS}
+                obFieldMeta={obFieldMeta}
               />
             </div>
           </div>

@@ -1,5 +1,11 @@
 import React from "react";
 import { SectionLabel } from "./primitives";
+import {
+  Accordion,
+  AccordionItem,
+  AccordionTrigger,
+  AccordionContent,
+} from "@/components/ui/accordion";
 
 function MiniToggle({ active, onChange, color = "#22C55E", testId }) {
   return (
@@ -49,6 +55,30 @@ function Group({ title, children }) {
   );
 }
 
+function FieldNote({ children }) {
+  return (
+    <p className="text-[10px] text-muted-lab font-num italic mt-1 mb-1">{children}</p>
+  );
+}
+
+/** Returns a colored dot + off-count badge, or null when all toggles are on. */
+function filterBadge(groupFilters) {
+  const offCount = Object.values(groupFilters ?? {}).filter((v) => !v).length;
+  if (offCount === 0) return null;
+  return (
+    <span className="ml-auto flex items-center gap-1.5 font-num text-[10px] text-[hsl(var(--accent-primary))]">
+      <span className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--accent-primary))]" />
+      {offCount}
+    </span>
+  );
+}
+
+/** Combined badge across multiple filter groups (e.g. outcome + cancelReason). */
+function combinedBadge(...groups) {
+  const merged = Object.assign({}, ...groups);
+  return filterBadge(merged);
+}
+
 export default function QuickControls({
   session,
   onToggle,
@@ -57,6 +87,7 @@ export default function QuickControls({
   deepDiveFilterMeta,
   sessionTradeCount,
   defaultDeepDiveFilters,
+  obFieldMeta = { hasNews: true, hasAge: true, hasWidth: true },
 }) {
   const flipFilter = (group, key) => {
     onDeepDiveFilterChange((prev) => ({
@@ -65,12 +96,18 @@ export default function QuickControls({
     }));
   };
 
-  const isFiltered = deepDiveFilterMeta?.isFiltered ?? false;
-  const deepDiveTrades = deepDiveFilterMeta?.includedTrades?.length ?? sessionTradeCount ?? 0;
+  const isFiltered       = deepDiveFilterMeta?.isFiltered ?? false;
+  const excludedCount    = deepDiveFilterMeta?.excludedCount ?? 0;
+  const deepDiveTrades   = (sessionTradeCount ?? 0) - excludedCount;
   const cancelledEnabled = deepDiveFilters?.outcome?.cancelled ?? true;
+
+  const obHasNews  = obFieldMeta?.hasNews ?? true;
+  const obHasAge   = obFieldMeta?.hasAge  ?? true;
+  const anyObField = obHasNews || obHasAge;
 
   return (
     <div className="rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel))] p-4" data-testid="quick-controls">
+      {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex flex-col">
           <span className="font-display text-base font-bold text-[hsl(var(--text))]">Quick Controls</span>
@@ -82,6 +119,11 @@ export default function QuickControls({
       </div>
 
       <div className="space-y-3">
+        {/* Run Impact eyebrow */}
+        <p className="text-[9px] font-bold uppercase tracking-widest text-muted-lab font-num mb-1">
+          Run Impact
+        </p>
+
         <Group title="Direction">
           <Row label="Longs"  active={session.longs}  onChange={() => onToggle(session.key, "longs")}  color="#22C55E" testId="qc-longs" />
           <Row label="Shorts" active={session.shorts} onChange={() => onToggle(session.key, "shorts")} color="#EF4444" testId="qc-shorts" />
@@ -92,18 +134,25 @@ export default function QuickControls({
           <Row label="CHoCH" active={session.choch} onChange={() => onToggle(session.key, "choch")} color="#A855F7" testId="qc-choch" />
         </Group>
 
-        {/* Deep Dive-only section separator */}
-        <div className="border-t border-[hsl(var(--border-soft))] pt-3">
-          <div className="flex items-center gap-2 mb-0.5">
-            <span className="font-display text-[10px] font-bold uppercase tracking-widest text-[hsl(var(--accent-primary))]">Deep Dive Only</span>
-          </div>
-          <p className="text-[10px] text-muted-lab font-num mb-3">Filters the selected-session analytics below.</p>
+        {/* Deep Dive divider */}
+        <div className="flex items-center gap-2 pt-1">
+          <div className="flex-1 border-t border-[hsl(var(--border-soft))]" />
+          <span className="text-[9px] font-bold uppercase tracking-widest text-[hsl(var(--accent-primary))] font-num shrink-0">Deep Dive</span>
+          <div className="flex-1 border-t border-[hsl(var(--border-soft))]" />
+        </div>
+        <p className="text-[10px] text-muted-lab font-num -mt-1">Filters the selected-session analytics below.</p>
 
-          <div className="space-y-3">
-            {/* Entry Model */}
-            <div>
-              <SectionLabel className="mb-2">Entry Model</SectionLabel>
-              <div className="space-y-0.5">
+        {/* Deep Dive accordion groups */}
+        <Accordion type="multiple" defaultValue={[]}>
+
+          {/* Entry Model */}
+          <AccordionItem value="entryModel" className="border-b-0 border-t border-[hsl(var(--border-soft))]">
+            <AccordionTrigger className="flex items-center py-1.5 text-[10px] font-bold uppercase tracking-widest text-[hsl(var(--text-2))] hover:text-[hsl(var(--text))] hover:no-underline gap-2 [&>svg]:ml-0">
+              <span className="flex-1 text-left">Entry Model</span>
+              {filterBadge(deepDiveFilters.entryModel)}
+            </AccordionTrigger>
+            <AccordionContent className="pb-0">
+              <div className="space-y-0.5 pt-1 pb-3">
                 <Row
                   label="Baseline"
                   active={deepDiveFilters.entryModel.baseline}
@@ -126,12 +175,17 @@ export default function QuickControls({
                   testId="qc-em-te"
                 />
               </div>
-            </div>
+            </AccordionContent>
+          </AccordionItem>
 
-            {/* Trigger Delay */}
-            <div className="border-t border-[hsl(var(--border-soft))] pt-3">
-              <SectionLabel className="mb-2">Trigger Delay</SectionLabel>
-              <div className="space-y-0.5">
+          {/* Trigger Delay */}
+          <AccordionItem value="triggerDelay" className="border-b-0 border-t border-[hsl(var(--border-soft))]">
+            <AccordionTrigger className="flex items-center py-1.5 text-[10px] font-bold uppercase tracking-widest text-[hsl(var(--text-2))] hover:text-[hsl(var(--text))] hover:no-underline gap-2 [&>svg]:ml-0">
+              <span className="flex-1 text-left">Trigger Delay</span>
+              {filterBadge(deepDiveFilters.teDelay)}
+            </AccordionTrigger>
+            <AccordionContent className="pb-0">
+              <div className="space-y-0.5 pt-1 pb-3">
                 <Row
                   label="Same Candle"
                   active={deepDiveFilters.teDelay.same}
@@ -161,12 +215,17 @@ export default function QuickControls({
                   testId="qc-td-d3"
                 />
               </div>
-            </div>
+            </AccordionContent>
+          </AccordionItem>
 
-            {/* Outcome */}
-            <div className="border-t border-[hsl(var(--border-soft))] pt-3">
-              <SectionLabel className="mb-2">Outcome</SectionLabel>
-              <div className="space-y-0.5">
+          {/* Outcome + Cancel Reason */}
+          <AccordionItem value="outcome" className="border-b-0 border-t border-[hsl(var(--border-soft))]">
+            <AccordionTrigger className="flex items-center py-1.5 text-[10px] font-bold uppercase tracking-widest text-[hsl(var(--text-2))] hover:text-[hsl(var(--text))] hover:no-underline gap-2 [&>svg]:ml-0">
+              <span className="flex-1 text-left">Outcome</span>
+              {combinedBadge(deepDiveFilters.outcome, deepDiveFilters.cancelReason)}
+            </AccordionTrigger>
+            <AccordionContent className="pb-0">
+              <div className="space-y-0.5 pt-1 pb-3">
                 <Row
                   label="Wins"
                   active={deepDiveFilters.outcome.win}
@@ -202,69 +261,135 @@ export default function QuickControls({
                   color="#94A3B8"
                   testId="qc-out-unfilled"
                 />
-              </div>
-            </div>
 
-            {/* Cancel Reason — dimmed when Cancelled outcome is off */}
-            <div className="border-t border-[hsl(var(--border-soft))] pt-3">
-              <SectionLabel className="mb-1">Cancel Reason</SectionLabel>
-              {!cancelledEnabled && (
-                <p className="text-[10px] text-muted-lab font-num mb-2 italic">
-                  Enable &quot;Cancelled&quot; above to sub-filter by reason.
-                </p>
-              )}
-              <div
-                className={`space-y-0.5 transition-opacity ${cancelledEnabled ? "" : "opacity-40 pointer-events-none"}`}
-              >
-                <Row
-                  label="First Failed Tag"
-                  active={deepDiveFilters.cancelReason.firstFailedTag}
-                  onChange={() => flipFilter("cancelReason", "firstFailedTag")}
-                  color="#22D3EE"
-                  testId="qc-cr-fft"
-                />
-                <Row
-                  label="Retrace"
-                  active={deepDiveFilters.cancelReason.retrace}
-                  onChange={() => flipFilter("cancelReason", "retrace")}
-                  color="#A78BFA"
-                  testId="qc-cr-retrace"
-                />
-                <Row
-                  label="News"
-                  active={deepDiveFilters.cancelReason.news}
-                  onChange={() => flipFilter("cancelReason", "news")}
-                  color="#F59E0B"
-                  testId="qc-cr-news"
-                />
-                <Row
-                  label="Session Filter"
-                  active={deepDiveFilters.cancelReason.session}
-                  onChange={() => flipFilter("cancelReason", "session")}
-                  color="#64748B"
-                  testId="qc-cr-session"
-                />
-                <Row
-                  label="Other"
-                  active={deepDiveFilters.cancelReason.other}
-                  onChange={() => flipFilter("cancelReason", "other")}
-                  color="#94A3B8"
-                  testId="qc-cr-other"
-                />
+                {/* Cancel Reason sub-section */}
+                <div className="mt-2 pt-2 border-t border-[hsl(var(--border-soft))]">
+                  <SectionLabel className="mb-1">Cancel Reason</SectionLabel>
+                  {!cancelledEnabled && (
+                    <p className="mb-1 text-[9px] text-muted-lab font-num italic">
+                      Enable &quot;Cancelled&quot; above to sub-filter by reason.
+                    </p>
+                  )}
+                  <div
+                    className={`space-y-0.5 transition-opacity ${cancelledEnabled ? "" : "opacity-40 pointer-events-none"}`}
+                  >
+                    <Row
+                      label="First Failed Tag"
+                      active={deepDiveFilters.cancelReason.firstFailedTag}
+                      onChange={() => flipFilter("cancelReason", "firstFailedTag")}
+                      color="#22D3EE"
+                      testId="qc-cr-fft"
+                    />
+                    <Row
+                      label="Retrace"
+                      active={deepDiveFilters.cancelReason.retrace}
+                      onChange={() => flipFilter("cancelReason", "retrace")}
+                      color="#A78BFA"
+                      testId="qc-cr-retrace"
+                    />
+                    <Row
+                      label="News"
+                      active={deepDiveFilters.cancelReason.news}
+                      onChange={() => flipFilter("cancelReason", "news")}
+                      color="#F59E0B"
+                      testId="qc-cr-news"
+                    />
+                    <Row
+                      label="Session Filter"
+                      active={deepDiveFilters.cancelReason.session}
+                      onChange={() => flipFilter("cancelReason", "session")}
+                      color="#64748B"
+                      testId="qc-cr-session"
+                    />
+                    <Row
+                      label="Other"
+                      active={deepDiveFilters.cancelReason.other}
+                      onChange={() => flipFilter("cancelReason", "other")}
+                      color="#94A3B8"
+                      testId="qc-cr-other"
+                    />
+                  </div>
+                </div>
               </div>
-            </div>
+            </AccordionContent>
+          </AccordionItem>
+
+          {/* OB Quality + OB Age — only rendered when run has OB fields */}
+          {anyObField && (
+            <AccordionItem value="obQuality" className="border-b-0 border-t border-[hsl(var(--border-soft))]">
+              <AccordionTrigger className="flex items-center py-1.5 text-[10px] font-bold uppercase tracking-widest text-[hsl(var(--text-2))] hover:text-[hsl(var(--text))] hover:no-underline gap-2 [&>svg]:ml-0">
+                <span className="flex-1 text-left">OB Quality</span>
+                {combinedBadge(deepDiveFilters.obQuality, deepDiveFilters.obAge)}
+              </AccordionTrigger>
+              <AccordionContent className="pb-0">
+                <div className="space-y-0.5 pt-1 pb-3">
+                  {obHasNews ? (
+                    <>
+                      <Row
+                        label="News OB"
+                        active={deepDiveFilters.obQuality.news}
+                        onChange={() => flipFilter("obQuality", "news")}
+                        color="#F59E0B"
+                        testId="qc-ob-news"
+                      />
+                      <Row
+                        label="Clean OB"
+                        active={deepDiveFilters.obQuality.clean}
+                        onChange={() => flipFilter("obQuality", "clean")}
+                        color="#22C55E"
+                        testId="qc-ob-clean"
+                      />
+                    </>
+                  ) : (
+                    <FieldNote>No news window data in this run.</FieldNote>
+                  )}
+
+                  {obHasAge ? (
+                    <div className={obHasNews ? "border-t border-[hsl(var(--border-soft))] pt-2 mt-2" : ""}>
+                      <SectionLabel className="mb-2">OB Age</SectionLabel>
+                      <div className="space-y-0.5">
+                        <Row
+                          label="Fresh (0–4)"
+                          active={deepDiveFilters.obAge.fresh}
+                          onChange={() => flipFilter("obAge", "fresh")}
+                          color="#22C55E"
+                          testId="qc-oa-fresh"
+                        />
+                        <Row
+                          label="Normal (5–10)"
+                          active={deepDiveFilters.obAge.normal}
+                          onChange={() => flipFilter("obAge", "normal")}
+                          color="#94A3B8"
+                          testId="qc-oa-normal"
+                        />
+                        <Row
+                          label="Old (10+)"
+                          active={deepDiveFilters.obAge.old}
+                          onChange={() => flipFilter("obAge", "old")}
+                          color="#EF4444"
+                          testId="qc-oa-old"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <FieldNote>bars_to_fill not available in this run.</FieldNote>
+                  )}
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+          )}
+
+        </Accordion>
+
+        {/* Footer — always visible */}
+        <div className="border-t border-[hsl(var(--border-soft))] pt-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-muted-lab font-num">Deep Dive trades</span>
+            <span className="font-num text-[10px] font-bold text-[hsl(var(--accent-primary))]">
+              {deepDiveTrades} / {sessionTradeCount}
+            </span>
           </div>
-        </div>
-
-        {/* Conditional footer when Deep Dive filters are active */}
-        {isFiltered && (
-          <div className="border-t border-[hsl(var(--border-soft))] pt-3 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] text-muted-lab font-num">Deep Dive trades</span>
-              <span className="font-num text-[10px] font-bold text-[hsl(var(--accent-primary))]">
-                {deepDiveTrades} / {sessionTradeCount}
-              </span>
-            </div>
+          {isFiltered && (
             <button
               onClick={() => onDeepDiveFilterChange(defaultDeepDiveFilters)}
               className="w-full rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2))] px-2 py-1.5 text-[10px] font-ui font-medium uppercase tracking-wider text-[hsl(var(--text-2))] hover:border-[hsl(var(--accent-primary))]/50 hover:text-[hsl(var(--accent-primary))] transition-colors"
@@ -272,8 +397,8 @@ export default function QuickControls({
             >
               Reset Deep Dive Filters
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );
