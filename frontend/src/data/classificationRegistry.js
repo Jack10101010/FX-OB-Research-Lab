@@ -101,39 +101,62 @@ export const CLASSIFICATION_TAGS = {
         description: "Entry model key present but not recognised by the current registry.",
     },
 
-    // ── entry_context ────────────────────────────────────────────────────────
-    // Multi-valued dimension: a trade may have more than one context tag.
-    // "clean" is the default/empty state and is intentionally not rendered in
-    // the detail panel (showing "Clean" on every baseline trade is noise).
+    // ── entry_context (canonical fill-state-at-arm leaves) ───────────────────
+    // Single source of truth for the fill-state taxonomy (FILL-STATE-TAXONOMY-1).
+    // deriveEntryContext() returns exactly one of these per trade.
+    //
+    // Hierarchy:
+    //   occupied_at_arm                      (textbook fill — "clean")
+    //   vacant_at_arm  ──┬── aae             (parent + signal subtypes)
+    //                    └── vacant_no_aae
+    //   unknown_at_arm                       (uninstrumented / baseline default)
+    //
+    // muteAsBadge: default/non-signal states (occupied_at_arm, unknown_at_arm)
+    // are hidden by ClassificationBadge but still counted by analytics tables.
+    // "Clean" is deprecated as a bucket — it resolves to occupied_at_arm via
+    // TAG_ALIASES.
 
-    clean: {
+    occupied_at_arm: {
         dim: "entry_context",
-        label: "Clean",
+        label: "Occupied At Arm",
         tone: "muted",
-        description: "No special entry context. Default state.",
+        muteAsBadge: true,
+        description: "Price was still inside the OB range when the arm candle opened — the textbook ('clean') fill.",
+        supportingFields: ["obOccupiedAtArm"],
+    },
+    vacant_at_arm: {
+        dim: "entry_context",
+        label: "OB Vacant At Arm",
+        tone: "warning",
+        description: "Price had already left the OB range when the order armed. Parent state: the superset of AAE and Vacant — No AAE.",
+        supportingFields: ["obOccupiedAtArm", "armedAfterObExit"],
     },
     aae: {
         dim: "entry_context",
         label: "AAE",
         tone: "warning",
-        description: "Armed After OB Exit: price exited the OB through the entry side during the delay window before the limit order armed.",
+        description: "Armed After OB Exit: price exited the OB through the entry side during the delay window, then returned and filled. A subtype of OB Vacant.",
         supportingFields: [
             "armedAfterObExit",
             "obOccupiedAtArm",
-            "priceDistanceFromObAtArmPips",
             "armCandleIndex",
             "ob_exit_time",
         ],
     },
-    ob_not_occupied: {
+    vacant_no_aae: {
         dim: "entry_context",
-        label: "OB Not Occupied",
+        label: "Vacant — No AAE",
         tone: "warning",
-        description: "Price was not inside the OB range when the arm candle opened.",
-        supportingFields: [
-            "obOccupiedAtArm",
-            "priceDistanceFromObAtArmPips",
-        ],
+        description: "OB was vacant at arm but the fill was not flagged AAE (vacant from origin, or no clean exit-and-return through the entry side).",
+        supportingFields: ["obOccupiedAtArm", "armedAfterObExit"],
+    },
+    unknown_at_arm: {
+        dim: "entry_context",
+        label: "Unknown At Arm",
+        tone: "muted",
+        muteAsBadge: true,
+        description: "OB occupancy at arm could not be determined (baseline / non-TE trades, or runs predating AAE instrumentation). Not 'clean'.",
+        supportingFields: ["obOccupiedAtArm"],
     },
 
     // ── exit_type ─────────────────────────────────────────────────────────────
@@ -216,17 +239,44 @@ export const CLASSIFICATION_TAGS = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Aliases — legacy / deprecated tag keys mapped to canonical keys.
+//
+// Keeps old run bundles, persisted filter state, and serialized data resolving
+// after the fill-state taxonomy rename (FILL-STATE-TAXONOMY-2):
+//   - ob_not_occupied → vacant_no_aae  (old name described the parent, but the
+//     derivation only ever produced the non-AAE leaf)
+//   - clean           → occupied_at_arm ("clean" deprecated as a bucket)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const TAG_ALIASES = {
+    ob_not_occupied: "vacant_no_aae",
+    clean:           "occupied_at_arm",
+};
+
+/**
+ * Map a possibly-legacy tag key to its canonical key.
+ * Canonical and unknown keys pass through unchanged.
+ *
+ * @param {string} tag
+ * @returns {string}
+ */
+export function normalizeContextTag(tag) {
+    return TAG_ALIASES[tag] ?? tag;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Lookup helper
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Safe tag metadata lookup.
- * Returns the registry entry for a known tag, or a muted fallback for unknown
- * tags so callers never need to null-check.
+ * Safe tag metadata lookup. Resolves legacy aliases first, then returns the
+ * registry entry for the canonical tag, or a muted fallback for unknown tags so
+ * callers never need to null-check.
  *
  * @param {string} tag
- * @returns {{ dim: string|null, label: string, tone: string, description?: string, supportingFields?: string[] }}
+ * @returns {{ dim: string|null, label: string, tone: string, muteAsBadge?: boolean, description?: string, supportingFields?: string[] }}
  */
 export function getTagMeta(tag) {
-    return CLASSIFICATION_TAGS[tag] ?? { dim: null, label: String(tag), tone: "muted" };
+    const canonical = normalizeContextTag(tag);
+    return CLASSIFICATION_TAGS[canonical] ?? { dim: null, label: String(tag), tone: "muted" };
 }

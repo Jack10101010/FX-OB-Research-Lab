@@ -35,13 +35,13 @@ export function buildTradeClassification(trade) {
     if (!trade) {
         return {
             entry_model:     "baseline",
-            entry_context:   ["clean"],
+            entry_context:   ["unknown_at_arm"],
             exit_type:       "unknown_exit",
             protection_mode: "baseline",
             fill_state:            "unknown_at_arm",
             fill_state_parent:     "unknown_at_arm",
             fill_state_is_anomaly: false,
-            key:             "baseline|clean|unknown_exit|baseline",
+            key:             "baseline|unknown_at_arm|unknown_exit|baseline",
         };
     }
 
@@ -174,44 +174,22 @@ function deriveEntryModel(trade) {
 }
 
 /**
- * Derive the entry_context tag array.
- * Multiple tags can apply simultaneously (multi-valued dimension).
- * Returns ["clean"] when no special context is detected.
+ * Derive the entry_context tag array (canonical single-leaf fill state).
  *
- * Null safety: all boolean TE/AAE fields from the importer return
- * true | false | null. Using === true and === false is intentional —
- * null/undefined must NOT qualify as a match.
+ * Sourced from deriveFillState() so entry_context and the fill_state field can
+ * never disagree. Returns exactly one canonical leaf tag:
+ *   occupied_at_arm | aae | vacant_no_aae | unknown_at_arm
+ *
+ * The array shape is preserved for backwards-compatible consumers that call
+ * .filter / .some / .map on entry_context. Default / non-signal states
+ * (occupied_at_arm, unknown_at_arm) carry muteAsBadge in classificationRegistry,
+ * so ClassificationBadge hides them; analytics tables still read them directly.
  *
  * @param {object} trade
  * @returns {string[]}
  */
 function deriveEntryContext(trade) {
-    const context = [];
-
-    // AAE: Armed After OB Exit.
-    // True when price exited the OB through the entry side during the delay
-    // window AND the limit order subsequently armed.
-    // armedAfterObExit is the camelCase alias set by importer.js.
-    if (trade.armedAfterObExit === true || trade.armed_after_ob_exit === true) {
-        context.push("aae");
-    }
-
-    // OB Not Occupied: price was outside the OB range at the arm candle.
-    // Only push this if AAE was NOT already detected — AAE is the more
-    // specific condition (it implies ob_not_occupied, but has separate meaning).
-    if (
-        (trade.obOccupiedAtArm === false || trade.ob_occupied_at_arm === false)
-        && trade.armedAfterObExit !== true
-        && trade.armed_after_ob_exit !== true
-    ) {
-        context.push("ob_not_occupied");
-    }
-
-    if (context.length === 0) {
-        context.push("clean");
-    }
-
-    return context;
+    return [deriveFillState(trade).state];
 }
 
 /**

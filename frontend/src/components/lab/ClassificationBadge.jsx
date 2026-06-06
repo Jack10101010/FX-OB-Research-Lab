@@ -8,9 +8,10 @@
  * Usage:
  *   <ClassificationBadge tag="aae" />
  *   <ClassificationBadge tag="te_d2" />
- *   <ClassificationBadge tags={["aae", "ob_not_occupied"]} />
+ *   <ClassificationBadge tags={["aae", "vacant_no_aae"]} />
  *
- * "clean" renders nothing — it is the absence of context, not a visible tag.
+ * Tags flagged muteAsBadge in the registry (occupied_at_arm, unknown_at_arm, and
+ * the legacy "clean" alias) render nothing — they are default states, not signals.
  *
  * Fallback: if a tag is not in the registry (future tags, unknown keys),
  * the component renders a muted pill with the raw tag string so nothing
@@ -27,8 +28,10 @@ export function ClassificationBadge({ tag, tags, className }) {
     // Normalize to array, filtering out undefined/null.
     const tagList = tags ?? (tag != null ? [tag] : []);
 
-    // Filter "clean" — it is the default/empty state and is not rendered.
-    const visible = tagList.filter((t) => t && t !== "clean");
+    // Hide non-signal / default states via the registry muteAsBadge flag
+    // (occupied_at_arm, unknown_at_arm, and the legacy "clean" alias). This is
+    // the single source of truth for badge suppression — no hardcoded tag keys.
+    const visible = tagList.filter((t) => t && !getTagMeta(t).muteAsBadge);
 
     if (visible.length === 0) return null;
 

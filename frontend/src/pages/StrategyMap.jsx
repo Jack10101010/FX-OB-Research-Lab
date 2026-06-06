@@ -765,8 +765,8 @@ export default function StrategyMap() {
                                         )}
                                         <Toggle label="Lifecycle" checked={showTriggeredEdgeLifecycle} onChange={setShowTriggeredEdgeLifecycle} dot="primary" />
                                         <Toggle label="OB Badges" checked={showTriggeredEdgeBadges} onChange={setShowTriggeredEdgeBadges} dot="success" />
-                                        <Toggle label="Cancelled Setups" checked={showCancelledSetups} onChange={setShowCancelledSetups} dot="secondary" />
-                                        <Toggle label="🔍 FFT Debug" checked={showFftDebug} onChange={setShowFftDebug} dot="danger" />
+                                        <Toggle label="Cancelled / FFT Setups" checked={showCancelledSetups} onChange={setShowCancelledSetups} dot="secondary" title="Shows cancelled triggered-edge setups, including First Failed Tag cancels, retrace cancels, and invalidated-before-entry setups. Must be enabled to see First Failed Tag cancelled-setup markers." />
+                                        <Toggle label="🔍 FFT Debug" checked={showFftDebug} onChange={setShowFftDebug} dot="danger" title="Shows First Failed Tag tap/cancel markers on the chart (indigo TAP dot, pink FFT cancel dot, tap→cancel line) and the FFT checklist in the Lifecycle Detail panel." />
                                     </>
                                 )}
                                 {hasGhostData && (
@@ -1960,7 +1960,7 @@ function LifecycleDetailPanel({ overlay: ov, onClose, trades = [], showFftDebug 
                     </span>
                     {badgeInfo && (
                         <span
-                            className="px-1.5 py-px rounded-sm font-ui text-[8px] uppercase tracking-wider"
+                            className="px-1.5 py-px rounded-sm font-ui text-[9px] uppercase tracking-wider"
                             style={{ background: badgeInfo.tone, color: "rgba(255,255,255,0.96)" }}
                             title={badgeInfo.tooltip || undefined}
                         >
@@ -1999,7 +1999,7 @@ function LifecycleDetailPanel({ overlay: ov, onClose, trades = [], showFftDebug 
             {/* Event timeline */}
             {timelineEvents.length > 0 && (
                 <div className="border-t border-[hsl(var(--border-soft))] pt-1.5">
-                    <div className="font-ui text-[9px] uppercase tracking-wider text-[hsl(var(--text-3))] mb-1">Event Sequence</div>
+                    <div className="font-ui text-[10px] uppercase tracking-wider text-[hsl(var(--text-2))] font-semibold mb-1">Event Sequence</div>
                     <div className="space-y-0.5">
                         {timelineEvents.map((ev, i) => (
                             <div key={i} className="flex items-center gap-1.5">
@@ -2007,8 +2007,8 @@ function LifecycleDetailPanel({ overlay: ov, onClose, trades = [], showFftDebug 
                                     className="flex-shrink-0 rounded-full"
                                     style={{ width: 5, height: 5, background: ev.color }}
                                 />
-                                <span className="font-ui text-[9px] text-[hsl(var(--text-3))] w-44 flex-shrink-0 truncate">{ev.label}</span>
-                                <span className="font-mono text-[9px] text-[hsl(var(--text-2))]">{fmtShort(ev.time)} UTC</span>
+                                <span className="font-ui text-[10px] text-[hsl(var(--text-2))] w-44 flex-shrink-0 truncate">{ev.label}</span>
+                                <span className="font-mono text-[10px] text-[hsl(var(--text-1))]">{fmtShort(ev.time)} UTC</span>
                             </div>
                         ))}
                     </div>
@@ -2017,7 +2017,7 @@ function LifecycleDetailPanel({ overlay: ov, onClose, trades = [], showFftDebug 
             {/* Ghost simulation */}
             {ov.ghost_candidate && (ghostOutcome || ghostR != null) && (
                 <div className="border-t border-[hsl(var(--border-soft))] mt-1.5 pt-1.5">
-                    <div className="font-ui text-[9px] uppercase tracking-wider text-[hsl(var(--text-3))] mb-0.5">Ghost Simulation</div>
+                    <div className="font-ui text-[10px] uppercase tracking-wider text-[hsl(var(--text-2))] font-semibold mb-0.5">Ghost Simulation</div>
                     <div className="flex items-center gap-3">
                         {ghostOutcome && (
                             <span className="font-ui text-[10px] text-[hsl(var(--text-1))]">{ghostOutcome}</span>
@@ -2053,7 +2053,7 @@ function LifecycleDetailPanel({ overlay: ov, onClose, trades = [], showFftDebug 
                 const moveAwayAtCancel = ov.fftMoveAwayPipsAtCancel != null ? `${Number(ov.fftMoveAwayPipsAtCancel).toFixed(1)} pips` : "—";
                 return (
                     <div className="border-t border-[hsl(var(--border-soft))] mt-1.5 pt-1.5">
-                        <div className="font-ui text-[9px] uppercase tracking-wider mb-1" style={{ color: "rgba(219,39,119,0.9)" }}>
+                        <div className="font-ui text-[10px] uppercase tracking-wider font-semibold mb-1" style={{ color: "rgba(236,72,153,1)" }}>
                             🔍 FFT Debug
                         </div>
                         <div className="space-y-0.5">
@@ -2080,8 +2080,8 @@ function LifecycleDetailPanel({ overlay: ov, onClose, trades = [], showFftDebug 
                                 ["ob_exit_time",             ov.obExitTime ? (fmtShort(ov.obExitTime) || "—") : "—"],
                             ].map(([label, value]) => (
                                 <div key={label} className="flex items-start gap-1">
-                                    <span className="font-ui text-[9px] text-[hsl(var(--text-3))] w-40 flex-shrink-0 truncate">{label}</span>
-                                    <span className="font-mono text-[9px] text-[hsl(var(--text-1))]">{value}</span>
+                                    <span className="font-ui text-[10px] text-[hsl(var(--text-2))] w-44 flex-shrink-0 truncate">{label}</span>
+                                    <span className="font-mono text-[10px] text-[hsl(var(--text-1))]">{value}</span>
                                 </div>
                             ))}
                         </div>
@@ -2323,12 +2323,13 @@ function variantLabel(v) {
     }[v] || v;
 }
 
-function Toggle({ label, checked, onChange, dot }) {
+function Toggle({ label, checked, onChange, dot, title }) {
     return (
         <FilterToggle
             active={checked}
             inactiveBorder="mid"
             dot={dot}
+            title={title}
             onClick={() => onChange(!checked)}
             className="text-[11px] tracking-wider"
         >
