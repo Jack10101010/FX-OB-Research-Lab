@@ -120,13 +120,13 @@ function FftChip({ label, value, tone = "default", title }) {
 
     return (
         <span
-            className="inline-flex items-center gap-1 px-1.5 py-0.5 border border-[hsl(var(--border-soft)/0.4)] bg-[hsl(var(--panel)/0.4)] clip-bevel-sm"
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 border border-[hsl(var(--border-soft)/0.7)] bg-[hsl(var(--panel)/0.65)] clip-bevel-sm"
             title={title}
         >
-            <span className="text-[8.5px] font-ui uppercase tracking-[0.1em] text-muted-lab opacity-60">
+            <span className="text-[9px] font-ui font-medium uppercase tracking-[0.08em] text-[hsl(var(--text-1))]">
                 {label}
             </span>
-            <span className={`text-[10px] font-num font-semibold tabular-nums ${toneClass}`}>
+            <span className={`text-[11px] font-num font-semibold tabular-nums ${toneClass}`}>
                 {value}
             </span>
         </span>
@@ -343,14 +343,17 @@ export function ScenarioSelector({ resolvedScenario, onScenarioChange, onVariant
                 Replaces the old sparse Rows / Fills / WR / Net R / Exp / PF
                 row. Driven by summarizeTradeSanity so the numbers track every
                 other strip in the app (Run Detail ledger, other labs). */}
-            <TradeSanityStrip stats={sanity} showBreakdown={true} />
+            <TradeSanityStrip stats={sanity} showBreakdown={true} variant="research" />
 
             {/* ── FFT summary row — shown only when FFT cancels are present ── */}
             {fftStats.fftCancels > 0 && (
-                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                <div className="flex flex-wrap items-center gap-1.5 mt-1.5 px-2 py-1.5 border-l-[3px] border-[hsl(var(--warning)/0.85)] bg-[hsl(var(--warning)/0.09)] rounded-sm">
                     {/* Section label */}
-                    <span className="text-[8px] font-ui uppercase tracking-[0.14em] text-[hsl(var(--warning)/0.65)] mr-0.5 shrink-0">
-                        FFT:
+                    <span
+                        className="text-[11px] font-ui uppercase tracking-[0.1em] font-bold text-[hsl(var(--warning))] px-1.5 py-0.5 rounded-sm bg-[hsl(var(--warning)/0.2)] border border-[hsl(var(--warning)/0.6)] mr-0.5 shrink-0 cursor-default"
+                        title="First Failed Tag cancel summary for the current scenario: setups where price tapped the OB but failed to reach the trigger, so the order was cancelled before entry. Ghost columns are simulated 'what-if' outcomes and are unverified."
+                    >
+                        FFT
                     </span>
 
                     {/* FFT Cancels */}
@@ -384,7 +387,15 @@ export function ScenarioSelector({ resolvedScenario, onScenarioChange, onVariant
                                 label="Ghost Net R"
                                 value={fmtFftR(fftStats.ghostNetR)}
                                 tone={fftStats.ghostNetR > 0.005 ? "success" : fftStats.ghostNetR < -0.005 ? "danger" : "muted"}
-                                title="Ghost-simulated net R — unverified. Load a paired FFT-OFF run for authoritative impact."
+                                title="Ghost Net R is the hypothetical R result of the cancelled setups if FFT had not cancelled them (simulated, unverified). FFT Impact is the opposite: how much FFT helped or hurt this run by cancelling them."
+                            />
+                            {/* FFT Impact — display-only inverse of Ghost Net R.
+                                Positive = FFT helped (cancelled net-losing setups). */}
+                            <FftChip
+                                label="FFT Impact"
+                                value={fmtFftR(-fftStats.ghostNetR)}
+                                tone={-fftStats.ghostNetR > 0.005 ? "success" : -fftStats.ghostNetR < -0.005 ? "danger" : "muted"}
+                                title="Ghost Net R is the hypothetical R result of the cancelled setups if FFT had not cancelled them. FFT Impact is the opposite: how much FFT helped or hurt this run by cancelling them. (Inverse of Ghost Net R; simulated, unverified.)"
                             />
                         </>
                     )}

@@ -101,6 +101,62 @@ function StatTile({ label, value, tone = "base", hint, zero = false, title }) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Research variant — borderless stat inside a labelled group. Net R renders as
+// a larger "hero" value so the decision metric dominates the scan path. Used
+// only by the grouped research layout; the default StatTile is untouched.
+// ────────────────────────────────────────────────────────────────────────────
+
+function ResearchStat({ label, value, tone = "base", hint, zero = false, title, hero = false }) {
+    const valueClass = zero ? TONES.muted : (TONES[tone] || TONES.base);
+    return (
+        <div className="flex flex-col gap-[1px]" title={title}>
+            <span className="font-ui text-[9px] uppercase tracking-wider leading-none text-[hsl(var(--text-muted))]">
+                {label}
+            </span>
+            <span className={`font-num ${hero ? "text-[20px]" : "text-[12px]"} font-semibold tabular-nums leading-tight ${valueClass}`}>
+                {value}
+            </span>
+            {hint && (
+                <span className="font-ui text-[9px] leading-none text-[hsl(var(--text-3))]">
+                    {hint}
+                </span>
+            )}
+        </div>
+    );
+}
+
+function ResearchGroup({ label, tiles, accent = false, dim = false }) {
+    if (!tiles.length) return null;
+    return (
+        <div
+            className={`flex flex-col gap-1 px-2.5 py-1.5 border clip-bevel-sm ${
+                accent
+                    ? "border-[hsl(var(--accent-primary)/0.45)] bg-[hsl(var(--panel)/0.45)]"
+                    : "border-[hsl(var(--border-soft)/0.6)] bg-[hsl(var(--panel)/0.3)]"
+            } ${dim ? "opacity-80" : ""}`}
+        >
+            <span className="font-ui text-[10px] font-semibold uppercase tracking-[0.08em] leading-none text-[hsl(var(--text-2))]">
+                {label}
+            </span>
+            <div className="flex flex-wrap items-end gap-x-3 gap-y-1">
+                {tiles.map((t) => (
+                    <ResearchStat
+                        key={t.key}
+                        label={t.label}
+                        value={t.value}
+                        tone={t.tone}
+                        hint={t.hint}
+                        zero={t.zero}
+                        title={t.title}
+                        hero={t.hero}
+                    />
+                ))}
+            </div>
+        </div>
+    );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Helpers used inside the strip
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -137,6 +193,7 @@ export function TradeSanityStrip({
     subtitle,
     compact = false,
     showBreakdown = true,
+    variant = "default",
     className = "",
 }) {
     const resolved = React.useMemo(() => {
@@ -166,6 +223,88 @@ export function TradeSanityStrip({
         expectancy = null,
         maxDrawdownR = null,
     } = resolved;
+
+    // ── Research variant — grouped, hierarchy-first layout (Strategy Map) ─────
+    // Groups the SAME stats into Outcome / Composition / Secondary. No new
+    // metrics, no new data wiring. Opt-in only; default behaviour is unchanged.
+    if (variant === "research") {
+        const outcome = [
+            { key: "netr", label: "Net R", value: fmtR(netRPerformance), tone: netRTone(netRPerformance), hero: true },
+            { key: "wr",   label: "WR",    value: fmtPct(winRate), tone: wrTone(winRate) },
+            ...(profitFactor != null
+                ? [{ key: "pf", label: "PF", value: fmtPF(profitFactor), tone: pfTone(profitFactor) }]
+                : []),
+            ...(expectancy != null
+                ? [{ key: "exp", label: "Exp", value: fmtR(expectancy, 3),
+                    tone: expectancy > 0 ? "success" : expectancy < 0 ? "danger" : "muted",
+                    zero: expectancy === 0 }]
+                : []),
+            ...(maxDrawdownR != null
+                ? [{ key: "dd", label: "DD",
+                    value: fmtRSigned(maxDrawdownR === 0 ? 0 : maxDrawdownR),
+                    tone: maxDrawdownR < -0.005 ? "warning" : "muted",
+                    zero: maxDrawdownR === 0 }]
+                : []),
+        ];
+
+        const composition = [
+            { key: "valid", label: "Valid", value: fmtCount(performanceTrades),
+              hint: performanceTrades !== total ? `of ${fmtCount(total)}` : null },
+            { key: "wlf", label: flats > 0 ? "W / L / F" : "W / L",
+              value: flats > 0
+                  ? `${fmtCount(wins)} / ${fmtCount(losses)} / ${fmtCount(flats)}`
+                  : `${fmtCount(wins)} / ${fmtCount(losses)}`,
+              tone: winRate != null ? wrTone(winRate) : "base" },
+            { key: "ls", label: "L / S",
+              value: `${fmtCount(longCount)} / ${fmtCount(shortCount)}`,
+              zero: longCount + shortCount === 0,
+              hint: longCount + shortCount === 0 ? "no direction" : null },
+        ];
+
+        const secondary = [
+            { key: "prot", label: "Protected", value: fmtCount(invalidCancelled),
+              tone: "protected", zero: invalidCancelled === 0,
+              title: "Setups protected before edge entry (avoided bad fills)." },
+            { key: "excl", label: "Excl.", value: fmtCount(Math.max(0, excludedSetups - invalidCancelled)),
+              tone: "muted", zero: (excludedSetups - invalidCancelled) <= 0,
+              title: `Excluded setups: ${fmtCount(unfilled)} unfilled · ${fmtCount(sessionFiltered)} session-filtered · ${fmtCount(newsCancelled)} news-cancelled` },
+            ...(newsFlattenTotal > 0
+                ? [{ key: "nf", label: "News flat", value: fmtCount(newsFlattenTotal),
+                    tone: "warning",
+                    title: "Trades flattened early by the news blackout. Counted in wins / losses by R sign." }]
+                : []),
+            { key: "winr", label: "Win R", value: fmtR(grossWinR),
+              tone: grossWinR > 0 ? "success" : "muted", zero: grossWinR === 0 },
+            { key: "lossr", label: "Loss R", value: fmtRSigned(grossLossR),
+              tone: grossLossR < 0 ? "danger" : "muted", zero: grossLossR === 0 },
+        ];
+
+        return (
+            <div
+                className={`flex flex-wrap items-stretch gap-2 border border-[hsl(var(--border-soft)/0.7)] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm px-3 py-2 ${className}`.trim()}
+                data-testid="trade-sanity-strip"
+                data-variant="research"
+            >
+                {(title || subtitle) && (
+                    <div className="flex flex-col gap-[2px] mr-1 pr-2 border-r border-[hsl(var(--border-soft))] justify-center">
+                        {title && (
+                            <span className="font-ui text-[9.5px] uppercase tracking-widest text-[hsl(var(--accent-primary))]">
+                                {title}
+                            </span>
+                        )}
+                        {subtitle && (
+                            <span className="font-ui text-[10px] text-[hsl(var(--text-2))]">
+                                {subtitle}
+                            </span>
+                        )}
+                    </div>
+                )}
+                <ResearchGroup label="Outcome" tiles={outcome} accent />
+                <ResearchGroup label="Composition" tiles={composition} />
+                <ResearchGroup label="Secondary" tiles={secondary} dim />
+            </div>
+        );
+    }
 
     // Compact mode: only the headline tiles, no direction/gross breakdown.
     // Used inside dense parent strips (ScenarioSelector, narrow side panels).
