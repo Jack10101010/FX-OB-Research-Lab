@@ -38,6 +38,9 @@ export function buildTradeClassification(trade) {
             entry_context:   ["clean"],
             exit_type:       "unknown_exit",
             protection_mode: "baseline",
+            fill_state:            "unknown_at_arm",
+            fill_state_parent:     "unknown_at_arm",
+            fill_state_is_anomaly: false,
             key:             "baseline|clean|unknown_exit|baseline",
         };
     }
@@ -46,6 +49,7 @@ export function buildTradeClassification(trade) {
     const entry_context   = deriveEntryContext(trade);
     const exit_type       = deriveExitType(trade);
     const protection_mode = deriveProtectionMode(trade);
+    const fillState       = deriveFillState(trade);
 
     const key = [
         entry_model,
@@ -54,7 +58,79 @@ export function buildTradeClassification(trade) {
         protection_mode,
     ].join("|");
 
-    return { entry_model, entry_context, exit_type, protection_mode, key };
+    return {
+        entry_model,
+        entry_context,
+        exit_type,
+        protection_mode,
+        fill_state:            fillState.state,
+        fill_state_parent:     fillState.parent,
+        fill_state_is_anomaly: fillState.isAnomaly,
+        key,
+    };
+}
+
+/**
+ * Derive the canonical fill-state-at-arm classification for a single trade.
+ *
+ * Hierarchy (see FILL-STATE-TAXONOMY-1):
+ *   All Filled
+ *   ├─ Occupied At Arm     obOccupiedAtArm === true
+ *   ├─ Vacant At Arm       obOccupiedAtArm === false           (parent)
+ *   │   ├─ AAE             vacant && armedAfterObExit === true
+ *   │   └─ Vacant — No AAE vacant && armedAfterObExit !== true
+ *   └─ Unknown At Arm      obOccupiedAtArm === null | undefined
+ *
+ * Rules:
+ *   - obOccupiedAtArm is AUTHORITATIVE for the parent state.
+ *   - armedAfterObExit only SUBDIVIDES Vacant.
+ *   - isAnomaly flags an armed-after-exit assertion where occupancy does NOT
+ *     confirm vacancy (occupied, or unknown). Surfaced, never silently merged
+ *     into AAE — so AAE always implies obOccupiedAtArm === false.
+ *   - Unknown At Arm is NOT "clean": it is the uninstrumented / baseline default.
+ *
+ * Null safety: occupancy / AAE booleans are true | false | null. Using === true
+ * and === false is intentional — null/undefined must fall through to Unknown.
+ *
+ * Additive: this does not change any existing classification field. The
+ * entry_context dimension is intentionally left untouched in this step.
+ *
+ * @param {object} trade
+ * @returns {{ state: string, parent: string, isAnomaly: boolean }}
+ */
+export function deriveFillState(trade) {
+    if (!trade) {
+        return { state: "unknown_at_arm", parent: "unknown_at_arm", isAnomaly: false };
+    }
+
+    const occupied = trade.obOccupiedAtArm ?? trade.ob_occupied_at_arm ?? null;
+    const armedAfterExit =
+        trade.armedAfterObExit === true || trade.armed_after_ob_exit === true;
+
+    // Vacant — obOccupiedAtArm is authoritative for the parent state.
+    if (occupied === false) {
+        return {
+            state:     armedAfterExit ? "aae" : "vacant_no_aae",
+            parent:    "vacant_at_arm",
+            isAnomaly: false,
+        };
+    }
+
+    // Occupied At Arm — the textbook fill. armed-after-exit here is a data conflict.
+    if (occupied === true) {
+        return {
+            state:     "occupied_at_arm",
+            parent:    "occupied_at_arm",
+            isAnomaly: armedAfterExit,
+        };
+    }
+
+    // Unknown / uninstrumented (null | undefined). Explicitly not "clean".
+    return {
+        state:     "unknown_at_arm",
+        parent:    "unknown_at_arm",
+        isAnomaly: armedAfterExit,
+    };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
