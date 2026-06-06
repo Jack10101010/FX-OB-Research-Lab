@@ -17,6 +17,7 @@ import { SameNextCandlePanel }    from "./SameNextCandlePanel";
 import { CancelReasonPanel }      from "./CancelReasonPanel";
 import { GhostOutcomePanel }      from "./GhostOutcomePanel";
 import { FftProtectionPanel }     from "./FftProtectionPanel";
+import { FftClassificationPanel } from "./FftClassificationPanel";
 import { DirectionalScenariosPanel } from "./DirectionalScenariosPanel";
 import { buildAllModelCurves }    from "../analytics/equityCurveAnalytics";
 import { PROFILE_KEYS }           from "../analytics/entryRegistry";
@@ -204,6 +205,9 @@ export function ModelAnalysis({
                             />
                         )}
                     </div>
+                    {/* Stage 1 FFT breakdown — Overall / Structure / Direction / Session.
+                        Full-width under the protection grid; same trades array. */}
+                    {hasFftCancels && <FftClassificationPanel trades={trades} />}
                 </>
             ) : null}
 
