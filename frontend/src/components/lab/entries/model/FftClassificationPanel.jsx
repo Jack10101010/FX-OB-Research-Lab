@@ -57,21 +57,33 @@ const SESSION_ORDER = ["London", "London Lull", "New York", "Asia", "Outside"];
 
 const COLS = "minmax(92px,1.3fr) 60px 70px 58px 84px 84px 78px";
 
+const HEADERS = [
+    { label: "", title: null },
+    { label: "Cancels", title: "Number of First Failed Tag cancels in this bucket (also the sample size)." },
+    { label: "Ghost W/L", title: "Ghost-simulated wins / losses of the cancelled setups, had FFT not cancelled them (unverified)." },
+    { label: "Cov", title: "Ghost coverage: how many of the cancels had ghost tracking, out of total cancels in the bucket." },
+    { label: "Ghost Net R", title: "Hypothetical net R of the cancelled setups if FFT had not cancelled them (simulated, unverified)." },
+    { label: "FFT Impact", title: "−Ghost Net R. Positive = FFT helped (it cancelled net-losing setups); negative = FFT hurt." },
+    { label: "Move-away", title: "Average pips price had moved past the OB edge at the moment of cancel." },
+];
+
 function HeaderRow() {
     return (
         <div
             className="grid items-baseline gap-x-2 px-1 pb-1 border-b border-[hsl(var(--border-soft)/0.25)]"
             style={{ gridTemplateColumns: COLS }}
         >
-            {["", "Cancels", "Ghost W/L", "Cov", "Ghost Net R", "FFT Impact", "Move-away"].map((h, i) => (
+            {HEADERS.map((h, i) => (
                 <span
-                    key={h || `c${i}`}
+                    key={h.label || `c${i}`}
+                    title={h.title || undefined}
                     className={cn(
                         "text-[8.5px] font-ui uppercase tracking-[0.1em] text-muted-lab opacity-60",
                         i === 0 ? "text-left" : "text-right",
+                        h.title && "cursor-help",
                     )}
                 >
-                    {h}
+                    {h.label}
                 </span>
             ))}
         </div>

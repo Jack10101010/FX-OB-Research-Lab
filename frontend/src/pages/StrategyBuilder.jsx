@@ -998,7 +998,10 @@ export default function StrategyBuilder() {
                             <div className="border-t border-[hsl(var(--border-soft))] pt-3">
                                 <div className="flex items-center justify-between">
                                     <div>
-                                        <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Enable Retrace Cancel</div>
+                                        <LabelWithTooltip
+                                            label={<span className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Enable Retrace Cancel</span>}
+                                            help={"Retrace Cancel removes a tapped-but-untriggered order block if price pulls away from the zone before reaching the entry trigger. Use it to test whether an early retreat from the OB signals the setup has already failed. Set the distance in pips or as a percentage of OB height."}
+                                        />
                                         <div className="text-[10.5px] text-muted-lab">Cancels a tapped-but-untriggered OB if price moves away from the zone before reaching the entry trigger.</div>
                                     </div>
                                     <NeonToggle checked={Boolean(cfg.triggeredEdgeCancelOnRetrace)} onChange={set("triggeredEdgeCancelOnRetrace")} />
@@ -1018,11 +1021,11 @@ export default function StrategyBuilder() {
                             {/* B · First Failed Tag */}
                             <div className="border-t border-[hsl(var(--border-soft))] pt-3">
                                 <div className="flex items-center justify-between">
-                                    <div
-                                        className="cursor-help"
-                                        title="First Failed Tag Cancel protects against order blocks that get tapped before the trigger threshold is reached. If price touches the OB entry side first, the setup is cancelled before the limit order is allowed to trigger. This helps test whether early OB taps are a warning sign that the block has already been used. Move-away settings can require price to move away by a minimum distance before cancelling; 0 means immediate cancel on first failed tag."
-                                    >
-                                        <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Enable First Failed Tag Cancel <span className="text-[hsl(var(--text-2))] normal-case" aria-hidden="true">ⓘ</span></div>
+                                    <div>
+                                        <LabelWithTooltip
+                                            label={<span className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Enable First Failed Tag Cancel</span>}
+                                            help={"First Failed Tag Cancel protects against order blocks that get tapped before the trigger threshold is reached. If price touches the OB entry side first, the setup is cancelled before the limit order is allowed to trigger. This helps test whether early OB taps are a warning sign that the block has already been used. Move-away settings can require price to move away by a minimum distance before cancelling; 0 means immediate cancel on first failed tag."}
+                                        />
                                         <div className="text-[10.5px] text-muted-lab">Cancels an OB after the first failed visit: price tags the OB, fails to reach the trigger threshold, then exits the OB.</div>
                                     </div>
                                     <NeonToggle checked={Boolean(cfg.triggeredEdgeCancelOnFirstFailedTag)} onChange={set("triggeredEdgeCancelOnFirstFailedTag")} />
@@ -1032,10 +1035,16 @@ export default function StrategyBuilder() {
                                         <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab">Move-Away Distance</div>
                                         <div className="text-[10px] text-muted-lab">0 = immediate cancel. Price must leave the order block and move away by the configured distance before FFT cancellation is allowed.</div>
                                         <div className="grid grid-cols-2 gap-3 mt-2">
-                                            <Field label="Move Away (Pips)" hint="Cancel only after price exits the OB and moves this many additional pips away. 0 = immediate.">
+                                            <Field
+                                                label={<LabelWithTooltip label="Move Away (Pips)" help={"Require price to move at least this many pips past the OB entry edge before a First Failed Tag cancel fires. 0 = cancel immediately on the first failed tag."} />}
+                                                hint="Cancel only after price exits the OB and moves this many additional pips away. 0 = immediate."
+                                            >
                                                 <NeonInput type="number" min="0" step="0.1" value={cfg.triggeredEdgeFftMoveAwayPips ?? 0} onChange={(e) => set("triggeredEdgeFftMoveAwayPips")(Number(e.target.value))} />
                                             </Field>
-                                            <Field label="Move Away (OB Multiple)" hint="Threshold = OB height × multiple. The stricter of pips / multiple applies. 0 = disabled.">
+                                            <Field
+                                                label={<LabelWithTooltip label="Move Away (OB Multiple)" help={"Require price to move past the OB edge by this multiple of the OB height before a First Failed Tag cancel fires. The stricter of pips / OB-multiple applies. 0 = disabled."} />}
+                                                hint="Threshold = OB height × multiple. The stricter of pips / multiple applies. 0 = disabled."
+                                            >
                                                 <NeonInput type="number" min="0" step="0.05" value={cfg.triggeredEdgeFftMoveAwayObMultiple ?? 0} onChange={(e) => set("triggeredEdgeFftMoveAwayObMultiple")(Number(e.target.value))} />
                                             </Field>
                                         </div>
@@ -1800,12 +1809,20 @@ function formatLoadRunLabel(run) {
 
 function LabelWithTooltip({ label, help }) {
     return (
-        <span className="relative inline-flex items-center gap-1.5 group/help">
+        <span className="relative inline-flex items-center gap-1.5 group/help cursor-help">
             <span>{label}</span>
-            <span className="inline-flex items-center justify-center text-[hsl(var(--accent-secondary))]">
+            <span
+                tabIndex={0}
+                role="button"
+                aria-label="Help"
+                className="inline-flex items-center justify-center text-[hsl(var(--accent-secondary))] outline-none rounded-full focus-visible:ring-1 focus-visible:ring-[hsl(var(--accent-secondary))]"
+            >
                 <HelpCircle className="w-3.5 h-3.5" />
             </span>
-            <span className="pointer-events-none absolute left-0 top-full z-30 mt-2 hidden w-80 max-w-[70vw] whitespace-pre-line clip-bevel-sm border border-[hsl(var(--accent-secondary)/0.45)] bg-[hsl(var(--panel))] px-3 py-2 text-left text-[10.5px] normal-case leading-relaxed tracking-normal text-[hsl(var(--text-2))] shadow-[0_0_24px_-10px_hsl(var(--accent-secondary))] group-hover/help:block group-focus-within/help:block">
+            <span
+                role="tooltip"
+                className="pointer-events-none absolute left-0 top-full z-30 mt-2 hidden w-80 max-w-[70vw] whitespace-pre-line clip-bevel-sm border border-[hsl(var(--accent-secondary)/0.45)] bg-[hsl(var(--panel))] px-3 py-2 text-left text-[10.5px] normal-case leading-relaxed tracking-normal text-[hsl(var(--text-2))] shadow-[0_0_24px_-10px_hsl(var(--accent-secondary))] group-hover/help:block group-focus-within/help:block"
+            >
                 {help}
             </span>
         </span>
