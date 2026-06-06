@@ -1086,7 +1086,7 @@ export function CandleChart({
         // INVALID_CANCELLED outcomes from the backend) but the rendered label
         // is now PROTECTED — these setups were saved from a bad fill, not
         // corrupted. Violet palette already wired in BADGE_COLORS below.
-        const BADGE_LABELS = { same: "SAME", next: "NEXT", used_ob: "RETRACE", first_failed: "FAILED TAG", never_trig: "NEVER TRIG", inval: "PROTECTED" };
+        const BADGE_LABELS = { same: "FILL C0", next: "FILL C1", used_ob: "RETRACE", first_failed: "FAILED TAG", never_trig: "NEVER TRIG", inval: "PROTECTED" };
         const BADGE_COLORS = {
             same:         { bg: "rgba(22, 163, 74, 0.88)",   text: "rgba(255,255,255,0.96)" },
             next:         { bg: "rgba(6, 182, 212, 0.85)",   text: "rgba(255,255,255,0.96)" },

@@ -83,11 +83,11 @@ function familyDisplayLabel(family) {
 
 function fillModeDisplayLabel(fm) {
     if (fm === "both") return "Both";
-    if (fm === "same") return "Same";
-    if (fm === "next") return "Next";
-    // Delay variants: "d2" → "Delay +2", "d3" → "Delay +3", etc.
+    if (fm === "same") return "Arm C0";
+    if (fm === "next") return "Arm C1";
+    // Delay variants: "d2" → "Arm C2", "d3" → "Arm C3", etc.
     const dm = typeof fm === "string" ? fm.match(/^d(\d+)$/) : null;
-    if (dm) return `Delay +${dm[1]}`;
+    if (dm) return `Arm C${dm[1]}`;
     return String(fm);
 }
 
@@ -240,14 +240,17 @@ export function ScenarioSelector({ resolvedScenario, onScenarioChange, onVariant
                     </div>
                 )}
 
-                {/* Fill Mode — only for Triggered Edge when multiple real modes exist.
+                {/* Arm Mode — only for Triggered Edge when multiple real modes exist.
                     The "Both" pill is gated on hasCombinedFillMode: if the run
                     exported same + next as separate CSVs with no combined file,
                     we deliberately hide Both rather than silently union them. */}
                 {showFillMode && (
                     <div className="flex items-center gap-1.5">
-                        <span className="text-[9px] font-ui uppercase tracking-wider text-[hsl(var(--text-muted))]">
-                            Fill
+                        <span
+                            className="text-[9px] font-ui uppercase tracking-wider text-[hsl(var(--text-muted))] cursor-default"
+                            title={"Arm timing = when the limit order becomes active after the trigger threshold is reached.\n\nArm C0 = order active on the trigger candle.\nArm C1 = order active at the start of the next candle.\nArm C2/C3 = order active at the start of the second/third candle after trigger.\n\nThis is not the same as fill timing. A trade can Arm C0 but still fill on a later candle."}
+                        >
+                            Arm
                         </span>
                         {displayFillModes.map((fm) => (
                             <PillBtn
@@ -312,7 +315,7 @@ export function ScenarioSelector({ resolvedScenario, onScenarioChange, onVariant
                 {!isDirectionalMode && bothUnavailableReason && (
                     <span
                         className="text-[10px] font-ui text-[hsl(var(--accent-secondary))]"
-                        title="Same and Next were exported as separate CSVs; merging them would double-count each OB."
+                        title="Arm C0 and Arm C1 were exported as separate CSVs; merging them would double-count each OB."
                     >
                         Both unavailable — {bothUnavailableReason}
                         {fillModeCoerced ? ` Showing ${fillModeDisplayLabel(activeFillMode)}.` : ""}

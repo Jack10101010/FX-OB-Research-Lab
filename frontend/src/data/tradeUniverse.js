@@ -473,9 +473,9 @@ function describeUniverseLabel({ universeType, resolvedFamily, resolvedThreshold
     }
     const thresh = resolvedThreshold != null ? ` ${formatThreshold(resolvedThreshold)}` : "";
     const dm = typeof resolvedFillMode === "string" ? resolvedFillMode.match(/^d(\d+)$/) : null;
-    const fill = resolvedFillMode === "same" ? " · Same"
-              : resolvedFillMode === "next" ? " · Next"
-              : dm ? ` · Delay +${dm[1]}`
+    const fill = resolvedFillMode === "same" ? " · Arm C0"
+              : resolvedFillMode === "next" ? " · Arm C1"
+              : dm ? ` · Arm C${dm[1]}`
               : " · Both";
     if (resolvedFamily === "triggered_edge") return `Triggered Edge${thresh}${fill}`;
     if (resolvedFamily === "penetration")    return `Penetration${thresh}`;
@@ -574,7 +574,7 @@ export function resolveTradeUniverse(params = {}) {
         && ftModes.includes("same") && ftModes.includes("next")) {
         warnings.push({
             code: "BOTH_UNAVAILABLE_NO_COMBINED",
-            message: "Same and Next were exported as separate CSVs; merging them would double-count each OB.",
+            message: "Arm C0 and Arm C1 were exported as separate CSVs; merging them would double-count each OB.",
         });
     }
     if (!isBaseline && (!trades || trades.length === 0)) {

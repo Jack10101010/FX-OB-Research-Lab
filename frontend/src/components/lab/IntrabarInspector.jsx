@@ -302,7 +302,8 @@ export function IntrabarInspector({
     const direction = (rawDirection.toLowerCase().startsWith("bear") || rawDirection.toLowerCase().startsWith("s")) ? "bear" : "bull";
     const directionLabel = direction.toUpperCase();
     const badgeState = triggeredEdgeOverlay?.badgeState;
-    const badgeLabel = badgeState ? String(badgeState).toUpperCase() : "";
+    const BADGE_LABEL_MAP = { same: "FILL C0", next: "FILL C1", used_ob: "RETRACE", first_failed: "FAILED TAG", never_trig: "NEVER TRIG", inval: "PROTECTED" };
+    const badgeLabel = badgeState ? (BADGE_LABEL_MAP[badgeState] || String(badgeState).toUpperCase()) : "";
 
     // Status sub-line bits
     const cancelReason = triggeredEdgeOverlay?.cancelReason || selectedTrade?.cancel_reason || "";

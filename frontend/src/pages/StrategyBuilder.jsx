@@ -891,9 +891,17 @@ export default function StrategyBuilder() {
                                                 onChange={(e) => set("triggeredEdgeEntryLevelPct")(Number(e.target.value))}
                                             />
                                         </Field>
-                                        <Field label="Entry Delay After Trigger" hint="0 = same · 1 = next · 2/3 = deferred" className="col-span-2">
+                                        <Field
+                                            label={
+                                                <LabelWithTooltip
+                                                    label="Entry Delay After Trigger"
+                                                    help={`Entry delay controls when the limit order is armed after the trigger threshold is reached.\n\nArm C0 = order becomes active on the trigger candle.\nArm C1 = order becomes active at the start of the next candle.\nArm C2/C3 = order becomes active at the start of the second/third candle after trigger.\n\nThis is not the same as fill timing. A trade can Arm C0 but still Fill C1, C2, or later if price reaches the limit later.`}
+                                                />
+                                            }
+                                            className="col-span-2"
+                                        >
                                             <div className="flex gap-2">
-                                                {[{ d: 0, label: "0 · Same" }, { d: 1, label: "1 · Next" }, { d: 2, label: "2" }, { d: 3, label: "3" }].map(({ d, label }) => {
+                                                {[{ d: 0, label: "Arm C0" }, { d: 1, label: "Arm C1" }, { d: 2, label: "Arm C2" }, { d: 3, label: "Arm C3" }].map(({ d, label }) => {
                                                     const delays = Array.isArray(cfg.triggeredEdgeDelays) ? cfg.triggeredEdgeDelays : [0, 1];
                                                     const active = delays.includes(d);
                                                     return (
@@ -1178,9 +1186,17 @@ export default function StrategyBuilder() {
                                             <Field label="Entry Level %" hint="0 is the OB edge.">
                                                 <NeonInput type="number" min="0" max="100" step="1" value={cfg.triggeredEdgeEntryLevelPct} onChange={(e) => set("triggeredEdgeEntryLevelPct")(Number(e.target.value))} />
                                             </Field>
-                                            <Field label="Entry Delay After Trigger" hint="0 = same · 1 = next · 2/3 = deferred" className="col-span-2">
+                                            <Field
+                                                label={
+                                                    <LabelWithTooltip
+                                                        label="Entry Delay After Trigger"
+                                                        help={`Entry delay controls when the limit order is armed after the trigger threshold is reached.\n\nArm C0 = order becomes active on the trigger candle.\nArm C1 = order becomes active at the start of the next candle.\nArm C2/C3 = order becomes active at the start of the second/third candle after trigger.\n\nThis is not the same as fill timing. A trade can Arm C0 but still Fill C1, C2, or later if price reaches the limit later.`}
+                                                    />
+                                                }
+                                                className="col-span-2"
+                                            >
                                                 <div className="flex gap-2">
-                                                    {[{ d: 0, label: "0 · Same" }, { d: 1, label: "1 · Next" }, { d: 2, label: "2" }, { d: 3, label: "3" }].map(({ d, label }) => {
+                                                    {[{ d: 0, label: "Arm C0" }, { d: 1, label: "Arm C1" }, { d: 2, label: "Arm C2" }, { d: 3, label: "Arm C3" }].map(({ d, label }) => {
                                                         const delays = Array.isArray(cfg.triggeredEdgeDelays) ? cfg.triggeredEdgeDelays : [0, 1];
                                                         const active = delays.includes(d);
                                                         return (
@@ -1972,9 +1988,16 @@ function DirectionalEntryCard({ label, enabled, entryModel, penetrationPct, trig
                                     onChange={(e) => onChange("TriggeredEdgeThreshold", Number(e.target.value))}
                                 />
                             </Field>
-                            <Field label="Entry Delay" hint="0=same · 1=next · 2/3=deferred">
+                            <Field
+                                label={
+                                    <LabelWithTooltip
+                                        label="Entry Delay"
+                                        help={`Entry delay controls when the limit order is armed after the trigger threshold is reached.\n\nArm C0 = order becomes active on the trigger candle.\nArm C1 = order becomes active at the start of the next candle.\nArm C2/C3 = order becomes active at the start of the second/third candle after trigger.\n\nThis is not the same as fill timing. A trade can Arm C0 but still Fill C1, C2, or later if price reaches the limit later.`}
+                                    />
+                                }
+                            >
                                 <div className="flex gap-1.5">
-                                    {[{ d: 0, label: "0·S" }, { d: 1, label: "1·N" }, { d: 2, label: "2" }, { d: 3, label: "3" }].map(({ d, label }) => {
+                                    {[{ d: 0, label: "C0" }, { d: 1, label: "C1" }, { d: 2, label: "C2" }, { d: 3, label: "C3" }].map(({ d, label }) => {
                                         const active = delays.includes(d);
                                         return (
                                             <button

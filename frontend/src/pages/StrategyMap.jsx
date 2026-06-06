@@ -1142,9 +1142,9 @@ function formatEntryModelKey(value) {
     const triggered = key.match(/^entry_triggered_edge_([0-9]+(?:p[0-9]+)?)(?:_(same|next|d\d+))?/i);
     if (triggered) {
         const rawMode = triggered[2] || "";
-        const mode = rawMode === "same" ? "Same"
-                   : rawMode === "next" ? "Next"
-                   : /^d(\d+)$/i.test(rawMode) ? `Delay +${rawMode.slice(1)}`
+        const mode = rawMode === "same" ? "Arm C0"
+                   : rawMode === "next" ? "Arm C1"
+                   : /^d(\d+)$/i.test(rawMode) ? `Arm C${rawMode.slice(1)}`
                    : "";
         return ["Triggered Edge", formatModelPct(triggered[1]), mode].filter(Boolean).join(" · ");
     }
@@ -1857,12 +1857,12 @@ function LifecycleDetailPanel({ overlay: ov, onClose, trades = [], showFftDebug 
 
     // Badge
     const BADGE_STATUS = {
-        same:         { label: "Same-Candle Fill",      tone: "rgba(22,163,74,0.88)" },
-        next:         { label: "Next-Candle Fill",       tone: "rgba(6,182,212,0.85)" },
-        used_ob:      { label: "Retrace Cancel",         tone: "rgba(219,39,119,0.88)" },
-        first_failed: { label: "First Failed Visit",     tone: "rgba(219,39,119,0.88)" },
-        never_trig:   { label: "Never Triggered",        tone: "rgba(107,114,128,0.82)" },
-        inval:        { label: "Invalidated Pre-Entry",  tone: "rgba(139,92,246,0.82)" },
+        same:         { label: "Fill C0",               tooltip: "Order filled on the same candle that triggered the entry.",          tone: "rgba(22,163,74,0.88)" },
+        next:         { label: "Fill C1",               tooltip: "Order filled on the first candle after the trigger candle.",         tone: "rgba(6,182,212,0.85)" },
+        used_ob:      { label: "Retrace Cancel",        tooltip: null,                                                                 tone: "rgba(219,39,119,0.88)" },
+        first_failed: { label: "First Failed Visit",    tooltip: null,                                                                 tone: "rgba(219,39,119,0.88)" },
+        never_trig:   { label: "Never Triggered",       tooltip: null,                                                                 tone: "rgba(107,114,128,0.82)" },
+        inval:        { label: "Invalidated Pre-Entry", tooltip: null,                                                                 tone: "rgba(139,92,246,0.82)" },
     };
     const badgeInfo = BADGE_STATUS[ov.badgeState] || null;
 
@@ -1903,10 +1903,10 @@ function LifecycleDetailPanel({ overlay: ov, onClose, trades = [], showFftDebug 
             narrative = `The ${dir} OB setup was invalidated before any trigger.${cancelLabel ? ` Reason: ${cancelLabel}.` : ""} The setup was removed to protect the trade from a compromised zone.`;
             break;
         case "same":
-            narrative = `Price tapped the ${dir} OB${fmtAt(ov.tappedTime)}, crossed ${trigPctText}, and filled on the same trigger candle${fmtAt(fillTime)}. The trade ${rText}.`;
+            narrative = `Price tapped the ${dir} OB${fmtAt(ov.tappedTime)}, crossed ${trigPctText}, and filled on the trigger candle (Fill C0)${fmtAt(fillTime)}. The trade ${rText}.`;
             break;
         case "next":
-            narrative = `Price tapped the ${dir} OB${fmtAt(ov.tappedTime)}, crossed ${trigPctText}${fmtAt(ov.triggerTime)}, then the fill order executed on the next candle open${fmtAt(fillTime)}. The trade ${rText}.`;
+            narrative = `Price tapped the ${dir} OB${fmtAt(ov.tappedTime)}, crossed ${trigPctText}${fmtAt(ov.triggerTime)}, then filled on the first candle after trigger (Fill C1)${fmtAt(fillTime)}. The trade ${rText}.`;
             break;
         default:
             narrative = ov.cancelledBeforeEntry
@@ -1962,6 +1962,7 @@ function LifecycleDetailPanel({ overlay: ov, onClose, trades = [], showFftDebug 
                         <span
                             className="px-1.5 py-px rounded-sm font-ui text-[8px] uppercase tracking-wider"
                             style={{ background: badgeInfo.tone, color: "rgba(255,255,255,0.96)" }}
+                            title={badgeInfo.tooltip || undefined}
                         >
                             {badgeInfo.label}
                         </span>
