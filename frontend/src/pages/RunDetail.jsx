@@ -2732,9 +2732,9 @@ export default function RunDetail() {
                     </div>
                     {/* Classification filter chips — Model and Context dimensions.
                         Only rendered when the current trade set contains non-baseline
-                        / non-clean tags (hides itself on all-baseline runs). */}
+                        models or non-muted (signal) context tags. */}
                     {(ledgerClassificationOptions.models.some((t) => t !== "baseline")
-                      || ledgerClassificationOptions.contexts.some((t) => t !== "clean")) && (
+                      || ledgerClassificationOptions.contexts.some((t) => !getTagMeta(t).muteAsBadge)) && (
                         <div className="mb-3 space-y-1.5">
                             {ledgerClassificationOptions.models.some((t) => t !== "baseline") && (
                                 <div className="flex flex-wrap gap-1 items-center">
@@ -2767,10 +2767,10 @@ export default function RunDetail() {
                                     )}
                                 </div>
                             )}
-                            {ledgerClassificationOptions.contexts.some((t) => t !== "clean") && (
+                            {ledgerClassificationOptions.contexts.some((t) => !getTagMeta(t).muteAsBadge) && (
                                 <div className="flex flex-wrap gap-1 items-center">
                                     <span className="font-ui text-[10px] uppercase tracking-wider text-[hsl(var(--text-3))] mr-1">Context</span>
-                                    {ledgerClassificationOptions.contexts.map((tag) => {
+                                    {ledgerClassificationOptions.contexts.filter((tag) => !getTagMeta(tag).muteAsBadge).map((tag) => {
                                         const meta = getTagMeta(tag);
                                         const ftTone = (meta.tone === "info" || meta.tone === "secondary") ? "primary" : meta.tone;
                                         return (
@@ -2839,7 +2839,7 @@ export default function RunDetail() {
                             { key: "classification", label: "Class", render: (r) => {
                                 try {
                                     const cls = buildTradeClassification(r);
-                                    const ctxTags = cls.entry_context.filter((t) => t !== "clean");
+                                    const ctxTags = cls.entry_context.filter((t) => !getTagMeta(t).muteAsBadge);
                                     return (
                                         <div className="flex gap-1 flex-wrap">
                                             <ClassificationBadge tag={cls.entry_model} />
@@ -2864,7 +2864,7 @@ export default function RunDetail() {
                         <div className="space-y-5">
                             {[
                                 { dimLabel: "Entry Model",   rows: classificationBreakdown.entry_model   },
-                                { dimLabel: "Entry Context", rows: classificationBreakdown.entry_context },
+                                { dimLabel: "Entry Context", rows: classificationBreakdown.entry_context.filter((row) => !getTagMeta(row.tag).muteAsBadge) },
                             ].map(({ dimLabel, rows }) => {
                                 if (!rows.length) return null;
                                 return (

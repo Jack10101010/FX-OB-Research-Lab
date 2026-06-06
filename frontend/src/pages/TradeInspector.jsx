@@ -14,6 +14,7 @@ import { ActiveRunContext } from "@/components/lab/ActiveRunContext";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { buildTradeClassification } from "@/data/tradeClassificationDims";
 import { ClassificationBadge } from "@/components/lab/ClassificationBadge";
+import { getTagMeta } from "@/data/classificationRegistry";
 
 export default function TradeInspector() {
     const { CANDLES, OB_BOXES, OB_BOXES_ENRICHED, ACTIVE_RUN, activeRunId, getRunData, ACTIVE_TRADE_VARIANT, AVAILABLE_TRADE_VARIANTS } = useDataset();
@@ -393,11 +394,11 @@ export default function TradeInspector() {
                                     <>
                                         <div className="divider-glow my-2" />
                                         <Row k="Entry Model" v={<ClassificationBadge tag={cls.entry_model} />} />
-                                        {cls.entry_context.some(t => t !== "clean") && (
+                                        {cls.entry_context.some(t => !getTagMeta(t).muteAsBadge) && (
                                             <Row k="Entry Context" v={
                                                 <div className="flex gap-1 flex-wrap">
                                                     {cls.entry_context
-                                                        .filter(t => t !== "clean")
+                                                        .filter(t => !getTagMeta(t).muteAsBadge)
                                                         .map(t => <ClassificationBadge key={t} tag={t} />)
                                                     }
                                                 </div>
