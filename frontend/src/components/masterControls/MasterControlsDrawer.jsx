@@ -10,6 +10,7 @@ import {
     fmtPreviewR,
     fmtPreviewDd,
 } from "./previewMetrics";
+import { isCostOnlyDirty, rescoreCostsForBundle } from "./costRescore";
 
 // ─── Registry summary (static — computed once at module load) ────────────────
 
@@ -120,7 +121,7 @@ export function MasterControlsDrawer() {
     const {
         isOpen, closeMasterControls,
         activeConfig, effectiveConfig,
-        dirtyFields,
+        dirtyFields, dirtyFieldList,
         dirtyCount, highestDirtyTier, highestRerunTier, hasDirtyFields,
         validationErrors, validationErrorList, hasValidationErrors,
         setDraftField, resetDraft,
@@ -150,6 +151,21 @@ export function MasterControlsDrawer() {
     const rerunMeta = highestRerunTier ? RERUN_TIER_META[highestRerunTier] : null;
     const previewButtonLabel = rerunMeta?.buttonLabel || "Run Preview";
     const rerunTone = RERUN_TIER_TONE[highestRerunTier] || RERUN_TIER_TONE.backend_rescore;
+
+    // Phase 7A — instant cost-only rescore (frontend, no backend, no store).
+    // Shows a local panel when the ONLY dirty fields are spread/slippage/commission.
+    const costOnly = highestRerunTier === "frontend_rescore" && isCostOnlyDirty(dirtyFieldList);
+    const costRescore = useMemo(() => {
+        if (!costOnly || !effectiveConfig || !activeRunId) return null;
+        const bundle = getRunData(activeRunId);
+        if (!bundle) return null;
+        const result = rescoreCostsForBundle(bundle, {
+            spread: effectiveConfig.spread,
+            slippage: effectiveConfig.slippage,
+            commission: effectiveConfig.commission,
+        });
+        return { active: extractPreviewMetrics(bundle), result };
+    }, [costOnly, effectiveConfig, activeRunId]); // eslint-disable-line react-hooks/exhaustive-deps
 
     return (
         <>
@@ -384,6 +400,10 @@ export function MasterControlsDrawer() {
                                 </p>
                             </div>
                         )}
+
+                        {/* Cost rescore — Phase 7A: instant, local, cost-only fast path.
+                            Pure frontend recompute — no sidecar, no store, no Strategy Map. */}
+                        {costOnly && <CostRescorePanel data={costRescore} />}
                     </section>
 
                     {/* ── 4. Active Config — Phase 3D/3E config view ───────── */}
@@ -1021,6 +1041,72 @@ function PreviewCompare({ activeMetrics, previewBundle }) {
 
             <p className="mt-2 pt-1.5 border-t border-[hsl(var(--border-soft))] text-[9px] text-muted-lab leading-snug">
                 Δ = preview − active (raw-R basis). Decision aid only — nothing is saved until Save As Run.
+            </p>
+        </div>
+    );
+}
+
+// ─── Cost rescore panel — Phase 7A (instant, local, display-only) ─────────────
+
+/**
+ * Active-vs-rescored cost preview. `data` = { active, result } where `active` is
+ * extractPreviewMetrics(activeBundle) and `result` is rescoreCostsForBundle(...).
+ * Pure display: never mutates the store and never triggers a backend run.
+ */
+function CostRescorePanel({ data }) {
+    if (!data || !data.result?.ok || !data.result?.exact) {
+        return (
+            <div className="mt-2 rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel)/0.3)] px-3 py-2.5">
+                <span className="text-[10px] font-semibold uppercase tracking-widest text-[hsl(196_80%_65%)]">
+                    Cost rescore (instant)
+                </span>
+                <p className="mt-1.5 text-[10px] text-[hsl(38_85%_55%)] leading-snug">
+                    Exact cost rescore unavailable for this run. Use Run Preview.
+                </p>
+            </div>
+        );
+    }
+
+    const a = data.active && data.active.ok ? data.active : {};
+    const r = data.result;
+    const newTrades = Array.isArray(r.trades) ? r.trades.length : null;
+
+    const dNetR  = compareDelta(r.netR, a.netR);
+    const dAvgR  = compareDelta(r.avgR, a.avgR);
+    const dMaxDd = (Number.isFinite(a.maxDd) && Number.isFinite(r.maxDd)) ? (a.maxDd - r.maxDd) : null;
+
+    const rows = [
+        { label: "Net R",    active: fmtPreviewR(a.netR),      preview: fmtPreviewR(r.netR),      delta: fmtPreviewR(dNetR),  tone: deltaTone(dNetR) },
+        { label: "Avg R",    active: fmtPreviewR(a.avgR),      preview: fmtPreviewR(r.avgR),      delta: fmtPreviewR(dAvgR),  tone: deltaTone(dAvgR) },
+        { label: "Max DD",   active: fmtPreviewDd(a.maxDd),    preview: fmtPreviewDd(r.maxDd),    delta: fmtPreviewR(dMaxDd), tone: deltaTone(dMaxDd) },
+        { label: "Win rate", active: fmtPreviewPct(a.winRate), preview: fmtPreviewPct(r.winRate), delta: "—",                 tone: undefined },
+        { label: "Trades",   active: fmtPreviewInt(a.trades),  preview: fmtPreviewInt(newTrades), delta: "—",                 tone: undefined },
+    ];
+
+    return (
+        <div className="mt-2 rounded border border-[hsl(196_80%_55%/0.3)] bg-[hsl(196_80%_55%/0.05)] px-3 py-2.5">
+            <div className="flex items-center gap-2">
+                <span className="text-[10px] font-semibold uppercase tracking-widest text-[hsl(196_80%_65%)]">
+                    Cost rescore (instant)
+                </span>
+                <span className="text-[8px] px-1 py-0.5 rounded border border-[hsl(196_80%_55%/0.4)] bg-[hsl(196_80%_55%/0.12)] text-[hsl(196_80%_65%)] font-semibold leading-none">
+                    LOCAL
+                </span>
+            </div>
+
+            <div className="mt-2 grid grid-cols-[auto_1fr_1fr_1fr] gap-x-2 gap-y-1 items-center">
+                <span className="text-[9px] uppercase tracking-wider text-muted-lab" />
+                <span className="text-[9px] uppercase tracking-wider text-muted-lab text-right">Active</span>
+                <span className="text-[9px] uppercase tracking-wider text-[hsl(196_80%_65%)] text-right">Rescored</span>
+                <span className="text-[9px] uppercase tracking-wider text-muted-lab text-right">Δ</span>
+
+                {rows.map((row) => (
+                    <CompareRow key={row.label} {...row} />
+                ))}
+            </div>
+
+            <p className="mt-2 pt-1.5 border-t border-[hsl(var(--border-soft))] text-[9px] text-muted-lab leading-snug">
+                Local cost-only rescore. No backend run. Win rate &amp; trades are unchanged by cost.
             </p>
         </div>
     );
