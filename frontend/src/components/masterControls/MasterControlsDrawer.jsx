@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { X, SlidersHorizontal, Database, Layers, Zap, GitBranch, Activity, Settings2, Play, AlertTriangle } from "lucide-react";
 import { useMasterControls } from "./MasterControlsContext";
-import { CONFIG_REGISTRY, getVisibleEntries } from "@/data/configRegistry";
+import { CONFIG_REGISTRY, getVisibleEntries, RERUN_TIER_META } from "@/data/configRegistry";
 import { useDataset, getRunData } from "@/data/store";
 import {
     extractPreviewMetrics,
@@ -104,6 +104,16 @@ function fmtCfgValue(v) {
     return s === "" ? "—" : s;
 }
 
+// ─── Rerun-tier hint tones — Phase 6 ─────────────────────────────────────────
+// Visual tone per rerunTier. full_backtest is amber to make "slow / full rerun"
+// obvious; instant/frontend are cooler; backend uses the accent.
+const RERUN_TIER_TONE = {
+    instant_filter:   { box: "border-[hsl(142_55%_45%/0.3)] bg-[hsl(142_55%_45%/0.06)]",   text: "text-[hsl(142_55%_55%)]" },
+    frontend_rescore: { box: "border-[hsl(196_80%_55%/0.3)] bg-[hsl(196_80%_55%/0.06)]",   text: "text-[hsl(196_80%_65%)]" },
+    backend_rescore:  { box: "border-[hsl(var(--border-soft))] bg-[hsl(var(--panel)/0.4)]", text: "text-[hsl(var(--accent-primary))]" },
+    full_backtest:    { box: "border-[hsl(38_85%_55%/0.35)] bg-[hsl(38_85%_55%/0.08)]",     text: "text-[hsl(38_85%_55%)]" },
+};
+
 // ─── Drawer ──────────────────────────────────────────────────────────────────
 
 export function MasterControlsDrawer() {
@@ -111,7 +121,7 @@ export function MasterControlsDrawer() {
         isOpen, closeMasterControls,
         activeConfig, effectiveConfig,
         dirtyFields,
-        dirtyCount, highestDirtyTier, hasDirtyFields,
+        dirtyCount, highestDirtyTier, highestRerunTier, hasDirtyFields,
         validationErrors, validationErrorList, hasValidationErrors,
         setDraftField, resetDraft,
         preview, startPreview, cancelPreview, clearPreview, previewIsStale,
@@ -133,6 +143,13 @@ export function MasterControlsDrawer() {
         () => extractPreviewMetrics(getRunData(activeRunId)),
         [activeRunId], // eslint-disable-line react-hooks/exhaustive-deps
     );
+
+    // Phase 6 — rerun-tier signalling. Classification only: the button label and
+    // hint reflect how expensive the dirtiest change is, but the button still calls
+    // startPreview (the current sidecar path). null tier → plain "Run Preview".
+    const rerunMeta = highestRerunTier ? RERUN_TIER_META[highestRerunTier] : null;
+    const previewButtonLabel = rerunMeta?.buttonLabel || "Run Preview";
+    const rerunTone = RERUN_TIER_TONE[highestRerunTier] || RERUN_TIER_TONE.backend_rescore;
 
     return (
         <>
@@ -306,7 +323,7 @@ export function MasterControlsDrawer() {
                                 ].join(" ")}
                             >
                                 <Play size={10} />
-                                Run Preview
+                                {previewButtonLabel}
                             </button>
 
                             {/* Cancel button — shown while in-flight */}
@@ -345,6 +362,28 @@ export function MasterControlsDrawer() {
                                 </button>
                             )}
                         </div>
+
+                        {/* Rerun-tier hint — Phase 6 (classification only).
+                            Reflects how expensive the dirtiest change is to recompute.
+                            The preview button still runs the sidecar path either way. */}
+                        {rerunMeta && (
+                            <div className={`mt-2 rounded border px-2.5 py-1.5 ${rerunTone.box}`}>
+                                <div className="flex items-center gap-1.5">
+                                    <span className={`text-[9px] font-semibold uppercase tracking-wider ${rerunTone.text}`}>
+                                        {rerunMeta.label}
+                                    </span>
+                                    {rerunMeta.needsBackend && (
+                                        <span className={`text-[8px] px-1 py-0.5 rounded border leading-none ${rerunTone.box} ${rerunTone.text}`}>
+                                            {highestRerunTier === "full_backtest" ? "SLOW" : "BACKEND"}
+                                        </span>
+                                    )}
+                                </div>
+                                <p className="mt-0.5 text-[9px] text-muted-lab leading-snug">{rerunMeta.blurb}</p>
+                                <p className="mt-1 text-[9px] text-muted-lab/70 leading-snug">
+                                    Phase 6 classification only — preview still uses the current sidecar path.
+                                </p>
+                            </div>
+                        )}
                     </section>
 
                     {/* ── 4. Active Config — Phase 3D/3E config view ───────── */}

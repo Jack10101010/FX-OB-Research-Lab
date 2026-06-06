@@ -569,6 +569,130 @@ export const CONFIG_REGISTRY = [
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Rerun-tier classification — Phase 6 (classification only, no recompute)
+// ─────────────────────────────────────────────────────────────────────────────
+// `rerunTier` answers "how expensive is it to see this change reflected?":
+//   instant_filter   — re-derivable from the already-loaded run (subset / relabel),
+//                      no rerun needed (e.g. session + structure-direction filters).
+//   frontend_rescore — recomputable locally from the loaded trade data once fast
+//                      rescore is wired (e.g. spread / slippage / commission costs).
+//   backend_rescore  — needs execution simulation; uses the sidecar preview today
+//                      (e.g. RR / stop / entry buffer / entry models / protection).
+//   full_backtest    — changes the OB or candle universe; needs a full backend rerun
+//                      (e.g. symbol / timeframe / date range / detection settings).
+//
+// Phase 6 ONLY classifies + signals — nothing recomputes yet. Guiding rules:
+//   • When uncertain, prefer "backend_rescore" (safe: never claims local accuracy).
+//   • Anything that clearly changes the OB/candle universe → "full_backtest".
+// rerunTier is derived from a single classifier (no per-entry literals to drift).
+
+export const RERUN_TIERS = Object.freeze([
+    "instant_filter",
+    "frontend_rescore",
+    "backend_rescore",
+    "full_backtest",
+]);
+
+// Cost ranking, cheap → expensive. Used to pick the dirtiest field's tier.
+export const RERUN_TIER_PRECEDENCE = Object.freeze({
+    instant_filter:   0,
+    frontend_rescore: 1,
+    backend_rescore:  2,
+    full_backtest:    3,
+});
+
+export const RERUN_TIER_META = Object.freeze({
+    instant_filter: {
+        label: "Instant filter",
+        buttonLabel: "Apply Filter",
+        blurb: "Can update from the loaded run without rerunning the backtest.",
+        needsBackend: false,
+    },
+    frontend_rescore: {
+        label: "Fast rescore",
+        buttonLabel: "Rescore Preview",
+        blurb: "Can be recalculated locally from the loaded run data once fast rescore is wired.",
+        needsBackend: false,
+    },
+    backend_rescore: {
+        label: "Backend preview",
+        buttonLabel: "Run Preview",
+        blurb: "Needs execution simulation; currently uses the sidecar preview run.",
+        needsBackend: true,
+    },
+    full_backtest: {
+        label: "Full backtest",
+        buttonLabel: "Run Full Backtest",
+        blurb: "Changes the candle/OB universe and needs a full backend rerun.",
+        needsBackend: true,
+    },
+});
+
+// Per-key overrides (highest priority). Mirrors the Phase 6 mapping exactly.
+const RERUN_TIER_KEY_OVERRIDES = {
+    // instant_filter — session + structure-direction filters (trades carry these tags)
+    london: "instant_filter", lull: "instant_filter", newYork: "instant_filter",
+    asia: "instant_filter", outside: "instant_filter", sessionFilter: "instant_filter",
+    bosLong: "instant_filter", bosShort: "instant_filter",
+    chochLong: "instant_filter", chochShort: "instant_filter",
+    direction: "instant_filter",
+    // frontend_rescore — cost params recomputable from gross R + cost breakdown
+    spread: "frontend_rescore", slippage: "frontend_rescore", commission: "frontend_rescore",
+    // full_backtest — changes the OB/candle/event universe or run methodology
+    symbol: "full_backtest", detectionTf: "full_backtest", executionTf: "full_backtest",
+    dateFrom: "full_backtest", dateTo: "full_backtest", dataFile: "full_backtest",
+    swing: "full_backtest", obFilter: "full_backtest",
+    minObSizePips: "full_backtest", maxObSizePips: "full_backtest",
+    structure: "full_backtest", newsFile: "full_backtest", monteCarlo: "full_backtest",
+    // backend_rescore — execution-level core fields (position model / conflict handling)
+    executionMode: "backend_rescore", conflict: "backend_rescore", cancelAction: "backend_rescore",
+};
+
+// Group-level defaults for everything not explicitly overridden above.
+const RERUN_TIER_GROUP_DEFAULTS = {
+    cost:       "frontend_rescore",
+    session:    "instant_filter",
+    execution:  "backend_rescore",  // rr, stopBuffer, entryBuffer, obEntryDepthPct, verifyTicks
+    entry:      "backend_rescore",  // entry models / penetration / triggered-edge fields
+    protection: "backend_rescore",  // TE cancel / FFT — depend on execution path
+    news:       "backend_rescore",  // blackout/flatten behaviour (newsFile → full_backtest above)
+    structure:  "full_backtest",    // structure type drives OB generation
+    core:       "full_backtest",    // detection / universe fields
+};
+
+/**
+ * Classify a registry entry into a rerunTier. Single source of truth:
+ * per-key override → group default → "backend_rescore" (safe fallback).
+ */
+export function classifyRerunTier(entry) {
+    if (!entry) return "backend_rescore";
+    return RERUN_TIER_KEY_OVERRIDES[entry.key]
+        ?? RERUN_TIER_GROUP_DEFAULTS[entry.group]
+        ?? "backend_rescore";
+}
+
+// Attach rerunTier to every entry (so every CONFIG_REGISTRY entry carries it).
+for (const entry of CONFIG_REGISTRY) {
+    entry.rerunTier = classifyRerunTier(entry);
+}
+
+/**
+ * Highest-cost rerunTier among the given cfg keys, or null when none resolve.
+ * Precedence: full_backtest > backend_rescore > frontend_rescore > instant_filter.
+ */
+export function highestRerunTierForKeys(keys) {
+    let best = null;
+    let bestRank = -1;
+    for (const key of keys || []) {
+        const tier = REGISTRY_BY_KEY[key]?.rerunTier;
+        if (!tier) continue;
+        const rank = RERUN_TIER_PRECEDENCE[tier] ?? -1;
+        if (rank > bestRank) { bestRank = rank; best = tier; }
+    }
+    return best;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Lookup helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -670,6 +794,11 @@ const VALID_INPUT_TYPES = new Set([
         // 10. subgroup must be present (string or null is fine; undefined is not)
         if (!("subgroup" in entry)) {
             console.warn(`[configRegistry] Entry ${id} — subgroup field is missing entirely.`);
+        }
+
+        // 11. rerunTier (Phase 6) must be present and one of the allowed values
+        if (!RERUN_TIERS.includes(entry.rerunTier)) {
+            console.warn(`[configRegistry] Entry ${id} — rerunTier "${entry.rerunTier}" is missing or invalid.`);
         }
     }
 })();

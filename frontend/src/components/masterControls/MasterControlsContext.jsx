@@ -7,7 +7,7 @@ import React, {
     useEffect,
 } from "react";
 import { useDataset, getRunData, addRunBundle } from "@/data/store";
-import { REGISTRY_BY_KEY } from "@/data/configRegistry";
+import { REGISTRY_BY_KEY, highestRerunTierForKeys } from "@/data/configRegistry";
 import { buildRunConfigLoadReport, getDefaultBuilderConfig, buildBacktesterConfig } from "@/data/configTranslator";
 import { startSidecarRun, getSidecarRun, getSidecarRunBundle, cancelSidecarRun } from "@/data/sidecarClient";
 import { ingestRunBundle } from "@/data/importer";
@@ -46,6 +46,7 @@ const MasterControlsContext = createContext({
     dirtyFieldList:       [],
     dirtyCount:           0,
     highestDirtyTier:     0,      // 0 = no dirty fields; 1/2/3 = tier of dirtiest field
+    highestRerunTier:     null,   // Phase 6 — rerunTier of the dirtiest field, or null
     hasDirtyFields:       false,
 
     // Validation
@@ -144,6 +145,16 @@ export function MasterControlsProvider({ children }) {
         }
         return max;
     }, [dirtyFields]);
+
+    // ── highestRerunTier — Phase 6 ──────────────────────────────────────────
+    // The rerunTier of the dirtiest changed field (precedence:
+    // full_backtest > backend_rescore > frontend_rescore > instant_filter).
+    // null when nothing is dirty. Classification only — does NOT change how
+    // startPreview executes (still the sidecar preview path).
+    const highestRerunTier = useMemo(
+        () => highestRerunTierForKeys(dirtyFieldList),
+        [dirtyFieldList],
+    );
 
     // ── Validation — run only against user-edited (dirty) fields ────────────
     // Validating effectiveConfig (= activeConfig when no draft) causes false
@@ -413,6 +424,7 @@ export function MasterControlsProvider({ children }) {
         dirtyFieldList,
         dirtyCount,
         highestDirtyTier,
+        highestRerunTier,
         hasDirtyFields,
         // Validation
         validationErrors,
@@ -441,6 +453,7 @@ export function MasterControlsProvider({ children }) {
         dirtyFieldList,
         dirtyCount,
         highestDirtyTier,
+        highestRerunTier,
         hasDirtyFields,
         validationErrors,
         validationErrorList,
