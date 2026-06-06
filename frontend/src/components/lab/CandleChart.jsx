@@ -1904,14 +1904,27 @@ function FftDebugLine({ line }) {
     );
 }
 
+// Hover copy per badge state. Fill C0/C1 describe FILL timing (when price
+// actually filled the order) — distinct from ARM timing on the scenario pills.
+const BADGE_TOOLTIPS = {
+    same:         "Fill C0 — order filled on the trigger candle. This is fill timing (when price reached the limit), not arm timing.",
+    next:         "Fill C1 — order filled on the first candle after the trigger candle. This is fill timing, not arm timing.",
+    used_ob:      "Retrace cancel — price re-entered the order block and the setup was cancelled before entry.",
+    first_failed: "Failed Tag — price tapped the OB but failed to reach the trigger threshold, so the setup was cancelled before entry (First Failed Tag).",
+    never_trig:   "Never triggered — price never reached the trigger threshold.",
+    inval:        "Protected — setup invalidated before entry.",
+};
+
 function TriggeredEdgeBadge({ badge, selected = false, onClick }) {
     const interactive = !!onClick;
+    const stateTip = BADGE_TOOLTIPS[badge.overlay?.badgeState] || null;
+    const tip = [stateTip, interactive ? "Click to inspect." : null].filter(Boolean).join(" ") || undefined;
     return (
         <div
             className={`absolute ${interactive ? "pointer-events-auto" : "pointer-events-none"}`}
             data-selected={selected ? "true" : "false"}
             onClick={interactive ? (e) => { e.stopPropagation(); onClick(); } : undefined}
-            title={interactive ? "Click to inspect this trade" : undefined}
+            title={tip}
             style={{
                 left: badge.left,
                 top: badge.top,

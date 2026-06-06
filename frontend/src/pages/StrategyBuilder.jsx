@@ -1018,8 +1018,11 @@ export default function StrategyBuilder() {
                             {/* B · First Failed Tag */}
                             <div className="border-t border-[hsl(var(--border-soft))] pt-3">
                                 <div className="flex items-center justify-between">
-                                    <div>
-                                        <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Enable First Failed Tag Cancel</div>
+                                    <div
+                                        className="cursor-help"
+                                        title="First Failed Tag Cancel protects against order blocks that get tapped before the trigger threshold is reached. If price touches the OB entry side first, the setup is cancelled before the limit order is allowed to trigger. This helps test whether early OB taps are a warning sign that the block has already been used. Move-away settings can require price to move away by a minimum distance before cancelling; 0 means immediate cancel on first failed tag."
+                                    >
+                                        <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Enable First Failed Tag Cancel <span className="text-[hsl(var(--text-2))] normal-case" aria-hidden="true">ⓘ</span></div>
                                         <div className="text-[10.5px] text-muted-lab">Cancels an OB after the first failed visit: price tags the OB, fails to reach the trigger threshold, then exits the OB.</div>
                                     </div>
                                     <NeonToggle checked={Boolean(cfg.triggeredEdgeCancelOnFirstFailedTag)} onChange={set("triggeredEdgeCancelOnFirstFailedTag")} />

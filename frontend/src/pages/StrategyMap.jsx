@@ -24,6 +24,7 @@ import { derivePrimaryResultView } from "@/data/tradeUniverse";
 // Phase 2B: Trade Classification badges in trade list sidebar
 import { buildTradeClassification } from "@/data/tradeClassificationDims";
 import { ClassificationBadge } from "@/components/lab/ClassificationBadge";
+import { getTagMeta } from "@/data/classificationRegistry";
 
 const STRATEGY_MAP_UI_KEY = "fxob_strategy_map_ui_v1";
 const DEFAULT_CHART_HEIGHT = 460;
@@ -1754,7 +1755,7 @@ function StrategyTradeListPanel({
                                 {(() => {
                                     try {
                                         const cls = buildTradeClassification(trade);
-                                        const ctxTags = cls.entry_context.filter((t) => t !== "clean");
+                                        const ctxTags = cls.entry_context.filter((t) => !getTagMeta(t).muteAsBadge);
                                         if (cls.entry_model === "baseline" && ctxTags.length === 0) return null;
                                         return (
                                             <div className="mt-1 flex gap-1 flex-wrap">
