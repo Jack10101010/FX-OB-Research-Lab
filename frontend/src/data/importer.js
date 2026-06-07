@@ -721,6 +721,28 @@ function entryTradeFileInfo(name) {
     };
 }
 
+// ─────────────────────── Control file parser ───────────────────────
+// Matches auto-paired FFT-OFF control output (AUTO-PAIR-CONTROL-RUNS):
+//   trades_{execution_mode}__{scenario_key}__control.csv
+// Example:
+//   trades_single_position__entry_triggered_edge_25p0_d3__control.csv
+//     → executionMode: "single_position"
+//     → scenarioKey:   "entry_triggered_edge_25p0_d3"
+// The scenario_key is the PARENT entry key (the "__control" suffix lives only in
+// the filename, never in the trade rows), so it is normalized with the same
+// canonicaliser as entry keys to stay matchable by the pairing analytics.
+function controlTradeFileInfo(name) {
+    const file = String(name || "").split(/[\\/]/).pop().toLowerCase();
+    const m = file.match(
+        /^trades_(single_position|allow_multi_position|one_per_direction)__(.+)__control\.csv$/
+    );
+    if (!m) return null;
+    return {
+        executionMode: m[1],
+        scenarioKey: normalizeEntryModeKey(m[2]),
+    };
+}
+
 // ─────────────────────── Directional file parser ───────────────────────
 // Matches Phase 3C output: trades_{variant}__dir_long_{longKey}__short_{shortKey}.csv
 // Examples:
@@ -789,6 +811,12 @@ function detectFileKind(name) {
         return "json_unknown";
     }
     if (n.endsWith(".csv")) {
+        // Auto-paired FFT-OFF control trades MUST be matched before the generic
+        // entry / protected / variant trade checks below. Their filenames contain
+        // "entry_..." and "trades_single_position", so without this guard they
+        // would be misclassified (trades_entry / trades_single_position) and
+        // silently overwrite the real entry/variant trades for that key.
+        if (controlTradeFileInfo(name))                      return "trades_control";
         if (n.includes("candle"))                            return "candles";
         if (entryTradeFileInfo(name))                         return "trades_entry";
         if (directionalTradeFileInfo(name))                   return "trades_directional";
@@ -884,6 +912,8 @@ export async function ingestRunBundle(fileList) {
         tradesByVariant: {},
         entryTradesByMode: {},
         entrySourceFiles: [],
+        controlTradesByScenario: {},
+        controlSourceFiles: [],
         protectionTradesByMode: {},
         protectionSourceFiles: [],
         directionalTradesByScenario: {},
@@ -1000,6 +1030,22 @@ export async function ingestRunBundle(fileList) {
                     console.log(`[importer] Directional scenario detected: ${scenarioId} (${executionMode}) — ${t.length} rows`);
                     break;
                 }
+                case "trades_control": {
+                    const info = controlTradeFileInfo(f.name);
+                    const parsed = parseCSV(text);
+                    validateCsvHeaders(kind, f.name, parsed.headers, collected.validationErrors, collected.validationWarnings);
+                    const t = parseTradesCSV(text);
+                    const { executionMode, scenarioKey } = info;
+                    // Keyed by "{execution_mode}:{scenario_key}" so the pairing
+                    // resolver can look up the FFT-OFF counterpart for the active
+                    // variant + scenario without any manual run selection.
+                    const storageKey = `${executionMode}:${scenarioKey}`;
+                    collected.controlTradesByScenario[storageKey] = t;
+                    collected.controlSourceFiles.push({ name: f.name, kind, executionMode, scenarioKey, rows: t.length });
+                    collected.recognized.push({ name: f.name, kind, executionMode, scenarioKey, rows: t.length });
+                    console.log(`[importer] FFT control scenario detected: ${storageKey} — ${t.length} rows`);
+                    break;
+                }
                 default:
                     collected.unrecognized.push({ name: f.name, kind });
             }
@@ -1054,6 +1100,8 @@ export async function ingestRunBundle(fileList) {
             },
             trades: [],
             tradesByVariant: {},
+            controlTradesByScenario: {},
+            controlPairs: null,
             primaryVariant: null,
             tradeMarkers: [],
             tradeMarkersByVariant: {},
@@ -1139,6 +1187,15 @@ export async function ingestRunBundle(fileList) {
     const entryTradesByMode = Object.fromEntries(
         Object.entries(collected.entryTradesByMode).map(([mode, trades]) => [mode, enrichTradesWithOrderBlocks(trades, obLookup, pipSize)]),
     );
+    // Auto-paired FFT-OFF control trades — enriched identically to entry/variant
+    // trades so downstream pairing analytics have the same OB-derived fields.
+    const controlTradesByScenario = Object.fromEntries(
+        Object.entries(collected.controlTradesByScenario).map(([key, trades]) => [key, enrichTradesWithOrderBlocks(trades, obLookup, pipSize)]),
+    );
+    const controlScenarioCount = Object.keys(controlTradesByScenario).length;
+    if (controlScenarioCount > 0) {
+        console.log(`[importer] FFT control scenarios imported: ${controlScenarioCount}`);
+    }
     const directionalTradesByScenario = Object.fromEntries(
         Object.entries(collected.directionalTradesByScenario).map(([key, trades]) => [key, enrichTradesWithOrderBlocks(trades, obLookup, pipSize)]),
     );
@@ -1173,6 +1230,9 @@ export async function ingestRunBundle(fileList) {
     const cfg = collected.config;
     const sm  = collected.summary;
     const entryResultsSummary = sm.entry_results || sm.entryResults || {};
+    // Lightweight auto-control metadata written by the backend into summary.json.
+    // Preserved verbatim; null on older bundles that predate control generation.
+    const controlPairs = sm.control_pairs ?? sm.controlPairs ?? null;
     const id = String(sm.id || cfg.id || sm.run_id || cfg.run_id || `imported_${Date.now()}`);
     const originalRunId = id;
     // Canonical roll-up: never count INVALID / UNFILLED / SESSION_FILTERED /
@@ -1216,6 +1276,8 @@ export async function ingestRunBundle(fileList) {
         entryResults: entryResultsSummary,
         directional_results: sm.directional_results || sm.directionalResults || {},
         directionalResults: sm.directional_results || sm.directionalResults || {},
+        control_pairs: controlPairs,
+        controlPairs,
         executionMode:sm.execution_mode || cfg.execution_mode || primaryVariant,
         reverseCancels: Number(sm.reverse_cancels ?? sm.reverseCancels ?? 0),
         date:         (sm.completed_at || new Date().toISOString()).slice(0, 10),
@@ -1285,6 +1347,12 @@ export async function ingestRunBundle(fileList) {
             scenarioMeta: collected.directionalScenarioMeta,
             tradesOmittedForStorage: false,
         },
+        // Auto-paired FFT-OFF control outputs (AUTO-PAIR-CONTROL-RUNS Phase 2).
+        // controlTradesByScenario: keyed "{execution_mode}:{scenario_key}".
+        // controlPairs: lightweight metadata mirrored from summary.control_pairs.
+        controlTradesByScenario,
+        controlPairs,
+        controlSourceFiles: collected.controlSourceFiles,
         newsEvents: collected.newsEvents,
         newsSourceFiles: collected.newsSourceFiles,
         sourceFiles,
