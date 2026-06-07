@@ -3,9 +3,10 @@
 > Living source of truth for parallel Claude / Codex / GPT chats working on this repo.
 > Keep it short, accurate, and current. Update it before you end your session.
 > **Every new chat must also read [WORKSTREAMS.md](./WORKSTREAMS.md) and attach to a workstream before coding.**
-> Last updated: 2026-06-05 — Phase 4B (Preview Results display) is committed (`bdc7473`) and the
-> coordination docs were refreshed (`f91cb74`). **HEAD = origin/codex-dev = `f91cb74`**; branch is
-> **in sync with origin — no unpushed commits**. Refreshed against live `git status` / `git log`.
+> Last updated: 2026-06-05 — Phase 7A (instant cost rescore panel) is committed (`4616506`).
+> **HEAD = `4616506`**; `origin/codex-dev` = `6c8fc60` → **2 commits ahead of origin (unpushed)**:
+> `4616506` (Master Controls Phase 7A) + `3d6b5ee` (Entry/FFT FFT-tooltip copy). Refreshed against
+> live `git status` / `git log`.
 
 ## Rules for Future Chats
 
@@ -151,25 +152,46 @@ Completed:
 - Run Preview context (Phase 4A)
 - Preview bundle isolation
 - Preview results display (Phase 4B — committed, `bdc7473`)
+- Promote preview to run / Save As Run (Phase 4C — committed, `c3db5f8`)
+- Active-vs-Preview compare (Phase 5 — committed, `354dcca`)
+- Rerun-tier classification (Phase 6 — committed, `99f07c7`)
+- Instant cost rescore panel (Phase 7A — committed, `4616506`)
 
 Important architecture (do not violate):
 
 - Preview bundles live **only** in `MasterControlsContext.preview.bundle`.
-- Preview runs must **not** call `addRunBundle`.
-- Preview runs must **not** change `activeRunId`.
-- Preview runs must **not** appear in run history / the run list.
-- Promotion / save-as-run is **not implemented yet** (planned Phase 4C).
+- Preview **execution + import** must **not** call `addRunBundle`, must **not** change
+  `activeRunId`, and must **not** appear in run history / the run list. Isolation holds
+  for the entire preview lifecycle — **right up until the user clicks Save As Run**.
+- Promotion is the **one** deliberate crossing point: `promotePreview()` in
+  `MasterControlsContext` calls `addRunBundle(preview.bundle)` **only on explicit user
+  action**, then clears the preview. `addRunBundle` assigns a unique id (no overwrite),
+  makes the promoted run active, and persists.
 - Phase 4B preview results are read-only: extraction reads `preview.bundle.summary`
-  first, then falls back to `preview.bundle.tradesByVariant` / `equityCurve`. No
-  store mutation, no `setActiveRunId`, no promotion.
+  first, then falls back to `preview.bundle.tradesByVariant` / `equityCurve`. The shared
+  extractor lives in `components/masterControls/previewMetrics.js` (used by both the
+  preview panel and the Phase 5 Active-vs-Preview compare).
+- Phase 6 `rerunTier` is **classification only**: registry fields are tagged
+  `instant_filter` / `frontend_rescore` / `backend_rescore` / `full_backtest`, and the
+  preview button label + hint reflect the dirtiest dirty field's tier. **Behavior is
+  unchanged — the button still runs the sidecar preview path.**
+- Phase 7A cost rescore (`components/masterControls/costRescore.js`) is **display-only**:
+  when the dirty set is cost-only (spread / slippage / commission) it recomputes net R /
+  avg R / max DD / equity locally from `gross_r` + per-trade cost columns and shows an
+  Active-vs-Rescored panel. **No backend, no sidecar, no store mutation, no run creation,
+  no Strategy Map update.** Wins/losses are **preserved from original outcomes** — never
+  re-derived from the new R sign. Exactness needs separable gross/cost data; otherwise the
+  panel says "unavailable" and the user falls back to Run Preview. `startPreview` unchanged.
 
 ## Latest Known Master Controls Commits
 
 From `git log` on `codex-dev` (newest first):
 
-- `f91cb74` docs(status): refresh project coordination state
+- `4616506` feat(master-controls): add instant cost rescore panel (Phase 7A) ← current HEAD
+- `99f07c7` feat(master-controls): classify rerun tiers (Phase 6)
+- `354dcca` feat(master-controls): compare active and preview runs (Phase 5)
+- `c3db5f8` feat(master-controls): promote preview to run (Phase 4C)
 - `bdc7473` feat(master-controls): add preview results display (Phase 4B)
-- `4e08b35` docs: add project coordination guardrails
 - `5d0806e` feat(master-controls): add preview run context (Phase 4A)
 - `38f8a60` fix(master-controls): polish drawer state feedback
 - `077b826` fix(master-controls): preserve entry metadata roundtrip
@@ -179,22 +201,32 @@ From `git log` on `codex-dev` (newest first):
 - `f121157` feat(master-controls): add config registry metadata
 - `3154dab` refactor(master-controls): extract shared config translator
 
-Branch position: `HEAD -> codex-dev` is at `f91cb74`, and `origin/codex-dev` is also at
-`f91cb74`. The branch is **in sync with origin — no unpushed commits**
-(`git log --oneline origin/codex-dev..HEAD` is empty).
+Branch position: `HEAD -> codex-dev` is at `4616506`; `origin/codex-dev` is at `6c8fc60`
+(`refactor(classification): migrate consumers to flag-based suppression`). The branch is
+**2 commits ahead of origin (unpushed)**: `4616506` (Master Controls Phase 7A) and
+`3d6b5ee` (Entry/FFT FFT-tooltip copy) (`git log --oneline origin/codex-dev..HEAD`).
 
 ## Current Pending Step
 
-Phase 4B (Preview Results display) **has been committed** as
-`bdc7473 feat(master-controls): add preview results display`. The change to
-`frontend/src/components/masterControls/MasterControlsDrawer.jsx` is no longer in the
-working tree (no longer dirty).
+Phase 7A (instant cost rescore panel) **has been committed** as
+`4616506 feat(master-controls): add instant cost rescore panel`. When only cost fields are
+dirty (spread / slippage / commission), the drawer shows a local Active-vs-Rescored panel
+recomputed in-browser from `gross_r` + per-trade cost columns — **display-only: no backend,
+no sidecar, no store mutation, no run creation, no Strategy Map update**. Exactness requires
+separable gross/cost data; otherwise it shows "unavailable" and the user falls back to Run
+Preview. No Master Controls source files remain dirty.
 
-Next expected actions:
+Master Controls is now in **QA / polish + Phase 7B planning**. Next expected actions:
 
-1. Manual QA the preview results panel (run a preview, confirm stats render, confirm
-   active run + run list are unchanged, confirm "Clear preview" works).
-2. Then audit / design Phase 4C (promotion / save-as-run) — **not started**.
+1. Manual QA Phase 7A: dirty only spread/slippage/commission → confirm the instant panel
+   renders Active-vs-Rescored deltas (Net R / Avg R / Max DD), win rate + trades unchanged,
+   and that runs without separable cost columns show "unavailable".
+2. Phase 7B (optional): feed the rescored trade list into a transient bundle so Strategy
+   Map / report can update live — still no backend, no store registration.
+3. Blocked tiers — RR↑ / stop / entry / OB-depth — remain **blocked** until the exporter
+   adds per-trade MFE/MAE (or candle-path) data (FX-OB-Backtester change).
+4. Two commits (`4616506`, `3d6b5ee`) are ahead of origin — decide on push per the Push
+   Protocol (they span two workstreams: Master Controls + Entry/FFT).
 
 ## Current Dirty Working Tree
 
@@ -203,19 +235,18 @@ re-run `git status --short` yourself; do not trust this list blindly.
 
 ### Modified (tracked)
 
-Live `git status --short` at `f91cb74` — **8 modified tracked files**
-(`MasterControlsDrawer.jsx` is gone: committed in `bdc7473`):
+Live `git status --short` at `4616506`. All Master Controls source files are committed/clean
+(through Phase 7A `4616506` — including `configRegistry.js`, `MasterControlsContext.jsx`,
+`MasterControlsDrawer.jsx`, `previewMetrics.js`, `costRescore.js`). Remaining modified tracked
+**source** files belong to other workstreams — do **not** stage them with Master Controls:
 
 | File | Likely workstream |
 |------|-------------------|
+| `frontend/src/data/importer.js` | Trade Classification / exporter (fill-state taxonomy) — verify owner before staging |
+| `frontend/src/components/lab/TradeSanityStrip.jsx` | Strategy Map / Classification (research strip) |
 | `frontend/src/pages/SessionLabV1/data/sessionLabV1Adapter.js` | Session Lab |
-| `frontend/src/pages/StrategyMap.jsx` | Strategy Map |
-| `frontend/src/pages/strategyMap/ScenarioSelector.jsx` | Strategy Map |
-| `frontend/src/components/lab/CandleChart.jsx` | Strategy Map / Entry-FFT overlay (ambiguous) |
-| `frontend/src/components/lab/IntrabarInspector.jsx` | Entry / FFT |
-| `frontend/src/pages/StrategyBuilder.jsx` | Entry / FFT (FFT pairing controls) |
-| `frontend/src/data/tradeUniverse.js` | Trade Classification / Strategy Map (ambiguous) |
-| `frontend/src/pages/OrderBlockLab.jsx` | **OB Retest / Retest Lab** — Phase 1 tab wiring (owned, this chat) |
+
+(`PROJECT_STATUS.md` and `WORKSTREAMS.md` also show as modified — this docs-update task.)
 
 ### Untracked
 
@@ -259,9 +290,10 @@ Classified by likely workstream:
 - The user has accidentally run git commands from the backtester / output folder before.
   **Always verify the current repo path is `FX-OB-Research-Lab` before any git operation**
   (e.g. `git rev-parse --show-toplevel`).
-- The branch is currently **in sync with `origin/codex-dev`** (HEAD = origin = `f91cb74`,
-  no unpushed commits as of this refresh). Still confirm with
-  `git log --oneline origin/codex-dev..HEAD` before any push — other chats commit constantly.
+- The branch is currently **2 commits ahead of `origin/codex-dev`** (HEAD = `4616506`,
+  origin = `6c8fc60`; unpushed: `4616506` Master Controls Phase 7A, `3d6b5ee` Entry/FFT
+  FFT-tooltip copy). Confirm with `git log --oneline origin/codex-dev..HEAD` before any push —
+  the unpushed set spans two workstreams, so follow the Push Protocol and ask first.
 - Root-level `package.json` / `package-lock.json` are untracked and look out of place —
   do not commit them blindly.
 
@@ -277,7 +309,7 @@ Read PROJECT_STATUS.md at the repo root. Then audit the current repo state:
    since the doc was last updated.
 4. Identify which workstream I'm continuing and which exact files it should touch.
 5. List unrelated dirty files I must NOT stage.
-6. Report whether it is safe to continue, and what (if anything) still needs to be
-   committed for Phase 4B (MasterControlsDrawer.jsx).
+6. Report whether it is safe to continue. Note: Master Controls Phase 4A–4C are all
+   committed; the workstream is now in QA / polish, not architecture.
 Do not modify, stage, commit, or push anything until I confirm.
 ```

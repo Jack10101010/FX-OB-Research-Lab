@@ -27,8 +27,10 @@
 ## Current Repo Facts (verify, don't trust blindly)
 
 - Branch: `codex-dev`
-- `HEAD` and `origin/codex-dev` are **both at `f91cb74`** — the branch is in sync with origin,
-  **no unpushed commits** (as of this refresh; `git log --oneline origin/codex-dev..HEAD` is empty).
+- `HEAD` is at `4616506` (Master Controls Phase 7A); `origin/codex-dev` is at `6c8fc60` — the
+  branch is **2 commits ahead of origin (unpushed)**: `4616506` (Master Controls Phase 7A) and
+  `3d6b5ee` (Entry/FFT FFT-tooltip copy). Note: Phase 6 and the classification fill-state work
+  are now **on origin** (pushed).
 - Re-run `git status --short` and `git log --oneline --decorate -10` yourself — other
   chats change this constantly.
 
@@ -52,6 +54,10 @@
   - Classification files
   - Strategy Map files
 - **Latest relevant commits:**
+  - `4616506` feat(master-controls): add instant cost rescore panel (Phase 7A)
+  - `99f07c7` feat(master-controls): classify rerun tiers (Phase 6)
+  - `354dcca` feat(master-controls): compare active and preview runs (Phase 5)
+  - `c3db5f8` feat(master-controls): promote preview to run (Phase 4C)
   - `bdc7473` feat(master-controls): add preview results display (Phase 4B)
   - `5d0806e` feat(master-controls): add preview run context (Phase 4A)
   - `38f8a60` fix(master-controls): polish drawer state feedback
@@ -62,15 +68,32 @@
   - `f121157` feat(master-controls): add config registry metadata
   - `3154dab` refactor(master-controls): extract shared config translator
 - **Latest state:**
-  - Phase 4A committed: preview run context (`5d0806e`).
-  - Phase 4B committed: preview results display (`bdc7473`) — `MasterControlsDrawer.jsx`
-    is no longer dirty.
-  - Phase 4C (promotion / save-as-run) **not started**.
-- **Open risks:** preview bundle isolation must hold — no `addRunBundle`, no
-  `setActiveRunId`, no run-history entry, no store mutation from preview.
-- **Next action:**
-  1. Manual QA the preview results panel (Phase 4B now committed).
-  2. Then audit / design Phase 4C promotion / save-as-run.
+  - Phase 4A–4C committed: preview run context, results display, Save As Run promotion.
+  - Phase 5 committed (`354dcca`): Active-vs-Preview compare. Shared metric extractor now
+    in `components/masterControls/previewMetrics.js`.
+  - Phase 6 committed (`99f07c7`): rerun-tier classification. Registry fields tagged
+    `instant_filter` / `frontend_rescore` / `backend_rescore` / `full_backtest`; context
+    exposes `highestRerunTier`; preview button label + hint reflect the dirtiest tier.
+  - Phase 7A committed (`4616506`): instant cost rescore. New pure util
+    `components/masterControls/costRescore.js`; when the dirty set is cost-only
+    (spread / slippage / commission) the drawer shows a local Active-vs-Rescored panel
+    recomputed from `gross_r` + per-trade cost columns. **Display-only — no backend, no
+    sidecar, no store mutation, no run creation, no Strategy Map update. Wins/losses
+    preserved from original outcomes (never re-derived from the new R sign).**
+  - No Master Controls source files are currently dirty.
+- **Open risks:** preview isolation must hold for the whole preview lifecycle — no
+  `addRunBundle`, no `setActiveRunId`, no run-history entry, no store mutation — **until**
+  the user clicks Save As Run, the one deliberate promotion point (`promotePreview()` →
+  `addRunBundle`). Phase 6 tiers are signal-only; Phase 7A cost rescore is display-only —
+  do not let either imply the sidecar path changed.
+- **Next action:** QA / polish + Phase 7B planning.
+  1. Manual QA Phase 7A: dirty only cost fields → confirm the instant Active-vs-Rescored
+     panel (Net R / Avg R / Max DD deltas; win rate + trades unchanged), and that runs
+     without separable cost columns show "unavailable".
+  2. Phase 7B (optional): route the rescored trade list through a transient bundle so
+     Strategy Map / report update live — still no backend, no store registration.
+  3. RR↑ / stop / entry / OB-depth rescore stays **blocked** until the exporter adds
+     per-trade MFE/MAE (backend / FX-OB-Backtester change).
 
 ### Session Lab
 
