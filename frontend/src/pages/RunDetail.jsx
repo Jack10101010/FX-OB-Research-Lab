@@ -53,6 +53,7 @@ import { buildFillStateBreakdown, buildSessionBreakdown, buildSignalCards } from
 import { buildResearchSignals } from "@/data/researchSignals";
 import { TermTip, TooltipProvider } from "@/components/lab/TermTip";
 import { ConfidenceChip } from "@/components/lab/ConfidenceChip";
+import { buildEnabledVariantBreakdown } from "@/data/enabledVariantBreakdown";
 
 // RB-8a/8b: account config lives in the global store (state.accountSettings),
 // read/written via useResultsLens (lens.accountSettings / lens.setAccountSettings)
@@ -897,6 +898,12 @@ export default function RunDetail() {
     const researchSignals = React.useMemo(
         () => buildResearchSignals(fillStateBreakdown, sessionBreakdown, classificationBreakdown.entry_model),
         [fillStateBreakdown, sessionBreakdown, classificationBreakdown],
+    );
+    // Enabled Variant Comparison — all entry-model variants in the bundle (read-only,
+    // independent of the selected scenario). Empty unless the bundle exposes 2+ variants.
+    const enabledVariantBreakdown = React.useMemo(
+        () => buildEnabledVariantBreakdown(runData),
+        [runData],
     );
 
     const filteredLedgerRows = React.useMemo(() => {
@@ -3018,6 +3025,20 @@ export default function RunDetail() {
                                         <ClassSectionHeader label="Entry Model Breakdown" />
                                         <ClassBreakdownTable rows={classificationBreakdown.entry_model.map((row) => ({
                                             label: getTagMeta(row.tag).label,
+                                            tooltipKey: row.tag,
+                                            stats: row,
+                                        }))} />
+                                    </div>
+                                )}
+
+                                {/* E — Enabled Variant Comparison: all entry-model variants in the
+                                    bundle (read-only; independent of the selected scenario). Only
+                                    shown when the bundle exposes 2+ enabled variants. */}
+                                {enabledVariantBreakdown.length >= 2 && (
+                                    <div>
+                                        <ClassSectionHeader label="Enabled Variant Comparison" />
+                                        <ClassBreakdownTable rows={enabledVariantBreakdown.map((row) => ({
+                                            label: row.label,
                                             tooltipKey: row.tag,
                                             stats: row,
                                         }))} />

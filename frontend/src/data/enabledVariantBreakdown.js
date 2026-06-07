@@ -1,0 +1,132 @@
+/**
+ * enabledVariantBreakdown.js
+ *
+ * Pure aggregation for the Classification tab "Enabled Variant Comparison" section
+ * (CLASSIFICATION-ENABLED-VARIANTS). No React, no side effects, node-testable.
+ *
+ * The run bundle stores per-entry-model-variant trades in its entry-results silo
+ * (`bundle.entryResults.tradesByMode`), reachable via `entryTradesByMode()`. The
+ * Classification tab's main Entry Model Breakdown only sees the *selected* scenario
+ * (`displayTrades`); this helper aggregates *all enabled* entry-model variants so
+ * they can be compared side by side (TE C0/C1/C2/C3, EP, baseline).
+ *
+ * Metrics match the rest of the tab (fillStateBreakdown / buildClassificationBreakdown):
+ *   Trades = count of performance trades
+ *   WR     = wins / (wins + losses)   — breakevens excluded from the denominator
+ *   Net R  = Σ r
+ *   Avg R  = Σ r / count              — breakevens included in the denominator
+ *
+ * Labels/tags come from the canonical classification system, so a variant reads the
+ * same everywhere (e.g. "TE C2 (+2 Delay)").
+ */
+
+import { buildTradeClassification } from "./tradeClassificationDims.js";
+import { isPerformanceTrade, isWinTrade, isLossTrade } from "./tradeClassification.js";
+import { getTagMeta } from "./classificationRegistry.js";
+
+// Local mirror of tradeUniverse.resolveEntryResults / entryTradesByMode (read-only).
+// Inlined deliberately: tradeUniverse.js uses an extensionless relative import that
+// breaks raw-node ESM, which would make this pure helper non-testable. Behaviour
+// matches entryTradesByMode minus key-normalization (deriveEntryModel already maps
+// raw entry_model_key strings to the canonical tag).
+function resolveEntryResults(bundle) {
+    return bundle?.entryResults
+        || bundle?.entry_results
+        || bundle?.summary?.entryResults
+        || bundle?.summary?.entry_results
+        || {};
+}
+
+function readEntryTradesByMode(bundle) {
+    const results = resolveEntryResults(bundle || {});
+    const raw = results?.tradesByMode || results?.trades_by_mode || {};
+    const out = {};
+    for (const [key, value] of Object.entries(raw || {})) {
+        if (Array.isArray(value)) {
+            out[key] = value;
+        } else if (value && typeof value === "object") {
+            for (const [nk, nv] of Object.entries(value)) {
+                if (Array.isArray(nv)) out[nk] = nv;
+            }
+        }
+    }
+    return out;
+}
+
+// Canonical display order: baseline → TE C0..C3 → EP 25..100 → unknown/other.
+const TAG_ORDER = {
+    baseline:      0,
+    te_same:       1,  // C0
+    te_next:       2,  // C1
+    te_d2:         3,  // C2
+    te_d3:         4,  // C3
+    ep_25:         5,
+    ep_50:         6,
+    ep_75:         7,
+    ep_100:        8,
+    unknown_model: 99,
+};
+const orderOf = (tag) => (tag in TAG_ORDER ? TAG_ORDER[tag] : 90); // unrecognized → before unknown_model
+
+/**
+ * Aggregate per-entry-model-variant trade lists into comparison rows.
+ *
+ * @param {Object<string, object[]>} tradesByMode — { entryModelKey: trades[] }
+ * @returns {Array<{ key:string, tag:string, label:string, tooltipKey:string,
+ *   count:number, wins:number, losses:number, winRate:number|null, netR:number, avgR:number }>}
+ *   Sorted canonically; variants with no performance trades are dropped.
+ */
+export function buildVariantRows(tradesByMode) {
+    const map = tradesByMode && typeof tradesByMode === "object" ? tradesByMode : {};
+    const rows = [];
+
+    for (const [key, trades] of Object.entries(map)) {
+        if (!Array.isArray(trades)) continue;
+
+        let count = 0, wins = 0, losses = 0, sumR = 0;
+        for (const trade of trades) {
+            if (!isPerformanceTrade(trade)) continue;
+            const r = Number.isFinite(Number(trade?.r)) ? Number(trade.r) : 0;
+            count += 1;
+            if (isWinTrade(trade))  wins += 1;
+            if (isLossTrade(trade)) losses += 1;
+            sumR += r;
+        }
+        if (count === 0) continue; // drop empty / non-performance-only variants
+
+        let tag;
+        try { tag = buildTradeClassification({ entry_model_key: key }).entry_model; }
+        catch { tag = "unknown_model"; }
+        const wl = wins + losses;
+
+        rows.push({
+            key,
+            tag,
+            label:      getTagMeta(tag).label,
+            tooltipKey: tag,
+            count,
+            wins,
+            losses,
+            winRate: wl > 0 ? wins / wl : null,
+            netR:    sumR,
+            avgR:    count > 0 ? sumR / count : 0,
+        });
+    }
+
+    rows.sort((a, b) => {
+        const d = orderOf(a.tag) - orderOf(b.tag);
+        return d !== 0 ? d : a.label.localeCompare(b.label);
+    });
+    return rows;
+}
+
+/**
+ * Build the enabled-variant comparison rows from a run bundle.
+ * Reads the entry-results silo (read-only); returns [] when no per-variant data.
+ *
+ * @param {object} runData — the run bundle
+ * @returns {object[]} variant rows (see buildVariantRows)
+ */
+export function buildEnabledVariantBreakdown(runData) {
+    return buildVariantRows(readEntryTradesByMode(runData));
+}
