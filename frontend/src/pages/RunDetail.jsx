@@ -46,6 +46,8 @@ import { formatDirectionalScenarioLabel } from "@/components/lab/entries/analyti
 import { buildTradeClassification } from "@/data/tradeClassificationDims";
 import { ClassificationBadge } from "@/components/lab/ClassificationBadge";
 import { getTagMeta } from "@/data/classificationRegistry";
+import { buildFillStateBreakdown, buildSessionBreakdown, buildSignalCards } from "@/data/fillStateBreakdown";
+import { TermTip, TooltipProvider } from "@/components/lab/TermTip";
 
 // RB-8a/8b: account config lives in the global store (state.accountSettings),
 // read/written via useResultsLens (lens.accountSettings / lens.setAccountSettings)
@@ -872,6 +874,20 @@ export default function RunDetail() {
     const classificationBreakdown = React.useMemo(
         () => buildClassificationBreakdown(displayTrades),
         [displayTrades],
+    );
+
+    // Classification Tab V2 — fill-state / session aggregations + signal cards.
+    const fillStateBreakdown = React.useMemo(
+        () => buildFillStateBreakdown(displayTrades),
+        [displayTrades],
+    );
+    const sessionBreakdown = React.useMemo(
+        () => buildSessionBreakdown(displayTrades),
+        [displayTrades],
+    );
+    const signalCards = React.useMemo(
+        () => buildSignalCards(fillStateBreakdown, sessionBreakdown),
+        [fillStateBreakdown, sessionBreakdown],
     );
 
     const filteredLedgerRows = React.useMemo(() => {
@@ -2861,70 +2877,78 @@ export default function RunDetail() {
                             No trade data. Import a run to see classification performance.
                         </div>
                     ) : (
-                        <div className="space-y-5">
-                            {[
-                                { dimLabel: "Entry Model",   rows: classificationBreakdown.entry_model   },
-                                { dimLabel: "Entry Context", rows: classificationBreakdown.entry_context.filter((row) => !getTagMeta(row.tag).muteAsBadge) },
-                            ].map(({ dimLabel, rows }) => {
-                                if (!rows.length) return null;
-                                return (
-                                    <div key={dimLabel}>
-                                        <div className="text-[10px] font-ui uppercase tracking-wider text-[hsl(var(--text-3))] mb-2">
-                                            {dimLabel}
-                                        </div>
-                                        {/* Column headers */}
-                                        <div
-                                            className="grid items-center gap-x-3 px-2 mb-1 text-[9px] font-ui uppercase tracking-wider text-[hsl(var(--text-3)/0.7)]"
-                                            style={{ gridTemplateColumns: "minmax(96px,auto) repeat(4,minmax(52px,1fr))" }}
-                                        >
-                                            <span>Tag</span>
-                                            <span className="text-right">Trades</span>
-                                            <span className="text-right">Win Rate</span>
-                                            <span className="text-right">Net R</span>
-                                            <span className="text-right">Avg R</span>
-                                        </div>
-                                        {/* Data rows */}
-                                        <div className="space-y-1">
-                                            {rows.map((row) => {
-                                                const wrTone = row.winRate == null
-                                                    ? "text-muted-lab"
-                                                    : row.winRate >= 0.5
-                                                        ? "text-[hsl(var(--success))]"
-                                                        : "text-[hsl(var(--danger))]";
-                                                const rTone = (v) => v > 0
-                                                    ? "text-[hsl(var(--success))]"
-                                                    : v < 0
-                                                        ? "text-[hsl(var(--danger))]"
-                                                        : "text-muted-lab";
-                                                return (
-                                                    <div
-                                                        key={row.tag}
-                                                        className="grid items-center gap-x-3 px-2 py-1.5 border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm"
-                                                        style={{ gridTemplateColumns: "minmax(96px,auto) repeat(4,minmax(52px,1fr))" }}
-                                                    >
-                                                        <div className="min-w-0">
-                                                            <ClassificationBadge tag={row.tag} />
-                                                        </div>
-                                                        <span className="font-num tabular-nums text-right text-[11px] text-[hsl(var(--text-2))]">
-                                                            {row.count}
-                                                        </span>
-                                                        <span className={`font-num tabular-nums text-right text-[11px] ${wrTone}`}>
-                                                            {row.winRate != null ? `${Math.round(row.winRate * 100)}%` : "—"}
-                                                        </span>
-                                                        <span className={`font-num tabular-nums text-right text-[11px] ${rTone(row.netR)}`}>
-                                                            {formatSignedR(row.netR)}
-                                                        </span>
-                                                        <span className={`font-num tabular-nums text-right text-[11px] ${rTone(row.avgR)}`}>
-                                                            {formatSignedR(row.avgR, 2)}
-                                                        </span>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
+                        <TooltipProvider delayDuration={150}>
+                            <div className="space-y-5">
+
+                                {/* A — Signal Cards: the research summary at a glance */}
+                                <div>
+                                    <ClassSectionHeader label="Signal Cards" />
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                                        {signalCards.map((card) => {
+                                            const label = card.tagKey ? getTagMeta(card.tagKey).label : card.label;
+                                            const s = card.stats;
+                                            return (
+                                                <MetricChip
+                                                    key={card.id}
+                                                    size="compact"
+                                                    tone={card.tone}
+                                                    label={<TermTip termKey={card.tooltipKey}>{label}</TermTip>}
+                                                    value={s.count ? formatSignedR(s.avgR, 2) : "—"}
+                                                    sub={s.count
+                                                        ? `${s.winRate != null ? `${Math.round(s.winRate * 100)}% WR` : "— WR"} · n=${s.count} · ${formatSignedR(s.netR, 1)}`
+                                                        : "no trades"}
+                                                />
+                                            );
+                                        })}
                                     </div>
-                                );
-                            })}
-                        </div>
+                                </div>
+
+                                {/* B — Fill State Breakdown (parent/child tree) */}
+                                <div>
+                                    <ClassSectionHeader label="Fill State Breakdown" />
+                                    {fillStateBreakdown.hasInstrumentation ? (
+                                        <ClassBreakdownTable rows={[
+                                            { label: getTagMeta("occupied_at_arm").label, tooltipKey: "occupied_at_arm", stats: fillStateBreakdown.occupied_at_arm, muted: true },
+                                            { label: getTagMeta("vacant_at_arm").label,   tooltipKey: "vacant_at_arm",   stats: fillStateBreakdown.vacant_at_arm,   emphasis: true },
+                                            { label: getTagMeta("aae").label,             tooltipKey: "aae",             stats: fillStateBreakdown.aae,             branch: "├─" },
+                                            { label: getTagMeta("vacant_no_aae").label,   tooltipKey: "vacant_no_aae",   stats: fillStateBreakdown.vacant_no_aae,   branch: "└─" },
+                                            { label: getTagMeta("unknown_at_arm").label,  tooltipKey: "unknown_at_arm",  stats: fillStateBreakdown.unknown_at_arm,  muted: true, footnote: true },
+                                        ]} />
+                                    ) : (
+                                        <div className="py-3 text-center font-ui text-[11px] text-muted-lab">
+                                            No fill-state data — this run predates AAE instrumentation.
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* C — Session Breakdown */}
+                                {sessionBreakdown.length > 0 && (
+                                    <div>
+                                        <ClassSectionHeader label="Session Breakdown" />
+                                        <ClassBreakdownTable rows={sessionBreakdown.map((row) => ({
+                                            label: row.session,
+                                            tooltipKey: row.glossaryKey,
+                                            stats: row,
+                                            danger: row.session === "Outside" && row.avgR < 0,
+                                            muted: row.session === "Unknown",
+                                        }))} />
+                                    </div>
+                                )}
+
+                                {/* D — Entry Model Breakdown (Entry Context table removed — Fill State replaces it) */}
+                                {classificationBreakdown.entry_model.length > 0 && (
+                                    <div>
+                                        <ClassSectionHeader label="Entry Model Breakdown" />
+                                        <ClassBreakdownTable rows={classificationBreakdown.entry_model.map((row) => ({
+                                            label: getTagMeta(row.tag).label,
+                                            tooltipKey: row.tag,
+                                            stats: row,
+                                        }))} />
+                                    </div>
+                                )}
+
+                            </div>
+                        </TooltipProvider>
                     )}
                 </NeonPanel>}
 
@@ -4698,4 +4722,84 @@ function buildClassificationBreakdown(trades) {
         entry_model:   toRows(modelMap),
         entry_context: toRows(contextMap),
     };
+}
+
+// ── Classification Tab V2 — shared presentational helpers ─────────────────────
+
+const CLASS_BREAKDOWN_GRID = "minmax(120px,auto) repeat(4,minmax(52px,1fr))";
+
+function ClassSectionHeader({ label }) {
+    return (
+        <div className="text-[10px] font-ui uppercase tracking-wider text-[hsl(var(--text-3))] mb-2">
+            {label}
+        </div>
+    );
+}
+
+/**
+ * Generic breakdown table used by Fill State / Session / Entry Model sections so
+ * every dimension shares the same columns, metrics, and tooltips.
+ * Each row: { label, tooltipKey, stats:{count,winRate,netR,avgR}, branch?, emphasis?, muted?, danger?, footnote? }.
+ */
+function ClassBreakdownTable({ rows }) {
+    if (!rows || !rows.length) return null;
+    return (
+        <div>
+            <div
+                className="grid items-center gap-x-3 px-2 mb-1 text-[9px] font-ui uppercase tracking-wider text-[hsl(var(--text-3)/0.7)]"
+                style={{ gridTemplateColumns: CLASS_BREAKDOWN_GRID }}
+            >
+                <span>Tag</span>
+                <span className="text-right"><TermTip termKey="stat_n">Trades</TermTip></span>
+                <span className="text-right"><TermTip termKey="stat_wr">Win Rate</TermTip></span>
+                <span className="text-right"><TermTip termKey="stat_net_r">Net R</TermTip></span>
+                <span className="text-right"><TermTip termKey="stat_avg_r">Avg R</TermTip></span>
+            </div>
+            <div className="space-y-1">
+                {rows.map((row, i) => <ClassBreakdownRow key={`${row.label}-${i}`} row={row} />)}
+            </div>
+        </div>
+    );
+}
+
+function ClassBreakdownRow({ row }) {
+    const { label, tooltipKey, stats, branch, emphasis, muted, danger, footnote } = row;
+    const wrTone = stats.winRate == null
+        ? "text-muted-lab"
+        : stats.winRate >= 0.5
+            ? "text-[hsl(var(--success))]"
+            : "text-[hsl(var(--danger))]";
+    const rTone = (v) => v > 0
+        ? "text-[hsl(var(--success))]"
+        : v < 0
+            ? "text-[hsl(var(--danger))]"
+            : "text-muted-lab";
+    const frame = danger
+        ? "bg-[hsl(var(--danger)/0.08)] border-[hsl(var(--danger)/0.35)]"
+        : emphasis
+            ? "bg-[hsl(var(--panel-2)/0.7)] border-[hsl(var(--accent-secondary)/0.4)]"
+            : "bg-[hsl(var(--panel-2)/0.35)] border-[hsl(var(--border-soft))]";
+    return (
+        <div
+            className={`grid items-center gap-x-3 px-2 py-1.5 border clip-bevel-sm ${frame}`}
+            style={{ gridTemplateColumns: CLASS_BREAKDOWN_GRID }}
+        >
+            <div className={`min-w-0 flex items-center gap-1 ${footnote ? "text-[10px]" : "text-[11px]"} ${emphasis ? "font-semibold text-[hsl(var(--text))]" : "text-[hsl(var(--text-2))]"} ${muted ? "opacity-60" : ""}`}>
+                {branch && <span className="text-[hsl(var(--text-3))] font-num shrink-0">{branch}</span>}
+                <TermTip termKey={tooltipKey}>{label}</TermTip>
+            </div>
+            <span className="font-num tabular-nums text-right text-[11px] text-[hsl(var(--text-2))]">
+                {stats.count}
+            </span>
+            <span className={`font-num tabular-nums text-right text-[11px] ${wrTone}`}>
+                {stats.winRate != null ? `${Math.round(stats.winRate * 100)}%` : "—"}
+            </span>
+            <span className={`font-num tabular-nums text-right text-[11px] ${rTone(stats.netR)}`}>
+                {formatSignedR(stats.netR)}
+            </span>
+            <span className={`font-num tabular-nums text-right text-[11px] ${rTone(stats.avgR)}`}>
+                {formatSignedR(stats.avgR, 2)}
+            </span>
+        </div>
+    );
 }
