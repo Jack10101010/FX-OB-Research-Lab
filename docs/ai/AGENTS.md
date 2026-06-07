@@ -6,6 +6,10 @@ agents can coordinate **without relying on chat history**. If you are a new chat
 read this file, then `PROJECT_STATUS.md` and `CURRENT_WORKSTREAM.md`, before doing
 anything.
 
+> **Mandatory session start:** At the start of every new session, all AI agents must
+> automatically read `AGENTS.md`, `CURRENT_WORKSTREAM.md`, and `PROJECT_STATUS.md` before
+> providing recommendations.
+
 > Repo facts live in the **root** `PROJECT_STATUS.md` / `WORKSTREAMS.md` for git
 > coordination. The `docs/ai/` copies are the **canonical AI-memory** versions:
 > roles, roadmap, decisions, backlog, ideas, glossary, and current focus. When they
