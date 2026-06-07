@@ -48,10 +48,6 @@ export function EntriesWorkspace() {
 
     const pairedFftOffRunId = activeRun?.pairedFftOffRunId ?? null;
     const pairedOffBundle   = pairedFftOffRunId ? getRunData?.(pairedFftOffRunId) : null;
-    const offTrades = useMemo(
-        () => extractOffTrades(pairedOffBundle, ACTIVE_TRADE_VARIANT),
-        [pairedOffBundle, ACTIVE_TRADE_VARIANT],
-    );
 
     const {
         activeTab, setActiveTab,
@@ -60,6 +56,14 @@ export function EntriesWorkspace() {
         selectedModelKey, setSelectedModelKey,
         TABS,
     } = useEntryWorkspace();
+
+    // Paired FFT-OFF trades: prefer the active run's built-in auto-control trades
+    // (priority 0, keyed by `${variant}:${scenario}`), then fall back to a
+    // manually-selected FFT-OFF run. selectedModelKey identifies the active scenario.
+    const offTrades = useMemo(
+        () => extractOffTrades(activeRun, pairedOffBundle, ACTIVE_TRADE_VARIANT, selectedModelKey),
+        [activeRun, pairedOffBundle, ACTIVE_TRADE_VARIANT, selectedModelKey],
+    );
 
     // Filtered trade list (respects global session/direction filters)
     const filteredTrades = useMemo(() => applyFilters(trades), [applyFilters, trades]);

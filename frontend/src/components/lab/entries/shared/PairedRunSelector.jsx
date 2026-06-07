@@ -11,7 +11,7 @@
 
 import React, { useMemo } from "react";
 import { useDataset, updateRunBundle } from "@/data/store";
-import { getPairableRunOptions } from "@/data/fftPairingResolver";
+import { getPairableRunOptions, getAutoControlInfo } from "@/data/fftPairingResolver";
 
 // ── status chip ───────────────────────────────────────────────────────────────
 
@@ -37,6 +37,18 @@ function StatusChip({ paired, missing }) {
     );
 }
 
+// ── auto-control badge ──────────────────────────────────────────────────────────
+// Informational only: shown when the active run carries backend-generated
+// FFT-OFF control trades, which are auto-paired without any manual selection.
+
+function AutoControlChip() {
+    return (
+        <span className="text-[8px] font-ui px-1.5 py-[2px] rounded-[2px] bg-[hsl(var(--accent-primary)/0.14)] text-[hsl(var(--accent-primary))]">
+            Auto-paired control
+        </span>
+    );
+}
+
 // ── option label builder ──────────────────────────────────────────────────────
 
 function optionText(opt) {
@@ -52,10 +64,18 @@ function optionText(opt) {
 // ── PairedRunSelector ─────────────────────────────────────────────────────────
 
 export function PairedRunSelector() {
-    const { activeRunId, runs, getRunData } = useDataset();
+    const { activeRunId, runs, getRunData, ACTIVE_TRADE_VARIANT } = useDataset();
 
     const activeBundle      = activeRunId ? runs?.[activeRunId] : null;
     const pairedFftOffRunId = activeBundle?.pairedFftOffRunId || "";
+
+    // Auto-control availability — when the active run carries backend FFT-OFF
+    // control trades they are auto-paired, so the manual dropdown is demoted to
+    // a fallback/override and an informational badge is shown instead.
+    const autoControl = useMemo(
+        () => getAutoControlInfo(activeBundle, ACTIVE_TRADE_VARIANT),
+        [activeBundle, ACTIVE_TRADE_VARIANT],
+    );
 
     const options = useMemo(
         () => getPairableRunOptions(runs || {}, activeRunId),
@@ -65,8 +85,28 @@ export function PairedRunSelector() {
     // No active run
     if (!activeRunId) return null;
 
-    // No pairable runs loaded — render disabled state so control is discoverable
+    // No pairable runs loaded.
     if (options.length === 0) {
+        // Auto-control present → informational badge; no manual run required.
+        if (autoControl.available) {
+            return (
+                <div className="flex flex-col gap-1.5 min-w-[220px] max-w-xs">
+                    <div className="flex items-center justify-between gap-2">
+                        <span className="text-[9px] font-ui uppercase tracking-[0.12em] text-muted-lab opacity-60 shrink-0">
+                            Paired FFT-OFF run
+                        </span>
+                        <AutoControlChip />
+                    </div>
+                    <div className="w-full text-[11px] font-ui px-2 py-1.5 rounded-[3px] bg-[hsl(var(--accent-primary)/0.08)] border border-[hsl(var(--accent-primary)/0.25)] text-[hsl(var(--text-2))]">
+                        Auto-paired from built-in control{autoControl.count > 1 ? ` · ${autoControl.count} scenarios` : ""}
+                    </div>
+                    <p className="text-[8.5px] font-ui text-muted-lab opacity-45 leading-snug">
+                        FFT impact is computed automatically from this run's FFT-OFF control scenarios — no manual pairing required.
+                    </p>
+                </div>
+            );
+        }
+        // Otherwise render the disabled state so the control stays discoverable.
         return (
             <div className="flex flex-col gap-1.5 min-w-[220px] max-w-xs opacity-50 pointer-events-none select-none">
                 <div className="flex items-center justify-between gap-2">
@@ -102,7 +142,9 @@ export function PairedRunSelector() {
                 <span className="text-[9px] font-ui uppercase tracking-[0.12em] text-muted-lab opacity-60 shrink-0">
                     Paired FFT-OFF run
                 </span>
-                <StatusChip paired={isPaired} missing={isMissing} />
+                {autoControl.available
+                    ? <AutoControlChip />
+                    : <StatusChip paired={isPaired} missing={isMissing} />}
             </div>
 
             {/* Dropdown */}
@@ -136,8 +178,9 @@ export function PairedRunSelector() {
 
             {/* Helper text */}
             <p className="text-[8.5px] font-ui text-muted-lab opacity-45 leading-snug">
-                Used for authoritative FFT impact metrics.
-                Choose the matching FFT-OFF run.
+                {autoControl.available
+                    ? "Auto-paired from this run's built-in FFT-OFF control. Manual selection applies only to runs without control data."
+                    : "Used for authoritative FFT impact metrics. Choose the matching FFT-OFF run."}
             </p>
         </div>
     );
