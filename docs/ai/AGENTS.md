@@ -92,8 +92,13 @@ refactor unrelated code, never change the dark theme.
 
 ## Custom Commands
 
-Conventions an agent recognizes in a prompt. Most are read-only reports; the ones that write
-always **propose diffs first** and wait for confirmation (docs are committed on the host).
+These are **logical commands, not native Claude commands.** When the user writes one of:
+`/status` · `/roadmap` · `/next` · `/sync` · `/handoff` · `/decision` · `/idea` · `/promote` ·
+`/checkpoint` · `/health` — interpret the request using the definitions below and execute the
+associated workflow.
+
+Most are read-only reports; the ones that write always **propose diffs first** and wait for
+confirmation (docs are committed on the host).
 
 ### `/status`
 - **Purpose:** report the state of the current workstream.
