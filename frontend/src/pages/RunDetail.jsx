@@ -37,6 +37,9 @@ import {
 } from "@/data/tradeClassification";
 import { TradeSanityStrip } from "@/components/lab/TradeSanityStrip";
 import { computeFftAnalytics, fmtFftR, fmtFftPips } from "@/data/fftAnalytics";
+// Phase 4: auto-control paired FFT analytics (consumes importer controlTradesByScenario).
+import { computePairedFftAnalytics } from "@/data/fftPairingAnalytics";
+import { extractOffTrades, getAutoControlInfo } from "@/data/fftPairingResolver";
 // RW-2: scenario-aware result-view selector (display-only; analytics wired in RW-3).
 import { useTradeUniverse } from "@/data/useTradeUniverse";
 import { buildAvailableOptions, collectAllEntryKeys, entryTradesByMode, buildCanonicalKey, derivePrimaryResultView } from "@/data/tradeUniverse";
@@ -47,7 +50,9 @@ import { buildTradeClassification } from "@/data/tradeClassificationDims";
 import { ClassificationBadge } from "@/components/lab/ClassificationBadge";
 import { getTagMeta } from "@/data/classificationRegistry";
 import { buildFillStateBreakdown, buildSessionBreakdown, buildSignalCards } from "@/data/fillStateBreakdown";
+import { buildResearchSignals } from "@/data/researchSignals";
 import { TermTip, TooltipProvider } from "@/components/lab/TermTip";
+import { ConfidenceChip } from "@/components/lab/ConfidenceChip";
 
 // RB-8a/8b: account config lives in the global store (state.accountSettings),
 // read/written via useResultsLens (lens.accountSettings / lens.setAccountSettings)
@@ -888,6 +893,10 @@ export default function RunDetail() {
     const signalCards = React.useMemo(
         () => buildSignalCards(fillStateBreakdown, sessionBreakdown),
         [fillStateBreakdown, sessionBreakdown],
+    );
+    const researchSignals = React.useMemo(
+        () => buildResearchSignals(fillStateBreakdown, sessionBreakdown, classificationBreakdown.entry_model),
+        [fillStateBreakdown, sessionBreakdown, classificationBreakdown],
     );
 
     const filteredLedgerRows = React.useMemo(() => {
@@ -2280,16 +2289,34 @@ export default function RunDetail() {
                 const allTrades = Array.isArray(displayTrades) ? displayTrades : [];
                 const fft = computeFftAnalytics(allTrades);
                 if (fft.fftCancels === 0) return null;
+
+                // Phase 4 — auto-control paired analytics. When the active run carries
+                // backend FFT-OFF control trades for this scenario, paired metrics are
+                // authoritative and replace the unverified ghost projections below.
+                const canonicalKey = buildCanonicalKey(resultView.family, resultView.threshold, resultView.fillMode);
+                const offTrades = extractOffTrades(runData, null, universe?.variant ?? null, canonicalKey);
+                const paired = computePairedFftAnalytics(allTrades, offTrades);
+                const autoControl = getAutoControlInfo(runData, universe?.variant ?? null);
+                const hasPaired = paired.hasPairedData && paired.hasHighConfPairs;
+
                 // Ghost R tone is always neutral — ghost metrics are unverified until a
                 // paired FFT-OFF run is available. Success/danger tone would imply authority.
                 const netRTone = "muted";
                 const wrSub = fft.ghostWinRate != null
                     ? `${fft.ghostWinRate.toFixed(1)}% ghost win rate`
                     : fft.hasGhostData ? "—" : "no ghost sim";
+                const ghostNetRStr = fft.hasGhostData ? fmtFftR(fft.ghostNetR) : "—";
+                const pairedNetRTone = paired.confirmedNetRImpact > 0.005 ? "success"
+                    : paired.confirmedNetRImpact < -0.005 ? "danger" : "muted";
                 return (
                     <>
-                        <div className="px-6 mt-4 mb-1 text-[9px] font-ui uppercase tracking-[0.12em] text-[hsl(var(--warning)/0.65)]">
-                            ◆ FFT Protection — First Failed Visit
+                        <div className="px-6 mt-4 mb-1 flex items-center gap-2 text-[9px] font-ui uppercase tracking-[0.12em] text-[hsl(var(--warning)/0.65)]">
+                            <span>◆ FFT Protection — First Failed Visit</span>
+                            {autoControl.available && (
+                                <span className="px-1.5 py-[2px] rounded-[2px] bg-[hsl(var(--accent-primary)/0.14)] text-[hsl(var(--accent-primary))] normal-case tracking-normal text-[8px]">
+                                    Auto-paired control
+                                </span>
+                            )}
                         </div>
                         <div className="kpi-strip">
                             <MetricChip
@@ -2300,38 +2327,85 @@ export default function RunDetail() {
                                 tone="warning"
                                 icon={XIcon}
                             />
-                            <MetricChip
-                                size="compact"
-                                label="Ghost Wins"
-                                value={String(fft.ghostWins)}
-                                sub={wrSub}
-                                tone={fft.hasGhostData ? "success" : "muted"}
-                                icon={TrendingUp}
-                            />
-                            <MetricChip
-                                size="compact"
-                                label="Ghost Losses"
-                                value={String(fft.ghostLosses)}
-                                sub="would have stopped out"
-                                tone={fft.hasGhostData ? "danger" : "muted"}
-                                icon={AlertTriangle}
-                            />
-                            <MetricChip
-                                size="compact"
-                                label="Ghost Unfilled"
-                                value={String(fft.ghostUnfilled)}
-                                sub="never triggered after cancel"
-                                tone="muted"
-                                icon={Hash}
-                            />
-                            <MetricChip
-                                size="compact"
-                                label="Ghost Net R (unverified)"
-                                value={fft.hasGhostData ? fmtFftR(fft.ghostNetR) : "—"}
-                                sub="simulated · load paired run for actuals"
-                                tone={fft.hasGhostData ? netRTone : "muted"}
-                                icon={Activity}
-                            />
+                            {hasPaired ? (
+                                <>
+                                    <MetricChip
+                                        size="compact"
+                                        label="Wins Removed"
+                                        value={String(paired.confirmedWinsRemoved)}
+                                        sub="confirmed · paired OFF"
+                                        tone="danger"
+                                        icon={AlertTriangle}
+                                    />
+                                    <MetricChip
+                                        size="compact"
+                                        label="Losses Avoided"
+                                        value={String(paired.confirmedLossesAvoided)}
+                                        sub="confirmed · paired OFF"
+                                        tone="success"
+                                        icon={TrendingUp}
+                                    />
+                                    <MetricChip
+                                        size="compact"
+                                        label="Net R Impact"
+                                        value={fmtFftR(paired.confirmedNetRImpact)}
+                                        sub={`authoritative · ghost ${ghostNetRStr} (unverified)`}
+                                        tone={pairedNetRTone}
+                                        icon={Activity}
+                                    />
+                                    <MetricChip
+                                        size="compact"
+                                        label="HIGH Confidence"
+                                        value={String(paired.highConfCount)}
+                                        sub="paired high-conf"
+                                        tone="muted"
+                                        icon={Hash}
+                                    />
+                                    <MetricChip
+                                        size="compact"
+                                        label="LOW Confidence"
+                                        value={String(paired.lowConfCount)}
+                                        sub="paired low-conf"
+                                        tone="muted"
+                                        icon={Hash}
+                                    />
+                                </>
+                            ) : (
+                                <>
+                                    <MetricChip
+                                        size="compact"
+                                        label="Ghost Wins"
+                                        value={String(fft.ghostWins)}
+                                        sub={wrSub}
+                                        tone={fft.hasGhostData ? "success" : "muted"}
+                                        icon={TrendingUp}
+                                    />
+                                    <MetricChip
+                                        size="compact"
+                                        label="Ghost Losses"
+                                        value={String(fft.ghostLosses)}
+                                        sub="would have stopped out"
+                                        tone={fft.hasGhostData ? "danger" : "muted"}
+                                        icon={AlertTriangle}
+                                    />
+                                    <MetricChip
+                                        size="compact"
+                                        label="Ghost Unfilled"
+                                        value={String(fft.ghostUnfilled)}
+                                        sub="never triggered after cancel"
+                                        tone="muted"
+                                        icon={Hash}
+                                    />
+                                    <MetricChip
+                                        size="compact"
+                                        label="Ghost Net R (unverified)"
+                                        value={fft.hasGhostData ? fmtFftR(fft.ghostNetR) : "—"}
+                                        sub="simulated · load paired run for actuals"
+                                        tone={fft.hasGhostData ? netRTone : "muted"}
+                                        icon={Activity}
+                                    />
+                                </>
+                            )}
                             {fft.hasMoveAwayData && (
                                 <MetricChip
                                     size="compact"
@@ -2879,6 +2953,9 @@ export default function RunDetail() {
                     ) : (
                         <TooltipProvider delayDuration={150}>
                             <div className="space-y-5">
+
+                                {/* Research Signals — auto-surfaced edges & risks with confidence */}
+                                <ResearchSignalsSection signals={researchSignals} />
 
                                 {/* A — Signal Cards: the research summary at a glance */}
                                 <div>
@@ -4732,6 +4809,73 @@ function ClassSectionHeader({ label }) {
     return (
         <div className="text-[10px] font-ui uppercase tracking-wider text-[hsl(var(--text-3))] mb-2">
             {label}
+        </div>
+    );
+}
+
+// ── Research Signals — auto-surfaced edges & risks (reads researchSignals engine) ──
+// Renders inside the Classification panel's TooltipProvider (so ConfidenceChip /
+// TermTip tooltips resolve). Pure presentation; the ranking/confidence logic lives
+// in data/researchSignals.js.
+function ResearchSignalsSection({ signals }) {
+    const positives = signals?.positives ?? [];
+    const negatives = signals?.negatives ?? [];
+    if (positives.length === 0 && negatives.length === 0) {
+        return (
+            <div>
+                <ClassSectionHeader label="Research Signals" />
+                <div className="py-3 text-center font-ui text-[11px] text-muted-lab">
+                    Not enough data for confident signals yet.
+                </div>
+            </div>
+        );
+    }
+    return (
+        <div>
+            <ClassSectionHeader label="Research Signals" />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <ResearchSignalColumn title="Strongest Edges" accent="text-[hsl(var(--success))]" signals={positives} emptyText="No positive edges." />
+                <ResearchSignalColumn title="Key Risks" accent="text-[hsl(var(--danger))]" signals={negatives} emptyText="No risks flagged." />
+            </div>
+        </div>
+    );
+}
+
+function ResearchSignalColumn({ title, accent, signals, emptyText }) {
+    return (
+        <div>
+            <div className={`text-[9px] font-ui uppercase tracking-wider mb-1.5 ${accent}`}>{title}</div>
+            {signals.length === 0 ? (
+                <div className="px-2 py-1.5 font-ui text-[10px] text-muted-lab">{emptyText}</div>
+            ) : (
+                <div className="space-y-1">
+                    {signals.map((sig) => <ResearchSignalRow key={sig.id} signal={sig} />)}
+                </div>
+            )}
+        </div>
+    );
+}
+
+function ResearchSignalRow({ signal }) {
+    const label = signal.label ?? getTagMeta(signal.key).label;
+    const s = signal.stats || {};
+    const effectTone = signal.effect > 0
+        ? "text-[hsl(var(--success))]"
+        : signal.effect < 0
+            ? "text-[hsl(var(--danger))]"
+            : "text-[hsl(var(--text-2))]";
+    return (
+        <div className="flex items-center gap-2 px-2 py-1.5 border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm">
+            <ConfidenceChip level={signal.confidence?.level} />
+            <div className="min-w-0 flex-1 text-[11px] text-[hsl(var(--text-2))] truncate">
+                <TermTip termKey={signal.tooltipKey}>{label}</TermTip>
+            </div>
+            <div className="font-num tabular-nums text-[10px] shrink-0 text-right whitespace-nowrap">
+                <span className={effectTone}>{formatSignedR(s.avgR, 2)}</span>
+                <span className="text-muted-lab">
+                    {" "}· n={s.count} · {s.winRate != null ? `${Math.round(s.winRate * 100)}%` : "—"} · {formatSignedR(s.netR, 1)}
+                </span>
+            </div>
         </div>
     );
 }
