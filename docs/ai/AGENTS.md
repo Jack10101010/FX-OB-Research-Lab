@@ -62,6 +62,10 @@ root (e.g. `CLASSIFICATION-TAB-V2-PLAN.md`). `docs/ai/` summarizes and points to
 5. **Update `docs/ai/` when a meaningful task completes** (use `/sync`).
 6. **Scoped commits only** — never `git add .`; stage only your task's files.
 7. Prefer the smallest correct change. Leave the tree green.
+8. **Documentation accuracy.** If `PROJECT_STATUS.md`, `CURRENT_WORKSTREAM.md`, `ROADMAP.md`,
+   `WORKSTREAMS.md`, `FINDINGS.md`, `DECISIONS.md`, `EXPERIMENTS.md`, or `BACKLOG.md` are
+   materially stale, propose a `/sync` update **before continuing major planning work**. Prefer
+   small incremental updates over large retrospective rewrites.
 
 > **Environment note:** in the Cowork sandbox, git can create but **not unlink**
 > `.git/index.lock` (mount restriction), so staging/committing is done on the host.
@@ -144,6 +148,12 @@ always **propose diffs first** and wait for confirmation (docs are committed on 
 - **Output:** a new `FINDINGS.md` entry (next `F-###`, summary / evidence / status / date).
 - **Files:** `FINDINGS.md` (append). (Use `/decision` for *build* choices, `/finding` for
   *research* conclusions — see the boundary note in those files.)
+
+### `/health`
+- **Purpose:** quick project health check.
+- **Output:** current workstream · last completed milestone · active blockers · stale documents ·
+  dirty files · uncommitted work · recommended next task.
+- **Files:** none (read-only; verifies docs against live git).
 
 ---
 

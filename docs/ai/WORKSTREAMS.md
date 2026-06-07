@@ -23,7 +23,9 @@
 
 ## Master Controls / Research Control Plane
 
-- **Status:** active (parallel). Phases 4A/4B shipped; promotion (4C) later.
+- **Status:** active (parallel). **Phase 7A complete.** Milestones since 4A/4B: preview→run
+  promotion, active-vs-preview compare, rerun-tier classification, and the **Instant Cost Rescore
+  panel**.
 - **Owns:** `components/masterControls/*`, `data/configRegistry.js`, `data/configTranslator.js`.
 - **Do not touch** from Classification work.
 
@@ -34,8 +36,11 @@
 
 ## Entry / FFT / Paired Runs
 
-- **Status:** active (parallel). Owns `components/lab/entries/*`, `IntrabarInspector.jsx`,
-  `pages/StrategyBuilder.jsx` (shared — coordinate).
+- **Status:** active (parallel). **FFT auto-pair control-run architecture complete** (auto-pairs
+  FFT-OFF control trades); **auto-control importer ingestion complete** (`importer` ingests
+  auto-control trade files); FFT classification breakdown panel shipped.
+- **Owns:** `components/lab/entries/*`, `IntrabarInspector.jsx`, `data/importer.js`
+  (auto-control ingestion), `pages/StrategyBuilder.jsx` (shared — coordinate).
 
 ## Strategy Map
 
@@ -44,7 +49,9 @@
 
 ## OB Retest / Retest Lab
 
-- **Status:** new. Owns `data/obRetest.js`, `components/lab/retest/*`, `OB-RETEST-ANALYSIS-*.md`.
+- **Status:** active. Phase 1 retest analysis lab + standalone retest tracker shipped; now at
+  **Phase 2 exporter audit** (`OB-RETEST-ANALYSIS-3-PHASE-2-EXPORTER-AUDIT.md`).
+- **Owns:** `data/obRetest.js`, `components/lab/retest/*`, `OB-RETEST-ANALYSIS-*.md`.
 
 ## Ghost / Backend Research
 
