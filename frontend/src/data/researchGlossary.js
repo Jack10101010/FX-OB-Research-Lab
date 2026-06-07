@@ -130,33 +130,33 @@ export const GLOSSARY = {
         friendlyName: "Triggered Edge",
         definition:
             "Entry family where the limit only arms after price triggers the OB edge, optionally " +
-            "after a delay.",
+            "after a candle delay. Delay variants are labelled C0–C3 (C0 = same candle … C3 = +3).",
         whyItMatters:
             "The entire AAE / vacant research only exists for TE entries — baseline trades have no " +
             "arm step.",
     },
     te_same: {
-        term: "TE Same",
-        friendlyName: "TE — Same Candle",
-        definition: "Limit arms and can fill on the same candle as the trigger (delay = 0).",
+        term: "TE C0",
+        friendlyName: "TE C0 — Same Candle",
+        definition: "Limit arms and can fill on the same candle as the trigger (delay 0).",
         whyItMatters: "Shortest delay; least chance for price to vacate the OB before arming.",
     },
     te_next: {
-        term: "TE Next",
-        friendlyName: "TE — Next Candle",
-        definition: "Limit arms on the candle immediately after the trigger (delay = 1).",
+        term: "TE C1",
+        friendlyName: "TE C1 — Next Candle",
+        definition: "Limit arms on the candle immediately after the trigger (delay 1).",
         whyItMatters: "First delay tier where AAE / vacant behaviour starts to appear.",
     },
     te_d2: {
-        term: "TE D2",
-        friendlyName: "TE — 2-Candle Delay",
-        definition: "Limit arms after a 2-candle delay window.",
+        term: "TE C2",
+        friendlyName: "TE C2 — +2 Delay",
+        definition: "Limit arms after a 2-candle delay window (delay 2).",
         whyItMatters: "Longer delay → more vacate-and-return opportunity → more AAE.",
     },
     te_d3: {
-        term: "TE D3",
-        friendlyName: "TE — 3-Candle Delay",
-        definition: "Limit arms after a 3-candle delay window.",
+        term: "TE C3",
+        friendlyName: "TE C3 — +3 Delay",
+        definition: "Limit arms after a 3-candle delay window (delay 3).",
         whyItMatters: "Highest AAE share in the full-history run; the richest cohort for the signal.",
     },
 

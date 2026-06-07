@@ -26,8 +26,9 @@ truth for tooltips). Keep the two consistent; the code file wins for exact UI co
 
 - **TE — Triggered Edge** — entry family where the limit arms only after price triggers the OB
   edge, optionally after a delay. AAE/vacant research only exists for TE.
-- **TE Same / Next / D2 / D3** — delay = 0 / 1 / 2 / 3 candles between trigger and arm. Longer
-  delay → more chance to vacate → more AAE.
+- **TE C0 / C1 / C2 / C3** — delay = 0 / 1 / 2 / 3 candles between trigger and arm (C0 = same
+  candle, C1 = next candle, C2 = +2, C3 = +3). Longer delay → more chance to vacate → more AAE.
+  (Tag keys remain `te_same` / `te_next` / `te_d2` / `te_d3`.)
 - **Baseline** — standard OB limit, no TE/penetration, no arm step.
 - **EP — Entry Penetration (25/50/75/100%)** — limit placed N% into the OB.
 
