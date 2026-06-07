@@ -32,6 +32,26 @@ Groomed by ChatGPT. Priority: P1 (next up) · P2 (soon) · P3 (later).
 - **Click-a-signal-card-to-filter** the ledger/sections.
 - **Low-n indicator** on noisy breakdown rows.
 
+## Master Controls
+
+> From Phase 7A live browser QA (2026-06-07, run `imported_1780733962068`). The cost-rescore
+> feature PASSed; these are the open issues it surfaced. Owner: Claude (UI) / Codex (data).
+
+- **(RESOLVED 2026-06-07) Sidecar preview import "hang"** — diagnosed via timing logs as a
+  **self-cancelling import effect**, not a perf issue (total import ~117 ms: fetch ~24 / ingest
+  ~85). The effect was keyed on `preview.status`; its `completed → importing` write re-ran the
+  effect and tripped the old `cancelled` cleanup before the async import resolved, skipping the
+  `status:"done"` transition. Fixed in `MasterControlsContext.jsx` with a job-id ref guard
+  (`importJobRef`). Live QA passed (preview reaches "Preview ready"; Results + compare render;
+  Save As Run + Clear work). Fix is implemented, commit pending.
+- **(P2) Investigate cost-rescore Active baseline mismatch** *(still open)* — the panel's Active column
+  (~+9.8R / 33.3% / 35 trades) ≠ the page Trade Sanity (~+8.44R / 38%); likely a variant/basis
+  mismatch (`extractPreviewMetrics` uses `primaryVariant` + raw R). Internally consistent, but
+  reconcile so the panel's "Active" matches the rest of the run view.
+- **(P3) Decide whether full-backtest-tier (T3) fields stay read-only in Master Controls** —
+  symbol / detection tf / dates can't be edited from the drawer, so the "Run Full Backtest"
+  affordance is unreachable there. Likely acceptable; confirm intent.
+
 ## Notes
 
 - Anything UI/UX/research → Claude. Anything data/importer/test/refactor → Codex.

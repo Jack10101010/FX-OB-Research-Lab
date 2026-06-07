@@ -80,19 +80,35 @@
     recomputed from `gross_r` + per-trade cost columns. **Display-only — no backend, no
     sidecar, no store mutation, no run creation, no Strategy Map update. Wins/losses
     preserved from original outcomes (never re-derived from the new R sign).**
-  - No Master Controls source files are currently dirty.
+  - **Phase 7A manual QA: PASS** (live browser QA, 2026-06-07, run `imported_1780733962068`).
+    Verified end-to-end: clean / spread / slippage / commission (exact flat −R per trade) /
+    additive multi-cost / RR-escalation hides the panel / reset clears it; display-only, no
+    store mutation, no auto-sidecar, no console errors. (Save As Run live QA was initially
+    blocked by the import "hang" — now diagnosed & fixed; see below.)
+  - **Preview import "hang" — FIXED (2026-06-07, uncommitted).** Diagnosed via timing logs as a
+    self-cancelling import effect (not a perf issue: total import ~117 ms). The effect, keyed on
+    `preview.status`, set `completed → importing` which re-ran it and tripped the old `cancelled`
+    cleanup before the async import resolved, skipping the `status:"done"` write. Fixed in
+    `MasterControlsContext.jsx` with a job-id ref guard (`importJobRef`). **Live QA passed:**
+    preview reaches "Preview ready", Preview Results + Active-vs-Preview render, Save As Run
+    appears, Clear preview works.
 - **Open risks:** preview isolation must hold for the whole preview lifecycle — no
   `addRunBundle`, no `setActiveRunId`, no run-history entry, no store mutation — **until**
   the user clicks Save As Run, the one deliberate promotion point (`promotePreview()` →
   `addRunBundle`). Phase 6 tiers are signal-only; Phase 7A cost rescore is display-only —
   do not let either imply the sidecar path changed.
-- **Next action:** QA / polish + Phase 7B planning.
-  1. Manual QA Phase 7A: dirty only cost fields → confirm the instant Active-vs-Rescored
-     panel (Net R / Avg R / Max DD deltas; win rate + trades unchanged), and that runs
-     without separable cost columns show "unavailable".
-  2. Phase 7B (optional): route the rescored trade list through a transient bundle so
-     Strategy Map / report update live — still no backend, no store registration.
-  3. RR↑ / stop / entry / OB-depth rescore stays **blocked** until the exporter adds
+  - ~~**Sidecar preview import hang/slow**~~ — **RESOLVED** (self-cancelling import effect; fixed
+    with job-id ref guard, live QA passed). Was never a perf issue.
+  - **Cost-rescore Active baseline mismatch** *(still open)* — panel Active (~+9.8R / 33.3% / 35 trades) ≠
+    page Trade Sanity (~+8.44R / 38%); likely variant/basis mismatch (`primaryVariant` + raw R).
+    Internally consistent, but needs investigation for user trust. (See `BACKLOG.md`.)
+- **Next action:** Phase 7A QA done (PASS); import "hang" diagnosed & fixed (commit pending).
+  1. ~~Investigate the sidecar preview import hang~~ — **done** (self-cancel effect → ref guard).
+  2. **Investigate the cost-rescore baseline mismatch** (variant/basis) so the panel's Active
+     numbers reconcile with the run view. *(still open)*
+  3. Consider Phase 7B (transient rescored bundle → live Strategy Map / report; still no
+     backend, no store registration).
+  4. RR↑ / stop / entry / OB-depth rescore stays **blocked** until the exporter adds
      per-trade MFE/MAE (backend / FX-OB-Backtester change).
 
 ### Session Lab

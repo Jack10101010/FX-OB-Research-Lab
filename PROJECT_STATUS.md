@@ -216,16 +216,43 @@ no sidecar, no store mutation, no run creation, no Strategy Map update**. Exactn
 separable gross/cost data; otherwise it shows "unavailable" and the user falls back to Run
 Preview. No Master Controls source files remain dirty.
 
-Master Controls is now in **QA / polish + Phase 7B planning**. Next expected actions:
+**Phase 7A manual QA: PASS** (live browser QA, 2026-06-07, run `imported_1780733962068`).
+Verified: clean state (no panel); spread-only → Fast Rescore + Cost rescore panel;
+slippage-only; commission-only (exact flat −R per trade); multiple cost fields additive;
+adding RR escalates to Backend Preview and hides the cost panel; reset clears the panel.
+The cost panel is display-only — no store mutation, no auto-sidecar, no console errors
+(only benign Recharts width/height warnings).
 
-1. Manual QA Phase 7A: dirty only spread/slippage/commission → confirm the instant panel
-   renders Active-vs-Rescored deltas (Net R / Avg R / Max DD), win rate + trades unchanged,
-   and that runs without separable cost columns show "unavailable".
-2. Phase 7B (optional): feed the rescored trade list into a transient bundle so Strategy
-   Map / report can update live — still no backend, no store registration.
-3. Blocked tiers — RR↑ / stop / entry / OB-depth — remain **blocked** until the exporter
+**Phase 7A QA findings (2026-06-07) — tracked in `docs/ai/BACKLOG.md` → Master Controls:**
+
+1. **Sidecar preview import "hang" — DIAGNOSED & FIXED (2026-06-07).** Timing instrumentation
+   showed the import is actually fast (fetch ~24 ms, ingest ~85 ms, total ~117 ms) — **not a
+   performance issue.** Root cause: the import effect (keyed on `preview.status`) **self-cancelled**
+   — its first line sets status `completed → importing`, which re-ran the effect and fired the old
+   cleanup, flipping a local `cancelled` flag before the async import resolved, so the final
+   `status:"done"` write was skipped and the UI sat on "Importing preview bundle…" indefinitely.
+   Fix (`MasterControlsContext.jsx`): replaced the `cancelled` flag with a job-id ref guard
+   (`importJobRef`), reset on clear/cancel/active-run change. **Live QA passed:** preview reaches
+   "Preview ready", Preview Results + Active-vs-Preview render, Save As Run appears, Clear preview
+   works, active run unchanged. (Temporary timing logs have been removed.)
+2. **Cost-rescore Active baseline mismatch.** The panel's Active column (~+9.8R / 33.3% /
+   35 trades) doesn't match the page Trade Sanity (~+8.44R / 38%) — likely a variant/basis
+   mismatch (extractor uses `primaryVariant` + raw R). Internally consistent, but trust
+   requires investigation.
+3. **Full-backtest tier unreachable from the drawer.** T3 fields (symbol / detection tf /
+   dates) are read-only in Master Controls, so "Run Full Backtest" can't be exercised here.
+   Likely acceptable for now; noted.
+
+Next expected actions:
+
+1. ~~Investigate the sidecar import hang~~ — **DONE**: diagnosed as a self-cancelling import
+   effect, fixed with a job-id ref guard; live QA passed; temp timing logs removed.
+2. Investigate the cost-rescore baseline mismatch (variant/basis) so the panel's Active
+   numbers reconcile with the rest of the run view. **(still open)**
+3. Only then consider Phase 7B (transient rescored bundle → live Strategy Map / report).
+4. Blocked tiers — RR↑ / stop / entry / OB-depth — remain **blocked** until the exporter
    adds per-trade MFE/MAE (or candle-path) data (FX-OB-Backtester change).
-4. Two commits (`4616506`, `3d6b5ee`) are ahead of origin — decide on push per the Push
+5. Two commits (`4616506`, `3d6b5ee`) are ahead of origin — decide on push per the Push
    Protocol (they span two workstreams: Master Controls + Entry/FFT).
 
 ## Current Dirty Working Tree
