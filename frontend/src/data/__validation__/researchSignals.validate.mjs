@@ -91,5 +91,93 @@ const empty = buildResearchSignals({}, [], []);
 ok(empty.positives.length === 0 && empty.negatives.length === 0 && empty.evaluated === 0,
    "empty inputs → empty result, no throw");
 
+// ── Hardening: partial nested config override (deep merge) ──────────────────────
+console.log("partial nested config override");
+
+// Shallow-merging `{ weights: { sample } }` over defaults would drop
+// `weights.stability` and yield a NaN score. Deep merge must preserve it.
+const partialConf = computeConfidence(
+    { count: 200, wins: 120, losses: 80, avgR: 0.5 },
+    { weights: { sample: 0.7 } },          // omit weights.stability on purpose
+);
+ok(Number.isFinite(partialConf.score) && !Number.isNaN(partialConf.score),
+   "computeConfidence: partial nested {weights:{sample}} → finite score (no NaN)");
+
+const partialBuild = buildResearchSignals(
+    fillState, sessions, entryModels,
+    { levelWeight: { High: 0.9 } },        // omit other levelWeight keys on purpose
+);
+ok([...partialBuild.positives, ...partialBuild.negatives].every((s) => Number.isFinite(s.rankScore)),
+   "buildResearchSignals: partial nested {levelWeight:{High}} → all rankScores finite");
+ok(partialBuild.positives[0]?.key === "vacant_at_arm",
+   "partial-config build still ranks Vacant top (merge preserved other levels)");
+
+// ── Hardening: negative-side parent/child dedup ────────────────────────────────
+console.log("negative parent/child dedup");
+
+const fsNeg = {
+    vacant_at_arm: { count: 200, wins: 40, losses: 150, avgR: -0.80 }, // eligible NEGATIVE parent
+    vacant_no_aae: { count: 90,  wins: 25, losses: 60,  avgR: -0.70 }, // |Δ|=0.10 < 0.30 → deduped
+    aae:           { count: 100, wins: 60, losses: 35,  avgR:  0.50 }, // diverges → kept (positive)
+};
+const negDedup = buildResearchSignals(fsNeg, [], []);
+const negDedupNegKeys = negDedup.negatives.map((s) => s.key);
+const negDedupPosKeys = negDedup.positives.map((s) => s.key);
+ok(negDedupNegKeys.includes("vacant_at_arm"), "negative parent (Vacant) surfaced as a risk");
+ok(!negDedupNegKeys.includes("vacant_no_aae"), "close negative child (Vacant-No-AAE) deduped on the negative side");
+ok(negDedupPosKeys.includes("aae"), "diverging child (AAE) still emitted (opposite polarity)");
+
+// ── Hardening: parent ineligible but child eligible → child kept ───────────────
+console.log("parent ineligible, child eligible");
+
+const fsParentIneligible = {
+    vacant_at_arm: { count: 6,   wins: 4,  losses: 2,  avgR: 0.90 }, // decided 6 < 10 → ineligible
+    aae:           { count: 120, wins: 80, losses: 30, avgR: 0.60 }, // eligible
+    vacant_no_aae: { count: 90,  wins: 60, losses: 20, avgR: 0.95 }, // close to parent, but parent ineligible → NOT deduped
+};
+const parentOut = buildResearchSignals(fsParentIneligible, [], []);
+const parentOutPosKeys = parentOut.positives.map((s) => s.key);
+ok(!parentOutPosKeys.includes("vacant_at_arm"), "ineligible parent (low sample) is suppressed, not emitted");
+ok(parentOutPosKeys.includes("aae") && parentOutPosKeys.includes("vacant_no_aae"),
+   "both children kept when parent is ineligible (no dedup against an ineligible parent)");
+ok(parentOut.suppressed === 1, "ineligible-but-qualified parent counted as suppressed (=1)");
+
+// ── Hardening: maxNegative cap ─────────────────────────────────────────────────
+console.log("maxNegative cap");
+
+const fourNegSessions = [
+    { session: "S1", glossaryKey: "session_s1", count: 100, wins: 30, losses: 65, avgR: -0.50 },
+    { session: "S2", glossaryKey: "session_s2", count: 100, wins: 25, losses: 70, avgR: -0.60 },
+    { session: "S3", glossaryKey: "session_s3", count: 100, wins: 20, losses: 75, avgR: -0.70 },
+    { session: "S4", glossaryKey: "session_s4", count: 100, wins: 15, losses: 80, avgR: -0.80 },
+];
+const capped = buildResearchSignals({}, fourNegSessions, []);
+const cappedNegKeys = capped.negatives.map((s) => s.key);
+ok(capped.negatives.length === 3, "negatives capped at maxNegative (3) when 4 qualify");
+ok(!cappedNegKeys.includes("session_s1"), "weakest negative (S1, -0.50) dropped by the cap");
+ok(cappedNegKeys.includes("session_s4") && cappedNegKeys.includes("session_s3") && cappedNegKeys.includes("session_s2"),
+   "the three strongest negatives are retained");
+
+// ── Hardening: confidence Low / Medium boundaries (deterministic via rStdErr) ──
+console.log("confidence Low/Medium boundaries");
+
+// Medium band [0.5, 0.75): decided 200 → sample 0.8333 (*0.6 = 0.5); stab 0.25 (*0.4 = 0.1) → 0.60
+const mediumConf = computeConfidence({ count: 210, wins: 120, losses: 80, avgR: 0.5, rStdErr: 1.0 });
+ok(mediumConf.level === "Medium", "score ~0.60 → Medium");
+// Low band [0.25, 0.5): decided 20 → sample 0.3333 (*0.6 = 0.2); stab 0.25 (*0.4 = 0.1) → 0.30
+const lowConf = computeConfidence({ count: 25, wins: 12, losses: 8, avgR: 0.3, rStdErr: 0.6 });
+ok(lowConf.level === "Low", "score ~0.30 → Low");
+ok(CONFIDENCE_LEVELS.indexOf(lowConf.level) < CONFIDENCE_LEVELS.indexOf(mediumConf.level),
+   "Low ranks strictly below Medium");
+
+// ── Hardening: partial rStdErr path (stability strictly between 0 and 1) ───────
+console.log("partial rStdErr path");
+
+const partialSE = computeConfidence({ count: 50, wins: 25, losses: 25, avgR: 0.5, rStdErr: 1.0 });
+ok(partialSE.parts.stabilityScore > 0 && partialSE.parts.stabilityScore < 1,
+   "rStdErr path yields a partial stability (0 < s < 1)");
+ok(Math.abs(partialSE.parts.stabilityScore - 0.25) < 1e-9,
+   "rStdErr path: (|avgR|/rStdErr)/zRef = (0.5/1.0)/2 = 0.25");
+
 console.log(`\n${failures === 0 ? "ALL PASS" : failures + " FAILURE(S)"}`);
 process.exit(failures === 0 ? 0 : 1);

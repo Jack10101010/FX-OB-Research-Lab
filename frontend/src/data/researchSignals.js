@@ -58,6 +58,23 @@ export const DEFAULT_SIGNALS_CONFIG = {
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
+/**
+ * Deep-merge a partial config over the defaults. Only the known nested objects
+ * (weights, levelThresholds, levelWeight) need merging — a plain spread would
+ * replace them wholesale and silently drop unspecified sub-keys (e.g. a partial
+ * `{ weights: { sample } }` would lose `weights.stability`, yielding NaN scores).
+ */
+function mergeConfig(config) {
+    const c = config || {};
+    return {
+        ...DEFAULT_SIGNALS_CONFIG,
+        ...c,
+        weights:         { ...DEFAULT_SIGNALS_CONFIG.weights,         ...(c.weights || {}) },
+        levelThresholds: { ...DEFAULT_SIGNALS_CONFIG.levelThresholds, ...(c.levelThresholds || {}) },
+        levelWeight:     { ...DEFAULT_SIGNALS_CONFIG.levelWeight,     ...(c.levelWeight || {}) },
+    };
+}
+
 /** Wilson score interval half-width for a proportion p over n trials. */
 function wilsonHalfWidth(p, n, z) {
     if (n <= 0) return 1;
@@ -94,7 +111,7 @@ function scoreToLevel(score, cfg) {
  * @returns {{ score:number, level:string, parts:{sampleScore:number, stabilityScore:number, decided:number, count:number} }}
  */
 export function computeConfidence(stats, config = DEFAULT_SIGNALS_CONFIG) {
-    const cfg = { ...DEFAULT_SIGNALS_CONFIG, ...config };
+    const cfg = mergeConfig(config);
     const count = num(stats?.count);
     const wins = num(stats?.wins);
     const losses = num(stats?.losses);
@@ -157,7 +174,7 @@ function toSignal(e, polarity, cfg) {
  * @returns {{ positives: object[], negatives: object[], suppressed: number, evaluated: number }}
  */
 export function buildResearchSignals(fillStateBreakdown, sessionBreakdown, entryModelRows, config = DEFAULT_SIGNALS_CONFIG) {
-    const cfg = { ...DEFAULT_SIGNALS_CONFIG, ...config };
+    const cfg = mergeConfig(config);
 
     // 1. Assemble candidates (uniform shape) -----------------------------------
     const candidates = [];
