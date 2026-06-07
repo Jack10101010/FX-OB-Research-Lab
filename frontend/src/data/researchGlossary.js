@@ -193,6 +193,59 @@ export const GLOSSARY = {
             "Danger condition: ~0% win rate and ~-1R avg in the full-history run — the single hardest " +
             "filter to apply.",
     },
+
+    // ── Phase 2 — Research Signals & Confidence ──────────────────────────────
+    research_signals: {
+        term: "Research Signals",
+        friendlyName: "Research Signals",
+        definition:
+            "Auto-surfaced strongest positive findings (edges) and strongest negative findings " +
+            "(risks) from the tab's live data — deduplicated and confidence-scored.",
+        whyItMatters:
+            "A one-glance read of what the current data is actually saying, so you don't have to " +
+            "scan every table to find the signal.",
+    },
+    effect: {
+        term: "Effect",
+        friendlyName: "Effect (Expectancy)",
+        definition: "A finding's signed average R (avgR): positive is an edge, negative is a risk.",
+        whyItMatters:
+            "The size and direction of a finding's edge — what ranks signals against each other.",
+    },
+    confidence: {
+        term: "Confidence",
+        friendlyName: "Confidence",
+        definition:
+            "How trustworthy a finding is, from sample size and statistical stability. Levels: " +
+            "Very Low, Low, Medium, High.",
+        whyItMatters:
+            "A big edge on a tiny or noisy sample isn't actionable; confidence stops flukes from " +
+            "outranking real, well-evidenced findings.",
+    },
+    confidence_high: {
+        term: "High",
+        friendlyName: "High Confidence",
+        definition: "Large sample and a tightly-estimated result.",
+        whyItMatters: "Trustworthy enough to act on, all else equal.",
+    },
+    confidence_medium: {
+        term: "Medium",
+        friendlyName: "Medium Confidence",
+        definition: "Reasonable sample, but not conclusive.",
+        whyItMatters: "Directionally useful; corroborate before leaning on it heavily.",
+    },
+    confidence_low: {
+        term: "Low",
+        friendlyName: "Low Confidence",
+        definition: "Thin sample, or a wide / unstable estimate.",
+        whyItMatters: "Treat as a hint, not evidence; gather more data.",
+    },
+    confidence_very_low: {
+        term: "Very Low",
+        friendlyName: "Very Low Confidence",
+        definition: "Too little data to trust (e.g. fewer than ~5 decided trades).",
+        whyItMatters: "Do not act on it; shown for completeness only.",
+    },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
