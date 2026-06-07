@@ -5,6 +5,7 @@ import React, {
     useCallback,
     useMemo,
     useEffect,
+    useRef,
 } from "react";
 import { useDataset, getRunData, addRunBundle } from "@/data/store";
 import { REGISTRY_BY_KEY, highestRerunTierForKeys } from "@/data/configRegistry";
@@ -89,10 +90,17 @@ export function MasterControlsProvider({ children }) {
     // ── Preview state — Phase 4A ─────────────────────────────────────────────
     const [preview, setPreview] = useState(EMPTY_PREVIEW);
 
+    // Tracks which sidecar job_id the import effect has claimed. Used instead of a
+    // per-effect `cancelled` flag so the effect can't cancel itself when its own
+    // `setPreview(status:"importing")` re-runs it. Reset to null on clear/cancel/
+    // active-run change so a superseded import never writes a stale "done".
+    const importJobRef = useRef(null);
+
     // Reset draft AND preview whenever the active run changes
     useEffect(() => {
         setDraftConfigState(null);
         setPreview(EMPTY_PREVIEW);
+        importJobRef.current = null;
     }, [activeRunId]);
 
     // ── activeConfig — derived from the active run bundle ───────────────────
@@ -260,6 +268,7 @@ export function MasterControlsProvider({ children }) {
      * Clear preview state without server interaction.
      */
     const clearPreview = useCallback(() => {
+        importJobRef.current = null;
         setPreview(EMPTY_PREVIEW);
     }, []);
 
@@ -300,6 +309,8 @@ export function MasterControlsProvider({ children }) {
                 console.warn("[MasterControls] cancelSidecarRun failed:", err);
             }
         }
+        // Neutralise any in-flight import so it cannot write a stale "done" after cancel.
+        importJobRef.current = null;
         setPreview(EMPTY_PREVIEW);
     }, [preview.status, preview.job]);
 
@@ -346,7 +357,14 @@ export function MasterControlsProvider({ children }) {
         const snapshotConfig = preview.snapshotConfig;
         if (!jobId) return;
 
-        let cancelled = false;
+        // The first line of doImport sets status → "importing", which re-runs this
+        // effect (deps: preview.status). Keying the import on jobId via importJobRef —
+        // instead of a per-effect `cancelled` flag — makes that self-triggered re-run a
+        // no-op here, so the final "done" transition is no longer skipped. Staleness is
+        // detected by comparing importJobRef.current to jobId before any write (cancel /
+        // clear / active-run change reset the ref to null).
+        if (importJobRef.current === jobId) return;
+        importJobRef.current = jobId;
 
         const doImport = async () => {
             setPreview((prev) => ({ ...prev, status: "importing" }));
@@ -358,7 +376,9 @@ export function MasterControlsProvider({ children }) {
                 );
                 const result = await ingestRunBundle(files);
 
-                if (cancelled) return;
+                // Stale-guard: cancel / clear / active-run change reset importJobRef to
+                // null (or a different job id), so a superseded import never writes "done".
+                if (importJobRef.current !== jobId) return;
 
                 if (!result.ok) {
                     const msg = [
@@ -386,7 +406,8 @@ export function MasterControlsProvider({ children }) {
                     bundle: result.bundle,
                 }));
             } catch (err) {
-                if (!cancelled) {
+                // Only surface the error if this import is still the current job.
+                if (importJobRef.current === jobId) {
                     setPreview((prev) => ({
                         ...prev,
                         status: "failed",
@@ -397,7 +418,6 @@ export function MasterControlsProvider({ children }) {
         };
 
         doImport();
-        return () => { cancelled = true; };
     }, [preview.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // ── previewIsStale — true when effectiveConfig has drifted since preview ─
