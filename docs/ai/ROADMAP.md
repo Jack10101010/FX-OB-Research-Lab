@@ -27,11 +27,11 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` todo. Render with `/roadmap`.
 
 ## Phase 2 — Research Signals + Confidence  `[~]`
 
-- [~] Research Signals engine (auto strongest +/- findings, dedup, suppression) — designed
-- [~] Confidence layer (Very Low / Low / Medium / High) — designed
-- [ ] `researchSignals.js` + validation
-- [ ] `ConfidenceChip.jsx`
+- [x] Research Signals engine (auto strongest +/- findings, dedup, suppression) — `researchSignals.js`
+- [x] Confidence layer (Very Low / Low / Medium / High) — `computeConfidence`
+- [x] `researchSignals.js` + validation (37 assertions pass)
 - [ ] Glossary keys: `research_signals`, `confidence`, `confidence_*`
+- [ ] `ConfidenceChip.jsx`
 - [ ] RunDetail: Research Signals section + confidence chips
 - [ ] (2b) `sumR2` in accumulators → true effect-SE confidence
 

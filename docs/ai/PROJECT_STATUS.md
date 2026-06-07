@@ -31,6 +31,9 @@ Branch: `codex-dev`. Theme: dark "neon lab" (do not change without request).
 - **Glossary tooltips** — `TermTip.jsx` over Radix; wired on headers, columns, rows, cards.
 - **Pure data layer** — `fillStateBreakdown.js` (`buildFillStateBreakdown` / `buildSessionBreakdown`
   / `buildSignalCards`) + validation script.
+- **Research Signals + Confidence engine** — `researchSignals.js` (`computeConfidence` →
+  Very Low/Low/Medium/High; signal ranking; low-sample suppression; parent/child dedup). Pure,
+  validated (37 assertions), committed. **UI wiring still pending.**
 
 Key commits (codex-dev): `4715513` feat(classification): add fill-state V2 tab;
 `acdf4d7` / `6c8fc60` migrate consumers to flag-based suppression; `d68d237` add fill state
@@ -38,8 +41,8 @@ glossary and derivation.
 
 ## Active / next
 
-- **Research Signals engine** (auto-surface strongest +/- findings) — designed, plan ready.
-- **Confidence layer** (Very Low / Low / Medium / High) — designed, plan ready.
+- **Research Signals UI wiring** — glossary keys (`research_signals`, `confidence`, `confidence_*`)
+  + `ConfidenceChip.jsx` + RunDetail "Research Signals" section. (Engine `researchSignals.js` done.)
 - **TE variant naming cleanup**.
 - **Distance importer mapping** — `price_distance_from_ob_at_arm_pips` (NOT yet in `importer.js`).
 - **Distance breakdown** (blocked on the importer mapping above).

@@ -16,22 +16,24 @@ Breakdown (parent/child tree), Session Breakdown, Entry Model Breakdown, glossar
 removed (Fill State replaces it). Foundation (taxonomy, glossary, `deriveFillState`,
 `muteAsBadge`, consumer migration) is complete and pushed.
 
-## What's next (Phase 2 — designed, not yet built)
+**Phase 2 engine is now implemented, validated, and committed** — `researchSignals.js`
+(Research Signals + Confidence layer). UI wiring is still pending.
 
-1. `frontend/src/data/researchSignals.js` — pure engine:
-   - Assemble candidates from fill-state + session + entry-model breakdowns.
-   - `effect = avgR`; confidence per candidate; suppress low-sample (`decided < 10`).
-   - Dedup parent/child within fill state (emit child only if it diverges ≥ 0.30R).
-   - Rank by `|effect| × levelWeight`; top 3 positives, top 3 negatives.
-2. Confidence layer — `computeConfidence({count, wins, losses, avgR, rStdErr?})`:
-   - `sampleScore` (saturating on decided) + `stabilityScore` (Wilson WR interval now;
-     effect-SE later when `sumR2` exists) → score → {Very Low, Low, Medium, High}.
-3. `frontend/src/components/lab/ConfidenceChip.jsx`.
-4. `researchGlossary.js` additive keys: `research_signals`, `confidence`, `confidence_*`.
-5. `RunDetail.jsx`: `researchSignals` memo + a "Research Signals" section at the top of the
+## What's next (Phase 2 — engine done, UI pending)
+
+**Done (committed):** `frontend/src/data/researchSignals.js` — the Research Signals engine +
+Confidence layer: `computeConfidence` → Very Low/Low/Medium/High; candidate ranking by
+`|effect| × levelWeight`; low-sample suppression (`decided < 10`); parent/child dedup (Vacant
+child folded in unless it diverges ≥ 0.30R); positives/negatives returned separately. Validated
+by `researchSignals.validate.mjs` (37 assertions) + Babel transpile.
+
+**Remaining (UI wiring):**
+1. `researchGlossary.js` — additive keys: `research_signals`, `confidence`, `confidence_*`.
+2. `frontend/src/components/lab/ConfidenceChip.jsx` — level pill (tone by level, glossary tooltip).
+3. `RunDetail.jsx` — `researchSignals` memo + a "Research Signals" section at the top of the
    Classification panel (Strongest Edges / Key Risks); optional confidence chips on Signal Cards.
 
-Full design: see the Phase-2 audit (chat) / `CLASSIFICATION-TAB-V2-PHASE-2-PLAN.md` if saved.
+Full design: see the Phase-2 audit (chat) / `CLASSIFICATION-TAB-V2-PLAN.md`.
 
 ## Blockers / open questions
 
