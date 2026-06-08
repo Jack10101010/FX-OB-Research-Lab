@@ -2,7 +2,7 @@ import React, { useMemo } from "react";
 import { useDataset } from "@/data/store";
 import { extractOffTrades } from "@/data/fftPairingResolver";
 import { computePairedFftAnalytics } from "@/data/fftPairingAnalytics";
-import { useEntryWorkspace } from "./shared/useEntryWorkspace";
+import { useEntryWorkspace, useModelSelectionGuard } from "./shared/useEntryWorkspace";
 import { WorkspaceTabBar } from "./shared/WorkspaceTabBar";
 import { GlobalFilterBar } from "./shared/GlobalFilterBar";
 import { EntryWorkspaceHeader } from "./shared/EntryWorkspaceHeader";
@@ -78,6 +78,30 @@ export function EntriesWorkspace() {
         () => buildEntryResultRows(runWithEntryResults, filteredTrades, ACTIVE_TRADE_VARIANT),
         [runWithEntryResults, filteredTrades, ACTIVE_TRADE_VARIANT],
     );
+
+    // Selectable model keys for THIS run (what selectedModelKey is matched against
+    // across the workspace) and the subset that has a built-in FFT-OFF control.
+    const availableModelKeys = useMemo(
+        () => (exactRows || []).filter((r) => r && !r.isBaseline && r.mode).map((r) => r.mode),
+        [exactRows],
+    );
+    const controlBackedKeys = useMemo(() => {
+        const map = activeRun?.controlTradesByScenario || {};
+        return Object.keys(map)
+            .filter((k) => Array.isArray(map[k]) && map[k].length > 0)
+            // keys are `${variant}:${scenarioKey}` — strip the variant prefix.
+            .map((k) => (k.includes(":") ? k.slice(k.indexOf(":") + 1) : k));
+    }, [activeRun]);
+
+    // Reconcile a stale persisted selection (e.g. a `..._d2` key carried over from
+    // a previous run) against this run's actual models so FFT auto-control resolves.
+    useModelSelectionGuard({
+        runId: activeRunId,
+        availableModelKeys,
+        controlBackedKeys,
+        selectedModelKey,
+        setSelectedModelKey,
+    });
 
     const summary = useMemo(() => buildExactSummary(exactRows), [exactRows]);
 

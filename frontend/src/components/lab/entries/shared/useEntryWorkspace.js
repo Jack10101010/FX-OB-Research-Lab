@@ -4,7 +4,7 @@
 // Persists tab + filters to localStorage so state survives navigation.
 
 import { useSearchParams } from "react-router-dom";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { sessionOf } from "../analytics/entryFormatters";
 
 const LS_FILTERS = "fxob_entries_workspace_filters_v1";
@@ -174,4 +174,60 @@ export function useEntryWorkspace() {
         selectedModelKey, setSelectedModelKey,
         TABS,
     };
+}
+
+// ── useModelSelectionGuard ───────────────────────────────────────────────────
+// Keeps `selectedModelKey` valid for the active run. `selectedModelKey` is
+// persisted in localStorage and shared across runs, so a key chosen in a
+// previous run (e.g. a delay scenario like `..._d2`) can be stale for the
+// current run — leaving FFT auto-control / paired analytics resolving to an
+// absent scenario. This guard reconciles the persisted selection against the
+// run's actual model keys (`exactRows[].mode`).
+//
+// Rules:
+//   • selection is valid for this run            → keep it.
+//   • selection is a stale, non-empty key        → reset (prefer a control-backed
+//                                                   scenario, else first available).
+//   • selection is null on run change / init     → auto-pick (same preference),
+//                                                   so a model + paired analytics
+//                                                   show by default.
+//   • selection is null within the same run       → leave null (intentional
+//                                                   in-session deselect is preserved).
+//
+// @param {object}   p
+// @param {string}   p.runId               active run id (detects run change / init)
+// @param {string[]} p.availableModelKeys   non-baseline `exactRows[].mode` values
+// @param {string[]} p.controlBackedKeys    scenario keys that have an FFT-OFF control
+// @param {string}   p.selectedModelKey
+// @param {Function} p.setSelectedModelKey
+export function useModelSelectionGuard({
+    runId,
+    availableModelKeys,
+    controlBackedKeys,
+    selectedModelKey,
+    setSelectedModelKey,
+}) {
+    const lastRunRef = useRef(null);
+    useEffect(() => {
+        const available = (Array.isArray(availableModelKeys) ? availableModelKeys : []).filter(Boolean);
+        if (available.length === 0) return; // run not loaded yet — don't touch the selection
+
+        const runChanged = lastRunRef.current !== runId;
+
+        // Valid selection for this run — keep it.
+        if (selectedModelKey && available.includes(selectedModelKey)) {
+            lastRunRef.current = runId;
+            return;
+        }
+
+        // Reset only for a stale non-empty key, or on run-change/init with no valid
+        // selection. An in-session deselect (null within the same run) is left alone.
+        if (selectedModelKey || runChanged) {
+            const controlBacked = Array.isArray(controlBackedKeys) ? controlBackedKeys : [];
+            const preferred = controlBacked.find((k) => available.includes(k));
+            const next = preferred || available[0] || null;
+            if (next && next !== selectedModelKey) setSelectedModelKey(next);
+        }
+        lastRunRef.current = runId;
+    }, [runId, availableModelKeys, controlBackedKeys, selectedModelKey, setSelectedModelKey]);
 }
