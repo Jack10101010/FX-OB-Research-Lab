@@ -455,7 +455,11 @@ export function MasterControlsDrawer() {
                                         )}
                                     </div>
                                 </div>
-                                <p className="mt-1 text-[9px] text-muted-lab leading-snug">Scope: primary variant only</p>
+                                <p className="mt-1 text-[9px] text-muted-lab leading-snug">
+                                    {localRescoreBundle?.meta?.rescoreScope === "all_trade_sets"
+                                        ? "Scope: all available trade sets"
+                                        : "Scope: partial — some trade sets were not rescored"}
+                                </p>
                                 <p className="mt-0.5 text-[9px] text-muted-lab/70 leading-snug">
                                     {lensActive
                                         ? "The page is viewing temporary cost-rescored data — not saved."

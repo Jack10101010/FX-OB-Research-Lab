@@ -175,22 +175,58 @@ export function rescoreCostsForBundle(bundle, costs) {
     const trades = pickTrades(bundle);
     if (!trades.length) return FAIL("No trades available to rescore.");
     if (!canRescoreCosts(bundle)) return FAIL("Exact cost rescore unavailable for this run.");
+    const result = rescoreTradeArray(trades, {
+        oldCosts: readOldCosts(bundle),
+        newCosts: { spread: costs?.spread, slippage: costs?.slippage, commission: costs?.commission },
+        pipSize: readPipSize(bundle),
+    });
+    if (!result.ok || !result.exact) {
+        return FAIL(result.reason || "Exact cost rescore unavailable for this run.");
+    }
+    return result;
+}
 
-    const old = readOldCosts(bundle);
-    const pipSize = readPipSize(bundle);
-    const newSpread = num(costs?.spread);
-    const newSlippage = num(costs?.slippage);
-    const newCommission = num(costs?.commission) ?? 0; // flat R per trade; default 0
+/** Cumulative new-R equity series for a (rescored) trade array. */
+export function equityFromTrades(trades) {
+    const list = Array.isArray(trades) ? trades : [];
+    let cum = 0;
+    return list.map((t, i) => {
+        cum += Number(t?.r) || 0;
+        return { i, netR: Number(cum.toFixed(4)) };
+    });
+}
+
+/**
+ * Rescore a single trade array against new cost settings — the reusable core shared
+ * by the display panel (rescoreCostsForBundle) and the all-variant bundle builder
+ * (buildRescoredBundle). Pure: never mutates the input. Preserves outcomes (cost
+ * never changes win/loss). Returns { ok:false, exact:false } when the array lacks
+ * separable cost data. An empty array is trivially exact.
+ *
+ * @param {Array} trades
+ * @param {{ oldCosts?, newCosts?, pipSize? }} opts  costs = { spread, slippage, commission }
+ */
+export function rescoreTradeArray(trades, { oldCosts = {}, newCosts = {}, pipSize = null } = {}) {
+    const list = Array.isArray(trades) ? trades : [];
+    if (!list.length) {
+        return { ok: true, exact: true, reason: "", trades: [], netR: 0, avgR: null, maxDd: null, equityCurve: [], wins: 0, losses: 0, winRate: null };
+    }
+    const oldSpread = num(oldCosts.spread);
+    const oldSlippage = num(oldCosts.slippage);
+    const newSpread = num(newCosts.spread);
+    const newSlippage = num(newCosts.slippage);
+    const newCommission = num(newCosts.commission) ?? 0; // flat R per trade; default 0
 
     const rescored = [];
     let cum = 0;
     const cumSeries = [];
 
-    for (const t of trades) {
+    for (const t of list) {
         const grossR = num(t.grossR ?? t.gross_r);
         const oldNetR = num(t.netR ?? t.net_r ?? t.r);
-        if (grossR === null) return FAIL("Exact cost rescore unavailable for this run.");
-
+        if (grossR === null) {
+            return { ok: false, exact: false, reason: "Exact cost rescore unavailable for this run." };
+        }
         // Per-trade separability guard: never treat a net-only R as gross.
         const sc = num(t.spreadCostR ?? t.spread_cost_r);
         const slc = num(t.slippageCostR ?? t.slippage_cost_r);
@@ -198,13 +234,15 @@ export function rescoreCostsForBundle(bundle, costs) {
         const separable =
             (oldNetR !== null && Math.abs(grossR - oldNetR) > EPS) ||
             sc !== null || slc !== null || cc !== null;
-        if (!separable) return FAIL("Exact cost rescore unavailable for this run.");
+        if (!separable) {
+            return { ok: false, exact: false, reason: "Exact cost rescore unavailable for this run." };
+        }
 
         const riskPips = riskPipsFor(t, pipSize);
-        const newSc = newPipCostR(old.spread, newSpread, sc, riskPips);
-        const newSlc = newPipCostR(old.slippage, newSlippage, slc, riskPips);
+        const newSc = newPipCostR(oldSpread, newSpread, sc, riskPips);
+        const newSlc = newPipCostR(oldSlippage, newSlippage, slc, riskPips);
         if (!newSc.exact || !newSlc.exact) {
-            return FAIL("Exact cost rescore unavailable for this run.");
+            return { ok: false, exact: false, reason: "Exact cost rescore unavailable for this run." };
         }
 
         const totalCostR = newSc.value + newSlc.value + newCommission;
@@ -227,7 +265,6 @@ export function rescoreCostsForBundle(bundle, costs) {
             total_cost_r: totalCostR,
             // outcome / direction / prices left untouched.
         });
-
         cum += newNetR;
         cumSeries.push(cum);
     }
@@ -237,39 +274,81 @@ export function rescoreCostsForBundle(bundle, costs) {
     const avgR = tradesN > 0 ? netR / tradesN : null;
     const maxDd = maxDrawdownFromSeries(cumSeries);
     const equityCurve = cumSeries.map((v, i) => ({ i, netR: Number(v.toFixed(4)) }));
-
     // wins/losses/winRate preserved from ORIGINAL outcomes — cost does not change them.
-    const { wins, losses } = countOriginalOutcomes(trades);
+    const { wins, losses } = countOriginalOutcomes(list);
     const denom = wins + losses;
     const winRate = denom > 0 ? (wins / denom) * 100 : null;
 
-    return {
-        ok: true,
-        exact: true,
-        reason: "",
-        trades: rescored,
-        netR,
-        avgR,
-        maxDd,
-        equityCurve,
-        wins,
-        losses,
-        winRate,
-    };
+    return { ok: true, exact: true, reason: "", trades: rescored, netR, avgR, maxDd, equityCurve, wins, losses, winRate };
+}
+
+/** Return v if it's a non-null object, else a fresh empty object. */
+function obj(v) {
+    return v && typeof v === "object" ? v : {};
 }
 
 /**
- * Build a temporary, bundle-shaped object from a cost-rescore result — Phase 7B.
+ * Rescore every array in a trade map against `ctx`, returning new trades + equity maps
+ * without mutating the source. Skipped keys (non-separable arrays) keep their original
+ * trades and equity. Empty arrays are trivially exact. `reuse` supplies precomputed
+ * results keyed by map-key (used to avoid recomputing the primary variant). When
+ * `sourceEquity` is null the collection has no paired equity map (e.g. control trades).
  *
- * This is a pure transform that yields an `ingestRunBundle`-shaped object so a future
- * Preview Lens (Phase 8+) can feed it through the same store derivation the app already
- * uses. It is NOT a store run: it is never added to `state.runs`, never persisted, and
- * never appears in run history. The caller holds it in context only.
+ * @returns {{ tradesMap: object, equityMap: object }}
+ */
+function rescoreTradeMap(sourceTrades, sourceEquity, ctx, prefix, rescoredList, skippedList, reuse = null) {
+    const srcTrades = obj(sourceTrades);
+    const tradesMap = { ...srcTrades };
+    const equityMap = { ...obj(sourceEquity) };
+    const hasEquity = sourceEquity !== null && sourceEquity !== undefined;
+    for (const [key, arr] of Object.entries(srcTrades)) {
+        if (!Array.isArray(arr)) continue;
+        const res = reuse && reuse[key] ? reuse[key] : rescoreTradeArray(arr, ctx);
+        if (res.ok && res.exact) {
+            tradesMap[key] = res.trades;
+            if (hasEquity) equityMap[key] = res.equityCurve;
+            rescoredList.push(`${prefix}:${key}`);
+        } else {
+            skippedList.push(`${prefix}:${key}`);
+        }
+    }
+    return { tradesMap, equityMap };
+}
+
+/**
+ * Rescore a nested results object (entryResults / protectionResults / directionalResults)
+ * that holds a `tradesKey` map and a parallel `equityKey` map. Preserves all other fields
+ * (summary, sourceFiles, …). Returns null when the source lacks the nested object, so the
+ * caller can avoid fabricating it.
+ */
+function rescoreNested(sourceNested, tradesKey, equityKey, ctx, prefix, rescoredList, skippedList) {
+    if (!sourceNested || typeof sourceNested !== "object") return null;
+    const { tradesMap, equityMap } = rescoreTradeMap(
+        sourceNested[tradesKey], sourceNested[equityKey], ctx, prefix, rescoredList, skippedList,
+    );
+    return { ...sourceNested, [tradesKey]: tradesMap, [equityKey]: equityMap };
+}
+
+/**
+ * Build a temporary, bundle-shaped object from a cost-rescore result — Phase 9A.
  *
- * PRIMARY VARIANT ONLY: cost rescore (Phase 7A) only recomputes the primary variant, so
- * non-primary variants / entry-model scenarios in `tradesByVariant` are left as-is. The
- * `meta.rescoreScope = "primary_variant"` flag records this so consumers don't assume the
- * whole universe was rescored.
+ * This is a pure transform that yields an `ingestRunBundle`-shaped object so the Preview
+ * Lens (Phase 8+) can feed it through the same store derivation the app already uses. It
+ * is NOT a store run: never added to `state.runs`, never persisted, never in run history.
+ * The caller holds it in context only.
+ *
+ * ALL TRADE SETS: cost is a post-hoc per-trade R deduction with the SAME formula for every
+ * collection (they share the importer's trade schema), so this rescores ALL of them —
+ * `trades`, every `tradesByVariant`, `entryResults.tradesByMode`, `protectionResults.
+ * tradesByMode`, `directionalResults.tradesByScenario`, and `controlTradesByScenario` —
+ * and recomputes each paired equity map. The primary variant reuses `rescoreResult`
+ * (already computed by the caller) instead of recomputing.
+ *
+ * Exactness is per-collection: any collection that lacks separable cost data is left at its
+ * original values and recorded in `meta.skippedCollections`. `meta.rescoreScope` is
+ * "all_trade_sets" when every collection rescored exactly, else "partial"; `meta.exact`
+ * mirrors that. The top-level primary `trades`/`equityCurve`/`summary` always come from
+ * `rescoreResult`, which the caller guarantees is ok && exact.
  *
  * Does NOT mutate `sourceBundle` (spreads it; only overrides changed fields). Reuses the
  * source's orderBlocks / candles / tradeMarkers / config (cost rescore moves neither entries
@@ -287,11 +366,59 @@ export function buildRescoredBundle(sourceBundle, rescoreResult, options = {}) {
 
     const { costs = null, dirtyFields = null, rerunTier = null } = options;
     const primaryVariant = sourceBundle.primaryVariant;
-    const sourceTbv = sourceBundle.tradesByVariant && typeof sourceBundle.tradesByVariant === "object"
-        ? sourceBundle.tradesByVariant
-        : {};
 
-    return {
+    // Shared rescore context: old costs from source config, new costs from options, pip size.
+    const ctx = {
+        oldCosts: readOldCosts(sourceBundle),
+        newCosts: {
+            spread: costs?.spread,
+            slippage: costs?.slippage,
+            commission: costs?.commission,
+        },
+        pipSize: readPipSize(sourceBundle),
+    };
+
+    const rescoredCollections = [];
+    const skippedCollections = [];
+
+    // ── tradesByVariant + equityCurveByVariant (reuse rescoreResult for the primary) ──
+    const sourceTbv = obj(sourceBundle.tradesByVariant);
+    const reuse = primaryVariant ? { [primaryVariant]: rescoreResult } : null;
+    const { tradesMap: tradesByVariant, equityMap: equityCurveByVariant } = rescoreTradeMap(
+        sourceTbv, sourceBundle.equityCurveByVariant, ctx,
+        "tradesByVariant", rescoredCollections, skippedCollections, reuse,
+    );
+    // Guarantee the primary key exists even if the source map omitted it.
+    if (primaryVariant && !Array.isArray(sourceTbv[primaryVariant])) {
+        tradesByVariant[primaryVariant] = rescoreResult.trades;
+        equityCurveByVariant[primaryVariant] = rescoreResult.equityCurve;
+        rescoredCollections.push(`tradesByVariant:${primaryVariant}`);
+    }
+
+    // ── nested results objects ──
+    const entryResults = rescoreNested(
+        sourceBundle.entryResults, "tradesByMode", "equityCurveByMode", ctx,
+        "entryResults.tradesByMode", rescoredCollections, skippedCollections,
+    );
+    const protectionResults = rescoreNested(
+        sourceBundle.protectionResults, "tradesByMode", "equityCurveByMode", ctx,
+        "protectionResults.tradesByMode", rescoredCollections, skippedCollections,
+    );
+    const directionalResults = rescoreNested(
+        sourceBundle.directionalResults, "tradesByScenario", "equityCurveByScenario", ctx,
+        "directionalResults.tradesByScenario", rescoredCollections, skippedCollections,
+    );
+
+    // ── controlTradesByScenario (top-level map, no paired equity map) ──
+    const hasControl = sourceBundle.controlTradesByScenario && typeof sourceBundle.controlTradesByScenario === "object";
+    const { tradesMap: controlTradesByScenario } = rescoreTradeMap(
+        sourceBundle.controlTradesByScenario, null, ctx,
+        "controlTradesByScenario", rescoredCollections, skippedCollections,
+    );
+
+    const exact = skippedCollections.length === 0;
+
+    const out = {
         ...sourceBundle,
         id: `${sourceBundle.id}__rescored`,
         isTemporary: true,
@@ -300,17 +427,19 @@ export function buildRescoredBundle(sourceBundle, rescoreResult, options = {}) {
             ...(sourceBundle.meta || {}),
             temporary: true,
             source: "master_controls_cost_rescore",
-            rescoreScope: "primary_variant",
+            rescoreScope: exact ? "all_trade_sets" : "partial",
+            exact,
+            rescoredCollections,
+            skippedCollections,
             costs,
             dirtyFields,
             rerunTier,
         },
-        // Primary-variant trade set is replaced; other variants pass through untouched.
+        // Top-level primary trade set + equity always come from rescoreResult (ok && exact).
         trades: rescoreResult.trades,
-        tradesByVariant: primaryVariant
-            ? { ...sourceTbv, [primaryVariant]: rescoreResult.trades }
-            : { ...sourceTbv },
+        tradesByVariant,
         equityCurve: rescoreResult.equityCurve,
+        equityCurveByVariant,
         summary: {
             ...(sourceBundle.summary || {}),
             netR: rescoreResult.netR,
@@ -322,4 +451,12 @@ export function buildRescoredBundle(sourceBundle, rescoreResult, options = {}) {
             avgR: rescoreResult.avgR,
         },
     };
+
+    // Only override nested result objects the source actually had (don't fabricate them).
+    if (entryResults) out.entryResults = entryResults;
+    if (protectionResults) out.protectionResults = protectionResults;
+    if (directionalResults) out.directionalResults = directionalResults;
+    if (hasControl) out.controlTradesByScenario = controlTradesByScenario;
+
+    return out;
 }
