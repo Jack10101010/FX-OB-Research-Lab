@@ -49,7 +49,7 @@ function GateShell({ title, badge, children }) {
 }
 
 export function RetestLabTab({ orderBlocks = [], trades = [], activeRun = null, activeRunId = null, enabled = false }) {
-    const { status, source, error, candleCount, events, perOB, summary, meta, config, setConfig, retryLoad } = useRetestData({
+    const { status, source, error, candleCount, events, perOB, summary, meta, edgeBreakdowns, bestWorstConditions, minN, config, setConfig, retryLoad } = useRetestData({
         orderBlocks, trades, activeRun, activeRunId, enabled,
     });
 
@@ -104,6 +104,7 @@ export function RetestLabTab({ orderBlocks = [], trades = [], activeRun = null, 
             <BasisBanner candleCount={candleCount} meta={meta} summary={summary} source={source} />
             <ConfigBar config={config} setConfig={setConfig} source={source} />
             <SummaryCards summary={summary} />
+            <RetestEdgeDiscovery edgeBreakdowns={edgeBreakdowns} bestWorst={bestWorstConditions} minN={minN} />
             <Breakdowns events={events} />
             <EventTable events={events} />
         </div>
@@ -307,6 +308,96 @@ function EventTable({ events }) {
                 />
             )}
         </NeonPanel>
+    );
+}
+
+// ── Retest Edge Discovery (Phase C1) ────────────────────────────────────────────
+const EDGE_ORDER = [
+    "byRetestNumber", "byObSize", "byOriginSession", "byRetestSession", "byStructure",
+    "byDirection", "byPenetration", "byTimeSinceDetection", "byTimeSinceFirstTouch",
+];
+
+function EdgeBreakdownTable({ title, rows, minN }) {
+    if (!rows || !rows.length) return null;
+    const columns = [
+        { key: "key", label: title, align: "left",
+          render: (r) => (r.belowMinN ? <span className="text-muted-lab">{r.key} *</span> : r.key) },
+        { key: "n", label: "n", align: "right" },
+        { key: "survived", label: "Surv", align: "right" },
+        { key: "failed", label: "Fail", align: "right" },
+        { key: "open", label: "Open", align: "right" },
+        { key: "survivalRate", label: "Survival", align: "right",
+          sortValue: (r) => (r.survivalRate == null ? -1 : r.survivalRate),
+          render: (r) => (r.survivalRate == null ? "—" : (
+              <span className={r.belowMinN ? "text-muted-lab" : (r.survivalRate >= 0.5 ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]")}>
+                  {pct(r.survivalRate, 0)}{r.belowMinN ? " *" : ""}
+              </span>
+          )) },
+        { key: "avgReactionPips", label: "Avg React", align: "right", render: (r) => pips(r.avgReactionPips, 1) },
+        { key: "avgCandlesToFailure", label: "→ Fail", align: "right", render: (r) => (r.avgCandlesToFailure == null ? "—" : pips(r.avgCandlesToFailure, 1)) },
+    ];
+    return (
+        <NeonPanel title={title} dense collapsible defaultCollapsed={false}>
+            <DataTable columns={columns} rows={rows} rowKey="key" defaultSortKey="n" compact />
+        </NeonPanel>
+    );
+}
+
+function ConditionList({ title, tone, items }) {
+    return (
+        <div>
+            <div className="text-[10.5px] uppercase tracking-[0.08em] text-muted-lab mb-1.5">{title}</div>
+            <div className="space-y-1">
+                {(items || []).map((c, i) => (
+                    <div key={i} className="flex items-center justify-between text-[12px] gap-2">
+                        <span className="text-[hsl(var(--text-2))] truncate">{c.condition}</span>
+                        <span className="shrink-0 tabular-nums">
+                            <span className={tone === "success" ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]"}>{pct(c.survivalRate, 0)}</span>
+                            <span className="text-muted-lab"> · n={c.n} · {pips(c.avgReactionPips, 1)}p</span>
+                        </span>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+function BestWorstPanel({ bestWorst, minN }) {
+    const eligible = bestWorst?.eligible || 0;
+    return (
+        <NeonPanel title="Best / Worst Retest Conditions" dense>
+            {eligible === 0 ? (
+                <div className="py-4 text-center text-[12px] text-muted-lab">
+                    Not enough samples (need n ≥ {minN}) to rank conditions yet.
+                </div>
+            ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <ConditionList title="Best — highest survival" tone="success" items={bestWorst.best} />
+                    <ConditionList title="Worst — lowest survival" tone="danger" items={bestWorst.worst} />
+                </div>
+            )}
+        </NeonPanel>
+    );
+}
+
+function RetestEdgeDiscovery({ edgeBreakdowns, bestWorst, minN }) {
+    const dims = edgeBreakdowns || {};
+    const hasAny = EDGE_ORDER.some((k) => dims[k]?.rows?.length);
+    if (!hasAny) return null;
+    return (
+        <div className="space-y-3">
+            <div className="panel-title-label uppercase text-title-lab">Retest Edge Discovery</div>
+            <div className="text-[10.5px] text-muted-lab">
+                Survival = survived ÷ (survived + failed); open (right-censored) excluded.
+                Rows below min sample (n &lt; {minN}) are shown but not ranked.
+            </div>
+            <BestWorstPanel bestWorst={bestWorst} minN={minN} />
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                {EDGE_ORDER.map((k) => (dims[k] ? (
+                    <EdgeBreakdownTable key={k} title={dims[k].label} rows={dims[k].rows} minN={minN} />
+                ) : null))}
+            </div>
+        </div>
     );
 }
 

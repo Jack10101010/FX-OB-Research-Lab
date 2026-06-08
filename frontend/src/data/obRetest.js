@@ -49,7 +49,9 @@ const SESSION_BANDS = [
     [17, 24, "Outside"],
 ];
 
-function sessionOf(epochSec) {
+// Exported (Phase C) so the research layer derives origin/detection/first-touch
+// sessions with the EXACT same canonical bands — never a second definition.
+export function sessionOf(epochSec) {
     if (epochSec == null || !isFinite(epochSec)) return "Unknown";
     const h = new Date(epochSec * 1000).getUTCHours();
     for (const [s, e, label] of SESSION_BANDS) if (h >= s && h < e) return label;

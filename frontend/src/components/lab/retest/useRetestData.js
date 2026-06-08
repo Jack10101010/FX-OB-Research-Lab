@@ -15,6 +15,7 @@ import React from "react";
 import { useDataset } from "@/data/store";
 import { buildTradesByObId, deriveOBStatus } from "@/data/obLifecycle";
 import { deriveRetests, summarizeRetestEvents, DEFAULT_RETEST_CONFIG } from "@/data/obRetest";
+import { enrichRetestEvents, buildRetestEdgeBreakdowns, buildBestWorstRetestConditions, DEFAULT_MIN_N } from "@/data/obRetestResearch";
 
 // Synthesize per-OB rows from events when the ob_retest_summary.csv sidecar is
 // absent — lets summarizeRetestEvents derive obsRetested even without it.
@@ -132,6 +133,20 @@ export function useRetestData({ orderBlocks = [], trades = [], activeRun = null,
 
     const result = hasBackend ? backendResult : derived;
 
+    // ── Phase C1: research layer (enrich events + grouped edge breakdowns) ───────
+    // Source-agnostic: joins events to activeRun.orderBlocks for OB-level dims.
+    const research = React.useMemo(() => {
+        const events = result?.events || [];
+        if (!events.length) return { enrichedEvents: [], edgeBreakdowns: {}, bestWorstConditions: null };
+        const obs = Array.isArray(activeRun?.orderBlocks) ? activeRun.orderBlocks : [];
+        const enrichedEvents = enrichRetestEvents(events, obs);
+        return {
+            enrichedEvents,
+            edgeBreakdowns: buildRetestEdgeBreakdowns(enrichedEvents, { minN: DEFAULT_MIN_N }),
+            bestWorstConditions: buildBestWorstRetestConditions(enrichedEvents, { minN: DEFAULT_MIN_N }),
+        };
+    }, [result, activeRun]);
+
     // Resolve the public status enum. Backend mode is READY immediately (no candles).
     let status;
     if (!activeRunId) status = RETEST_STATUS.NO_RUN;
@@ -150,6 +165,11 @@ export function useRetestData({ orderBlocks = [], trades = [], activeRun = null,
         perOB: result?.perOB || [],
         summary: result?.summary || null,
         meta: result?.meta || null,
+        // Phase C1 research layer
+        enrichedEvents: research.enrichedEvents,
+        edgeBreakdowns: research.edgeBreakdowns,
+        bestWorstConditions: research.bestWorstConditions,
+        minN: DEFAULT_MIN_N,
         config,
         setConfig,
         retryLoad: doLoad,
