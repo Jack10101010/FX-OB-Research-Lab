@@ -110,37 +110,6 @@ export function ConfidencePanel({ exactRows, halfSplitData, outlierData, robustn
                 </div>
             </NeonPanel>
 
-            {/* Robustness scores */}
-            <NeonPanel title="Robustness Scores" className="xl:col-span-1"
-                action={<Pill tone="secondary">COMPOSITE 0–100</Pill>}
-            >
-                <p className="mb-3 text-[11.5px] font-ui text-[hsl(var(--text-2))]">
-                    Composite 0–100 score based on sample size, edge vs baseline, drawdown control, trade-off quality, and fill rate.
-                </p>
-                {robustnessScores?.length > 0 ? (
-                    <div className="space-y-2">
-                        {robustnessScores.map(({ mode, label, score }) => {
-                            const rInfo  = robustnessLabel(score);
-                            const color  = score >= 70 ? "hsl(var(--success))" : score >= 45 ? "hsl(var(--warning))" : "hsl(var(--danger))";
-                            return (
-                                <div key={mode} className="flex items-center gap-3">
-                                    <span className="text-[11px] font-ui text-[hsl(var(--text))] w-28 truncate">{label}</span>
-                                    <div className="flex-1 h-2 bg-[hsl(var(--panel-2))] rounded-full overflow-hidden">
-                                        <div className="h-full rounded-full" style={{ width: `${score}%`, background: color }} />
-                                    </div>
-                                    <span className="text-[11px] font-num tabular-nums w-8 text-right" style={{ color }}>{score}</span>
-                                    <span className="text-[10px] font-ui uppercase tracking-wider w-16" style={{ color }}>{rInfo.label}</span>
-                                </div>
-                            );
-                        })}
-                    </div>
-                ) : (
-                    <div className="py-4 text-[11.5px] font-ui text-[hsl(var(--text-2))]">
-                        Load this model's trade file to see this trust analysis.
-                    </div>
-                )}
-            </NeonPanel>
-
             {/* Half-split → Holds over time? */}
             <NeonPanel title="Holds over time?" className="xl:col-span-1"
                 action={<Pill tone="secondary">FIRST vs SECOND HALF</Pill>}
@@ -192,6 +161,37 @@ export function ConfidencePanel({ exactRows, halfSplitData, outlierData, robustn
                                 <OutlierBar top5Pct={row.top5Pct} risk={row.risk} />
                             </div>
                         ))}
+                    </div>
+                ) : (
+                    <div className="py-4 text-[11.5px] font-ui text-[hsl(var(--text-2))]">
+                        Load this model's trade file to see this trust analysis.
+                    </div>
+                )}
+            </NeonPanel>
+
+            {/* Robustness scores — composite reference; kept last (the verdict + banner lead). */}
+            <NeonPanel title="Robustness Scores" className="xl:col-span-1"
+                action={<Pill tone="secondary">COMPOSITE 0–100</Pill>}
+            >
+                <p className="mb-3 text-[11.5px] font-ui text-[hsl(var(--text-2))]">
+                    Composite 0–100 score based on sample size, edge vs baseline, drawdown control, trade-off quality, and fill rate.
+                </p>
+                {robustnessScores?.length > 0 ? (
+                    <div className="space-y-2">
+                        {robustnessScores.map(({ mode, label, score }) => {
+                            const rInfo  = robustnessLabel(score);
+                            const color  = score >= 70 ? "hsl(var(--success))" : score >= 45 ? "hsl(var(--warning))" : "hsl(var(--danger))";
+                            return (
+                                <div key={mode} className="flex items-center gap-3">
+                                    <span className="text-[11px] font-ui text-[hsl(var(--text))] w-28 truncate">{label}</span>
+                                    <div className="flex-1 h-2 bg-[hsl(var(--panel-2))] rounded-full overflow-hidden">
+                                        <div className="h-full rounded-full" style={{ width: `${score}%`, background: color }} />
+                                    </div>
+                                    <span className="text-[11px] font-num tabular-nums w-8 text-right" style={{ color }}>{score}</span>
+                                    <span className="text-[10px] font-ui uppercase tracking-wider w-16" style={{ color }}>{rInfo.label}</span>
+                                </div>
+                            );
+                        })}
                     </div>
                 ) : (
                     <div className="py-4 text-[11.5px] font-ui text-[hsl(var(--text-2))]">

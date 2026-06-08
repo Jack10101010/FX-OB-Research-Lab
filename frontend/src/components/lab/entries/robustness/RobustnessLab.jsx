@@ -1,4 +1,5 @@
 import React, { useMemo } from "react";
+import { ChevronRight }        from "lucide-react";
 import { NeonPanel }            from "@/components/lab/NeonPanel";
 import { Pill }                 from "@/components/lab/DataTable";
 import { cn }                   from "@/lib/utils";
@@ -31,14 +32,14 @@ const VERDICT_TOKEN = {
 };
 
 function deriveVerdict({ score, trades, stable, outlierRisk, delta, hasTradeData }) {
-    if (!hasTradeData)              return { key: "unknown",   label: "Not enough info", tone: "muted",     reason: "Load this model's trade file" };
-    if (trades < LOW_SAMPLE_N)      return { key: "needs",     label: "Needs more data", tone: "secondary", reason: `Only ${trades} trades so far` };
-    if (outlierRisk === "HIGH")     return { key: "fragile",   label: "Fragile",         tone: "danger",    reason: "Driven by a few big trades" };
-    if (stable === false)           return { key: "fragile",   label: "Fragile",         tone: "danger",    reason: "Edge breaks between halves" };
-    if (delta != null && delta <= 0) return { key: "reject",   label: "Reject",          tone: "danger",    reason: "No edge vs baseline" };
-    if (score != null && score >= 70) return { key: "ready",   label: "Trade-ready",     tone: "success",   reason: "Strong, stable, beats baseline" };
-    if (score != null && score >= 45) return { key: "promising", label: "Promising",     tone: "warning",   reason: "Some edge; keep validating" };
-    return                                 { key: "reject",    label: "Reject",          tone: "danger",    reason: "Weak overall score" };
+    if (!hasTradeData)               return { key: "unknown",    label: "Not enough info", tone: "muted",     reason: "No trade-level data loaded",     action: "Load this model's trade file" };
+    if (trades < LOW_SAMPLE_N)       return { key: "needs",      label: "Needs more data", tone: "secondary", reason: `Only ${trades} trades so far`,   action: "Gather more trades" };
+    if (outlierRisk === "HIGH")      return { key: "fragile",    label: "Fragile",         tone: "danger",    reason: "Driven by a few big trades",     action: "Don't size up — investigate" };
+    if (stable === false)            return { key: "fragile",    label: "Fragile",         tone: "danger",    reason: "Edge breaks between halves",     action: "Don't size up — investigate" };
+    if (delta != null && delta <= 0) return { key: "reject",     label: "Reject",          tone: "danger",    reason: "No edge vs baseline",            action: "Drop it" };
+    if (score != null && score >= 70) return { key: "ready",     label: "Trade-ready",     tone: "success",   reason: "Strong, stable, beats baseline", action: "Candidate for promotion" };
+    if (score != null && score >= 45) return { key: "promising", label: "Promising",       tone: "warning",   reason: "Some edge; keep validating",     action: "Keep trading small; gather more" };
+    return                                  { key: "reject",     label: "Reject",          tone: "danger",    reason: "Weak overall score",             action: "Drop it" };
 }
 
 function resolveModelTrades(mode, tradesByMode, activeVariant) {
@@ -277,7 +278,7 @@ function VerdictBadge({ verdict, lg = false }) {
         <span
             className={cn(
                 "inline-flex items-center font-ui font-semibold rounded-[2px] whitespace-nowrap",
-                lg ? "text-[14px] px-3 py-1" : "text-[11.5px] px-2 py-0.5",
+                lg ? "text-[14px] px-3 py-1" : "text-[12.5px] px-2.5 py-1",
             )}
             style={{ color: `hsl(var(${tok}))`, background: `hsl(var(${tok})/0.14)`, border: `1px solid hsl(var(${tok})/0.40)` }}
         >
@@ -307,8 +308,8 @@ function VerdictTable({ rows, selected, onSelect }) {
                 <table className="w-full border-separate border-spacing-0">
                     <thead>
                         <tr>
-                            {[["Model", "left"], ["Verdict", "left"], ["Robustness", "right"], ["Why", "left"]].map(([h, align]) => (
-                                <th key={h} className={cn("text-[10px] font-ui font-semibold uppercase tracking-[0.05em] text-[hsl(var(--text-2))] px-3 py-2", align === "right" ? "text-right" : "text-left")}>{h}</th>
+                            {[["Model", "left"], ["Verdict", "left"], ["Robustness", "right"], ["Why", "left"], ["", "right"]].map(([h, align], i) => (
+                                <th key={i} className={cn("text-[10.5px] font-ui font-semibold uppercase tracking-[0.05em] text-[hsl(var(--text-2))] px-3 py-2.5", align === "right" ? "text-right" : "text-left")}>{h}</th>
                             ))}
                         </tr>
                     </thead>
@@ -319,21 +320,27 @@ function VerdictTable({ rows, selected, onSelect }) {
                             return (
                                 <tr key={r.mode} onClick={() => onSelect(r.mode)}
                                     className={cn(
-                                        "cursor-pointer transition-colors border-t border-[hsl(var(--border-soft)/0.4)]",
-                                        isSel ? "bg-[hsl(var(--accent-primary)/0.10)]" : "hover:bg-[hsl(var(--panel-2)/0.6)]",
+                                        "group cursor-pointer transition-colors border-t border-[hsl(var(--border-soft)/0.4)]",
+                                        isSel ? "bg-[hsl(var(--accent-primary)/0.12)]" : "hover:bg-[hsl(var(--panel-2)/0.6)]",
                                     )}
                                 >
-                                    <td className="px-3 py-2.5 text-[12.5px] font-ui text-[hsl(var(--text))] whitespace-nowrap">
-                                        <span className="inline-flex items-center gap-2">
-                                            <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: `hsl(var(${tok}))` }} />
+                                    <td className="px-3 py-4 text-[13.5px] font-ui text-[hsl(var(--text))] whitespace-nowrap">
+                                        <span className="inline-flex items-center gap-2.5">
+                                            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: `hsl(var(${tok}))` }} />
                                             {r.label}
                                         </span>
                                     </td>
-                                    <td className="px-3 py-2.5"><VerdictBadge verdict={r.verdict} /></td>
-                                    <td className="px-3 py-2.5 text-right font-num tabular-nums text-[14px] font-semibold" style={{ color: scoreColorOf(r.score) }}>
+                                    <td className="px-3 py-4"><VerdictBadge verdict={r.verdict} /></td>
+                                    <td className="px-3 py-4 text-right font-num tabular-nums text-[18px] font-semibold leading-none" style={{ color: scoreColorOf(r.score) }}>
                                         {r.score == null ? "—" : r.score}
                                     </td>
-                                    <td className="px-3 py-2.5 text-[11.5px] font-ui text-[hsl(var(--text-2))]">{r.verdict.reason}</td>
+                                    <td className="px-3 py-4 text-[12.5px] font-ui text-[hsl(var(--text-2))]">{r.verdict.reason}</td>
+                                    <td className="px-3 py-4 text-right">
+                                        <ChevronRight className={cn(
+                                            "w-4 h-4 inline-block transition-colors",
+                                            isSel ? "text-[hsl(var(--accent-primary))]" : "text-[hsl(var(--text-3))] group-hover:text-[hsl(var(--text))]",
+                                        )} />
+                                    </td>
                                 </tr>
                             );
                         })}
@@ -344,21 +351,51 @@ function VerdictTable({ rows, selected, onSelect }) {
     );
 }
 
+// Hero verdict — the answer. Large label + large score, the reason, and the
+// recommended next action. Built to be readable in under 2 seconds.
 function VerdictBanner({ v }) {
     const tok = VERDICT_TOKEN[v.verdict.tone] || "--text-2";
     return (
         <div
-            className="flex items-center gap-4 flex-wrap px-4 py-3 clip-bevel-sm border bg-[hsl(var(--panel)/0.86)]"
-            style={{ borderColor: `hsl(var(${tok})/0.45)` }}
+            className="clip-bevel-sm border px-6 py-5"
+            style={{ borderColor: `hsl(var(${tok})/0.50)`, background: `hsl(var(${tok})/0.07)` }}
         >
-            <VerdictBadge verdict={v.verdict} lg />
-            <div className="flex items-baseline gap-1.5">
-                <span className="font-num tabular-nums text-[22px] font-semibold leading-none" style={{ color: scoreColorOf(v.score) }}>
-                    {v.score == null ? "—" : v.score}
-                </span>
-                <span className="text-[11px] font-ui text-[hsl(var(--text-2))]">/ 100 robustness</span>
+            <div className="flex items-start justify-between gap-6 flex-wrap">
+                {/* Verdict — the headline */}
+                <div className="min-w-0">
+                    <div className="text-[10.5px] font-ui font-semibold uppercase tracking-[0.08em] text-[hsl(var(--text-2))] mb-2">
+                        Verdict
+                    </div>
+                    <div className="flex items-center gap-3">
+                        <span className="w-1.5 h-9 rounded-full shrink-0" style={{ background: `hsl(var(${tok}))` }} />
+                        <span className="font-display font-semibold text-[30px] leading-none uppercase tracking-tight" style={{ color: `hsl(var(${tok}))` }}>
+                            {v.verdict.label}
+                        </span>
+                    </div>
+                    <div className="mt-3 text-[13px] leading-snug text-[hsl(var(--text-2))]">{v.verdict.reason}</div>
+                </div>
+
+                {/* Robustness score — the supporting number */}
+                <div className="text-right shrink-0">
+                    <div className="font-num tabular-nums text-[44px] font-semibold leading-none" style={{ color: scoreColorOf(v.score) }}>
+                        {v.score == null ? "—" : v.score}
+                    </div>
+                    <div className="mt-1.5 text-[10.5px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--text-2))]">
+                        robustness / 100
+                    </div>
+                </div>
             </div>
-            <div className="text-[12.5px] font-ui text-[hsl(var(--text-2))] min-w-0">{v.verdict.reason}</div>
+
+            {/* Recommended action */}
+            <div className="mt-4 pt-3 flex items-center gap-2.5 border-t border-[hsl(var(--border-soft))]">
+                <span className="text-[10.5px] font-ui font-semibold uppercase tracking-[0.06em] text-[hsl(var(--text-2))] shrink-0">
+                    Do next
+                </span>
+                <span className="inline-flex items-center gap-1.5 text-[13.5px] font-ui font-semibold text-[hsl(var(--text))]">
+                    <ChevronRight className="w-4 h-4 shrink-0" style={{ color: `hsl(var(${tok}))` }} />
+                    {v.verdict.action}
+                </span>
+            </div>
         </div>
     );
 }
