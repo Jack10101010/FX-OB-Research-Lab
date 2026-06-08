@@ -12,6 +12,18 @@ import { REGISTRY_BY_KEY, highestRerunTierForKeys } from "@/data/configRegistry"
 import { buildRunConfigLoadReport, getDefaultBuilderConfig, buildBacktesterConfig } from "@/data/configTranslator";
 import { startSidecarRun, getSidecarRun, getSidecarRunBundle, cancelSidecarRun } from "@/data/sidecarClient";
 import { ingestRunBundle } from "@/data/importer";
+import { isCostOnlyDirty, rescoreCostsForBundle, buildRescoredBundle } from "./costRescore";
+
+// Signature of a cost-only rescore (run id + cost values). Used so a manually-cleared
+// temporary bundle isn't immediately rebuilt until the cost config or run changes.
+function lensSignature(runId, cfg) {
+    return JSON.stringify({
+        runId: runId || null,
+        spread: cfg?.spread ?? null,
+        slippage: cfg?.slippage ?? null,
+        commission: cfg?.commission ?? null,
+    });
+}
 
 // ─── Preview state ────────────────────────────────────────────────────────────
 // Allowed statuses:
@@ -67,6 +79,9 @@ const MasterControlsContext = createContext({
     previewIsStale:       false,
     // Promotion — Phase 4C
     promotePreview:       () => {},
+    // Temporary cost-rescored bundle — Phase 7B (context-only; not stored/applied)
+    localRescoreBundle:      null,
+    clearLocalRescoreBundle: () => {},
 });
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
@@ -96,11 +111,22 @@ export function MasterControlsProvider({ children }) {
     // active-run change so a superseded import never writes a stale "done".
     const importJobRef = useRef(null);
 
+    // ── Phase 7B — temporary cost-rescored bundle ───────────────────────────
+    // A bundle-shaped object built from the Phase 7A cost rescore. Held in context
+    // ONLY — never added to the store / run list, never persisted, never promoted.
+    // It is the bridge toward a future Preview Lens (Phase 8); no page reads it yet.
+    const [localRescoreBundle, setLocalRescoreBundle] = useState(null);
+    // Signature the user manually dismissed, so the auto-build effect doesn't rebuild
+    // the same bundle until the cost config / run changes.
+    const lensSuppressRef = useRef("");
+
     // Reset draft AND preview whenever the active run changes
     useEffect(() => {
         setDraftConfigState(null);
         setPreview(EMPTY_PREVIEW);
         importJobRef.current = null;
+        setLocalRescoreBundle(null);
+        lensSuppressRef.current = "";
     }, [activeRunId]);
 
     // ── activeConfig — derived from the active run bundle ───────────────────
@@ -218,6 +244,8 @@ export function MasterControlsProvider({ children }) {
      */
     const resetDraft = useCallback(() => {
         setDraftConfigState(null);
+        setLocalRescoreBundle(null);
+        lensSuppressRef.current = "";
     }, []);
 
     // ── Preview actions — Phase 4A ────────────────────────────────────────────
@@ -270,7 +298,18 @@ export function MasterControlsProvider({ children }) {
     const clearPreview = useCallback(() => {
         importJobRef.current = null;
         setPreview(EMPTY_PREVIEW);
+        setLocalRescoreBundle(null);
     }, []);
+
+    /**
+     * Manually dismiss the temporary cost-rescored bundle (drawer "Clear" button).
+     * Suppresses the auto-build effect for the current rescore so it does not pop back
+     * immediately; suppression lifts when the cost config or active run changes.
+     */
+    const clearLocalRescoreBundle = useCallback(() => {
+        lensSuppressRef.current = lensSignature(activeRunId, effectiveConfig);
+        setLocalRescoreBundle(null);
+    }, [activeRunId, effectiveConfig]);
 
     /**
      * Promote the completed preview bundle into a permanent run — Phase 4C.
@@ -312,6 +351,7 @@ export function MasterControlsProvider({ children }) {
         // Neutralise any in-flight import so it cannot write a stale "done" after cancel.
         importJobRef.current = null;
         setPreview(EMPTY_PREVIEW);
+        setLocalRescoreBundle(null);
     }, [preview.status, preview.job]);
 
     // ── Polling effect — drives "queued"/"running" → "completed"/"failed" ────
@@ -427,6 +467,40 @@ export function MasterControlsProvider({ children }) {
         return JSON.stringify(preview.snapshotConfig) !== JSON.stringify(effectiveConfig);
     }, [preview.status, preview.snapshotConfig, effectiveConfig]);
 
+    // ── Phase 7B build effect — keep localRescoreBundle in sync with the cost rescore ─
+    // Builds the temporary bundle when the dirty set is cost-only AND an exact rescore
+    // is available; clears it otherwise. This is the SOLE writer of localRescoreBundle
+    // (plus the explicit resets above), so it covers every reset rule: active-run change,
+    // resetDraft, dirty fields no longer cost-only, and exact-rescore-unavailable.
+    // It never touches the store, addRunBundle, or persistence.
+    useEffect(() => {
+        const costOnly = highestRerunTier === "frontend_rescore" && isCostOnlyDirty(dirtyFieldList);
+        if (!costOnly || !effectiveConfig || !activeRunId) {
+            lensSuppressRef.current = "";
+            setLocalRescoreBundle(null);
+            return;
+        }
+        // Respect a manual dismissal of this exact rescore.
+        if (lensSuppressRef.current === lensSignature(activeRunId, effectiveConfig)) return;
+
+        const costs = {
+            spread: effectiveConfig.spread,
+            slippage: effectiveConfig.slippage,
+            commission: effectiveConfig.commission,
+        };
+        const sourceBundle = getRunData(activeRunId);
+        const result = sourceBundle ? rescoreCostsForBundle(sourceBundle, costs) : null;
+        if (!result || !result.ok || !result.exact) {
+            setLocalRescoreBundle(null);
+            return;
+        }
+        setLocalRescoreBundle(buildRescoredBundle(sourceBundle, result, {
+            costs,
+            dirtyFields: dirtyFieldList,
+            rerunTier: highestRerunTier,
+        }));
+    }, [activeRunId, dirtyFieldList, effectiveConfig, highestRerunTier]); // eslint-disable-line react-hooks/exhaustive-deps
+
     // ── Context value ────────────────────────────────────────────────────────
 
     const value = useMemo(() => ({
@@ -461,6 +535,9 @@ export function MasterControlsProvider({ children }) {
         previewIsStale,
         // Promotion — Phase 4C
         promotePreview,
+        // Temporary rescored bundle — Phase 7B
+        localRescoreBundle,
+        clearLocalRescoreBundle,
     }), [
         isOpen,
         openMasterControls,
@@ -486,6 +563,8 @@ export function MasterControlsProvider({ children }) {
         clearPreview,
         previewIsStale,
         promotePreview,
+        localRescoreBundle,
+        clearLocalRescoreBundle,
     ]);
 
     return (

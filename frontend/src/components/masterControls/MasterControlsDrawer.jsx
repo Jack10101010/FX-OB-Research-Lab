@@ -127,6 +127,7 @@ export function MasterControlsDrawer() {
         setDraftField, resetDraft,
         preview, startPreview, cancelPreview, clearPreview, previewIsStale,
         promotePreview,
+        localRescoreBundle, clearLocalRescoreBundle,
     } = useMasterControls();
     const { activeRunId } = useDataset();
 
@@ -404,6 +405,30 @@ export function MasterControlsDrawer() {
                         {/* Cost rescore — Phase 7A: instant, local, cost-only fast path.
                             Pure frontend recompute — no sidecar, no store, no Strategy Map. */}
                         {costOnly && <CostRescorePanel data={costRescore} />}
+
+                        {/* Temporary rescored bundle — Phase 7B. A bundle-shaped object built
+                            from the cost rescore, held in context only (NOT stored, NOT applied
+                            to any page yet). Bridge toward the Phase 8 Preview Lens. */}
+                        {localRescoreBundle && (
+                            <div className="mt-2 rounded border border-[hsl(196_80%_55%/0.25)] bg-[hsl(196_80%_55%/0.04)] px-3 py-2">
+                                <div className="flex items-center justify-between gap-2">
+                                    <span className="text-[10px] font-semibold uppercase tracking-widest text-[hsl(196_80%_65%)]">
+                                        Temporary rescored bundle ready
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={clearLocalRescoreBundle}
+                                        className="text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--border-soft))] text-muted-lab hover:text-white transition-colors"
+                                    >
+                                        Clear
+                                    </button>
+                                </div>
+                                <p className="mt-1 text-[9px] text-muted-lab leading-snug">Scope: primary variant only</p>
+                                <p className="mt-0.5 text-[9px] text-muted-lab/70 leading-snug">
+                                    Not saved · Not applied to page yet
+                                </p>
+                            </div>
+                        )}
                     </section>
 
                     {/* ── 4. Active Config — Phase 3D/3E config view ───────── */}

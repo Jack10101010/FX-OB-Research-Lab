@@ -257,3 +257,69 @@ export function rescoreCostsForBundle(bundle, costs) {
         winRate,
     };
 }
+
+/**
+ * Build a temporary, bundle-shaped object from a cost-rescore result — Phase 7B.
+ *
+ * This is a pure transform that yields an `ingestRunBundle`-shaped object so a future
+ * Preview Lens (Phase 8+) can feed it through the same store derivation the app already
+ * uses. It is NOT a store run: it is never added to `state.runs`, never persisted, and
+ * never appears in run history. The caller holds it in context only.
+ *
+ * PRIMARY VARIANT ONLY: cost rescore (Phase 7A) only recomputes the primary variant, so
+ * non-primary variants / entry-model scenarios in `tradesByVariant` are left as-is. The
+ * `meta.rescoreScope = "primary_variant"` flag records this so consumers don't assume the
+ * whole universe was rescored.
+ *
+ * Does NOT mutate `sourceBundle` (spreads it; only overrides changed fields). Reuses the
+ * source's orderBlocks / candles / tradeMarkers / config (cost rescore moves neither entries
+ * nor outcomes, so OBs, candles and markers are unchanged).
+ *
+ * @param {object} sourceBundle   the active run bundle the rescore derived from.
+ * @param {object} rescoreResult  output of rescoreCostsForBundle (must be ok && exact).
+ * @param {{ costs?, dirtyFields?, rerunTier? }} [options]
+ * @returns {object|null} bundle-like object, or null when inputs are unusable.
+ */
+export function buildRescoredBundle(sourceBundle, rescoreResult, options = {}) {
+    if (!sourceBundle || typeof sourceBundle !== "object") return null;
+    if (!rescoreResult || !rescoreResult.ok || !rescoreResult.exact) return null;
+    if (!Array.isArray(rescoreResult.trades)) return null;
+
+    const { costs = null, dirtyFields = null, rerunTier = null } = options;
+    const primaryVariant = sourceBundle.primaryVariant;
+    const sourceTbv = sourceBundle.tradesByVariant && typeof sourceBundle.tradesByVariant === "object"
+        ? sourceBundle.tradesByVariant
+        : {};
+
+    return {
+        ...sourceBundle,
+        id: `${sourceBundle.id}__rescored`,
+        isTemporary: true,
+        derivedFrom: sourceBundle.id,
+        meta: {
+            ...(sourceBundle.meta || {}),
+            temporary: true,
+            source: "master_controls_cost_rescore",
+            rescoreScope: "primary_variant",
+            costs,
+            dirtyFields,
+            rerunTier,
+        },
+        // Primary-variant trade set is replaced; other variants pass through untouched.
+        trades: rescoreResult.trades,
+        tradesByVariant: primaryVariant
+            ? { ...sourceTbv, [primaryVariant]: rescoreResult.trades }
+            : { ...sourceTbv },
+        equityCurve: rescoreResult.equityCurve,
+        summary: {
+            ...(sourceBundle.summary || {}),
+            netR: rescoreResult.netR,
+            wins: rescoreResult.wins,
+            losses: rescoreResult.losses,
+            winRate: rescoreResult.winRate,
+            trades: rescoreResult.trades.length,
+            maxDd: rescoreResult.maxDd,
+            avgR: rescoreResult.avgR,
+        },
+    };
+}
