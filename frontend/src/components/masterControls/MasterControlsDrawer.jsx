@@ -77,6 +77,9 @@ const SAFE_EDITABLE_SUBSET = new Set([
     // Trade direction — Tier 1 / instant_filter (Phase 10A.1). The only `select`
     // field exposed for editing; the safe-edit path now renders a SelectInput for it.
     "direction",
+    // FFT toggle — Phase 10B. Editable so toggling it ON→OFF drives the instant FFT
+    // preview lens (control-trade swap). Advanced-mode field; shows under "Show advanced".
+    "triggeredEdgeCancelOnFirstFailedTag",
 ]);
 
 // Readable labels for structure-direction tags in the filter summary.
@@ -102,6 +105,17 @@ function describeFilters(filters) {
         parts.push(`Direction: ${dir === "long" ? "Long only" : dir === "short" ? "Short only" : dir}`);
     }
     return parts.length ? parts.join(" · ") : "No active restriction";
+}
+
+/** One-line coverage summary of an FFT preview bundle's `meta` (Phase 10B). */
+function describeFftCoverage(meta) {
+    if (!meta || typeof meta !== "object") return "Triggered-edge scenarios swapped to FFT-OFF control";
+    const covered = Array.isArray(meta.coveredScenarios) ? meta.coveredScenarios.length : 0;
+    const missing = Array.isArray(meta.missingScenarios) ? meta.missingScenarios.length : 0;
+    const scope = meta.swapScope === "full" ? "Full" : meta.swapScope === "partial" ? "Partial" : "—";
+    const parts = [`Coverage: ${scope}`, `${covered} scenario${covered === 1 ? "" : "s"} swapped`];
+    if (missing > 0) parts.push(`${missing} without control`);
+    return parts.join(" · ");
 }
 
 // ─── Config view helpers ──────────────────────────────────────────────────────
@@ -164,6 +178,7 @@ export function MasterControlsDrawer() {
         localRescoreBundle, clearLocalRescoreBundle,
         previewLens, applyLocalRescoreLens, exitPreviewLens,
         localFilterBundle, clearLocalFilterBundle, applyLocalFilterLens,
+        localFftBundle, clearFftPreview, applyFftPreviewLens,
     } = useMasterControls();
     const { activeRunId } = useDataset();
 
@@ -217,6 +232,15 @@ export function MasterControlsDrawer() {
     const filterLensActive = !!(
         previewLens?.active
         && previewLens.mode === "instant_filter"
+        && previewLens.sourceRunId === activeRunId
+    );
+
+    // Phase 10B — instant FFT ON/OFF preview (control-trade swap). Shows a local block
+    // when the FFT toggle is dirty and an FFT-OFF swap bundle is available for this run.
+    const fftDirty = dirtyFields instanceof Set && dirtyFields.has("triggeredEdgeCancelOnFirstFailedTag");
+    const fftLensActive = !!(
+        previewLens?.active
+        && previewLens.mode === "fft_swap"
         && previewLens.sourceRunId === activeRunId
     );
 
@@ -566,6 +590,62 @@ export function MasterControlsDrawer() {
                                 <p className="mt-0.5 text-[9px] text-muted-lab/70 leading-snug">
                                     {filterLensActive
                                         ? "The page is viewing temporary filtered data — not saved."
+                                        : "Not saved · Not applied to page yet"}
+                                </p>
+                            </div>
+                        )}
+
+                        {/* Instant FFT ON/OFF — Phase 10B. Swaps the triggered-edge scenarios
+                            for their exported FFT-OFF control trades. Same Preview Lens pipeline;
+                            visible only on triggered-edge views (baseline is FFT-invariant). */}
+                        {fftDirty && localFftBundle && (
+                            <div className={`mt-2 rounded border px-3 py-2 ${
+                                fftLensActive
+                                    ? "border-[hsl(var(--warning)/0.5)] bg-[hsl(var(--warning)/0.10)]"
+                                    : "border-[hsl(var(--warning)/0.28)] bg-[hsl(var(--warning)/0.05)]"
+                            }`}>
+                                <div className="flex items-center justify-between gap-2">
+                                    <span className="text-[10px] font-semibold uppercase tracking-widest text-[hsl(var(--warning))]">
+                                        {fftLensActive ? "Applied to page preview" : "Temporary FFT bundle ready"}
+                                    </span>
+                                    <div className="flex items-center gap-1.5">
+                                        {fftLensActive ? (
+                                            <button
+                                                type="button"
+                                                onClick={exitPreviewLens}
+                                                className="text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--warning)/0.45)] text-[hsl(var(--warning))] hover:bg-[hsl(var(--warning)/0.15)] transition-colors"
+                                            >
+                                                Exit page preview
+                                            </button>
+                                        ) : (
+                                            <>
+                                                <button
+                                                    type="button"
+                                                    onClick={applyFftPreviewLens}
+                                                    className="text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.12)] text-[hsl(var(--warning))] font-medium hover:bg-[hsl(var(--warning)/0.2)] transition-colors"
+                                                >
+                                                    Apply to page
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={clearFftPreview}
+                                                    className="text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--border-soft))] text-muted-lab hover:text-white transition-colors"
+                                                >
+                                                    Clear
+                                                </button>
+                                            </>
+                                        )}
+                                    </div>
+                                </div>
+                                <p className="mt-1 text-[10px] font-num text-[hsl(var(--text-1))]">
+                                    FFT ON <span className="text-muted-lab">→</span> FFT OFF
+                                </p>
+                                <p className="mt-0.5 text-[9px] text-muted-lab leading-snug">
+                                    {describeFftCoverage(localFftBundle?.meta)}
+                                </p>
+                                <p className="mt-0.5 text-[9px] text-muted-lab/70 leading-snug">
+                                    {fftLensActive
+                                        ? "The page is viewing temporary FFT-OFF data — not saved. Triggered-edge views only."
                                         : "Not saved · Not applied to page yet"}
                                 </p>
                             </div>

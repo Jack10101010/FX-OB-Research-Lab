@@ -22,6 +22,10 @@ import { startSidecarRun, getSidecarRun, getSidecarRunBundle, cancelSidecarRun }
 import { ingestRunBundle } from "@/data/importer";
 import { isCostOnlyDirty, rescoreCostsForBundle, buildRescoredBundle } from "./costRescore";
 import { isFilterOnlyDirty, buildTradePredicate, buildFilteredBundle } from "./tradeFilter";
+import { buildFftPreviewBundle } from "./controlSwap";
+
+// The single config key that drives the FFT preview lens (Phase 10B).
+const FFT_DRAFT_KEY = "triggeredEdgeCancelOnFirstFailedTag";
 
 // Signature of a cost-only rescore (run id + cost values). Used so a manually-cleared
 // temporary bundle isn't immediately rebuilt until the cost config or run changes.
@@ -51,6 +55,15 @@ function filterSignature(runId, cfg) {
         chochLong: cfg?.chochLong ?? null,
         chochShort: cfg?.chochShort ?? null,
         direction: cfg?.direction ?? null,
+    });
+}
+
+// Signature of an FFT-only change (run id + the FFT field). Used so a manually-cleared
+// temporary FFT bundle isn't rebuilt until the FFT toggle or run changes (Phase 10B).
+function fftSignature(runId, cfg) {
+    return JSON.stringify({
+        runId: runId || null,
+        [FFT_DRAFT_KEY]: cfg?.[FFT_DRAFT_KEY] ?? null,
     });
 }
 
@@ -119,6 +132,10 @@ const MasterControlsContext = createContext({
     localFilterBundle:       null,
     clearLocalFilterBundle:  () => {},
     applyLocalFilterLens:    () => {},
+    // Temporary FFT ON/OFF preview bundle — Phase 10B (control-trade universe swap)
+    localFftBundle:          null,
+    clearFftPreview:         () => {},
+    applyFftPreviewLens:     () => {},
 });
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
@@ -164,6 +181,12 @@ export function MasterControlsProvider({ children }) {
     const [localFilterBundle, setLocalFilterBundle] = useState(null);
     const filterSuppressRef = useRef("");
 
+    // ── Phase 10B — temporary FFT ON/OFF preview bundle ─────────────────────
+    // A bundle-shaped object that swaps the triggered-edge scenarios for their
+    // FFT-OFF control counterparts. Held in context ONLY — never stored / persisted.
+    const [localFftBundle, setLocalFftBundle] = useState(null);
+    const fftSuppressRef = useRef("");
+
     // Reset draft AND preview whenever the active run changes
     useEffect(() => {
         setDraftConfigState(null);
@@ -173,6 +196,8 @@ export function MasterControlsProvider({ children }) {
         lensSuppressRef.current = "";
         setLocalFilterBundle(null);
         filterSuppressRef.current = "";
+        setLocalFftBundle(null);
+        fftSuppressRef.current = "";
     }, [activeRunId]);
 
     // ── activeConfig — derived from the active run bundle ───────────────────
@@ -294,6 +319,8 @@ export function MasterControlsProvider({ children }) {
         lensSuppressRef.current = "";
         setLocalFilterBundle(null);
         filterSuppressRef.current = "";
+        setLocalFftBundle(null);
+        fftSuppressRef.current = "";
     }, []);
 
     // ── Preview actions — Phase 4A ────────────────────────────────────────────
@@ -348,6 +375,7 @@ export function MasterControlsProvider({ children }) {
         setPreview(EMPTY_PREVIEW);
         setLocalRescoreBundle(null);
         setLocalFilterBundle(null);
+        setLocalFftBundle(null);
     }, []);
 
     /**
@@ -368,6 +396,16 @@ export function MasterControlsProvider({ children }) {
     const clearLocalFilterBundle = useCallback(() => {
         filterSuppressRef.current = filterSignature(activeRunId, effectiveConfig);
         setLocalFilterBundle(null);
+    }, [activeRunId, effectiveConfig]);
+
+    /**
+     * Manually dismiss the temporary FFT preview bundle (drawer "Clear" button).
+     * Suppresses the auto-build effect for this exact FFT toggle until it or the
+     * active run changes.
+     */
+    const clearFftPreview = useCallback(() => {
+        fftSuppressRef.current = fftSignature(activeRunId, effectiveConfig);
+        setLocalFftBundle(null);
     }, [activeRunId, effectiveConfig]);
 
     /**
@@ -412,6 +450,7 @@ export function MasterControlsProvider({ children }) {
         setPreview(EMPTY_PREVIEW);
         setLocalRescoreBundle(null);
         setLocalFilterBundle(null);
+        setLocalFftBundle(null);
     }, [preview.status, preview.job]);
 
     // ── Polling effect — drives "queued"/"running" → "completed"/"failed" ────
@@ -593,6 +632,33 @@ export function MasterControlsProvider({ children }) {
         }));
     }, [activeRunId, dirtyFieldList, effectiveConfig, highestRerunTier]); // eslint-disable-line react-hooks/exhaustive-deps
 
+    // ── Phase 10B build effect — keep localFftBundle in sync with the FFT toggle ──
+    // Builds the temporary FFT-OFF bundle when the ONLY dirty field is the FFT toggle
+    // and an ON→OFF control swap is available; clears it otherwise. Sole writer of
+    // localFftBundle (plus the explicit resets above). Builds from the RAW run bundle
+    // (lens-immune) so it never compounds with an already-applied lens. buildFftPreviewBundle
+    // returns null for no-op / unavailable (already OFF, no controls, no covered scenario),
+    // which collapses to "no block shown". No store writes, no persistence.
+    useEffect(() => {
+        const fftOnly = dirtyFieldList.length === 1 && dirtyFields.has(FFT_DRAFT_KEY);
+        if (!fftOnly || !effectiveConfig || !activeRunId) {
+            fftSuppressRef.current = "";
+            setLocalFftBundle(null);
+            return;
+        }
+        // Respect a manual dismissal of this exact FFT toggle.
+        if (fftSuppressRef.current === fftSignature(activeRunId, effectiveConfig)) return;
+
+        const sourceBundle = getRawRunData(activeRunId);
+        if (!sourceBundle) {
+            setLocalFftBundle(null);
+            return;
+        }
+        setLocalFftBundle(buildFftPreviewBundle(sourceBundle, {
+            fftEnabled: Boolean(effectiveConfig[FFT_DRAFT_KEY]),
+        }));
+    }, [activeRunId, dirtyFieldList, effectiveConfig]); // eslint-disable-line react-hooks/exhaustive-deps
+
     // ── Phase 8B — apply the temporary bundle to the whole app via the store lens ─
     // `previewLens` is read live from the store. The context re-renders on every store
     // notify() (it subscribes through useDataset above), so this read stays fresh.
@@ -667,6 +733,39 @@ export function MasterControlsProvider({ children }) {
         }
     }, [localFilterBundle, activeRunId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+    // ── Phase 10B — apply the temporary FFT-OFF bundle via the same store lens ───
+    /** Apply the temporary FFT preview bundle as a read-only Preview Lens. */
+    const applyFftPreviewLens = useCallback(() => {
+        if (!localFftBundle || !activeRunId) return;
+        setPreviewLens({
+            sourceRunId: activeRunId,
+            bundle: localFftBundle,
+            mode: "fft_swap",
+            label: "FFT OFF Preview",
+        });
+    }, [localFftBundle, activeRunId]);
+
+    // Keep OUR FFT lens in sync with localFftBundle, mirroring the cost/filter lenses.
+    // Only manages the "fft_swap" lens — never touches a lens of another mode, so the
+    // cost, filter and FFT lenses can't fight: each sync clears/repushes only its own
+    // kind, and applying one mode overwrites the single store lens cleanly.
+    useEffect(() => {
+        const lens = getPreviewLens();
+        if (!lens || lens.mode !== "fft_swap") return;
+        if (!localFftBundle || !activeRunId || lens.sourceRunId !== activeRunId) {
+            clearPreviewLens();
+            return;
+        }
+        if (lens.bundle !== localFftBundle) {
+            setPreviewLens({
+                sourceRunId: activeRunId,
+                bundle: localFftBundle,
+                mode: "fft_swap",
+                label: "FFT OFF Preview",
+            });
+        }
+    }, [localFftBundle, activeRunId]); // eslint-disable-line react-hooks/exhaustive-deps
+
     // ── Context value ────────────────────────────────────────────────────────
 
     const value = useMemo(() => ({
@@ -712,6 +811,10 @@ export function MasterControlsProvider({ children }) {
         localFilterBundle,
         clearLocalFilterBundle,
         applyLocalFilterLens,
+        // FFT preview lens — Phase 10B
+        localFftBundle,
+        clearFftPreview,
+        applyFftPreviewLens,
     }), [
         isOpen,
         openMasterControls,
@@ -745,6 +848,9 @@ export function MasterControlsProvider({ children }) {
         localFilterBundle,
         clearLocalFilterBundle,
         applyLocalFilterLens,
+        localFftBundle,
+        clearFftPreview,
+        applyFftPreviewLens,
     ]);
 
     return (
