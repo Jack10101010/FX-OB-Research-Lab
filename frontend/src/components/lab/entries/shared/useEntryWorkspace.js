@@ -24,6 +24,7 @@ const DEFAULT_COLS = {
     avgTimeToSL:   false,
     profitFactor:  true,
     triggeredEdge: false,
+    fftImpact:     false,
 };
 
 export const TABS = [

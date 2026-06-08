@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import { useDataset } from "@/data/store";
 import { extractOffTrades } from "@/data/fftPairingResolver";
+import { computePairedFftAnalytics } from "@/data/fftPairingAnalytics";
 import { useEntryWorkspace } from "./shared/useEntryWorkspace";
 import { WorkspaceTabBar } from "./shared/WorkspaceTabBar";
 import { GlobalFilterBar } from "./shared/GlobalFilterBar";
@@ -102,6 +103,37 @@ export function EntriesWorkspace() {
             : filteredTrades;
     }, [tradesByMode, selectedModelKey, ACTIVE_TRADE_VARIANT, applyFilters, filteredTrades]);
 
+    // Per-row FFT paired-impact summaries for the Exact Results table.
+    // EXACT-KEY control lookup only (no extractOffTrades/resolveAutoControlTrades —
+    // their single-control fallback could attach the wrong control to another row).
+    const fftByMode = useMemo(() => {
+        const out = {};
+        const tbm = tradesByMode || {};
+        const ctrl = activeRun?.controlTradesByScenario;
+        if (!ctrl || typeof ctrl !== "object") return out;
+        for (const row of exactRows) {
+            const mode = row?.mode;
+            if (!mode) continue;
+            const controlTrades = ctrl[`${ACTIVE_TRADE_VARIANT}:${mode}`];
+            if (!Array.isArray(controlTrades) || controlTrades.length === 0) continue;
+            const scenarioTrades = applyFilters(
+                tbm[`${ACTIVE_TRADE_VARIANT}__${mode}`] || tbm[mode] || [],
+            );
+            const p = computePairedFftAnalytics(scenarioTrades, controlTrades);
+            if (p.fftCancels > 0) {
+                out[mode] = {
+                    fftCancels: p.fftCancels,
+                    netRImpact: p.confirmedNetRImpact,
+                    winnersRemoved: p.confirmedWinsRemoved,
+                    lossesAvoided: p.confirmedLossesAvoided,
+                    lowConf: p.lowConfCount,
+                    highConf: p.highConfCount,
+                };
+            }
+        }
+        return out;
+    }, [exactRows, tradesByMode, activeRun, ACTIVE_TRADE_VARIANT, applyFilters]);
+
     // Shared props passed down to every tab
     const sharedProps = {
         trades: filteredTrades,
@@ -117,6 +149,7 @@ export function EntriesWorkspace() {
         filters,
         offTrades,
         fftTrades,
+        fftByMode,
     };
 
     return (

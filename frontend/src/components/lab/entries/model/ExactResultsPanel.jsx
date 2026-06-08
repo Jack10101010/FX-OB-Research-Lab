@@ -102,10 +102,37 @@ function gridTemplate(colVis, hasTrigEdge = false) {
         + (colVis.triggeredEdge && hasTrigEdge ? " 62px 68px 72px 64px" : "");
 }
 
+// Full-width detail line shown under a triggered-edge row when the "FFT Impact"
+// toggle is on and the row has auto-control paired data. Readable, color-coded,
+// not a new column — spans the table width and wraps.
+function FftImpactSubRow({ data }) {
+    const { fftCancels, netRImpact, winnersRemoved, lossesAvoided, lowConf } = data;
+    const netTone =
+        netRImpact > 0.005  ? "text-[hsl(var(--success))]" :
+        netRImpact < -0.005 ? "text-[hsl(var(--danger))]"  :
+        "text-[hsl(var(--text-2))]";
+    const netLabel = `${netRImpact >= 0 ? "+" : ""}${netRImpact.toFixed(2)}R`;
+    const Sep = () => <span className="text-[hsl(var(--text-2))] opacity-40 px-0.5">·</span>;
+    return (
+        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 px-3 py-2 border-b border-[hsl(var(--border-soft)/0.3)] bg-[hsl(var(--accent-primary)/0.06)] shadow-[inset_3px_0_0_hsl(var(--accent-primary)/0.6)] text-[12px] font-ui">
+            <span className="font-semibold uppercase tracking-[0.12em] text-[hsl(var(--accent-primary))] mr-1">FFT</span>
+            <span className="text-[hsl(var(--text))]"><span className="font-semibold tabular-nums">{fftCancels}</span> cancels</span>
+            <Sep />
+            <span className="text-[hsl(var(--text))]">net <span className={cn("font-semibold tabular-nums", netTone)}>{netLabel}</span></span>
+            <Sep />
+            <span className="text-[hsl(var(--text))]">cost <span className="font-semibold tabular-nums text-[hsl(var(--danger))]">{winnersRemoved}</span> winner{winnersRemoved === 1 ? "" : "s"} removed</span>
+            <Sep />
+            <span className="text-[hsl(var(--text))]">benefit <span className="font-semibold tabular-nums text-[hsl(var(--success))]">{lossesAvoided}</span> loss{lossesAvoided === 1 ? "" : "es"} avoided</span>
+            <Sep />
+            <span className="text-[hsl(var(--warning))]"><span className="font-semibold tabular-nums">{lowConf}</span> unknown/low-conf</span>
+        </div>
+    );
+}
+
 // Phase 3: isFirst suppresses the top border on the first family section.
 // showProfileBadge flows down to ResultRow → RowTags and also controls whether
 // the fill description sub-line is shown in the header.
-function FamilySection({ family, rows, colVis, hasTrigEdge, open, onToggle, isFirst, showProfileBadge, selectedModelKey, setSelectedModelKey }) {
+function FamilySection({ family, rows, colVis, hasTrigEdge, open, onToggle, isFirst, showProfileBadge, selectedModelKey, setSelectedModelKey, fftByMode }) {
     const familyMeta    = ENTRY_FAMILIES.find(f => f.key === family);
     const familyColor   = familyMeta?.color || "hsl(var(--text-2))";
     const fillDesc      = showProfileBadge ? familyMeta?.fillDescription : null;
@@ -130,22 +157,24 @@ function FamilySection({ family, rows, colVis, hasTrigEdge, open, onToggle, isFi
                 )}
             </div>
             {open && rows.map(row => (
-                <ResultRow key={row.mode} row={row} colVis={colVis} hasTrigEdge={hasTrigEdge} showProfileBadge={showProfileBadge} selectedModelKey={selectedModelKey} setSelectedModelKey={setSelectedModelKey} />
+                <ResultRow key={row.mode} row={row} colVis={colVis} hasTrigEdge={hasTrigEdge} showProfileBadge={showProfileBadge} selectedModelKey={selectedModelKey} setSelectedModelKey={setSelectedModelKey} fftByMode={fftByMode} />
             ))}
         </div>
     );
 }
 
-function ResultRow({ row, colVis, hasTrigEdge, showProfileBadge, selectedModelKey, setSelectedModelKey }) {
+function ResultRow({ row, colVis, hasTrigEdge, showProfileBadge, selectedModelKey, setSelectedModelKey, fftByMode }) {
     // V2: use metricsProfile / requiresLifecycleFunnel — not a mode string check.
     const isTrigRow = row.metricsProfile === PROFILE_KEYS.TRIGGERED_EDGE || row.requiresLifecycleFunnel === true;
     const isSelected = !row.isBaseline && row.mode === selectedModelKey;
+    const fftImpact = colVis.fftImpact && isTrigRow ? (fftByMode?.[row.mode] ?? null) : null;
     const handleClick = () => {
         if (!row.isBaseline && setSelectedModelKey) {
             setSelectedModelKey(isSelected ? null : row.mode);
         }
     };
     return (
+        <>
         <div
             className={cn(
                 "grid min-h-[38px] items-center gap-2 border-b border-[hsl(var(--border-soft)/0.3)] px-3 py-2 text-[12px] font-display tabular-nums transition-colors",
@@ -211,6 +240,8 @@ function ResultRow({ row, colVis, hasTrigEdge, showProfileBadge, selectedModelKe
                 </>
             )}
         </div>
+        {fftImpact && <FftImpactSubRow data={fftImpact} />}
+        </>
     );
 }
 
@@ -264,7 +295,7 @@ function TableHeader({ colVis, hasTrigEdge, sortState, onSort }) {
     );
 }
 
-export function ExactResultsPanel({ exactRows, colVis, setColVis, selectedModelKey, setSelectedModelKey }) {
+export function ExactResultsPanel({ exactRows, colVis, setColVis, selectedModelKey, setSelectedModelKey, fftByMode = {} }) {
     const [sortState, setSortState] = useLocalStorageState(SORT_STORAGE_KEY, { key: "netR", dir: "desc" });
     const [familyOpen, setFamilyOpen] = useLocalStorageState(FAMILY_STORAGE_KEY, {});
     const hasExact    = exactRows.some(r => r.exact && !r.isBaseline);
@@ -286,6 +317,7 @@ export function ExactResultsPanel({ exactRows, colVis, setColVis, selectedModelK
         { key: "avgTimeToTP",   label: "Time to TP" },
         { key: "avgTimeToSL",   label: "Time to SL" },
         ...(hasTrigEdge ? [{ key: "triggeredEdge", label: "Triggered Edge" }] : []),
+        ...(hasTrigEdge ? [{ key: "fftImpact", label: "FFT Impact" }] : []),
     ];
 
     const handleExport = () => {
@@ -363,6 +395,7 @@ export function ExactResultsPanel({ exactRows, colVis, setColVis, selectedModelK
                             showProfileBadge={hasMultipleFamilies}
                             selectedModelKey={selectedModelKey}
                             setSelectedModelKey={setSelectedModelKey}
+                            fftByMode={fftByMode}
                         />
                     ))}
                 </div>

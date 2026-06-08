@@ -102,6 +102,7 @@ export function ModelAnalysis({
     filters,
     offTrades,          // optional — trades from a paired FFT-OFF run for authoritative pairing
     fftTrades,          // optional — active-scenario trades (where FFT cancels live); falls back to `trades`
+    fftByMode,          // optional — per-mode FFT paired-impact summaries for the results table
 }) {
     // FFT panels analyse the active *scenario* trades (which carry the
     // first_failed_tag cancels), not the base ACTIVE_TRADE_VARIANT list. Falls
@@ -177,6 +178,7 @@ export function ModelAnalysis({
                     setColVis={setColVis}
                     selectedModelKey={selectedModelKey}
                     setSelectedModelKey={setSelectedModelKey}
+                    fftByMode={fftByMode || {}}
                 />
             </div>
 
