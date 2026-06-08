@@ -296,17 +296,22 @@ function fftRowContribution(p) {
 }
 
 function fftRowReason(p) {
-    if (!p.hasPairedRow) return "No matching FFT-OFF control row was found.";
-    if (p.confidence === "HIGH") {
-        if (p.pairedOffOutcome === "WIN")
-            return "This cancelled OB became a winner in the FFT-OFF control, so FFT removed a winning trade.";
-        if (FFT_LOSS_OUTCOMES.has(p.pairedOffOutcome))
-            return "This cancelled OB became a loser in the FFT-OFF control, so FFT avoided a losing trade.";
-        return "Paired result was a neutral/breakeven outcome, so it does not move Net R Impact.";
-    }
-    if (p.pairedOffTradeStatus === "filled")
-        return "The control fill timing diverged from the FFT row, so confidence is low.";
-    return "This row is not counted in Net R Impact because the paired result was not a trustworthy filled outcome.";
+    const base = (() => {
+        if (!p.hasPairedRow) return "No matching FFT-OFF control row was found.";
+        if (p.confidence === "HIGH") {
+            if (p.pairedOffOutcome === "WIN")
+                return "This cancelled OB became a winner in the FFT-OFF control, so FFT removed a winning trade.";
+            if (FFT_LOSS_OUTCOMES.has(p.pairedOffOutcome))
+                return "This cancelled OB became a loser in the FFT-OFF control, so FFT avoided a losing trade.";
+            return "Paired result was a neutral/breakeven outcome, so it does not move Net R Impact.";
+        }
+        if (p.pairedOffTradeStatus === "filled")
+            return "The control fill timing diverged from the FFT row, so confidence is low.";
+        return "This row is not counted in Net R Impact because the paired result was not a trustworthy filled outcome.";
+    })();
+    // Surface ambiguous matches (multiple OFF rows shared this OB key) on top of
+    // the base reason, so a possibly-mismatched control result is flagged.
+    return p.isAmbiguous ? `${base} Multiple possible control rows matched this OB.` : base;
 }
 
 const FFT_DRILL = {
