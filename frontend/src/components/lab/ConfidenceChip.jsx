@@ -19,6 +19,7 @@
 import * as React from "react";
 import { Pill } from "@/components/lab/DataTable";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { GlossaryCard } from "@/components/lab/TermTip";
 import { getGlossary } from "@/data/researchGlossary";
 import { cn } from "@/lib/utils";
 
@@ -49,10 +50,8 @@ export function ConfidenceChip({ level, className, side = "top" }) {
     return (
         <Tooltip>
             <TooltipTrigger asChild>{pill}</TooltipTrigger>
-            <TooltipContent side={side} className="max-w-xs whitespace-normal leading-snug">
-                <div className="font-semibold text-[11px] mb-0.5">{g.friendlyName}</div>
-                <div className="text-[10.5px] opacity-90 mb-1">{g.definition}</div>
-                <div className="text-[10px] italic opacity-75">Why it matters: {g.whyItMatters}</div>
+            <TooltipContent side={side} className="whitespace-normal">
+                <GlossaryCard entry={g} />
             </TooltipContent>
         </Tooltip>
     );
