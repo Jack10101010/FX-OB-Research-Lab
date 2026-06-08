@@ -203,18 +203,22 @@ export function ModelAnalysis({
                         label="Trigger Behavior"
                         sub="Ghost outcomes · FFT protection analytics · observational only"
                     />
-                    <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-                        {lifecycleRow && hasGhostData && <GhostOutcomePanel trades={trades} />}
-                        {hasFftCancels && (
+                    {lifecycleRow && hasGhostData && (
+                        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+                            <GhostOutcomePanel trades={trades} />
+                        </div>
+                    )}
+                    {/* FFT Protection (left) + FFT Classification (right), side by side.
+                        Both read the same scenario trades (fftSource). */}
+                    {hasFftCancels && (
+                        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
                             <FftProtectionPanel
                                 trades={fftSource}
                                 offTrades={offTrades || []}
                             />
-                        )}
-                    </div>
-                    {/* Stage 1 FFT breakdown — Overall / Structure / Direction / Session.
-                        Full-width under the protection grid; scenario trades (fftSource). */}
-                    {hasFftCancels && <FftClassificationPanel trades={fftSource} />}
+                            <FftClassificationPanel trades={fftSource} />
+                        </div>
+                    )}
                 </>
             ) : null}
 

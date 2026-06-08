@@ -49,15 +49,15 @@ function StatRow({ label, value, sub, tone = "default" }) {
 
     return (
         <div className="flex items-baseline justify-between gap-2 py-1 border-b border-[hsl(var(--border-soft)/0.18)] last:border-b-0">
-            <span className="text-[10px] font-ui text-[hsl(var(--text-2))] shrink-0">
+            <span className="text-[10.5px] font-ui text-[hsl(var(--text))] shrink-0">
                 {label}
             </span>
             <div className="text-right">
-                <span className={cn("text-[11px] font-num font-semibold tabular-nums", toneClass)}>
+                <span className={cn("text-[11.5px] font-num font-semibold tabular-nums", toneClass)}>
                     {value}
                 </span>
                 {sub && (
-                    <span className="ml-1.5 text-[9px] font-ui text-muted-lab opacity-60">
+                    <span className="ml-1.5 text-[9px] font-ui text-[hsl(var(--text-2))] opacity-90">
                         {sub}
                     </span>
                 )}
@@ -68,7 +68,7 @@ function StatRow({ label, value, sub, tone = "default" }) {
 
 function SectionLabel({ children }) {
     return (
-        <div className="text-[8.5px] font-ui uppercase tracking-[0.12em] text-muted-lab opacity-50 mb-1.5">
+        <div className="text-[9.5px] font-ui uppercase tracking-[0.12em] text-[hsl(var(--text))] opacity-90 mb-1.5">
             {children}
         </div>
     );
@@ -105,7 +105,7 @@ function GhostOutcomeBar({ wins, losses, unfilled, breakevens }) {
                 {segments.map(s => (
                     <div key={s.label} className="flex items-center gap-1">
                         <div className="w-2 h-2 rounded-[1px]" style={{ background: s.color, opacity: s.opacity }} />
-                        <span className="text-[8.5px] font-ui text-muted-lab">{s.label} {s.count}</span>
+                        <span className="text-[9px] font-ui text-[hsl(var(--text-2))]">{s.label} {s.count}</span>
                     </div>
                 ))}
             </div>
@@ -113,109 +113,139 @@ function GhostOutcomeBar({ wins, losses, unfilled, breakevens }) {
     );
 }
 
+// ── shared presentational helpers ─────────────────────────────────────────────
+
+const FFT_TONE_TEXT = {
+    success: "text-[hsl(var(--success))]",
+    danger:  "text-[hsl(var(--danger))]",
+    warning: "text-[hsl(var(--warning))]",
+    accent:  "text-[hsl(var(--accent-primary))]",
+    muted:   "text-[hsl(var(--text-2))]",
+};
+
+// Outcomes that count toward the loss side of net R impact (mirrors the analytics).
+const FFT_LOSS_OUTCOMES = new Set(["LOSS", "NEWS_FLATTEN", "PROTECTION_EXIT"]);
+
+function fftTone(netR) {
+    return netR > 0.005 ? "success" : netR < -0.005 ? "danger" : "muted";
+}
+
+// Verdict hero — the single bottom-line number, stated in plain English.
+function VerdictHero({ netR, verified }) {
+    const tone = fftTone(netR);
+    const word = netR > 0.005 ? "FFT helped" : netR < -0.005 ? "FFT hurt" : "FFT was neutral";
+    const bg = tone === "success" ? "bg-[hsl(var(--success)/0.08)]"
+        : tone === "danger" ? "bg-[hsl(var(--danger)/0.08)]"
+        : "bg-[hsl(var(--panel-2))]";
+    const rLabel = `${netR >= 0 ? "+" : ""}${netR.toFixed(2)}R`;
+    return (
+        <div className={cn("rounded-[3px] px-3 py-2.5 mb-3 flex items-center justify-between gap-3", bg)}>
+            <div>
+                <div className={cn("text-[12px] font-ui font-semibold", FFT_TONE_TEXT[tone])}>{word}</div>
+                <div className="text-[9px] font-ui text-[hsl(var(--text-2))] opacity-90 mt-0.5">
+                    {verified ? "net R impact · paired FFT-OFF control" : "ghost estimate · unverified"}
+                </div>
+            </div>
+            <div className={cn("text-[20px] font-num font-semibold tabular-nums leading-none", FFT_TONE_TEXT[tone])}>
+                {rLabel}
+            </div>
+        </div>
+    );
+}
+
+// Cost / benefit tile.
+function StatTile({ label, value, sub, tone = "muted" }) {
+    return (
+        <div className="rounded-[3px] bg-[hsl(var(--panel-2))] px-2.5 py-2">
+            <div className="text-[9px] font-ui uppercase tracking-[0.08em] text-[hsl(var(--text-2))]">{label}</div>
+            <div className={cn("text-[17px] font-num font-semibold tabular-nums leading-tight mt-0.5", FFT_TONE_TEXT[tone])}>{value}</div>
+            {sub && <div className="text-[9px] font-ui text-[hsl(var(--text-2))] opacity-90 mt-0.5 leading-snug">{sub}</div>}
+        </div>
+    );
+}
+
+// Trust bar — counted (high-confidence) vs excluded (low) across all cancels.
+function TrustBar({ high, low }) {
+    const total = high + low;
+    if (total === 0) return null;
+    const cells = Array.from({ length: total }, (_, i) => i < high);
+    return (
+        <div className="mt-3 mb-1">
+            <div className="flex items-baseline justify-between mb-1.5 gap-2">
+                <span className="text-[10.5px] font-ui text-[hsl(var(--text))]">
+                    Based on <span className="font-semibold text-[hsl(var(--success))]">{high} trustworthy</span> of {total} cancels
+                </span>
+                <span className="text-[9px] font-ui text-[hsl(var(--text-2))] opacity-90 shrink-0">{low} unclear · not counted</span>
+            </div>
+            <div className="flex gap-[3px] h-[8px]">
+                {cells.map((on, i) => (
+                    <div key={i} className="flex-1 rounded-[1px]"
+                        style={{ background: on ? "hsl(var(--success))" : "hsl(var(--border-soft))", opacity: on ? 0.85 : 0.6 }} />
+                ))}
+            </div>
+        </div>
+    );
+}
+
 // ── Paired OFF table ──────────────────────────────────────────────────────────
-// One row per FFT cancel, showing matched OFF outcome + confidence badge.
+// One row per FFT cancel: control outcome + whether it counts toward impact.
 
 function ConfidenceBadge({ level }) {
     return (
         <span className={cn(
-            "text-[7.5px] font-ui uppercase tracking-[0.1em] px-1 py-px rounded-[2px]",
+            "text-[8px] font-ui uppercase tracking-[0.06em] px-1 py-px rounded-[2px]",
             level === "HIGH"
                 ? "bg-[hsl(var(--success)/0.12)] text-[hsl(var(--success))]"
-                : "bg-[hsl(var(--warning)/0.12)] text-[hsl(var(--warning))]"
+                : "bg-[hsl(var(--panel-2))] text-[hsl(var(--text-2))] opacity-80"
         )}>
-            {level}
+            {level === "HIGH" ? "counted" : "excluded"}
         </span>
     );
 }
 
-function PairRow({ pair }) {
-    const outcomeTone = pairedOffOutcomeTone(pair.pairedOffOutcome);
-    const outcomeLabel = pairedOffOutcomeLabel(pair.pairedOffOutcome);
+function OutcomeChip({ pair }) {
+    const tone = pairedOffOutcomeTone(pair.pairedOffOutcome);
+    const label = pair.hasPairedRow ? pairedOffOutcomeLabel(pair.pairedOffOutcome) : "No match";
+    const cls = tone === "success" ? "bg-[hsl(var(--success)/0.12)] text-[hsl(var(--success))]"
+        : tone === "danger" ? "bg-[hsl(var(--danger)/0.12)] text-[hsl(var(--danger))]"
+        : "bg-[hsl(var(--panel-2))] text-[hsl(var(--text-2))]";
+    return <span className={cn("inline-block text-[9px] font-ui px-1.5 py-px rounded-[2px]", cls)}>{label}</span>;
+}
 
-    const toneClass = {
-        success: "text-[hsl(var(--success))]",
-        danger:  "text-[hsl(var(--danger))]",
-        warning: "text-[hsl(var(--warning))]",
-        muted:   "text-[hsl(var(--text-2))]",
-    }[outcomeTone] ?? "text-[hsl(var(--text-2))]";
-
+function CompactPairRow({ pair }) {
+    const counted = pair.confidence === "HIGH";
+    const tone = pairedOffOutcomeTone(pair.pairedOffOutcome);
     const rVal = pair.pairedOffR != null
         ? `${pair.pairedOffR >= 0 ? "+" : ""}${pair.pairedOffR.toFixed(2)}R`
         : "—";
-
-    const maVal = pair.moveAwayPips != null
-        ? `${pair.moveAwayPips.toFixed(1)}p`
-        : "—";
-
-    // Ghost agreement indicator
-    const ghostAgreement =
-        pair.ghostOutcome == null ? null :
-        pair.ghostMatchesOff     ? "✓" : "✗";
-
     return (
-        <div className="flex items-center gap-2 py-1 border-b border-[hsl(var(--border-soft)/0.14)] last:border-b-0 text-[9px] font-ui">
-            {/* OB identity */}
-            <span className="text-muted-lab opacity-60 w-10 shrink-0 tabular-nums">
-                OB {pair.obId}
-            </span>
-            <span className="text-muted-lab opacity-50 w-6 shrink-0 capitalize text-[8px]">
-                {pair.direction === "BULLISH" ? "↑" : pair.direction === "BEARISH" ? "↓" : "?"}
-            </span>
-
-            {/* Paired OFF outcome */}
-            {pair.hasPairedRow ? (
-                <span className={cn("font-semibold w-16 shrink-0 tabular-nums", toneClass)}>
-                    {outcomeLabel}
-                </span>
-            ) : (
-                <span className="w-16 shrink-0 text-muted-lab opacity-40 italic">no match</span>
-            )}
-
-            {/* OFF R */}
-            <span className={cn("w-14 shrink-0 tabular-nums text-right", toneClass)}>
-                {rVal}
-            </span>
-
-            {/* Move-away */}
-            <span className="text-muted-lab opacity-50 w-10 shrink-0 text-right tabular-nums">
-                {maVal}
-            </span>
-
-            {/* Ghost agreement */}
-            {ghostAgreement != null && (
-                <span className={cn(
-                    "w-4 shrink-0 text-center",
-                    ghostAgreement === "✓" ? "text-[hsl(var(--success))] opacity-70" : "text-[hsl(var(--danger))] opacity-70"
-                )}>
-                    {ghostAgreement}
-                </span>
-            )}
-
-            {/* Confidence badge */}
-            <div className="ml-auto shrink-0">
-                <ConfidenceBadge level={pair.confidence} />
-            </div>
+        <div
+            className="grid grid-cols-[2.8rem_1fr_3.4rem_4.4rem] items-center gap-2 py-1.5 border-b border-[hsl(var(--border-soft)/0.14)] last:border-b-0"
+            style={{ opacity: counted ? 1 : 0.5 }}
+        >
+            <span className="text-[10.5px] font-ui text-[hsl(var(--text-2))] tabular-nums">OB {pair.obId}</span>
+            <span><OutcomeChip pair={pair} /></span>
+            <span className={cn("text-[10px] font-num tabular-nums text-right", FFT_TONE_TEXT[tone] ?? FFT_TONE_TEXT.muted)}>{rVal}</span>
+            <span className="text-right"><ConfidenceBadge level={pair.confidence} /></span>
         </div>
     );
 }
 
 function PairedOffTable({ pairs }) {
     if (!pairs?.length) return null;
-
+    // Counted (high-confidence) rows first; display-only ordering.
+    const sorted = [...pairs].sort(
+        (a, b) => (a.confidence === "HIGH" ? 0 : 1) - (b.confidence === "HIGH" ? 0 : 1),
+    );
     return (
-        <div className="mt-1">
-            {/* Column headers */}
-            <div className="flex items-center gap-2 pb-1 mb-0.5 border-b border-[hsl(var(--border-soft)/0.22)] text-[8px] font-ui text-muted-lab opacity-40 uppercase tracking-[0.08em]">
-                <span className="w-10 shrink-0">OB</span>
-                <span className="w-6 shrink-0" />
-                <span className="w-16 shrink-0">OFF out</span>
-                <span className="w-14 shrink-0 text-right">OFF R</span>
-                <span className="w-10 shrink-0 text-right">MA</span>
-                <span className="w-4 shrink-0 text-center" title="Ghost agrees with OFF?">G</span>
-                <span className="ml-auto shrink-0">conf</span>
+        <div className="mt-2">
+            <div className="grid grid-cols-[2.8rem_1fr_3.4rem_4.4rem] items-center gap-2 pb-1 mb-0.5 border-b border-[hsl(var(--border-soft)/0.22)] text-[8.5px] font-ui text-[hsl(var(--text-2))] opacity-90 uppercase tracking-[0.08em]">
+                <span>OB</span>
+                <span>Control outcome</span>
+                <span className="text-right">Control R</span>
+                <span className="text-right">Impact?</span>
             </div>
-            {pairs.map((p, i) => <PairRow key={p.obId + i} pair={p} />)}
+            {sorted.map((p, i) => <CompactPairRow key={p.obId + "-" + i} pair={p} />)}
         </div>
     );
 }
@@ -226,77 +256,67 @@ function PairedSummarySection({ pairedStats }) {
     const {
         highConfCount, lowConfCount,
         confirmedLossesAvoided, confirmedWinsRemoved,
-        confirmedNetRImpact, ghostAccuracyRate,
+        ghostAccuracyRate,
         hasPairedData,
     } = pairedStats;
 
     if (!hasPairedData || pairedStats.fftCancels === 0) return null;
 
-    const netRTone =
-        confirmedNetRImpact > 0.005  ? "success" :
-        confirmedNetRImpact < -0.005 ? "danger"  : "muted";
-
-    const netRLabel = confirmedNetRImpact >= 0
-        ? `+${confirmedNetRImpact.toFixed(2)}R`
-        : `${confirmedNetRImpact.toFixed(2)}R`;
+    // Display-only R split (reads existing pair outputs; no pairing recomputed).
+    let benefitR = 0, costR = 0;
+    for (const p of pairedStats.pairs) {
+        if (p.confidence !== "HIGH" || p.pairedOffR == null) continue;
+        if (p.pairedOffOutcome === "WIN") costR += -p.pairedOffR;
+        else if (FFT_LOSS_OUTCOMES.has(p.pairedOffOutcome)) benefitR += -p.pairedOffR;
+    }
 
     return (
         <>
             <Divider />
-            <div className="flex items-center justify-between mb-2">
-                <SectionLabel>Paired OFF · authoritative</SectionLabel>
-                <div className="flex gap-1">
-                    {highConfCount > 0 && (
-                        <span className="text-[7.5px] font-ui px-1 py-px rounded-[2px] bg-[hsl(var(--success)/0.12)] text-[hsl(var(--success))]">
-                            {highConfCount} HIGH
-                        </span>
-                    )}
-                    {lowConfCount > 0 && (
-                        <span className="text-[7.5px] font-ui px-1 py-px rounded-[2px] bg-[hsl(var(--warning)/0.12)] text-[hsl(var(--warning))]">
-                            {lowConfCount} LOW
-                        </span>
-                    )}
+            <SectionLabel>Paired control · authoritative</SectionLabel>
+
+            {/* Cost vs benefit — the two numbers that net to the verdict */}
+            {highConfCount > 0 && (
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                    <StatTile
+                        label="Losses avoided"
+                        value={String(confirmedLossesAvoided)}
+                        sub={`+${benefitR.toFixed(2)}R saved · benefit`}
+                        tone={confirmedLossesAvoided > 0 ? "success" : "muted"}
+                    />
+                    <StatTile
+                        label="Winners removed"
+                        value={String(confirmedWinsRemoved)}
+                        sub={`${costR.toFixed(2)}R given up · cost`}
+                        tone={confirmedWinsRemoved > 0 ? "danger" : "muted"}
+                    />
                 </div>
-            </div>
+            )}
+
+            <TrustBar high={highConfCount} low={lowConfCount} />
 
             <PairedOffTable pairs={pairedStats.pairs} />
 
-            {/* Aggregate derived metrics — HIGH confidence only */}
-            {highConfCount > 0 && (
-                <div className="mt-2.5 space-y-0">
+            <div className="mt-2 flex gap-1.5 items-start text-[9.5px] font-ui text-[hsl(var(--text-2))] opacity-95 leading-snug">
+                <span className="text-[hsl(var(--accent-primary))] shrink-0">ⓘ</span>
+                <span>Only counted (high-confidence) rows move net R impact. Excluded rows had a missing, invalid, unfilled, or timing-diverged control result.</span>
+            </div>
+
+            {ghostAccuracyRate != null && highConfCount > 0 && (
+                <div className="mt-2">
                     <StatRow
-                        label="Losses avoided"
-                        value={String(confirmedLossesAvoided)}
-                        sub="HIGH conf · OFF was LOSS"
-                        tone={confirmedLossesAvoided > 0 ? "success" : "muted"}
+                        label="Ghost accuracy"
+                        value={`${ghostAccuracyRate.toFixed(0)}%`}
+                        sub="ghost agreed with paired control"
+                        tone={ghostAccuracyRate >= 75 ? "success" : ghostAccuracyRate >= 50 ? "warning" : "danger"}
                     />
-                    <StatRow
-                        label="Wins removed"
-                        value={String(confirmedWinsRemoved)}
-                        sub="HIGH conf · OFF was WIN"
-                        tone={confirmedWinsRemoved > 0 ? "danger" : "muted"}
-                    />
-                    <StatRow
-                        label="Net R impact"
-                        value={netRLabel}
-                        sub="paired OFF R delta · HIGH conf"
-                        tone={netRTone}
-                    />
-                    {ghostAccuracyRate != null && (
-                        <StatRow
-                            label="Ghost accuracy"
-                            value={`${ghostAccuracyRate.toFixed(0)}%`}
-                            sub="vs paired OFF outcome"
-                            tone={ghostAccuracyRate >= 75 ? "success" : ghostAccuracyRate >= 50 ? "warning" : "danger"}
-                        />
-                    )}
                 </div>
             )}
 
             {lowConfCount > 0 && highConfCount === 0 && (
-                <div className="mt-2 text-[9px] font-ui text-muted-lab opacity-55 italic">
-                    All pairs are LOW confidence — OFF rows were invalid, unfilled, or
-                    ghost timing diverged. Ghost metrics are the only signal available.
+                <div className="mt-2 text-[9.5px] font-ui text-[hsl(var(--text-2))] opacity-90 italic">
+                    All cancels are low-confidence — control rows were invalid, unfilled, or
+                    timing-diverged. Only the ghost estimate below is available.
                 </div>
             )}
         </>
@@ -315,7 +335,7 @@ export function FftProtectionPanel({ trades = [], offTrades = [] }) {
 
     const {
         fftCancels,
-        ghostTracked, ghostWins, ghostLosses,
+        ghostWins, ghostLosses,
         ghostUnfilled, ghostBreakevens, ghostNetR, ghostWinRate,
         avgMoveAwayAtCancel, maxMoveAwayAtCancel,
         hasMoveAwayData, hasGhostData,
@@ -345,7 +365,7 @@ export function FftProtectionPanel({ trades = [], offTrades = [] }) {
 
     return (
         <NeonPanel
-            title={<TermTip termKey="fft">FFT Protection</TermTip>}
+            title={<span className="text-[hsl(var(--text))]"><TermTip termKey="fft">FFT Protection</TermTip></span>}
             action={
                 <div className="flex items-center gap-1.5">
                     <Pill tone="warning">{fftCancels} cancelled</Pill>
@@ -357,30 +377,29 @@ export function FftProtectionPanel({ trades = [], offTrades = [] }) {
                 </div>
             }
         >
-            <div className="text-[9.5px] font-ui text-muted-lab opacity-70 mb-3">
-                First Failed Visit · cancel analytics
+            <div className="text-[10px] font-ui text-[hsl(var(--text-2))] mb-3">
+                First failed tag · {fftCancels} setups cancelled before trigger
             </div>
+
+            {/* Verdict hero — paired when trustworthy, else ghost estimate */}
+            {(hasPairedData && pairedStats.hasHighConfPairs)
+                ? <VerdictHero netR={pairedStats.confirmedNetRImpact} verified />
+                : hasGhostData
+                    ? <VerdictHero netR={ghostNetR} verified={false} />
+                    : null}
 
             {/* Unverified notice — shown when no paired OFF run is loaded */}
             {!hasPairedData && hasGhostData && (
                 <div className="mb-3 px-2 py-1.5 border border-dashed border-[hsl(var(--warning)/0.30)] bg-[hsl(var(--warning)/0.05)] text-[8.5px] font-ui text-[hsl(var(--warning)/0.70)] italic leading-snug">
-                    Ghost results are simulated and may diverge from the paired FFT-OFF run.
-                    Load/compare a paired FFT-OFF run for authoritative impact.
+                    No paired FFT-OFF control loaded — the number above is a ghost estimate.
+                    Import a run with its built-in control for authoritative impact.
                 </div>
             )}
 
-            {/* Cancel count */}
-            <StatRow
-                label="FFT cancels"
-                value={String(fftCancels)}
-                sub="setups cancelled pre-trigger"
-                tone="warning"
-            />
-
-            {/* ── Paired OFF section (primary when available) ─────────── */}
+            {/* ── Paired control section (primary when available) ─────── */}
             <PairedSummarySection pairedStats={pairedStats} />
 
-            {/* ── Ghost section (secondary / collapsible when paired available) */}
+            {/* ── Ghost section (secondary / collapsible) ─────────────── */}
             {hasGhostData && (
                 <>
                     <Divider />
@@ -390,7 +409,7 @@ export function FftProtectionPanel({ trades = [], offTrades = [] }) {
                         className="w-full flex items-center justify-between group mb-1 outline-none"
                     >
                         <SectionLabel>
-                            <TermTip termKey="ghost">Ghost sim</TermTip>{hasPairedData ? " · secondary" : ""}
+                            <TermTip termKey="ghost">Ghost sim</TermTip>{hasPairedData ? " · secondary · unverified" : " · unverified"}
                         </SectionLabel>
                         <span className="text-[9px] text-muted-lab opacity-40 group-hover:opacity-70 transition-opacity">
                             {showGhost ? "▾" : "▸"}
@@ -399,13 +418,6 @@ export function FftProtectionPanel({ trades = [], offTrades = [] }) {
 
                     {showGhost && (
                         <>
-                            <StatRow
-                                label="Ghost tracked"
-                                value={`${ghostTracked} / ${fftCancels}`}
-                                sub={`${((ghostTracked / fftCancels) * 100).toFixed(0)}% had ghost sim`}
-                                tone="muted"
-                            />
-
                             <GhostOutcomeBar
                                 wins={ghostWins}
                                 losses={ghostLosses}
@@ -413,63 +425,33 @@ export function FftProtectionPanel({ trades = [], offTrades = [] }) {
                                 breakevens={ghostBreakevens}
                             />
 
-                            <div className="mt-2.5 space-y-0">
-                                <StatRow label="Ghost wins"    value={String(ghostWins)}       tone="success" />
-                                <StatRow label="Ghost losses"  value={String(ghostLosses)}     tone="danger" />
-                                {ghostUnfilled > 0 && (
-                                    <StatRow
-                                        label="Ghost unfilled"
-                                        value={String(ghostUnfilled)}
-                                        sub="never triggered / session filtered"
-                                        tone="muted"
-                                    />
-                                )}
-                                <StatRow
-                                    label="Ghost win rate"
-                                    value={fmtFftPct(ghostWinRate)}
-                                    tone={wrTone}
-                                />
-                                <StatRow
-                                    label="Ghost net R"
-                                    value={fmtFftR(ghostNetR)}
-                                    sub="if none were cancelled"
-                                    tone={ghostNetRTone}
-                                />
-                                <div className="pt-1 text-[8.5px] font-ui text-[hsl(var(--warning)/0.65)] opacity-80 italic">
-                                    {hasPairedData
-                                        ? "Ghost may diverge from paired OFF — verify with table above."
-                                        : "Ghost outcomes are simulated estimates and may not reflect actual behaviour."}
-                                </div>
+                            <div className="grid grid-cols-3 gap-2 mt-2">
+                                <StatTile label="Ghost net R" value={fmtFftR(ghostNetR)} sub="if none cancelled" tone={ghostNetRTone} />
+                                <StatTile label="Wins / losses" value={`${ghostWins} / ${ghostLosses}`} tone="muted" />
+                                <StatTile label="Win rate" value={fmtFftPct(ghostWinRate)} tone={wrTone} />
+                            </div>
+                            <div className="mt-1.5 text-[8.5px] font-ui text-[hsl(var(--warning)/0.65)] opacity-80 italic">
+                                {hasPairedData
+                                    ? "Ghost may diverge from the paired control — trust the table above."
+                                    : "Ghost outcomes are simulated estimates and may not reflect actual behaviour."}
                             </div>
                         </>
-                    )}
-
-                    {!hasGhostData && !hasPairedData && (
-                        <div className="mt-2 text-[9px] font-ui text-muted-lab opacity-55 italic">
-                            No ghost simulation data. Re-run with ghost tracking or load a paired
-                            FFT-OFF run to see hypothetical outcomes.
-                        </div>
                     )}
                 </>
             )}
 
-            {/* Move-away distance */}
+            {/* Move-away distance — condensed footer */}
             {hasMoveAwayData && (
                 <>
                     <Divider />
-                    <SectionLabel>Move-away distance at cancel</SectionLabel>
-                    <StatRow
-                        label="Avg pips past OB edge"
-                        value={fmtFftPips(avgMoveAwayAtCancel)}
-                        sub="pips"
-                        tone="accent"
-                    />
-                    <StatRow
-                        label="Max pips past OB edge"
-                        value={fmtFftPips(maxMoveAwayAtCancel)}
-                        sub="pips"
-                        tone="muted"
-                    />
+                    <div className="flex items-baseline justify-between gap-2">
+                        <SectionLabel>Move-away at cancel</SectionLabel>
+                        <span className="text-[11.5px] font-num tabular-nums text-[hsl(var(--text))]">
+                            {fmtFftPips(avgMoveAwayAtCancel)}<span className="text-[9px] text-[hsl(var(--text-2))] opacity-80 ml-1">avg</span>
+                            <span className="mx-1.5 text-[hsl(var(--text-2))] opacity-40">·</span>
+                            {fmtFftPips(maxMoveAwayAtCancel)}<span className="text-[9px] text-[hsl(var(--text-2))] opacity-80 ml-1">max pips</span>
+                        </span>
+                    </div>
                 </>
             )}
         </NeonPanel>

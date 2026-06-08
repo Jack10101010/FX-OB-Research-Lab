@@ -55,7 +55,7 @@ const SESSION_ORDER = ["London", "London Lull", "New York", "Asia", "Outside"];
 
 // ── layout ───────────────────────────────────────────────────────────────────
 
-const COLS = "minmax(92px,1.3fr) 60px 70px 58px 84px 84px 78px";
+const COLS = "minmax(76px,1.2fr) 52px 62px 46px 70px 70px 64px";
 
 const HEADERS = [
     { label: "", title: null },
@@ -78,7 +78,7 @@ function HeaderRow() {
                     key={h.label || `c${i}`}
                     title={h.title || undefined}
                     className={cn(
-                        "text-[8.5px] font-ui uppercase tracking-[0.1em] text-muted-lab opacity-60",
+                        "text-[9px] font-ui uppercase tracking-[0.08em] text-[hsl(var(--text-2))] opacity-90",
                         i === 0 ? "text-left" : "text-right",
                         h.title && "cursor-help",
                     )}
@@ -92,7 +92,7 @@ function HeaderRow() {
 
 function SectionHead({ children }) {
     return (
-        <div className="text-[8.5px] font-ui uppercase tracking-[0.12em] text-muted-lab opacity-50 px-1 pt-2 pb-0.5">
+        <div className="text-[9.5px] font-ui uppercase tracking-[0.12em] text-[hsl(var(--text))] opacity-90 px-1 pt-2 pb-0.5">
             {children}
         </div>
     );
@@ -123,18 +123,18 @@ function StatRow({ label, stats, strong = false }) {
             style={{ gridTemplateColumns: COLS }}
             title={lowN ? `Low sample (n=${n} < ${SMALL_N}) — interpret with caution.` : undefined}
         >
-            <span className={cn("text-[10px] font-ui text-left", strong ? "text-[hsl(var(--text-1))] font-semibold" : "text-[hsl(var(--text-2))]")}>
+            <span className={cn("text-[10.5px] font-ui text-left", strong ? "text-[hsl(var(--text-1))] font-semibold" : "text-[hsl(var(--text))]")}>
                 {label}
                 {lowN && <span className="ml-1 text-[8px] text-[hsl(var(--warning))]">low n</span>}
             </span>
             <span className={cn(cell, "font-semibold text-[hsl(var(--text-1))]")}>{n}</span>
             <span className={cell}>{hasGhost ? `${stats.ghostWins} / ${stats.ghostLosses}` : dash}</span>
-            <span className={cn(cell, "text-[hsl(var(--text-2))]")}>
+            <span className={cn(cell, "text-[hsl(var(--text))]")}>
                 {empty ? dash : `${stats.ghostTracked}/${n}`}
             </span>
-            <span className={cn(cell, "text-[hsl(var(--text-2))]")}>{hasGhost ? fmtFftR(stats.ghostNetR) : dash}</span>
+            <span className={cn(cell, "text-[hsl(var(--text))]")}>{hasGhost ? fmtFftR(stats.ghostNetR) : dash}</span>
             <span className={cn(cell, "font-semibold", impactTone)}>{hasGhost ? fmtFftR(impact) : dash}</span>
-            <span className={cn(cell, "text-[hsl(var(--text-2))]")}>
+            <span className={cn(cell, "text-[hsl(var(--text))]")}>
                 {stats.hasMoveAwayData ? `${fmtFftPips(stats.avgMoveAwayAtCancel)}p` : dash}
             </span>
         </div>
@@ -168,8 +168,8 @@ export function FftClassificationPanel({ trades = [] }) {
 
     if (overall.fftCancels === 0) {
         return (
-            <NeonPanel title="FFT Classification">
-                <p className="text-[10px] font-ui text-muted-lab opacity-60 italic">
+            <NeonPanel title={<span className="text-[hsl(var(--text))]">FFT Classification</span>}>
+                <p className="text-[10px] font-ui text-[hsl(var(--text-2))] italic">
                     No FFT cancels in this scenario.
                 </p>
             </NeonPanel>
@@ -179,8 +179,8 @@ export function FftClassificationPanel({ trades = [] }) {
     const ghostMissing = !overall.hasGhostData;
 
     return (
-        <NeonPanel title="FFT Classification">
-            <p className="text-[9.5px] font-ui text-[hsl(var(--text-2))] leading-snug mb-2">
+        <NeonPanel title={<span className="text-[hsl(var(--text))]">FFT Classification</span>}>
+            <p className="text-[10px] font-ui text-[hsl(var(--text))] leading-snug mb-2">
                 When does First Failed Tag Cancel help or hurt? Ghost Net R is the hypothetical R of the
                 cancelled setups had FFT not cancelled them (simulated, unverified). FFT Impact = −Ghost Net R:{" "}
                 <span className="text-[hsl(var(--success))]">positive = FFT helped</span>,{" "}
@@ -195,7 +195,7 @@ export function FftClassificationPanel({ trades = [] }) {
             )}
 
             <div className="overflow-x-auto">
-                <div className="min-w-[520px]">
+                <div className="min-w-[440px]">
                     <HeaderRow />
 
                     <SectionHead>Overall</SectionHead>
