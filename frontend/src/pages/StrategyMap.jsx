@@ -152,7 +152,7 @@ function saveStrategyMapUi(settings) {
 }
 
 export default function StrategyMap() {
-    const { CANDLES, OB_BOXES, OB_BOXES_ENRICHED, TRADE_MARKERS, RUNS, activeRunId, getRunData, ACTIVE_TRADE_VARIANT, candleLoadStatus, SCENARIO } = useDataset();
+    const { CANDLES, OB_BOXES, OB_BOXES_ENRICHED, TRADE_MARKERS, RUNS, activeRunId, getRunData, ACTIVE_TRADE_VARIANT, candleLoadStatus, SCENARIO, FOCUSED_FFT_EVENT, clearFocusedFftEvent } = useDataset();
     const [initialUi] = useState(loadStrategyMapUi);
     const resizeRef = useRef(null);
     const candleLoadAttemptedRef = useRef(new Set());
@@ -379,6 +379,46 @@ export default function StrategyMap() {
     const chartTradeMarkers = isDirectionalMode ? directionalTrades : resolvedScenario.tradeMarkers;
     const rrTools = isDirectionalMode ? [] : resolvedScenario.rrTools;
     const triggeredEdgeOverlays = isDirectionalMode ? [] : resolvedScenario.triggeredEdgeOverlays;
+
+    // ── One-shot FFT focus handoff from RunDetail FFT drilldown ──────────────
+    // Selects the matching triggered-edge overlay and enables FFT Debug. Waits for
+    // overlays to resolve before clearing the event, so it survives candle/scenario
+    // loading. Normalizes ob_id / direction (LONG↔bull) / entry_model_key (case-insensitive).
+    useEffect(() => {
+        const evt = FOCUSED_FFT_EVENT;
+        if (!evt || evt.runId !== runId) return;
+        const overlays = triggeredEdgeOverlays || [];
+        if (!overlays.length) return; // not built yet — keep event, retry on next render
+        const normObId = (v) => {
+            const s = String(v ?? "").trim();
+            const m = s.match(/\d+/);
+            return m ? String(Number(m[0])) : s.toLowerCase();
+        };
+        const normDir = (v) => {
+            const s = String(v ?? "").trim().toLowerCase();
+            if (s.startsWith("bull") || s === "long" || s === "buy") return "bull";
+            if (s.startsWith("bear") || s === "short" || s === "sell") return "bear";
+            return s;
+        };
+        const normKey = (v) => String(v ?? "").trim().toLowerCase();
+        const wantOb = normObId(evt.obId);
+        const wantDir = normDir(evt.direction);
+        const wantKey = normKey(evt.entryModelKey);
+        const match =
+            overlays.find((o) =>
+                normObId(o.obId) === wantOb &&
+                normDir(o.direction) === wantDir &&
+                normKey(o.entryModelKey) === wantKey,
+            ) ||
+            overlays.find((o) => normObId(o.obId) === wantOb && normDir(o.direction) === wantDir) ||
+            null;
+        if (match) {
+            setSelectedOverlay(match);
+            setSelectedTradeId(null);
+            setShowFftDebug(true);
+        }
+        clearFocusedFftEvent(); // overlays are ready — clear whether matched or not
+    }, [FOCUSED_FFT_EVENT, runId, triggeredEdgeOverlays]); // eslint-disable-line react-hooks/exhaustive-deps
     const runStats = isDirectionalMode
         ? buildRunStats(
             directionalTrades,

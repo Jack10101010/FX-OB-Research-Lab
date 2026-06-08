@@ -5070,7 +5070,7 @@ function buildClassificationBreakdown(trades) {
 
 // ── Classification Tab V2 — shared presentational helpers ─────────────────────
 
-const CLASS_BREAKDOWN_GRID = "minmax(120px,auto) repeat(4,minmax(52px,1fr))";
+const CLASS_BREAKDOWN_GRID = "minmax(180px,1.6fr) repeat(4,minmax(52px,1fr))";
 
 function ClassSectionHeader({ label }) {
     return (
@@ -5155,7 +5155,7 @@ function ResearchSignalRow({ signal }) {
 // ClassBreakdownTable (used by Fill State / Session / Entry Model) stays untouched.
 // 7 grid columns: Variant + Trades / WR / Net R / Avg R / Max DD / PF. Confidence is a
 // chip inside the label cell (no extra column). Read-only; consumes buildModelFamilyComparison.
-const MODEL_FAMILY_GRID = "minmax(120px,auto) repeat(6,minmax(46px,1fr))";
+const MODEL_FAMILY_GRID = "minmax(180px,1.6fr) repeat(6,minmax(46px,1fr))";
 
 function fmtPF(v) {
     if (v == null) return "∞";                       // null = no losses
@@ -5218,7 +5218,7 @@ function ModelFamilyTable({ rows, families, winnerRowId }) {
     return (
         <div>
             <div
-                className="grid items-center gap-x-3 px-2 mb-1 text-[10.5px] font-ui uppercase tracking-wider text-[hsl(var(--muted))]"
+                className="grid items-center gap-x-3 px-2 mb-1 border border-transparent text-[10.5px] font-ui uppercase tracking-wider text-[hsl(var(--muted))]"
                 style={{ gridTemplateColumns: MODEL_FAMILY_GRID }}
             >
                 <span>Variant</span>
@@ -5286,12 +5286,12 @@ function ModelFamilyTable({ rows, families, winnerRowId }) {
 function ClassBreakdownTable({ rows, extraCol }) {
     if (!rows || !rows.length) return null;
     const gridCols = extraCol
-        ? "minmax(120px,auto) repeat(5,minmax(52px,1fr))"
+        ? "minmax(180px,1.6fr) repeat(5,minmax(52px,1fr))"
         : CLASS_BREAKDOWN_GRID;
     return (
         <div>
             <div
-                className="grid items-center gap-x-3 px-2 mb-1 text-[10.5px] font-ui uppercase tracking-wider text-[hsl(var(--muted))]"
+                className="grid items-center gap-x-3 px-2 mb-1 border border-transparent text-[10.5px] font-ui uppercase tracking-wider text-[hsl(var(--muted))]"
                 style={{ gridTemplateColumns: gridCols }}
             >
                 <span>Tag</span>
