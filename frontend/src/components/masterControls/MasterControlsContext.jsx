@@ -21,6 +21,7 @@ import { buildRunConfigLoadReport, getDefaultBuilderConfig, buildBacktesterConfi
 import { startSidecarRun, getSidecarRun, getSidecarRunBundle, cancelSidecarRun } from "@/data/sidecarClient";
 import { ingestRunBundle } from "@/data/importer";
 import { isCostOnlyDirty, rescoreCostsForBundle, buildRescoredBundle } from "./costRescore";
+import { isFilterOnlyDirty, buildTradePredicate, buildFilteredBundle } from "./tradeFilter";
 
 // Signature of a cost-only rescore (run id + cost values). Used so a manually-cleared
 // temporary bundle isn't immediately rebuilt until the cost config or run changes.
@@ -30,6 +31,26 @@ function lensSignature(runId, cfg) {
         spread: cfg?.spread ?? null,
         slippage: cfg?.slippage ?? null,
         commission: cfg?.commission ?? null,
+    });
+}
+
+// Signature of a filter-only change (run id + the filter-relevant config fields). Used
+// so a manually-cleared temporary filter bundle isn't rebuilt until the filter config
+// or run changes (Phase 10A).
+function filterSignature(runId, cfg) {
+    return JSON.stringify({
+        runId: runId || null,
+        sessionFilter: cfg?.sessionFilter ?? null,
+        london: cfg?.london ?? null,
+        lull: cfg?.lull ?? null,
+        newYork: cfg?.newYork ?? null,
+        asia: cfg?.asia ?? null,
+        outside: cfg?.outside ?? null,
+        bosLong: cfg?.bosLong ?? null,
+        bosShort: cfg?.bosShort ?? null,
+        chochLong: cfg?.chochLong ?? null,
+        chochShort: cfg?.chochShort ?? null,
+        direction: cfg?.direction ?? null,
     });
 }
 
@@ -94,6 +115,10 @@ const MasterControlsContext = createContext({
     previewLens:             null,
     applyLocalRescoreLens:   () => {},
     exitPreviewLens:         () => {},
+    // Temporary instant-filter bundle — Phase 10A (session / structure / direction)
+    localFilterBundle:       null,
+    clearLocalFilterBundle:  () => {},
+    applyLocalFilterLens:    () => {},
 });
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
@@ -132,6 +157,13 @@ export function MasterControlsProvider({ children }) {
     // the same bundle until the cost config / run changes.
     const lensSuppressRef = useRef("");
 
+    // ── Phase 10A — temporary instant-filter bundle ─────────────────────────
+    // A bundle-shaped object built by filtering the active run's trades (session /
+    // structure / direction). Held in context ONLY — never stored / persisted /
+    // promoted. Applied to the app via the same Preview Lens as the cost rescore.
+    const [localFilterBundle, setLocalFilterBundle] = useState(null);
+    const filterSuppressRef = useRef("");
+
     // Reset draft AND preview whenever the active run changes
     useEffect(() => {
         setDraftConfigState(null);
@@ -139,6 +171,8 @@ export function MasterControlsProvider({ children }) {
         importJobRef.current = null;
         setLocalRescoreBundle(null);
         lensSuppressRef.current = "";
+        setLocalFilterBundle(null);
+        filterSuppressRef.current = "";
     }, [activeRunId]);
 
     // ── activeConfig — derived from the active run bundle ───────────────────
@@ -258,6 +292,8 @@ export function MasterControlsProvider({ children }) {
         setDraftConfigState(null);
         setLocalRescoreBundle(null);
         lensSuppressRef.current = "";
+        setLocalFilterBundle(null);
+        filterSuppressRef.current = "";
     }, []);
 
     // ── Preview actions — Phase 4A ────────────────────────────────────────────
@@ -311,6 +347,7 @@ export function MasterControlsProvider({ children }) {
         importJobRef.current = null;
         setPreview(EMPTY_PREVIEW);
         setLocalRescoreBundle(null);
+        setLocalFilterBundle(null);
     }, []);
 
     /**
@@ -321,6 +358,16 @@ export function MasterControlsProvider({ children }) {
     const clearLocalRescoreBundle = useCallback(() => {
         lensSuppressRef.current = lensSignature(activeRunId, effectiveConfig);
         setLocalRescoreBundle(null);
+    }, [activeRunId, effectiveConfig]);
+
+    /**
+     * Manually dismiss the temporary instant-filter bundle (drawer "Clear" button).
+     * Suppresses the auto-build effect for this exact filter so it does not pop back
+     * immediately; suppression lifts when the filter config or active run changes.
+     */
+    const clearLocalFilterBundle = useCallback(() => {
+        filterSuppressRef.current = filterSignature(activeRunId, effectiveConfig);
+        setLocalFilterBundle(null);
     }, [activeRunId, effectiveConfig]);
 
     /**
@@ -364,6 +411,7 @@ export function MasterControlsProvider({ children }) {
         importJobRef.current = null;
         setPreview(EMPTY_PREVIEW);
         setLocalRescoreBundle(null);
+        setLocalFilterBundle(null);
     }, [preview.status, preview.job]);
 
     // ── Polling effect — drives "queued"/"running" → "completed"/"failed" ────
@@ -513,6 +561,38 @@ export function MasterControlsProvider({ children }) {
         }));
     }, [activeRunId, dirtyFieldList, effectiveConfig, highestRerunTier]); // eslint-disable-line react-hooks/exhaustive-deps
 
+    // ── Phase 10A build effect — keep localFilterBundle in sync with the filter draft ─
+    // Builds the temporary filtered bundle when the dirty set is filter-only (session /
+    // structure / direction, all instant_filter tier) AND the resulting predicate is an
+    // actual restriction; clears it otherwise. Sole writer of localFilterBundle (plus the
+    // explicit resets above). Filters the RAW run bundle (lens-immune via getRawRunData)
+    // so it never compounds with an already-applied lens. No store writes, no persistence.
+    useEffect(() => {
+        const filterOnly = highestRerunTier === "instant_filter" && isFilterOnlyDirty(dirtyFieldList);
+        if (!filterOnly || !effectiveConfig || !activeRunId) {
+            filterSuppressRef.current = "";
+            setLocalFilterBundle(null);
+            return;
+        }
+        // Respect a manual dismissal of this exact filter.
+        if (filterSuppressRef.current === filterSignature(activeRunId, effectiveConfig)) return;
+
+        const predicate = buildTradePredicate(effectiveConfig);
+        if (!predicate.active) {
+            setLocalFilterBundle(null);
+            return;
+        }
+        const sourceBundle = getRawRunData(activeRunId);
+        if (!sourceBundle) {
+            setLocalFilterBundle(null);
+            return;
+        }
+        setLocalFilterBundle(buildFilteredBundle(sourceBundle, predicate, {
+            dirtyFields: dirtyFieldList,
+            rerunTier: highestRerunTier,
+        }));
+    }, [activeRunId, dirtyFieldList, effectiveConfig, highestRerunTier]); // eslint-disable-line react-hooks/exhaustive-deps
+
     // ── Phase 8B — apply the temporary bundle to the whole app via the store lens ─
     // `previewLens` is read live from the store. The context re-renders on every store
     // notify() (it subscribes through useDataset above), so this read stays fresh.
@@ -553,6 +633,39 @@ export function MasterControlsProvider({ children }) {
             });
         }
     }, [localRescoreBundle, activeRunId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // ── Phase 10A — apply the temporary filtered bundle via the same store lens ─
+    /** Apply the temporary instant-filter bundle as a read-only Preview Lens. */
+    const applyLocalFilterLens = useCallback(() => {
+        if (!localFilterBundle || !activeRunId) return;
+        setPreviewLens({
+            sourceRunId: activeRunId,
+            bundle: localFilterBundle,
+            mode: "instant_filter",
+            label: "Filter preview",
+        });
+    }, [localFilterBundle, activeRunId]);
+
+    // Keep OUR filter lens in sync with localFilterBundle, mirroring the cost lens above.
+    // Only manages the "instant_filter" lens — never touches a lens of another mode, so a
+    // cost lens and a filter lens can't fight: each sync clears/repushes only its own kind,
+    // and applying one mode overwrites the single store lens cleanly.
+    useEffect(() => {
+        const lens = getPreviewLens();
+        if (!lens || lens.mode !== "instant_filter") return;
+        if (!localFilterBundle || !activeRunId || lens.sourceRunId !== activeRunId) {
+            clearPreviewLens();
+            return;
+        }
+        if (lens.bundle !== localFilterBundle) {
+            setPreviewLens({
+                sourceRunId: activeRunId,
+                bundle: localFilterBundle,
+                mode: "instant_filter",
+                label: "Filter preview",
+            });
+        }
+    }, [localFilterBundle, activeRunId]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // ── Context value ────────────────────────────────────────────────────────
 
@@ -595,6 +708,10 @@ export function MasterControlsProvider({ children }) {
         previewLens,
         applyLocalRescoreLens,
         exitPreviewLens,
+        // Instant filter lens — Phase 10A
+        localFilterBundle,
+        clearLocalFilterBundle,
+        applyLocalFilterLens,
     }), [
         isOpen,
         openMasterControls,
@@ -625,6 +742,9 @@ export function MasterControlsProvider({ children }) {
         previewLens,
         applyLocalRescoreLens,
         exitPreviewLens,
+        localFilterBundle,
+        clearLocalFilterBundle,
+        applyLocalFilterLens,
     ]);
 
     return (

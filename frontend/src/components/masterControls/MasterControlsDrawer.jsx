@@ -11,6 +11,7 @@ import {
     fmtPreviewDd,
 } from "./previewMetrics";
 import { isCostOnlyDirty, rescoreCostsForBundle } from "./costRescore";
+import { isFilterOnlyDirty } from "./tradeFilter";
 
 // ─── Registry summary (static — computed once at module load) ────────────────
 
@@ -68,7 +69,40 @@ const SAFE_EDITABLE_SUBSET = new Set([
     "newYork",
     "asia",
     "outside",
+    // Structure-direction chips — Tier 1 / instant_filter (Phase 10A)
+    "bosLong",
+    "bosShort",
+    "chochLong",
+    "chochShort",
+    // NOTE: `direction` (inputType "select") is intentionally NOT here — the safe
+    // editable path renders only boolean/number controls. The filter predicate still
+    // honours it; exposing it needs a select control (follow-up).
 ]);
+
+// Readable labels for structure-direction tags in the filter summary.
+const STRUCT_DIR_LABELS = {
+    bos_long:    "BOS Long",
+    bos_short:   "BOS Short",
+    choch_long:  "CHoCH Long",
+    choch_short: "CHoCH Short",
+};
+
+/** One-line human summary of a filtered bundle's `meta.filters`. */
+function describeFilters(filters) {
+    if (!filters || typeof filters !== "object") return "Filtered subset";
+    const parts = [];
+    if (Array.isArray(filters.sessions) && filters.sessions.length) {
+        parts.push(`Sessions: ${filters.sessions.join(", ")}`);
+    }
+    if (Array.isArray(filters.structureDirs) && filters.structureDirs.length) {
+        parts.push(`Structure: ${filters.structureDirs.map((k) => STRUCT_DIR_LABELS[k] || k).join(", ")}`);
+    }
+    const dir = filters.direction;
+    if (dir && dir !== "both") {
+        parts.push(`Direction: ${dir === "long" ? "Long only" : dir === "short" ? "Short only" : dir}`);
+    }
+    return parts.length ? parts.join(" · ") : "No active restriction";
+}
 
 // ─── Config view helpers ──────────────────────────────────────────────────────
 
@@ -129,6 +163,7 @@ export function MasterControlsDrawer() {
         promotePreview,
         localRescoreBundle, clearLocalRescoreBundle,
         previewLens, applyLocalRescoreLens, exitPreviewLens,
+        localFilterBundle, clearLocalFilterBundle, applyLocalFilterLens,
     } = useMasterControls();
     const { activeRunId } = useDataset();
 
@@ -174,6 +209,16 @@ export function MasterControlsDrawer() {
         });
         return { active: extractPreviewMetrics(bundle), result };
     }, [costOnly, effectiveConfig, activeRunId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Phase 10A — instant filter (session / structure / direction). Shows a local
+    // block when the ONLY dirty fields are filter keys and a temp filtered bundle exists.
+    const filterOnly = highestRerunTier === "instant_filter" && isFilterOnlyDirty(dirtyFieldList);
+    // Is OUR instant-filter lens currently applied to this run?
+    const filterLensActive = !!(
+        previewLens?.active
+        && previewLens.mode === "instant_filter"
+        && previewLens.sourceRunId === activeRunId
+    );
 
     return (
         <>
@@ -463,6 +508,64 @@ export function MasterControlsDrawer() {
                                 <p className="mt-0.5 text-[9px] text-muted-lab/70 leading-snug">
                                     {lensActive
                                         ? "The page is viewing temporary cost-rescored data — not saved."
+                                        : "Not saved · Not applied to page yet"}
+                                </p>
+                            </div>
+                        )}
+
+                        {/* Instant filter — Phase 10A. A temporary bundle whose trades are a
+                            subset (session / structure / direction). Same Preview Lens pipeline
+                            as the cost rescore; filter-only, never composed with cost. */}
+                        {filterOnly && localFilterBundle && (
+                            <div className={`mt-2 rounded border px-3 py-2 ${
+                                filterLensActive
+                                    ? "border-[hsl(var(--warning)/0.5)] bg-[hsl(var(--warning)/0.10)]"
+                                    : "border-[hsl(var(--warning)/0.28)] bg-[hsl(var(--warning)/0.05)]"
+                            }`}>
+                                <div className="flex items-center justify-between gap-2">
+                                    <span className="text-[10px] font-semibold uppercase tracking-widest text-[hsl(var(--warning))]">
+                                        {filterLensActive ? "Applied to page preview" : "Temporary filter bundle ready"}
+                                    </span>
+                                    <div className="flex items-center gap-1.5">
+                                        {filterLensActive ? (
+                                            <button
+                                                type="button"
+                                                onClick={exitPreviewLens}
+                                                className="text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--warning)/0.45)] text-[hsl(var(--warning))] hover:bg-[hsl(var(--warning)/0.15)] transition-colors"
+                                            >
+                                                Exit page preview
+                                            </button>
+                                        ) : (
+                                            <>
+                                                <button
+                                                    type="button"
+                                                    onClick={applyLocalFilterLens}
+                                                    className="text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.12)] text-[hsl(var(--warning))] font-medium hover:bg-[hsl(var(--warning)/0.2)] transition-colors"
+                                                >
+                                                    Apply to page
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={clearLocalFilterBundle}
+                                                    className="text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--border-soft))] text-muted-lab hover:text-white transition-colors"
+                                                >
+                                                    Clear
+                                                </button>
+                                            </>
+                                        )}
+                                    </div>
+                                </div>
+                                <p className="mt-1 text-[10px] font-num tabular-nums text-[hsl(var(--text-1))]">
+                                    {fmtPreviewInt(localFilterBundle?.meta?.beforeCount)}
+                                    <span className="text-muted-lab"> → </span>
+                                    {fmtPreviewInt(localFilterBundle?.meta?.afterCount)} trades
+                                </p>
+                                <p className="mt-0.5 text-[9px] text-muted-lab leading-snug">
+                                    {describeFilters(localFilterBundle?.meta?.filters)}
+                                </p>
+                                <p className="mt-0.5 text-[9px] text-muted-lab/70 leading-snug">
+                                    {filterLensActive
+                                        ? "The page is viewing temporary filtered data — not saved."
                                         : "Not saved · Not applied to page yet"}
                                 </p>
                             </div>
