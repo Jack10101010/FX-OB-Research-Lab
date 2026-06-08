@@ -23,7 +23,7 @@ import {
     normalizeFundingChallengeSettings,
     simulateFundingChallenge,
 } from "@/components/lab/account/fundingChallenge";
-import { FolderKanban, Map as MapIcon, GitCompareArrows, TrendingUp, Hash, Activity, Target, AlertTriangle, ShieldCheck, Edit3, X as XIcon, SlidersHorizontal, ChevronDown, Eye } from "lucide-react";
+import { FolderKanban, Map as MapIcon, GitCompareArrows, TrendingUp, Hash, Activity, Target, AlertTriangle, ShieldCheck, Edit3, X as XIcon, SlidersHorizontal, ChevronDown, Eye, Crown } from "lucide-react";
 import { BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import {
     isPerformanceTrade,
@@ -55,7 +55,8 @@ import { TermTip, TooltipProvider } from "@/components/lab/TermTip";
 // `Tooltip` is already imported from recharts above — alias the Radix UI tooltip.
 import { Tooltip as UiTooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { ConfidenceChip } from "@/components/lab/ConfidenceChip";
-import { buildEnabledVariantBreakdown } from "@/data/enabledVariantBreakdown";
+import { buildModelFamilyComparison } from "@/data/modelFamily";
+import { computeExplainableWinner } from "@/data/compareWinner";
 
 // RB-8a/8b: account config lives in the global store (state.accountSettings),
 // read/written via useResultsLens (lens.accountSettings / lens.setAccountSettings)
@@ -1043,11 +1044,25 @@ export default function RunDetail() {
         () => buildResearchSignals(fillStateBreakdown, sessionBreakdown, classificationBreakdown.entry_model),
         [fillStateBreakdown, sessionBreakdown, classificationBreakdown],
     );
-    // Enabled Variant Comparison — all entry-model variants in the bundle (read-only,
-    // independent of the selected scenario). Empty unless the bundle exposes 2+ variants.
-    const enabledVariantBreakdown = React.useMemo(
-        () => buildEnabledVariantBreakdown(runData),
+    // Model Family Comparison — every model variant in the bundle across all families
+    // (baseline / entry-model / directional / protection / fft-control), read-only and
+    // independent of the selected scenario. Empty unless the bundle exposes 2+ variants.
+    const modelFamily = React.useMemo(
+        () => buildModelFamilyComparison(runData),
         [runData],
+    );
+    // Shared explainable-winner (same helper as Comparison Lab). Map each row to the
+    // winner's metric shape; `validation` is absent on model-family rows so the helper
+    // skips it and ranks over Net R / WR / PF / Max DD. Directional hint, not a verdict.
+    const modelFamilyWinner = React.useMemo(
+        () => computeExplainableWinner(modelFamily.rows.map((r) => ({
+            netR: r.netR,
+            winRate: r.winRate,
+            pf: r.profitFactor,
+            maxDd: r.maxDdR,
+            trades: r.count,
+        }))),
+        [modelFamily],
     );
 
     const filteredLedgerRows = React.useMemo(() => {
@@ -3231,26 +3246,18 @@ export default function RunDetail() {
                                     </div>
                                 )}
 
-                                {/* E — Enabled Variant Comparison: all entry-model variants in the
-                                    bundle (read-only; independent of the selected scenario). Only
-                                    shown when the bundle exposes 2+ enabled variants. */}
-                                {enabledVariantBreakdown.length >= 2 && (
+                                {/* E — Model Family Comparison: every model variant in the bundle
+                                    across all families (baseline / entry-model / directional /
+                                    protection / fft-control). Read-only; independent of the selected
+                                    scenario. Shown when the bundle exposes 2+ variants. */}
+                                {modelFamily.rows.length >= 2 && (
                                     <div>
-                                        <ClassSectionHeader label="Enabled Variant Comparison" />
-                                        <ClassBreakdownTable
-                                            rows={enabledVariantBreakdown.map((row) => ({
-                                                label: row.label,
-                                                tooltipKey: row.tag,
-                                                stats: row,
-                                            }))}
-                                            extraCol={{
-                                                header: <TermTip termKey="max_drawdown">Max DD</TermTip>,
-                                                render: (r) => {
-                                                    const dd = r.stats?.maxDdR;
-                                                    if (dd == null) return <span className="text-muted-lab">—</span>;
-                                                    return <span className={dd < 0 ? "text-[hsl(var(--danger))]" : "text-muted-lab"}>{formatSignedR(dd)}</span>;
-                                                },
-                                            }}
+                                        <ClassSectionHeader label="Model Family Comparison" />
+                                        <ModelFamilyComparisonBody
+                                            rows={modelFamily.rows}
+                                            families={modelFamily.families}
+                                            warnings={modelFamily.comparability.warnings}
+                                            winner={modelFamilyWinner}
                                         />
                                     </div>
                                 )}
@@ -5106,6 +5113,132 @@ function ResearchSignalRow({ signal }) {
                 <span className="text-muted-lab">
                     {" "}· n={s.count} · {s.winRate != null ? `${Math.round(s.winRate * 100)}%` : "—"} · {formatSignedR(s.netR, 1)}
                 </span>
+            </div>
+        </div>
+    );
+}
+
+// ── Model Family Comparison (MODEL-FAMILY-COMPARISON-2F) ─────────────────────────
+// Dedicated, compact table for the all-family model comparison so the shared
+// ClassBreakdownTable (used by Fill State / Session / Entry Model) stays untouched.
+// 7 grid columns: Variant + Trades / WR / Net R / Avg R / Max DD / PF. Confidence is a
+// chip inside the label cell (no extra column). Read-only; consumes buildModelFamilyComparison.
+const MODEL_FAMILY_GRID = "minmax(120px,auto) repeat(6,minmax(46px,1fr))";
+
+function fmtPF(v) {
+    if (v == null) return "∞";                       // null = no losses
+    if (!Number.isFinite(Number(v))) return "—";
+    return Number(v).toFixed(2);
+}
+
+// Comparability banner + winner line + the table. Winner is a directional hint
+// (same shared helper as Comparison Lab), not a verdict.
+function ModelFamilyComparisonBody({ rows, families, warnings, winner }) {
+    const winnerRowId = (winner && rows[winner.winnerIdx]) ? rows[winner.winnerIdx].rowId : null;
+    const winnerRow = winnerRowId ? rows.find((r) => r.rowId === winnerRowId) : null;
+    return (
+        <div className="flex flex-col gap-2">
+            {Array.isArray(warnings) && warnings.length > 0 && (
+                <div className="flex flex-col gap-1">
+                    {warnings.map((w) => (
+                        <div
+                            key={w.code}
+                            className={`flex items-start gap-2 border clip-bevel-sm px-2.5 py-1.5 text-[10.5px] leading-relaxed ${
+                                w.severity === "warn"
+                                    ? "border-[hsl(var(--warning)/0.35)] bg-[hsl(var(--warning)/0.06)] text-[hsl(var(--text-2))]"
+                                    : "border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.5)] text-muted-lab"
+                            }`}
+                        >
+                            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 opacity-70" />
+                            <span>{w.message}</span>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {winnerRow && (
+                <div className="flex items-center flex-wrap gap-x-2 gap-y-0.5 text-[10.5px] font-ui">
+                    <Crown className="w-3.5 h-3.5 text-[hsl(var(--accent-primary))]" />
+                    <span className="text-[hsl(var(--text))]">Best: {winnerRow.label}</span>
+                    <span className="text-muted-lab">
+                        {winner.winnerWinCount > 0
+                            ? `leads ${winner.winnerLabels.join(", ")}`
+                            : "tie-broken by Net R — no single metric leader"}
+                    </span>
+                    {winner.smallSample && (
+                        <span className="text-[hsl(var(--warning))]">· small sample, directional</span>
+                    )}
+                    <span className="text-[hsl(var(--text-3))]">· hint, not a verdict</span>
+                </div>
+            )}
+
+            <ModelFamilyTable rows={rows} families={families} winnerRowId={winnerRowId} />
+        </div>
+    );
+}
+
+function ModelFamilyTable({ rows, families, winnerRowId }) {
+    if (!rows || !rows.length) return null;
+    // Family eyebrows only when 2+ families are present (single-family runs stay flat).
+    const showFamilies = (families || []).filter((f) => f.present).length >= 2;
+    const rTone = (v) => (v > 0 ? "text-[hsl(var(--success))]" : v < 0 ? "text-[hsl(var(--danger))]" : "text-muted-lab");
+    let lastFamily = null;
+    return (
+        <div>
+            <div
+                className="grid items-center gap-x-3 px-2 mb-1 text-[9px] font-ui uppercase tracking-wider text-[hsl(var(--text-3)/0.7)]"
+                style={{ gridTemplateColumns: MODEL_FAMILY_GRID }}
+            >
+                <span>Variant</span>
+                <span className="text-right"><TermTip termKey="stat_n">Trades</TermTip></span>
+                <span className="text-right"><TermTip termKey="stat_wr">WR</TermTip></span>
+                <span className="text-right"><TermTip termKey="stat_net_r">Net R</TermTip></span>
+                <span className="text-right"><TermTip termKey="stat_avg_r">Avg R</TermTip></span>
+                <span className="text-right"><TermTip termKey="max_drawdown">Max DD</TermTip></span>
+                <span className="text-right"><TermTip termKey="stat_pf">PF</TermTip></span>
+            </div>
+            <div className="space-y-1">
+                {rows.map((row, i) => {
+                    const showHeader = showFamilies && row.familyKey !== lastFamily;
+                    lastFamily = row.familyKey;
+                    const isWinner = row.rowId === winnerRowId;
+                    const wrTone = row.winRate == null
+                        ? "text-muted-lab"
+                        : row.winRate >= 0.5 ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]";
+                    return (
+                        <React.Fragment key={row.rowId || `${row.label}-${i}`}>
+                            {showHeader && (
+                                <div className="px-2 pt-1 text-[9px] font-ui uppercase tracking-wider text-[hsl(var(--text-3))]">
+                                    {row.familyLabel}
+                                </div>
+                            )}
+                            <div
+                                className={`grid items-center gap-x-3 px-2 py-1.5 border clip-bevel-sm ${
+                                    isWinner
+                                        ? "bg-[hsl(var(--accent-primary)/0.07)] border-[hsl(var(--accent-primary)/0.4)]"
+                                        : "bg-[hsl(var(--panel-2)/0.35)] border-[hsl(var(--border-soft))]"
+                                }`}
+                                style={{ gridTemplateColumns: MODEL_FAMILY_GRID }}
+                            >
+                                <div className="min-w-0 flex items-center gap-1.5 text-[11px] text-[hsl(var(--text-2))]">
+                                    {isWinner && <Crown className="w-3 h-3 shrink-0 text-[hsl(var(--accent-primary))]" />}
+                                    <span className="truncate"><TermTip termKey={row.tooltipKey}>{row.label}</TermTip></span>
+                                    <ConfidenceChip level={row.confidence?.level} />
+                                </div>
+                                <span className="font-num tabular-nums text-right text-[11px] text-[hsl(var(--text-2))]">{row.count}</span>
+                                <span className={`font-num tabular-nums text-right text-[11px] ${wrTone}`}>
+                                    {row.winRate != null ? `${Math.round(row.winRate * 100)}%` : "—"}
+                                </span>
+                                <span className={`font-num tabular-nums text-right text-[11px] ${rTone(row.netR)}`}>{formatSignedR(row.netR)}</span>
+                                <span className={`font-num tabular-nums text-right text-[11px] ${rTone(row.avgR)}`}>{formatSignedR(row.avgR, 2)}</span>
+                                <span className={`font-num tabular-nums text-right text-[11px] ${row.maxDdR != null && row.maxDdR < 0 ? "text-[hsl(var(--danger))]" : "text-muted-lab"}`}>
+                                    {row.maxDdR == null ? "—" : formatSignedR(row.maxDdR)}
+                                </span>
+                                <span className="font-num tabular-nums text-right text-[11px] text-[hsl(var(--text-2))]">{fmtPF(row.profitFactor)}</span>
+                            </div>
+                        </React.Fragment>
+                    );
+                })}
             </div>
         </div>
     );
