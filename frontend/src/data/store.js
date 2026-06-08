@@ -202,6 +202,11 @@ let state = {
     autoReloadCompletedAt: null,
     autoReloadFailedCount: 0,
     candleLoadStatus: {},
+    // Preview Lens (Phase 8A) — ephemeral, read-only overlay. NEVER persisted,
+    // NEVER added to `runs` / RUNS. Lets a temporary bundle stand in for one real
+    // run at read time. Shape when active:
+    //   { active, sourceRunId, bundle, mode, label, appliedAt }
+    previewLens: null,
 };
 
 const listeners = new Set();
@@ -894,7 +899,9 @@ function chooseProjectActiveRun(project) {
 
 function buildDerived() {
     const effectiveActiveRunId = ensureActiveRunId();
-    const active = effectiveActiveRunId ? state.runs[effectiveActiveRunId] : null;
+    // Active-run views read through the lens overlay; the RUNS list below still
+    // iterates state.runs, so the lens never appears as a separate run.
+    const active = effectiveActiveRunId ? bundleFor(effectiveActiveRunId) : null;
     const activeProject = state.activeProjectId ? state.projects[state.activeProjectId] || null : null;
     const activeVariantData = active ? variantDataFor(active) : null;
     const activeSummary = active
@@ -999,9 +1006,69 @@ export function getDataset() {
     return buildDerived();
 }
 
+// ── Preview Lens (Phase 8A) — ephemeral, read-only overlay ──────────────────
+// `bundleFor` lets a temporary bundle stand in for ONE real run at read time,
+// WITHOUT ever entering state.runs / RUNS / persistence. Keyed on sourceRunId so
+// it only overlays the run it derives from; cleared whenever the real active run
+// changes (see the run-switch setters below).
+
+/** Resolve the bundle for a runId, applying the preview lens when it matches. */
+function bundleFor(runId) {
+    const lens = state.previewLens;
+    if (lens?.active && runId && runId === lens.sourceRunId && lens.bundle) {
+        return lens.bundle;
+    }
+    return state.runs[runId] || null;
+}
+
+/** Lens-aware bundle accessor — pages should use this. */
 export function getRunData(runId) {
     if (!runId) return null;
+    return bundleFor(runId);
+}
+
+/** Raw bundle accessor — ALWAYS the real stored run, never the lens. */
+export function getRawRunData(runId) {
+    if (!runId) return null;
     return state.runs[runId] || null;
+}
+
+/** Current preview lens (or null). Read-only. */
+export function getPreviewLens() {
+    return state.previewLens;
+}
+
+/**
+ * Apply an ephemeral preview lens. The lens bundle stands in for `sourceRunId`
+ * at read time only — it is NEVER added to state.runs, RUNS, or persistence.
+ */
+export function setPreviewLens(lens) {
+    if (!lens || typeof lens !== "object") return;
+    if (!lens.sourceRunId || !lens.bundle || typeof lens.bundle !== "object") return;
+    state = {
+        ...state,
+        previewLens: {
+            active: true,
+            sourceRunId: lens.sourceRunId,
+            bundle: lens.bundle,
+            mode: lens.mode || "local_rescore",
+            label: lens.label || "",
+            appliedAt: lens.appliedAt || new Date().toISOString(),
+        },
+    };
+    notify();
+}
+
+/** Remove the preview lens WITHOUT notifying — for callers that notify once at the end. */
+function clearPreviewLensSilently() {
+    if (state.previewLens) state = { ...state, previewLens: null };
+}
+
+/** Remove the preview lens and re-render. No-op when none is active. */
+export function clearPreviewLens() {
+    if (!state.previewLens) return;
+    state = { ...state, previewLens: null };
+    notify();
 }
 
 /**
@@ -1018,7 +1085,7 @@ export function getRunData(runId) {
  */
 export function getTradeUniverse(runId = null, scenarioOverride = null) {
     const effectiveRunId = runId || state.activeRunId || null;
-    const bundle = effectiveRunId ? state.runs[effectiveRunId] || null : null;
+    const bundle = effectiveRunId ? bundleFor(effectiveRunId) : null;
     const scenario = scenarioOverride || state.scenario || null;
     const fallbackVariant = state.selectedTradeVariant
         || bundle?.primaryVariant
@@ -1247,6 +1314,7 @@ export function importRunsBackup(payload, options = {}) {
 }
 
 export function setActiveRunId(runId) {
+    clearPreviewLensSilently(); // a real run switch drops any temporary lens
     const nextRun = runId ? state.runs[runId] : null;
     const selectedTradeVariant = nextRun?.primaryVariant || null;
     state = {
@@ -1269,6 +1337,7 @@ export function setActiveRunId(runId) {
 }
 
 export function setActiveProjectId(projectId) {
+    clearPreviewLensSilently();
     const nextId = projectId && state.projects[projectId] ? projectId : null;
     const nextProject = nextId ? state.projects[nextId] : null;
     const projectRun = chooseProjectActiveRun(nextProject);
@@ -1300,6 +1369,7 @@ export function setActiveProjectId(projectId) {
 export function setProjectActiveRun(projectId, runId) {
     if (!projectId || !state.projects[projectId]) return;
     if (!runId || !state.runs[runId]) return;
+    clearPreviewLensSilently();
     const currentProject = state.projects[projectId];
     const nextProject = { ...currentProject, activeRunId: runId, updatedAt: new Date().toISOString() };
     state = {
@@ -1603,6 +1673,7 @@ export function setAccountSettings(patch) {
  * @param {string|null} runId
  */
 export function setScenarioRun(runId) {
+    clearPreviewLensSilently();
     const nextRun = runId ? state.runs[runId] : null;
     const selectedTradeVariant = nextRun?.primaryVariant || null;
     state = {
@@ -1624,6 +1695,7 @@ export function setScenarioRun(runId) {
 
 export function addRunBundle(bundle) {
     if (!bundle?.id) return;
+    clearPreviewLensSilently(); // a newly added real run must not be overlaid by a stale lens
     const normalizedBundle = normalizeIncomingRunBundle(bundle);
     const id = normalizedBundle.id;
     const candles = Array.isArray(normalizedBundle.candles) ? normalizedBundle.candles : [];
