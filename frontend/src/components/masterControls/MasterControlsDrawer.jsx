@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from "react";
 import { X, SlidersHorizontal, Database, Layers, Zap, GitBranch, Activity, Settings2, Play, AlertTriangle } from "lucide-react";
 import { useMasterControls } from "./MasterControlsContext";
 import { CONFIG_REGISTRY, getVisibleEntries, RERUN_TIER_META } from "@/data/configRegistry";
-import { useDataset, getRunData } from "@/data/store";
+import { useDataset, getRawRunData } from "@/data/store";
 import {
     extractPreviewMetrics,
     fmtPreviewInt,
@@ -128,6 +128,7 @@ export function MasterControlsDrawer() {
         preview, startPreview, cancelPreview, clearPreview, previewIsStale,
         promotePreview,
         localRescoreBundle, clearLocalRescoreBundle,
+        previewLens, applyLocalRescoreLens, exitPreviewLens,
     } = useMasterControls();
     const { activeRunId } = useDataset();
 
@@ -138,11 +139,11 @@ export function MasterControlsDrawer() {
     // Grouped registry entries — recomputed only when the advanced toggle changes
     const groupedConfig = useMemo(() => buildGroupedConfig(showAdvanced), [showAdvanced]);
 
-    // Active-run metrics for the Phase 5 compare — READ-ONLY. getRunData returns
-    // the full active bundle (same ingestRunBundle shape as preview.bundle), so the
-    // SAME extractor yields apples-to-apples metrics. Recomputed when the run changes.
+    // Active-run metrics for the Phase 5 compare — READ-ONLY. Uses getRawRunData (NOT the
+    // lens-aware getRunData) so the "Active" column always reflects the REAL run even when a
+    // Preview Lens is applied — otherwise Active would collapse into the rescored numbers.
     const activeMetrics = useMemo(
-        () => extractPreviewMetrics(getRunData(activeRunId)),
+        () => extractPreviewMetrics(getRawRunData(activeRunId)),
         [activeRunId], // eslint-disable-line react-hooks/exhaustive-deps
     );
 
@@ -156,9 +157,15 @@ export function MasterControlsDrawer() {
     // Phase 7A — instant cost-only rescore (frontend, no backend, no store).
     // Shows a local panel when the ONLY dirty fields are spread/slippage/commission.
     const costOnly = highestRerunTier === "frontend_rescore" && isCostOnlyDirty(dirtyFieldList);
+    // Is OUR cost-rescore lens currently applied to this run? (Phase 8B)
+    const lensActive = !!(
+        previewLens?.active
+        && previewLens.mode === "local_rescore"
+        && previewLens.sourceRunId === activeRunId
+    );
     const costRescore = useMemo(() => {
         if (!costOnly || !effectiveConfig || !activeRunId) return null;
-        const bundle = getRunData(activeRunId);
+        const bundle = getRawRunData(activeRunId);
         if (!bundle) return null;
         const result = rescoreCostsForBundle(bundle, {
             spread: effectiveConfig.spread,
@@ -410,22 +417,49 @@ export function MasterControlsDrawer() {
                             from the cost rescore, held in context only (NOT stored, NOT applied
                             to any page yet). Bridge toward the Phase 8 Preview Lens. */}
                         {localRescoreBundle && (
-                            <div className="mt-2 rounded border border-[hsl(196_80%_55%/0.25)] bg-[hsl(196_80%_55%/0.04)] px-3 py-2">
+                            <div className={`mt-2 rounded border px-3 py-2 ${
+                                lensActive
+                                    ? "border-[hsl(196_80%_55%/0.5)] bg-[hsl(196_80%_55%/0.10)]"
+                                    : "border-[hsl(196_80%_55%/0.25)] bg-[hsl(196_80%_55%/0.04)]"
+                            }`}>
                                 <div className="flex items-center justify-between gap-2">
                                     <span className="text-[10px] font-semibold uppercase tracking-widest text-[hsl(196_80%_65%)]">
-                                        Temporary rescored bundle ready
+                                        {lensActive ? "Applied to page preview" : "Temporary rescored bundle ready"}
                                     </span>
-                                    <button
-                                        type="button"
-                                        onClick={clearLocalRescoreBundle}
-                                        className="text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--border-soft))] text-muted-lab hover:text-white transition-colors"
-                                    >
-                                        Clear
-                                    </button>
+                                    <div className="flex items-center gap-1.5">
+                                        {lensActive ? (
+                                            <button
+                                                type="button"
+                                                onClick={exitPreviewLens}
+                                                className="text-[9px] px-1.5 py-0.5 rounded border border-[hsl(196_80%_55%/0.4)] text-[hsl(196_80%_65%)] hover:bg-[hsl(196_80%_55%/0.15)] transition-colors"
+                                            >
+                                                Exit page preview
+                                            </button>
+                                        ) : (
+                                            <>
+                                                <button
+                                                    type="button"
+                                                    onClick={applyLocalRescoreLens}
+                                                    className="text-[9px] px-1.5 py-0.5 rounded border border-[hsl(196_80%_55%/0.4)] bg-[hsl(196_80%_55%/0.12)] text-[hsl(196_80%_65%)] font-medium hover:bg-[hsl(196_80%_55%/0.2)] transition-colors"
+                                                >
+                                                    Apply to page
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={clearLocalRescoreBundle}
+                                                    className="text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--border-soft))] text-muted-lab hover:text-white transition-colors"
+                                                >
+                                                    Clear
+                                                </button>
+                                            </>
+                                        )}
+                                    </div>
                                 </div>
                                 <p className="mt-1 text-[9px] text-muted-lab leading-snug">Scope: primary variant only</p>
                                 <p className="mt-0.5 text-[9px] text-muted-lab/70 leading-snug">
-                                    Not saved · Not applied to page yet
+                                    {lensActive
+                                        ? "The page is viewing temporary cost-rescored data — not saved."
+                                        : "Not saved · Not applied to page yet"}
                                 </p>
                             </div>
                         )}
@@ -997,7 +1031,7 @@ function CompareRow({ label, active, preview, delta, tone }) {
  * pre-extracted metric objects and never mutates the store or promotes.
  *
  * Both metric objects come from the same extractPreviewMetrics() — active from
- * getRunData(activeRunId), preview from preview.bundle — guaranteeing the columns
+ * getRawRunData(activeRunId), preview from preview.bundle — guaranteeing the columns
  * are computed identically (raw-R basis, no Results-Basis lens).
  */
 function PreviewCompare({ activeMetrics, previewBundle }) {

@@ -7,7 +7,15 @@ import React, {
     useEffect,
     useRef,
 } from "react";
-import { useDataset, getRunData, addRunBundle } from "@/data/store";
+import {
+    useDataset,
+    getRunData,
+    getRawRunData,
+    addRunBundle,
+    setPreviewLens,
+    clearPreviewLens,
+    getPreviewLens,
+} from "@/data/store";
 import { REGISTRY_BY_KEY, highestRerunTierForKeys } from "@/data/configRegistry";
 import { buildRunConfigLoadReport, getDefaultBuilderConfig, buildBacktesterConfig } from "@/data/configTranslator";
 import { startSidecarRun, getSidecarRun, getSidecarRunBundle, cancelSidecarRun } from "@/data/sidecarClient";
@@ -82,6 +90,10 @@ const MasterControlsContext = createContext({
     // Temporary cost-rescored bundle — Phase 7B (context-only; not stored/applied)
     localRescoreBundle:      null,
     clearLocalRescoreBundle: () => {},
+    // Preview lens — Phase 8B (apply the temporary bundle to the whole app, read-only)
+    previewLens:             null,
+    applyLocalRescoreLens:   () => {},
+    exitPreviewLens:         () => {},
 });
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
@@ -501,6 +513,47 @@ export function MasterControlsProvider({ children }) {
         }));
     }, [activeRunId, dirtyFieldList, effectiveConfig, highestRerunTier]); // eslint-disable-line react-hooks/exhaustive-deps
 
+    // ── Phase 8B — apply the temporary bundle to the whole app via the store lens ─
+    // `previewLens` is read live from the store. The context re-renders on every store
+    // notify() (it subscribes through useDataset above), so this read stays fresh.
+    const previewLens = getPreviewLens();
+
+    /** Apply the temporary cost-rescored bundle as a read-only Preview Lens. */
+    const applyLocalRescoreLens = useCallback(() => {
+        if (!localRescoreBundle || !activeRunId) return;
+        setPreviewLens({
+            sourceRunId: activeRunId,
+            bundle: localRescoreBundle,
+            mode: "local_rescore",
+            label: "Cost rescore preview",
+        });
+    }, [localRescoreBundle, activeRunId]);
+
+    /** Exit the Preview Lens. Leaves draft + localRescoreBundle intact. */
+    const exitPreviewLens = useCallback(() => {
+        clearPreviewLens();
+    }, []);
+
+    // Keep OUR lens in sync with localRescoreBundle: re-push when the bundle changes, and
+    // exit when the rescore goes away (non-cost-dirty / unavailable / reset / run switch).
+    // Only manages the "local_rescore" lens; never touches a lens of another mode.
+    useEffect(() => {
+        const lens = getPreviewLens();
+        if (!lens || lens.mode !== "local_rescore") return;
+        if (!localRescoreBundle || !activeRunId || lens.sourceRunId !== activeRunId) {
+            clearPreviewLens();
+            return;
+        }
+        if (lens.bundle !== localRescoreBundle) {
+            setPreviewLens({
+                sourceRunId: activeRunId,
+                bundle: localRescoreBundle,
+                mode: "local_rescore",
+                label: "Cost rescore preview",
+            });
+        }
+    }, [localRescoreBundle, activeRunId]); // eslint-disable-line react-hooks/exhaustive-deps
+
     // ── Context value ────────────────────────────────────────────────────────
 
     const value = useMemo(() => ({
@@ -538,6 +591,10 @@ export function MasterControlsProvider({ children }) {
         // Temporary rescored bundle — Phase 7B
         localRescoreBundle,
         clearLocalRescoreBundle,
+        // Preview lens — Phase 8B
+        previewLens,
+        applyLocalRescoreLens,
+        exitPreviewLens,
     }), [
         isOpen,
         openMasterControls,
@@ -565,6 +622,9 @@ export function MasterControlsProvider({ children }) {
         promotePreview,
         localRescoreBundle,
         clearLocalRescoreBundle,
+        previewLens,
+        applyLocalRescoreLens,
+        exitPreviewLens,
     ]);
 
     return (
