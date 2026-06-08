@@ -218,7 +218,7 @@ export function ModelAnalysis({
                                 trades={fftSource}
                                 offTrades={offTrades || []}
                             />
-                            <FftClassificationPanel trades={fftSource} />
+                            <FftClassificationPanel trades={fftSource} offTrades={offTrades || []} />
                         </div>
                     )}
                 </>
