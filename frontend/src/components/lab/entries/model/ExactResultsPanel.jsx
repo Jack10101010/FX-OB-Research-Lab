@@ -50,10 +50,11 @@ function RowTags({ row, showProfileBadge }) {
     if (row.isBaseline)                tags.push(<Pill key="bl"   tone="secondary">REF MODEL</Pill>);
     // V2: use per-family flags. isBestNetRInFamily = best Net R within family.
     if (row.isBestNetRInFamily)        tags.push(<Pill key="nr"   tone="success">BEST R</Pill>);
-    if (row.isBestExpectancyInFamily)  tags.push(<Pill key="exp"  tone="primary">BEST EXP</Pill>);
+    // "Best" quality tags read as green (winning configuration); selection stays blue/cyan.
+    if (row.isBestExpectancyInFamily)  tags.push(<Pill key="exp"  tone="success">BEST EXP</Pill>);
     if (row.isLowestDDInFamily)        tags.push(<Pill key="dd"   tone="muted">LOW DD</Pill>);
     // BEST FILL is within-family only — fill% denominators differ across families.
-    if (row.isBestFillPctInFamily)     tags.push(<Pill key="fill" tone="secondary">BEST FILL</Pill>);
+    if (row.isBestFillPctInFamily)     tags.push(<Pill key="fill" tone="success">BEST FILL</Pill>);
     if (row.isBestPFInFamily)          tags.push(<Pill key="pf"   tone="success">BEST PF</Pill>);
     if (!row.exact && !row.isBaseline) tags.push(<Pill key="pend" tone="warning">PENDING</Pill>);
     const conf = sampleConfidence(row.fills);
@@ -102,29 +103,37 @@ function gridTemplate(colVis, hasTrigEdge = false) {
         + (colVis.triggeredEdge && hasTrigEdge ? " 62px 68px 72px 64px" : "");
 }
 
-// Full-width detail line shown under a triggered-edge row when the "FFT Impact"
-// toggle is on and the row has auto-control paired data. Readable, color-coded,
-// not a new column — spans the table width and wraps.
+// Compact KPI chip used by the FFT research sub-row. Text stays at 12px (readable).
+function FftChip({ className, children }) {
+    return (
+        <span className={cn(
+            "inline-flex items-center px-2 py-0.5 rounded-[3px] text-[12px] font-ui leading-none tabular-nums",
+            className,
+        )}>
+            {children}
+        </span>
+    );
+}
+
+// Full-width research-overlay line shown under a triggered-edge row when the
+// "FFT Impact" toggle is on and the row has auto-control paired data. Amber/orange
+// theme marks it as a secondary modification layer (not a primary result row).
+// Presentation only — values come straight from fftByMode.
 function FftImpactSubRow({ data }) {
     const { fftCancels, netRImpact, winnersRemoved, lossesAvoided, lowConf } = data;
-    const netTone =
-        netRImpact > 0.005  ? "text-[hsl(var(--success))]" :
-        netRImpact < -0.005 ? "text-[hsl(var(--danger))]"  :
-        "text-[hsl(var(--text-2))]";
     const netLabel = `${netRImpact >= 0 ? "+" : ""}${netRImpact.toFixed(2)}R`;
-    const Sep = () => <span className="text-[hsl(var(--text-2))] opacity-40 px-0.5">·</span>;
+    const impactCls =
+        netRImpact > 0.005  ? "bg-[hsl(var(--success)/0.14)] text-[hsl(var(--success))]" :
+        netRImpact < -0.005 ? "bg-[hsl(var(--danger)/0.14)] text-[hsl(var(--danger))]"  :
+        "bg-[hsl(var(--panel-2))] text-[hsl(var(--text-2))]";
     return (
-        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 px-3 py-2 border-b border-[hsl(var(--border-soft)/0.3)] bg-[hsl(var(--accent-primary)/0.06)] shadow-[inset_3px_0_0_hsl(var(--accent-primary)/0.6)] text-[12px] font-ui">
-            <span className="font-semibold uppercase tracking-[0.12em] text-[hsl(var(--accent-primary))] mr-1">FFT</span>
-            <span className="text-[hsl(var(--text))]"><span className="font-semibold tabular-nums">{fftCancels}</span> cancels</span>
-            <Sep />
-            <span className="text-[hsl(var(--text))]">net <span className={cn("font-semibold tabular-nums", netTone)}>{netLabel}</span></span>
-            <Sep />
-            <span className="text-[hsl(var(--text))]">cost <span className="font-semibold tabular-nums text-[hsl(var(--danger))]">{winnersRemoved}</span> winner{winnersRemoved === 1 ? "" : "s"} removed</span>
-            <Sep />
-            <span className="text-[hsl(var(--text))]">benefit <span className="font-semibold tabular-nums text-[hsl(var(--success))]">{lossesAvoided}</span> loss{lossesAvoided === 1 ? "" : "es"} avoided</span>
-            <Sep />
-            <span className="text-[hsl(var(--warning))]"><span className="font-semibold tabular-nums">{lowConf}</span> unknown/low-conf</span>
+        <div className="flex flex-wrap items-center gap-1.5 px-3 py-1.5 border-b border-[hsl(var(--border-soft)/0.3)] bg-[hsl(var(--warning)/0.05)] shadow-[inset_3px_0_0_hsl(var(--warning)/0.55)]">
+            <FftChip className="bg-[hsl(var(--warning)/0.16)] text-[hsl(var(--warning))] font-semibold uppercase tracking-[0.1em]">FFT</FftChip>
+            <FftChip className="bg-[hsl(var(--panel-2))] text-[hsl(var(--text))]"><span className="font-semibold mr-1">{fftCancels}</span>Cancels</FftChip>
+            <FftChip className={cn("font-semibold", impactCls)}>{netLabel} Impact</FftChip>
+            <FftChip className="bg-[hsl(var(--danger)/0.14)] text-[hsl(var(--danger))]">Cost:<span className="font-semibold ml-1">{winnersRemoved}</span></FftChip>
+            <FftChip className="bg-[hsl(var(--success)/0.14)] text-[hsl(var(--success))]">Benefit:<span className="font-semibold ml-1">{lossesAvoided}</span></FftChip>
+            <FftChip className="bg-[hsl(var(--warning)/0.14)] text-[hsl(var(--warning))]">Unknown:<span className="font-semibold ml-1">{lowConf}</span></FftChip>
         </div>
     );
 }
