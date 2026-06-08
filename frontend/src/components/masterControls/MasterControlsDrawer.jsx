@@ -1042,6 +1042,10 @@ function PreviewCompare({ activeMetrics, previewBundle }) {
             <p className="mt-2 pt-1.5 border-t border-[hsl(var(--border-soft))] text-[9px] text-muted-lab leading-snug">
                 Δ = preview − active (raw-R basis). Decision aid only — nothing is saved until Save As Run.
             </p>
+            <p className="mt-1 text-[9px] text-muted-lab/70 leading-snug">
+                Comparison uses primary-variant raw R for both columns so Active and Preview stay
+                apples-to-apples — these may differ from the page&apos;s selected scenario / Trade Sanity view.
+            </p>
         </div>
     );
 }
@@ -1107,6 +1111,11 @@ function CostRescorePanel({ data }) {
 
             <p className="mt-2 pt-1.5 border-t border-[hsl(var(--border-soft))] text-[9px] text-muted-lab leading-snug">
                 Local cost-only rescore. No backend run. Win rate &amp; trades are unchanged by cost.
+            </p>
+            <p className="mt-1 text-[9px] text-muted-lab/70 leading-snug">
+                Active baseline uses the run&apos;s primary variant
+                {a.variant ? ` (${a.variant})` : ""}, raw R, and all rows. It may differ from the
+                page&apos;s selected scenario / Trade Sanity view.
             </p>
         </div>
     );
