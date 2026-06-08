@@ -14,7 +14,21 @@
 import React from "react";
 import { useDataset } from "@/data/store";
 import { buildTradesByObId, deriveOBStatus } from "@/data/obLifecycle";
-import { deriveRetests, DEFAULT_RETEST_CONFIG } from "@/data/obRetest";
+import { deriveRetests, summarizeRetestEvents, DEFAULT_RETEST_CONFIG } from "@/data/obRetest";
+
+// Synthesize per-OB rows from events when the ob_retest_summary.csv sidecar is
+// absent — lets summarizeRetestEvents derive obsRetested even without it.
+function synthPerOBFromEvents(events) {
+    const byOb = new Map();
+    for (const e of events) {
+        const k = String(e.obId);
+        if (!byOb.has(k)) byOb.set(k, { obId: e.obId, touchCount: 1, retestCount: 0 });
+        const rec = byOb.get(k);
+        rec.retestCount += 1;
+        rec.touchCount += 1;
+    }
+    return [...byOb.values()];
+}
 
 // Status enum drives the gate order in RetestLabTab.
 export const RETEST_STATUS = {
@@ -42,6 +56,10 @@ export function useRetestData({ orderBlocks = [], trades = [], activeRun = null,
     }, []);
 
     const mayHaveCandles = runMayHaveCandles(activeRun);
+    // Backend-preferred (Phase 2.4): when the imported run carries ob_retests.csv,
+    // use it verbatim — no candle load, no derivation. Presence (an array, even
+    // empty) = backend mode; absence (null/undefined) = frontend derivation.
+    const hasBackend = Array.isArray(activeRun?.obRetests);
 
     // Lazy candle load — only when the tab is enabled and the run plausibly has candles.
     const loadToken = React.useRef(0);
@@ -77,16 +95,17 @@ export function useRetestData({ orderBlocks = [], trades = [], activeRun = null,
         setLoadState("idle");
         setError("");
         loadToken.current += 1;
-        if (enabled && activeRunId && mayHaveCandles) {
+        if (enabled && activeRunId && mayHaveCandles && !hasBackend) {
             doLoad();
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [activeRunId, enabled, mayHaveCandles]);
+    }, [activeRunId, enabled, mayHaveCandles, hasBackend]);
 
     // Derive retests (memoized). Only meaningful once candles are ready.
     const tradesByObId = React.useMemo(() => buildTradesByObId(trades || []), [trades]);
 
     const derived = React.useMemo(() => {
+        if (hasBackend) return null; // backend-preferred → no derivation
         if (loadState !== "ready" || !candles || !candles.length) return null;
         return deriveRetests({
             orderBlocks,
@@ -96,11 +115,27 @@ export function useRetestData({ orderBlocks = [], trades = [], activeRun = null,
             deriveStatus: deriveOBStatus,
         });
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [loadState, candles, orderBlocks, tradesByObId, config]);
+    }, [hasBackend, loadState, candles, orderBlocks, tradesByObId, config]);
 
-    // Resolve the public status enum.
+    // Backend-verified result: built from imported ob_retests.csv (+ optional
+    // ob_retest_summary.csv) via the SAME summarizer → identical cards/breakdowns.
+    const backendResult = React.useMemo(() => {
+        if (!hasBackend) return null;
+        const events = activeRun.obRetests || [];
+        const perOB = Array.isArray(activeRun.obRetestSummary) && activeRun.obRetestSummary.length
+            ? activeRun.obRetestSummary
+            : synthPerOBFromEvents(events);
+        const obsTotal = Array.isArray(activeRun.orderBlocks) ? activeRun.orderBlocks.length : perOB.length;
+        const summary = summarizeRetestEvents(events, perOB, obsTotal);
+        return { events, perOB, summary, meta: { dataBasis: "backend", candleCount: null, config: null } };
+    }, [hasBackend, activeRun]);
+
+    const result = hasBackend ? backendResult : derived;
+
+    // Resolve the public status enum. Backend mode is READY immediately (no candles).
     let status;
     if (!activeRunId) status = RETEST_STATUS.NO_RUN;
+    else if (hasBackend) status = RETEST_STATUS.READY;
     else if (!mayHaveCandles) status = RETEST_STATUS.NO_CANDLES;
     else if (loadState === "failed") status = RETEST_STATUS.FAILED;
     else if (loadState === "ready" && derived) status = RETEST_STATUS.READY;
@@ -108,12 +143,13 @@ export function useRetestData({ orderBlocks = [], trades = [], activeRun = null,
 
     return {
         status,
+        source: hasBackend ? "backend" : "frontend",
         error,
-        candleCount: derived?.meta?.candleCount ?? (candles?.length || 0),
-        events: derived?.events || [],
-        perOB: derived?.perOB || [],
-        summary: derived?.summary || null,
-        meta: derived?.meta || null,
+        candleCount: result?.meta?.candleCount ?? (candles?.length || 0),
+        events: result?.events || [],
+        perOB: result?.perOB || [],
+        summary: result?.summary || null,
+        meta: result?.meta || null,
         config,
         setConfig,
         retryLoad: doLoad,

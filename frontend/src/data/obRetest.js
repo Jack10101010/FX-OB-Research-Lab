@@ -353,7 +353,7 @@ export function deriveRetests({ orderBlocks = [], tradesByObId = null, candles =
         perOB.push(perRow);
     }
 
-    const summary = buildSummary(events, perOB, orderBlocks.length);
+    const summary = summarizeRetestEvents(events, perOB, orderBlocks.length);
     const t1 = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
     const meta = {
         candleCount: col.n,
@@ -365,7 +365,12 @@ export function deriveRetests({ orderBlocks = [], tradesByObId = null, candles =
     return { events, perOB, summary, meta };
 }
 
-function buildSummary(events, perOB, obsTotal) {
+// Build the run-level summary from retest events + per-OB aggregates. Exported so
+// the backend-preferred path (Phase 2.4) can reuse the EXACT same rate/breakdown
+// logic on imported backend events — guaranteeing identical cards/metrics whether
+// the data is frontend-derived or backend-verified. perOB carries touch/retest
+// counts; when unavailable they are derived from the events themselves.
+export function summarizeRetestEvents(events = [], perOB = [], obsTotal = 0) {
     const obsWithFirstTouch = perOB.filter((p) => p.touchCount > 0).length;
     const obsRetested = perOB.filter((p) => p.retestCount > 0).length;
     const totalRetests = events.length;

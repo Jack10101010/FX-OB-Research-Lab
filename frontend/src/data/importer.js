@@ -280,6 +280,58 @@ export function parseOrderBlocksCSV(text) {
     });
 }
 
+// ── OB Retest backend artifacts (Phase 2.4) ─────────────────────────────────────
+// Backend ob_retests.csv is authoritative when present. Parse its snake_case rows
+// into the EXACT camelCase event shape obRetest.js emits, so every downstream view
+// (cards / breakdowns / table) consumes backend and derived events identically.
+// Normalizations: direction bullish/bearish → bull/bear; numeric & boolean coercion.
+function obRetestDirection(v) {
+    return String(v || "").toLowerCase().includes("bear") ? "bear" : "bull";
+}
+
+export function parseObRetestsCSV(text) {
+    const { rows } = parseCSV(text);
+    return rows.map((r) => ({
+        obId: pick(r, "ob_id", "obId"),
+        direction: obRetestDirection(pick(r, "direction")),
+        structure: String(pick(r, "structure", "structure_tag") || ""),
+        detectionTime: numOrNull(pick(r, "detection_time", "detectionTime")),
+        firstTouchTime: numOrNull(pick(r, "first_touch_time", "firstTouchTime")),
+        firstFillTime: numOrNull(pick(r, "first_fill_time", "firstFillTime")),
+        firstTouchOutcome: String(pick(r, "first_touch_outcome", "firstTouchOutcome") || ""),
+        firstTouchWasTraded: boolOrNull(pick(r, "first_touch_was_traded", "firstTouchWasTraded")) ?? false,
+        retestIndex: numOrNull(pick(r, "retest_index", "retestIndex")),
+        retestTime: numOrNull(pick(r, "retest_time", "retestTime")),
+        retestCandleIndex: numOrNull(pick(r, "retest_candle_index", "retestCandleIndex")),
+        retestType: String(pick(r, "retest_type", "retestType") || ""),
+        entryPenetrationPct: numOrNull(pick(r, "entry_penetration_pct", "entryPenetrationPct")),
+        maxPenetrationPct: numOrNull(pick(r, "max_penetration_pct", "maxPenetrationPct")),
+        reactionMaxPips: numOrNull(pick(r, "reaction_max_pips", "reactionMaxPips")),
+        reactionMet: boolOrNull(pick(r, "reaction_met", "reactionMet")) ?? false,
+        outcome: String(pick(r, "outcome") || ""),
+        failureMode: String(pick(r, "failure_mode", "failureMode") || "none"),
+        candlesToFailure: numOrNull(pick(r, "candles_to_failure", "candlesToFailure")),
+        session: String(pick(r, "session") || ""),
+        minutesSinceFirstTouch: numOrNull(pick(r, "minutes_since_first_touch", "minutesSinceFirstTouch")),
+    }));
+}
+
+// Per-OB aggregate sidecar → perOB shape consumed by summarizeRetestEvents
+// (touchCount / retestCount drive obsWithFirstTouch / obsRetested).
+export function parseObRetestSummaryCSV(text) {
+    const { rows } = parseCSV(text);
+    return rows.map((r) => ({
+        obId: pick(r, "ob_id", "obId"),
+        direction: obRetestDirection(pick(r, "direction")),
+        structure: String(pick(r, "structure", "structure_tag") || ""),
+        touchCount: numOrNull(pick(r, "ob_touch_count", "touchCount")) ?? 0,
+        retestCount: numOrNull(pick(r, "retest_count", "retestCount")) ?? 0,
+        retestsSurvived: numOrNull(pick(r, "retests_survived", "retestsSurvived")) ?? 0,
+        retestsFailed: numOrNull(pick(r, "retests_failed", "retestsFailed")) ?? 0,
+        retestsOpen: numOrNull(pick(r, "retests_open", "retestsOpen")) ?? 0,
+    }));
+}
+
 export function parseTradesCSV(text) {
     const { headers, rows } = parseCSV(text);
     const hasNewsCreatedTagFields = headers.some((header) => header.startsWith("ob_origin_news_") || header.startsWith("ob_detection_news_"));
@@ -821,6 +873,11 @@ function detectFileKind(name) {
         if (entryTradeFileInfo(name))                         return "trades_entry";
         if (directionalTradeFileInfo(name))                   return "trades_directional";
         if (protectedTradeFileInfo(name))                     return "trades_protected";
+        // OB Retest backend artifacts (Phase 2.4). MUST precede the order_blocks
+        // catch below — "ob_retests.csv" / "ob_retest_summary.csv" both match the
+        // generic `ob_` test and would otherwise be misclassified as order_blocks.
+        if (n.includes("ob_retest_summary"))                  return "ob_retest_summary";
+        if (n.includes("ob_retests"))                         return "ob_retest";
         if (n.includes("order_block") || n.includes("ob_"))  return "order_blocks";
         if (n.includes("trades_single_position"))            return "trades_single_position";
         if (n.includes("trades_allow_multi_position"))       return "trades_allow_multi_position";
@@ -909,6 +966,7 @@ export async function ingestRunBundle(fileList) {
     const files = Array.from(fileList);
     const collected = {
         config: null, summary: null, orderBlocks: null, candles: null,
+        obRetests: null, obRetestSummary: null,
         tradesByVariant: {},
         entryTradesByMode: {},
         entrySourceFiles: [],
@@ -961,6 +1019,18 @@ export async function ingestRunBundle(fileList) {
                     validateCsvHeaders(kind, f.name, parsed.headers, collected.validationErrors, collected.validationWarnings);
                     collected.orderBlocks = parseOrderBlocksCSV(text);
                     collected.recognized.push({ name: f.name, kind, rows: collected.orderBlocks.length });
+                    break;
+                }
+                case "ob_retest": {
+                    // Backend-verified retest events (Phase 2.4). Optional artifact;
+                    // absence simply leaves the frontend derivation in charge.
+                    collected.obRetests = parseObRetestsCSV(text);
+                    collected.recognized.push({ name: f.name, kind, rows: collected.obRetests.length });
+                    break;
+                }
+                case "ob_retest_summary": {
+                    collected.obRetestSummary = parseObRetestSummaryCSV(text);
+                    collected.recognized.push({ name: f.name, kind, rows: collected.obRetestSummary.length });
                     break;
                 }
                 case "news_events": {
@@ -1359,6 +1429,10 @@ export async function ingestRunBundle(fileList) {
         orderBlocks: mappedOBs,
         candles: hasCandles ? collected.candles : null,
         hasCandles,
+        // Backend-verified OB retest artifacts (Phase 2.4). null when the run was
+        // exported without them → Retest Lab falls back to frontend derivation.
+        obRetests: collected.obRetests,
+        obRetestSummary: collected.obRetestSummary,
         integrity,
         validationErrors: collected.validationErrors,
         validationWarnings: collected.validationWarnings,

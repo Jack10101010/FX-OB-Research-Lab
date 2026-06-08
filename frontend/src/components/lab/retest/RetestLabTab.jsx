@@ -49,7 +49,7 @@ function GateShell({ title, badge, children }) {
 }
 
 export function RetestLabTab({ orderBlocks = [], trades = [], activeRun = null, activeRunId = null, enabled = false }) {
-    const { status, error, candleCount, events, perOB, summary, meta, config, setConfig, retryLoad } = useRetestData({
+    const { status, source, error, candleCount, events, perOB, summary, meta, config, setConfig, retryLoad } = useRetestData({
         orderBlocks, trades, activeRun, activeRunId, enabled,
     });
 
@@ -101,8 +101,8 @@ export function RetestLabTab({ orderBlocks = [], trades = [], activeRun = null, 
     // ── READY ───────────────────────────────────────────────────────────────────
     return (
         <div className="px-6 mt-4 space-y-4">
-            <BasisBanner candleCount={candleCount} meta={meta} summary={summary} />
-            <ConfigBar config={config} setConfig={setConfig} />
+            <BasisBanner candleCount={candleCount} meta={meta} summary={summary} source={source} />
+            <ConfigBar config={config} setConfig={setConfig} source={source} />
             <SummaryCards summary={summary} />
             <Breakdowns events={events} />
             <EventTable events={events} />
@@ -111,12 +111,17 @@ export function RetestLabTab({ orderBlocks = [], trades = [], activeRun = null, 
 }
 
 // ── Basis banner ──────────────────────────────────────────────────────────────
-function BasisBanner({ candleCount, meta, summary }) {
+function BasisBanner({ candleCount, meta, summary, source }) {
+    const isBackend = source === "backend";
     return (
         <div className="flex flex-wrap items-center gap-2">
-            <HeroBadge tone="secondary">Derived · frontend</HeroBadge>
-            <HeroBadge tone="muted">{candleCount.toLocaleString()} candles</HeroBadge>
-            {meta?.computeMs != null && <HeroBadge tone="muted">{meta.computeMs} ms</HeroBadge>}
+            {isBackend
+                ? <HeroBadge tone="success">Backend Verified</HeroBadge>
+                : <HeroBadge tone="secondary">Frontend Derived</HeroBadge>}
+            {isBackend
+                ? <HeroBadge tone="muted">from imported run</HeroBadge>
+                : <HeroBadge tone="muted">{candleCount.toLocaleString()} candles</HeroBadge>}
+            {!isBackend && meta?.computeMs != null && <HeroBadge tone="muted">{meta.computeMs} ms</HeroBadge>}
             {summary && <HeroBadge tone="muted">{summary.totalRetests} retest events</HeroBadge>}
             <span className="text-[10.5px] text-muted-lab ml-1">
                 Open (right-censored) retests are excluded from survival/failure rates.
@@ -126,7 +131,20 @@ function BasisBanner({ candleCount, meta, summary }) {
 }
 
 // ── Config bar ────────────────────────────────────────────────────────────────
-function ConfigBar({ config, setConfig }) {
+function ConfigBar({ config, setConfig, source }) {
+    // Backend mode: criteria were fixed by the exporter at run time. The artifact
+    // does not carry those params, so we show an informational read-only notice
+    // rather than interactive controls that would falsely imply recomputation.
+    if (source === "backend") {
+        return (
+            <NeonPanel title="Retest Criteria" dense>
+                <div className="text-[11px] text-muted-lab leading-relaxed">
+                    Criteria were applied by the backend exporter at run time (read-only).
+                    Re-import a run exported with different settings to change them.
+                </div>
+            </NeonPanel>
+        );
+    }
     return (
         <NeonPanel title="Retest Criteria" dense>
             <div className="flex flex-wrap items-end gap-5">

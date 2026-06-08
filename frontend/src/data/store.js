@@ -189,6 +189,9 @@ let state = {
     activeRunId: (() => { try { return localStorage.getItem(LS_ACTIVE) || null; } catch { return null; } })(),
     activeProjectId: (() => { try { return localStorage.getItem(LS_ACTIVE_PROJECT) || null; } catch { return null; } })(),
     selectedTradeVariant: null,
+    // One-shot, non-persisted cross-page focus handoff (RunDetail FFT drilldown →
+    // Strategy Map). Transient: never written to localStorage; the consumer clears it.
+    focusedFftEvent: null,
     // Structured scenario — the canonical answer to "what is the Strategy Map showing?"
     scenario: loadPersistedScenario((() => { try { return localStorage.getItem(LS_ACTIVE) || null; } catch { return null; } })()),
     // Results Basis axis (Phase RB-1) — HOW trades are measured. No page reads
@@ -978,6 +981,10 @@ function buildDerived() {
         AVAILABLE_TRADE_VARIANTS: activeVariantData?.variants || [],
         // Structured scenario — canonical selection driving Strategy Map overlays.
         SCENARIO: state.scenario,
+        // One-shot FFT focus handoff (RunDetail → Strategy Map); transient, not persisted.
+        FOCUSED_FFT_EVENT: state.focusedFftEvent,
+        setFocusedFftEvent,
+        clearFocusedFftEvent,
         // Results Basis axis (Phase RB-1) — exposed for future consumers; no
         // page reads these yet, so this is inert.
         RESULTS_BASIS: state.resultsBasis,
@@ -1220,6 +1227,10 @@ function normalizeRestoredRun(id, bundle) {
         tradeMarkers: Array.isArray(bundle.tradeMarkers) ? bundle.tradeMarkers : [],
         tradeMarkersByVariant: bundle.tradeMarkersByVariant && typeof bundle.tradeMarkersByVariant === "object" ? bundle.tradeMarkersByVariant : {},
         orderBlocks: Array.isArray(bundle.orderBlocks) ? bundle.orderBlocks : [],
+        // Backend-verified OB retest artifacts (Phase 2.4). null when the run was
+        // imported without them; preserved here so Retest Lab can prefer backend data.
+        obRetests: Array.isArray(bundle.obRetests) ? bundle.obRetests : (bundle.obRetests ?? null),
+        obRetestSummary: Array.isArray(bundle.obRetestSummary) ? bundle.obRetestSummary : (bundle.obRetestSummary ?? null),
         candles: Array.isArray(bundle.candles) ? bundle.candles : (bundle.candles ?? null),
         importedAt: bundle.importedAt || bundle.summary?.importedAt || new Date().toISOString(),
         summary: { ...(bundle.summary || {}), id },
@@ -1638,6 +1649,20 @@ export function setScenario(patch) {
         },
     };
     persistScenario();
+    notify();
+}
+
+// ── One-shot FFT focus handoff (RunDetail drilldown → Strategy Map) ─────────
+// Transient cross-page channel: NOT persisted to localStorage. The Strategy Map
+// consumer clears it after the scenario overlays resolve (matched or not).
+export function setFocusedFftEvent(event) {
+    state = { ...state, focusedFftEvent: event || null };
+    notify();
+}
+
+export function clearFocusedFftEvent() {
+    if (state.focusedFftEvent == null) return;
+    state = { ...state, focusedFftEvent: null };
     notify();
 }
 
