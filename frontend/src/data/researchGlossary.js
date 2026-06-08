@@ -498,6 +498,58 @@ export const GLOSSARY = {
         definition: "A grid of survival rate by origin session (rows) versus retest session (columns), with the same minimum-sample safeguards.",
         whyItMatters: "Reveals origin/retest session combinations that a one-dimensional breakdown would miss.",
     },
+
+    // ── OB Retest origin-candle structure (Phase C2) ─────────────────────────────
+    retest_origin_candle: {
+        friendlyName: "Origin Candle",
+        definition: "The candle whose OHLC formed the order block (its open/high/low/close).",
+        whyItMatters: "The shape of the candle that created an OB may predict how well it holds on later retests.",
+    },
+    retest_body_pct: {
+        friendlyName: "Body %",
+        definition: "The origin candle's body (|close − open|) as a percent of its full range (high − low).",
+        whyItMatters: "High body % = decisive/impulsive origin; low body % = indecision or rejection.",
+    },
+    retest_upper_wick: {
+        friendlyName: "Upper Wick %",
+        definition: "The origin candle's upper wick (high − body top) as a percent of its range.",
+        whyItMatters: "A large upper wick signals rejection from above at the OB's origin.",
+    },
+    retest_lower_wick: {
+        friendlyName: "Lower Wick %",
+        definition: "The origin candle's lower wick (body bottom − low) as a percent of its range.",
+        whyItMatters: "A large lower wick signals rejection from below at the OB's origin.",
+    },
+    retest_body_dominance: {
+        friendlyName: "Body Dominance",
+        definition: "Origin body share bucket: body_light (<35%), body_balanced (35–65%), body_dominant (>65%).",
+        whyItMatters: "Tests whether decisive (body-dominant) origins produce more reliable retests than indecisive ones.",
+    },
+    retest_wick_dominance: {
+        friendlyName: "Wick Dominance",
+        definition: "Bucket of the larger single wick as a % of range: low_wick (<25%), balanced_wick (25–50%), high_wick (>50%).",
+        whyItMatters: "High-wick origins (strong rejection) may behave differently on retest than clean-body origins.",
+    },
+    retest_dominant_wick: {
+        friendlyName: "Dominant Wick Side",
+        definition: "Which wick is larger on the origin candle — upper, lower, or even.",
+        whyItMatters: "The rejection side at origin can hint at directional conviction.",
+    },
+    retest_origin_range: {
+        friendlyName: "Origin Range",
+        definition: "The origin candle's high−low range in pips, bucketed small (<10p) / medium (10–20p) / large (>20p).",
+        whyItMatters: "Large origin ranges mark more volatile creation conditions, which may change retest odds.",
+    },
+    retest_impulse_proxy: {
+        friendlyName: "Impulse Proxy (experimental)",
+        definition: "Distance from the origin close to the structure break level, in pips, bucketed weak (<20p) / medium (20–50p) / strong (>50p). 'unknown' when break level or OHLC is missing.",
+        whyItMatters: "A rough stand-in for displacement strength until a true displacement field is exported (C3).",
+    },
+    retest_break_level: {
+        friendlyName: "Break Level",
+        definition: "The structure level whose break confirmed the order block (BOS/CHoCH trigger price).",
+        whyItMatters: "Used as the reference for the impulse proxy — how far price displaced to confirm the break.",
+    },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

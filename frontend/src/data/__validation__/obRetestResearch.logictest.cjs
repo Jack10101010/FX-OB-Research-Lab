@@ -163,6 +163,72 @@ check("findings non-empty for a 100%-vs-0% split", f1.length >= 1, String(f1.len
 check("includes a Retest session comparison (+100pp)", f1.some((x) => x.dimension === "Retest session" && x.deltaPP === 100), JSON.stringify(f1[0] || {}));
 check("thin-only data → no findings (min-N respected)", R.buildRetestFindings(R.buildRetestEdgeBreakdowns(R.enrichRetestEvents([mkEvent()], []), { minN: 20 }), { minN: 20 }).length === 0);
 
+// ── Test 12: C2 origin-candle bucket boundaries ──────────────────────────────────
+console.log("\nTest 12 — origin bucket boundaries");
+check("body 34.9 → body_light", R.bodyDominanceBucket(34.9) === "body_light");
+check("body 35 → body_balanced", R.bodyDominanceBucket(35) === "body_balanced");
+check("body 65 → body_balanced", R.bodyDominanceBucket(65) === "body_balanced");
+check("body 65.1 → body_dominant", R.bodyDominanceBucket(65.1) === "body_dominant");
+check("body null → unknown", R.bodyDominanceBucket(null) === "unknown");
+check("wick 24.9 → low_wick", R.wickDominanceBucket(24.9) === "low_wick");
+check("wick 25 → balanced_wick", R.wickDominanceBucket(25) === "balanced_wick");
+check("wick 50 → balanced_wick", R.wickDominanceBucket(50) === "balanced_wick");
+check("wick 50.1 → high_wick", R.wickDominanceBucket(50.1) === "high_wick");
+check("impulse 19.9 → weak", R.impulseBucket(19.9) === "weak");
+check("impulse 20 → medium", R.impulseBucket(20) === "medium");
+check("impulse 50 → medium", R.impulseBucket(50) === "medium");
+check("impulse 50.1 → strong", R.impulseBucket(50.1) === "strong");
+check("impulse null → unknown", R.impulseBucket(null) === "unknown");
+
+// ── Test 13: origin derivation — bullish & bearish candles ───────────────────────
+console.log("\nTest 13 — origin candle derivation (bull + bear)");
+const bullOB = { id: "1", side: "bull", top: 1.1000, bottom: 1.0990, obWidthPips: 10,
+    originOpen: 1.1000, originHigh: 1.1012, originLow: 1.0998, originClose: 1.1010, breakLevel: 1.1040 };
+const enBull = R.enrichRetestEvents([mkEvent({ obId: "1" })], [bullOB])[0];
+check("bull range ≈ 14p", Math.abs(enBull.originRangePips - 14) < 0.01, String(enBull.originRangePips));
+check("bull body ≈ 10p", Math.abs(enBull.originBodyPips - 10) < 0.01, String(enBull.originBodyPips));
+check("bull bodyPct ≈ 71.4 → body_dominant", enBull.originBodyDominance === "body_dominant", String(enBull.originBodyPct));
+check("bull dominant wick even", enBull.dominantWickSide === "even", enBull.dominantWickSide);
+check("bull wick dominance low_wick", enBull.originWickDominance === "low_wick", enBull.originWickDominance);
+check("bull origin range bucket medium", enBull.originRangeBucket === "medium (10-20p)", enBull.originRangeBucket);
+check("bull impulse 30p → medium", enBull.originImpulseProxy === "medium", enBull.originImpulseProxy);
+
+const bearOB = { id: "2", side: "bear", top: 1.1010, bottom: 1.1000, obWidthPips: 10,
+    originOpen: 1.1010, originHigh: 1.1011, originLow: 1.0985, originClose: 1.1000, breakLevel: 1.1090 };
+const enBear = R.enrichRetestEvents([mkEvent({ obId: "2", direction: "bear" })], [bearOB])[0];
+check("bear bodyPct ≈ 38.5 → body_balanced", enBear.originBodyDominance === "body_balanced", String(enBear.originBodyPct));
+check("bear dominant wick lower", enBear.dominantWickSide === "lower", enBear.dominantWickSide);
+check("bear wick dominance high_wick", enBear.originWickDominance === "high_wick", enBear.originWickDominance);
+check("bear impulse 80p → strong", enBear.originImpulseProxy === "strong", enBear.originImpulseProxy);
+
+// ── Test 14: unknown handling when origin fields are missing ─────────────────────
+console.log("\nTest 14 — unknown handling (no origin OHLC)");
+const enNoOrigin = R.enrichRetestEvents([mkEvent({ obId: "9" })], [{ id: "9", side: "bull", top: 1.1, bottom: 1.099, obWidthPips: 10 }])[0];
+check("no OHLC → body dominance unknown", enNoOrigin.originBodyDominance === "unknown");
+check("no OHLC → wick dominance unknown", enNoOrigin.originWickDominance === "unknown");
+check("no OHLC → range bucket unknown", enNoOrigin.originRangeBucket === "unknown");
+check("no OHLC → impulse unknown", enNoOrigin.originImpulseProxy === "unknown");
+check("no OHLC → dominant wick unknown", enNoOrigin.dominantWickSide === "unknown");
+
+// ── Test 15: origin dims surfaced in breakdowns + grouped arithmetic ─────────────
+console.log("\nTest 15 — origin dims in breakdowns");
+const bd15 = R.buildRetestEdgeBreakdowns(R.enrichRetestEvents([mkEvent({ obId: "1" }), mkEvent({ obId: "1", retestIndex: 2 })], [bullOB]), { minN: 20 });
+check("byOriginBodyDominance present (group origin)", bd15.byOriginBodyDominance && bd15.byOriginBodyDominance.group === "origin");
+check("byOriginImpulse present (group origin)", bd15.byOriginImpulse && bd15.byOriginImpulse.group === "origin");
+check("origin grouped arithmetic holds", bd15.byOriginBodyDominance.rows.every((r) => r.survived + r.failed + r.open === r.n));
+
+// ── Test 16: importer maps the C2 fields ─────────────────────────────────────────
+console.log("\nTest 16 — importer parseOrderBlocksCSV maps origin OHLC + break level");
+const imp = compile("../importer.js", { 'require("./tradeClassification")': "({summarizeTradeClassifications:()=>({wins:0,losses:0,winRate:0})})" });
+const obCsv = "ob_id,direction,structure_tag,top,bottom,width_pips,origin_open,origin_high,origin_low,origin_close,break_level\n"
+    + "1,bullish,BOS,1.1000,1.0990,10,1.1001,1.1012,1.0998,1.1010,1.1040\n";
+const parsedOB = imp.parseOrderBlocksCSV(obCsv)[0];
+check("originOpen mapped", parsedOB.originOpen === 1.1001, String(parsedOB.originOpen));
+check("originHigh mapped", parsedOB.originHigh === 1.1012);
+check("originLow mapped", parsedOB.originLow === 1.0998);
+check("originClose mapped", parsedOB.originClose === 1.1010);
+check("breakLevel mapped", parsedOB.breakLevel === 1.1040);
+
 // ── result ───────────────────────────────────────────────────────────────────────
 console.log(`\n${"=".repeat(52)}`);
 console.log(`Results: ${PASS} passed, ${FAIL} failed`);

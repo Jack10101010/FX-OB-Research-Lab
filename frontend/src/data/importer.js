@@ -208,6 +208,14 @@ export function parseOrderBlocksCSV(text) {
             side: String(pick(r, "side", "direction", "type") || "bull").toLowerCase().startsWith("b")
                 ? (String(pick(r, "side", "direction", "type") || "").toLowerCase().includes("bear") ? "bear" : "bull")
                 : "bear",
+            // Origin candle OHLC + structure break level (Phase C2). Present in
+            // order_blocks.csv but previously unmapped; powers origin body/wick/
+            // impulse research dimensions. numOrNull → absent stays null (unknown).
+            originOpen:  numOrNull(pick(r, "origin_open", "originOpen")),
+            originHigh:  numOrNull(pick(r, "origin_high", "originHigh")),
+            originLow:   numOrNull(pick(r, "origin_low", "originLow")),
+            originClose: numOrNull(pick(r, "origin_close", "originClose")),
+            breakLevel:  numOrNull(pick(r, "break_level", "breakLevel")),
             obFinalStatus: String(pick(r, "ob_final_status", "obFinalStatus") || ""),
             obFinalStatusLabel: String(pick(r, "ob_final_status_label", "obFinalStatusLabel") || ""),
             chartRightTime: pick(r, "chart_right_time"),

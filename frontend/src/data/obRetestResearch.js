@@ -36,6 +36,7 @@ function toEpoch(value) {
 }
 
 const num = (v) => (v != null && v !== "" && isFinite(Number(v)) ? Number(v) : null);
+const round2 = (v) => (v == null || !isFinite(v) ? v : Math.round(v * 100) / 100);
 
 // ── Fixed buckets (C1) ──────────────────────────────────────────────────────────
 export function obSizeBucket(pips) {
@@ -91,6 +92,47 @@ export function timeSincePrevRetestBucket(minutes) {
     if (m < 120) return "30m-2h";
     if (m < 480) return "2-8h";
     return "8h+";
+}
+
+// ── Origin candle buckets (Phase C2, fixed) ─────────────────────────────────────
+export function bodyDominanceBucket(bodyPct) {
+    const p = num(bodyPct);
+    if (p == null) return "unknown";
+    if (p < 35) return "body_light";
+    if (p <= 65) return "body_balanced";
+    return "body_dominant";
+}
+
+// Based on the LARGER single wick (% of range) — captures directional rejection,
+// distinct from body dominance (which is the body share).
+export function wickDominanceBucket(maxWickPct) {
+    const p = num(maxWickPct);
+    if (p == null) return "unknown";
+    if (p < 25) return "low_wick";
+    if (p <= 50) return "balanced_wick";
+    return "high_wick";
+}
+
+// Experimental impulse proxy: |break_level − origin close| in pips. Fixed bands.
+export function impulseBucket(distPips) {
+    const d = num(distPips);
+    if (d == null) return "unknown";
+    if (d < 20) return "weak";
+    if (d <= 50) return "medium";
+    return "strong";
+}
+
+// Per-OB pip size, derived from the OB's own width (obWidthPips = height ÷ pip).
+// Lets origin range/body be expressed in pips without threading run config.
+function obPipSize(ob) {
+    const top = num(ob?.top ?? ob?.high);
+    const bot = num(ob?.bottom ?? ob?.bot ?? ob?.low);
+    const w = num(ob?.obWidthPips ?? ob?.ob_width_pips ?? ob?.width_pips);
+    if (top != null && bot != null && w && w > 0) {
+        const r = Math.abs(top - bot);
+        if (r > 0) return r / w;
+    }
+    return 0.0001;
 }
 
 const DEEP_PENETRATION_PCT = 66;
@@ -154,6 +196,46 @@ export function enrichRetestEvents(events = [], orderBlocks = []) {
         const structure = e.structure || "—";
         const direction = e.direction || "—";
 
+        // ── Origin candle structure (Phase C2) ──────────────────────────────────
+        // Derived from the OB's origin candle OHLC + break level (joined from
+        // order_blocks.csv). All "unknown" when those fields are absent. Body/wick
+        // are ratios (no pip needed); range/body/impulse use a per-OB pip size.
+        const oOpen = ob ? num(ob.originOpen ?? ob.origin_open) : null;
+        const oHigh = ob ? num(ob.originHigh ?? ob.origin_high) : null;
+        const oLow = ob ? num(ob.originLow ?? ob.origin_low) : null;
+        const oClose = ob ? num(ob.originClose ?? ob.origin_close) : null;
+        const breakLevel = ob ? num(ob.breakLevel ?? ob.break_level) : null;
+        let originRangePips = null, originBodyPips = null, originBodyPct = null;
+        let originUpperWickPct = null, originLowerWickPct = null, dominantWickSide = "unknown";
+        let bodyDominance = "unknown", wickDominance = "unknown", impulseProxy = "unknown";
+        const haveOHLC = oOpen != null && oHigh != null && oLow != null && oClose != null && oHigh >= oLow;
+        if (haveOHLC) {
+            const pip = obPipSize(ob);
+            const range = oHigh - oLow;
+            const body = Math.abs(oClose - oOpen);
+            const bodyTop = Math.max(oOpen, oClose);
+            const bodyBot = Math.min(oOpen, oClose);
+            const upperWick = Math.max(0, oHigh - bodyTop);
+            const lowerWick = Math.max(0, bodyBot - oLow);
+            originRangePips = round2(range / pip);
+            originBodyPips = round2(body / pip);
+            if (range > 1e-12) {
+                originBodyPct = round2((body / range) * 100);
+                originUpperWickPct = round2((upperWick / range) * 100);
+                originLowerWickPct = round2((lowerWick / range) * 100);
+                dominantWickSide = upperWick > lowerWick ? "upper" : lowerWick > upperWick ? "lower" : "even";
+                bodyDominance = bodyDominanceBucket(originBodyPct);
+                wickDominance = wickDominanceBucket(Math.max(originUpperWickPct, originLowerWickPct));
+            } else {
+                originBodyPct = 0; originUpperWickPct = 0; originLowerWickPct = 0;
+                dominantWickSide = "even"; bodyDominance = "body_light"; wickDominance = "low_wick";
+            }
+            if (breakLevel != null && oClose != null) {
+                impulseProxy = impulseBucket(Math.abs(breakLevel - oClose) / pip);
+            }
+        }
+        const originRangeBucket = originRangePips == null ? "unknown" : obSizeBucket(originRangePips);
+
         enrichedByRef.set(e, {
             ...e,
             obWidthPips,
@@ -178,6 +260,17 @@ export function enrichRetestEvents(events = [], orderBlocks = []) {
             failureBehavior: failureBehavior(e.outcome, e.maxPenetrationPct),
             originNewsBucket: ob ? newsBucket(ob.ob_origin_news_window ?? ob.obOriginNewsWindow) : "unknown",
             detectionNewsBucket: ob ? newsBucket(ob.ob_detection_news_window ?? ob.obDetectionNewsWindow) : "unknown",
+            // Origin candle structure (C2)
+            originRangePips,
+            originBodyPips,
+            originBodyPct,
+            originUpperWickPct,
+            originLowerWickPct,
+            dominantWickSide,
+            originBodyDominance: bodyDominance,
+            originWickDominance: wickDominance,
+            originRangeBucket,
+            originImpulseProxy: impulseProxy,
         });
     }
 
@@ -245,12 +338,19 @@ export const RETEST_DIMENSIONS = {
     byFirstTouchOutcome: { label: "First Touch Outcome", group: "behavior", tip: "retest_first_touch_outcome", fn: (e) => e.firstTouchOutcome || "unknown" },
     byFailureBehavior: { label: "Failure Behaviour", group: "behavior", tip: "retest_failure_behavior", fn: (e) => e.failureBehavior },
     byReactionQuality: { label: "Reaction Quality", group: "behavior", tip: "retest_reaction_quality", fn: (e) => e.reactionQuality },
+    // Origin candle structure (Phase C2)
+    byOriginBodyDominance: { label: "Origin Body Dominance", group: "origin", tip: "retest_body_dominance", fn: (e) => e.originBodyDominance },
+    byOriginWickDominance: { label: "Origin Wick Dominance", group: "origin", tip: "retest_wick_dominance", fn: (e) => e.originWickDominance },
+    byDominantWickSide: { label: "Dominant Wick Side", group: "origin", tip: "retest_dominant_wick", fn: (e) => e.dominantWickSide },
+    byOriginRange: { label: "Origin Range", group: "origin", tip: "retest_origin_range", fn: (e) => e.originRangeBucket },
+    byOriginImpulse: { label: "Origin Impulse Proxy", group: "origin", tip: "retest_impulse_proxy", fn: (e) => e.originImpulseProxy },
 };
 
 // IA grouping (C1.6) — which dimensions live under each Edge Discovery sub-tab.
 export const RETEST_DIMENSION_GROUPS = [
     { key: "sessions", label: "Sessions" },
     { key: "structure", label: "Structure" },
+    { key: "origin", label: "Origin" },
     { key: "penetration", label: "Penetration" },
     { key: "timing", label: "Timing" },
     { key: "behavior", label: "Behavior" },
