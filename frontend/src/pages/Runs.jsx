@@ -349,7 +349,7 @@ export default function Runs() {
                             { key: "projectName", label: "Project", render: (r) => <ProjectLabel run={r} /> },
                             { key: "detectionTf", label: "TF", render: (r) => compactTimeframe(r.detectionTf) },
                             { key: "dateRange",   label: "Date Range", render: (r) => formatRunDateRange(r.dateRange) },
-                            { key: "rr",          label: "RR",         align: "right", render: (r) => formatNumericCell(r.rr, 1) },
+                            { key: "rr",          label: "RR",         align: "right", tip: "rr", render: (r) => formatNumericCell(r.rr, 1) },
                             { key: "trades",      label: "Trades",     align: "right", render: (r) => formatIntegerCell(r.validTradeCount ?? r.trades) },
                             { key: "winRate",     label: "WR",         align: "right", render: (r) => formatPercentCell(r.winRate, 1) },
                             { key: "netR",        label: "Net R",      align: "right", render: (r) => <SafeColoredR value={r.netR} /> },

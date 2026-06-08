@@ -302,7 +302,7 @@ export default function Overview() {
                         <DataTable
                             testId="top-sweep-table"
                             columns={[
-                                { key: "rr",        label: "RR",       mono: true, render: (r) => <span className={r.rr === ACTIVE_RUN.rr ? "text-[hsl(var(--accent-primary))]" : ""}>{r.rr.toFixed(1)}</span> },
+                                { key: "rr",        label: "RR",       mono: true, tip: "rr", render: (r) => <span className={r.rr === ACTIVE_RUN.rr ? "text-[hsl(var(--accent-primary))]" : ""}>{r.rr.toFixed(1)}</span> },
                                 { key: "trades",    label: "Trades",   align: "right" },
                                 { key: "winRate",   label: "Win Rate", align: "right", render: (r) => `${r.winRate.toFixed(1)}%` },
                                 { key: "netR",      label: "Net R",    align: "right", render: (r) => <ColoredR value={r.netR} /> },
@@ -325,7 +325,7 @@ export default function Overview() {
                                 { key: "id",        label: "Run ID",   mono: true },
                                 { key: "symbol",    label: "Symbol" },
                                 { key: "detectionTf", label: "TF",     mono: true },
-                                { key: "rr",        label: "RR",       align: "right", mono: true, render: (r) => r.rr.toFixed(1) },
+                                { key: "rr",        label: "RR",       align: "right", mono: true, tip: "rr", render: (r) => r.rr.toFixed(1) },
                                 { key: "trades",    label: "Trades",   align: "right" },
                                 { key: "winRate",   label: "Win Rate", align: "right", render: (r) => `${r.winRate.toFixed(1)}%` },
                                 { key: "netR",      label: "Net R",    align: "right", render: (r) => <ColoredR value={r.netR} /> },

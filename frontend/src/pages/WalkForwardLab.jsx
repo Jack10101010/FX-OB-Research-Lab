@@ -237,7 +237,7 @@ export default function WalkForwardLab() {
                                 <Link to={`/runs/${encodeURIComponent(r.id)}`} className="text-[hsl(var(--accent-primary))] hover:text-white">{r.id}</Link>
                             ) },
                             { key: "dateRange",   label: "Date Range", render: (r) => r.dateRange || "—" },
-                            { key: "rr",          label: "RR",         align: "right", render: (r) => fmt(r.rr, 1) },
+                            { key: "rr",          label: "RR",         align: "right", tip: "rr", render: (r) => fmt(r.rr, 1) },
                             { key: "stopBuffer",  label: "Stop Buf",   align: "right", render: (r) => fmt(r.stopBuffer, 1) },
                             { key: "entryBuffer", label: "Entry Buf",  align: "right", render: (r) => fmt(r.entryBuffer, 1) },
                             { key: "verifyTicks", label: "Verify",     align: "right", render: (r) => (isNum(r.verifyTicks) ? String(Number(r.verifyTicks)) : "—") },

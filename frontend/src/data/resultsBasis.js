@@ -404,7 +404,7 @@ export function bucketDisplaySchema(basis /* , account */) {
     if (normalizeBasis(basis) === BASIS.CURRENT_EQUITY) {
         return [
             { key: "label",              label: "Bucket",       kind: "label",   sortable: false },
-            { key: "rows",               label: "N",            align: "right", kind: "int" },
+            { key: "rows",               label: "N",            align: "right", kind: "int", tip: "stat_n" },
             { key: "winRate",            label: "WR",           align: "right", kind: "pct",   invariant: true },
             { key: "contributionAmount", label: "Contribution", align: "right", kind: "money", heatmap: true },
             { key: "contributionPct",    label: "Contrib %",    align: "right", kind: "moneyPct" },
@@ -412,14 +412,14 @@ export function bucketDisplaySchema(basis /* , account */) {
     }
     return [
         { key: "label",        label: "Bucket", kind: "label",  sortable: false },
-        { key: "rows",         label: "N",      align: "right", kind: "int" },
+        { key: "rows",         label: "N",      align: "right", kind: "int", tip: "stat_n" },
         { key: "wins",         label: "Wins",   align: "right", kind: "int" },
         { key: "losses",       label: "Losses", align: "right", kind: "int" },
         { key: "winRate",      label: "WR",     align: "right", kind: "pct",  invariant: true },
-        { key: "netR",         label: "Net R",  align: "right", kind: "rNet", heatmap: true },
-        { key: "expectancy",   label: "Exp",    align: "right", kind: "expR", heatmap: true },
-        { key: "profitFactor", label: "PF",     align: "right", kind: "pf" },
-        { key: "ci",           label: "95% CI", align: "right", kind: "ci", sortable: false, heatmap: false },
+        { key: "netR",         label: "Net R",  align: "right", kind: "rNet", heatmap: true, tip: "stat_net_r" },
+        { key: "expectancy",   label: "Exp",    align: "right", kind: "expR", heatmap: true, tip: "stat_exp" },
+        { key: "profitFactor", label: "PF",     align: "right", kind: "pf", tip: "stat_pf" },
+        { key: "ci",           label: "95% CI", align: "right", kind: "ci", sortable: false, heatmap: false, tip: "ci_95" },
     ];
 }
 
@@ -542,20 +542,20 @@ export function summaryDisplaySchema(basis, account = null, options = {}) {
     const full = ce
         ? [
             { key: "label",            label: "Name",   kind: "label", sortable: false },
-            { key: "rows",             label: "Trades", align: "right", kind: "int" },
+            { key: "rows",             label: "Trades", align: "right", kind: "int", tip: "stat_n" },
             { key: "winRate",          label: "WR",     align: "right", kind: "pct", invariant: true },
             { key: "netAmount",        label: "Net",    align: "right", kind: "money" },
-            { key: "expectancyAmount", label: "Exp",    align: "right", kind: "money" },
-            { key: "maxDrawdownPct",   label: "Max DD", align: "right", kind: "moneyPct" },
+            { key: "expectancyAmount", label: "Exp",    align: "right", kind: "money", tip: "stat_exp" },
+            { key: "maxDrawdownPct",   label: "Max DD", align: "right", kind: "moneyPct", tip: "max_drawdown" },
         ]
         : [
             { key: "label",        label: "Name",   kind: "label", sortable: false },
-            { key: "rows",         label: "Trades", align: "right", kind: "int" },
+            { key: "rows",         label: "Trades", align: "right", kind: "int", tip: "stat_n" },
             { key: "winRate",      label: "WR",     align: "right", kind: "pct", invariant: true },
-            { key: "netR",         label: "Net R",  align: "right", kind: "rNet" },
-            { key: "expectancy",   label: "Exp",    align: "right", kind: "expR" },
-            { key: "profitFactor", label: "PF",     align: "right", kind: "pf" },
-            { key: "maxDrawdownR", label: "Max DD", align: "right", kind: "rNet" },
+            { key: "netR",         label: "Net R",  align: "right", kind: "rNet", tip: "stat_net_r" },
+            { key: "expectancy",   label: "Exp",    align: "right", kind: "expR", tip: "stat_exp" },
+            { key: "profitFactor", label: "PF",     align: "right", kind: "pf", tip: "stat_pf" },
+            { key: "maxDrawdownR", label: "Max DD", align: "right", kind: "rNet", tip: "max_drawdown" },
         ];
     if (Array.isArray(options.includeCols)) {
         const set = new Set(options.includeCols);

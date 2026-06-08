@@ -1066,7 +1066,7 @@ function ParetoFrontier({ runs, runMetrics, wrOf }) {
                             ) },
                             { key: "netR",    label: "Net R",    align: "right", render: (r) => <ColoredR value={r.netR} /> },
                             { key: "ddAbs",   label: "Max DD",   align: "right", render: (r) => r.ddLabel },
-                            { key: "rr",      label: "RR",       align: "right", render: (r) => r.rrLabel },
+                            { key: "rr",      label: "RR",       align: "right", tip: "rr", render: (r) => r.rrLabel },
                             { key: "winRate", label: "Win Rate", align: "right", render: (r) => r.wrLabel },
                             { key: "pareto",  label: "Pareto",   align: "right", render: (r) => (
                                 r.pareto ? <Pill tone="primary">EFFICIENT</Pill> : <Pill tone="muted">—</Pill>

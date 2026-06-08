@@ -1,6 +1,7 @@
 import React from "react";
 import { cn } from "@/lib/utils";
 import { ChevronUp, ChevronDown, ChevronsUpDown } from "lucide-react";
+import { TermTip } from "@/components/lab/TermTip";
 
 // Premium dense data table — canonical table primitive for research dashboards.
 export function DataTable({
@@ -90,7 +91,10 @@ export function DataTable({
                                         col.align === "center" && "w-full justify-center",
                                     )}
                                 >
-                                    {col.label}
+                                    {/* Optional glossary tooltip on the header label.
+                                        Opt-in via `col.tip` (a researchGlossary key);
+                                        columns without it render exactly as before. */}
+                                    {col.tip ? <TermTip termKey={col.tip}>{col.label}</TermTip> : col.label}
                                     {col.sortable !== false && <SortIcon active={sortKey === col.key} dir={sortDir} />}
                                 </span>
                             </th>

@@ -207,6 +207,11 @@ export const GLOSSARY = {
         whyItMatters:
             "A one-glance read of what the current data is actually saying, so you don't have to " +
             "scan every table to find the signal.",
+        interpretation: [
+            "Edges — strongest positive findings to lean into",
+            "Risks — strongest negative findings to avoid",
+            "Weigh each by its confidence chip before acting",
+        ],
     },
     effect: {
         term: "Effect",
@@ -273,10 +278,6 @@ export const GLOSSARY = {
             "Reward-to-risk ratio. RR 2 means the target is 2× the stop risk (1R = the stop distance).",
         whyItMatters:
             "RR and win rate together determine expectancy — a low win rate can still profit at high RR.",
-        interpretation: [
-            "Higher RR — tolerates a lower win rate",
-            "Lower RR — needs a higher win rate",
-        ],
     },
     fft: {
         term: "FFT",
@@ -286,6 +287,11 @@ export const GLOSSARY = {
             "past the order block edge before filling.",
         whyItMatters:
             "It trades fill rate for fewer fakeout entries.",
+        interpretation: [
+            "Ghost losses avoided — FFT is helping",
+            "Ghost wins removed — FFT is costing you",
+            "Confirm against the paired FFT-OFF run",
+        ],
     },
     ghost: {
         term: "Ghost",
@@ -295,6 +301,11 @@ export const GLOSSARY = {
             "allowed to run.",
         whyItMatters:
             "Ghosts show whether FFT is cancelling likely winners or likely losers.",
+        interpretation: [
+            "Net R impact positive — cancels helped",
+            "Net R impact negative — cancels hurt",
+            "Estimate only — the paired OFF run is authoritative",
+        ],
     },
     ep: {
         term: "EP",
@@ -308,26 +319,17 @@ export const GLOSSARY = {
     stat_pf: {
         term: "PF",
         friendlyName: "Profit Factor",
-        definition: "Gross wins divided by gross losses.",
+        definition: "Gross wins ÷ gross losses. Above 1.0 is profitable; below 1.0 is losing.",
         whyItMatters:
             "A quick read on whether winners outweigh losers, independent of trade count.",
-        interpretation: [
-            "Above 1.0 — profitable",
-            "Above 1.5 — strong edge",
-            "Below 1.0 — losing",
-        ],
     },
     stat_exp: {
         term: "Exp",
         friendlyName: "Expectancy",
-        definition: "Average R per trade (Net R ÷ trade count).",
+        definition:
+            "Average R per trade (Net R ÷ trade count). Positive means it profits on average.",
         whyItMatters:
             "It combines win rate and reward/risk into one number.",
-        interpretation: [
-            "Positive — wins on average",
-            "Negative — loses on average",
-            "0 — breakeven",
-        ],
     },
     results_basis: {
         term: "Results Basis",
@@ -337,6 +339,10 @@ export const GLOSSARY = {
             "results using starting balance and risk settings.",
         whyItMatters:
             "Switching basis changes the scale of every number on the page.",
+        interpretation: [
+            "Raw R — compare edges fairly, account-independent",
+            "Current Equity — see real, compounded account impact",
+        ],
     },
     ci_95: {
         term: "95% CI",

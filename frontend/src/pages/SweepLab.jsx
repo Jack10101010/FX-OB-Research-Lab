@@ -81,7 +81,7 @@ function RRSweepView() {
                 <DataTable
                     testId="rr-sweep-table"
                     columns={[
-                        { key: "rr",        label: "RR",       render: (r) => r.rr.toFixed(1) },
+                        { key: "rr",        label: "RR",       tip: "rr", render: (r) => r.rr.toFixed(1) },
                         { key: "trades",    label: "Trades",   align: "right" },
                         { key: "winRate",   label: "Win Rate", align: "right", render: (r) => `${r.winRate.toFixed(1)}%` },
                         { key: "netR",      label: "Net R",    align: "right", render: (r) => <ColoredR value={r.netR} /> },

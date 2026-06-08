@@ -22,6 +22,7 @@ import React from "react";
 import { Segment, HeroBadge } from "@/components/lab/controls";
 import { AccountSettingsPanel } from "@/components/lab/account/AccountSettingsPanel";
 import { useResultsLens } from "@/data/useResultsLens";
+import { TermTip } from "@/components/lab/TermTip";
 
 const BASIS_OPTIONS = [
     { value: "raw_r", label: "Raw R" },
@@ -35,7 +36,7 @@ export function ResultsLensControl({ showAccount = true, compact = false, classN
         <div className={`flex flex-col gap-3 ${className}`.trim()}>
             <div className="flex flex-wrap items-center gap-3">
                 <span className="text-[9px] font-ui uppercase tracking-widest text-[hsl(var(--text-muted))]">
-                    Results Basis
+                    <TermTip termKey="results_basis">Results Basis</TermTip>
                 </span>
                 <Segment
                     testId="results-basis"

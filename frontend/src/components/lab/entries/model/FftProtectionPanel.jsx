@@ -22,6 +22,7 @@
 import React, { useMemo, useState } from "react";
 import { NeonPanel }  from "@/components/lab/NeonPanel";
 import { Pill }       from "@/components/lab/DataTable";
+import { TermTip }    from "@/components/lab/TermTip";
 import {
     computeFftAnalytics,
     fmtFftR, fmtFftPct, fmtFftPips,
@@ -90,7 +91,7 @@ function GhostOutcomeBar({ wins, losses, unfilled, breakevens }) {
 
     return (
         <div className="mt-2 mb-1">
-            <SectionLabel>Ghost outcome distribution</SectionLabel>
+            <SectionLabel><TermTip termKey="ghost">Ghost outcome distribution</TermTip></SectionLabel>
             <div className="flex h-[10px] w-full overflow-hidden gap-[1px]">
                 {segments.map(s => (
                     <div
@@ -344,7 +345,7 @@ export function FftProtectionPanel({ trades = [], offTrades = [] }) {
 
     return (
         <NeonPanel
-            title="FFT Protection"
+            title={<TermTip termKey="fft">FFT Protection</TermTip>}
             action={
                 <div className="flex items-center gap-1.5">
                     <Pill tone="warning">{fftCancels} cancelled</Pill>
@@ -389,7 +390,7 @@ export function FftProtectionPanel({ trades = [], offTrades = [] }) {
                         className="w-full flex items-center justify-between group mb-1 outline-none"
                     >
                         <SectionLabel>
-                            Ghost sim{hasPairedData ? " · secondary" : ""}
+                            <TermTip termKey="ghost">Ghost sim</TermTip>{hasPairedData ? " · secondary" : ""}
                         </SectionLabel>
                         <span className="text-[9px] text-muted-lab opacity-40 group-hover:opacity-70 transition-opacity">
                             {showGhost ? "▾" : "▸"}

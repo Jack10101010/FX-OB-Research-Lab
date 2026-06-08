@@ -1,5 +1,6 @@
 import React from "react";
 import { cn } from "@/lib/utils";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 
 const SIZE_STYLES = {
     default: {
@@ -33,6 +34,7 @@ export function MetricChip({
     valueClassName,
     subClassName,
     testId,
+    infoLabel = "Click for breakdown",   // hover hint on the ⓘ when the chip is clickable
 }) {
     const sz = SIZE_STYLES[size] || SIZE_STYLES.default;
 
@@ -57,9 +59,14 @@ export function MetricChip({
             )}
         >
             {onClick && (
-                <div className="absolute top-1.5 right-1.5 z-10 w-3.5 h-3.5 rounded-full border border-[hsl(var(--accent-primary)/0.45)] text-[hsl(var(--accent-primary))] grid place-items-center text-[7px] font-bold leading-none pointer-events-none select-none opacity-50 group-hover:opacity-100 transition-opacity duration-200">
-                    i
-                </div>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <div className="absolute top-1.5 right-1.5 z-10 w-3.5 h-3.5 rounded-full border border-[hsl(var(--accent-primary)/0.45)] text-[hsl(var(--accent-primary))] grid place-items-center text-[7px] font-bold leading-none select-none opacity-50 group-hover:opacity-100 transition-opacity duration-200 cursor-help">
+                            i
+                        </div>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">{infoLabel}</TooltipContent>
+                </Tooltip>
             )}
             <div
                 className={cn(

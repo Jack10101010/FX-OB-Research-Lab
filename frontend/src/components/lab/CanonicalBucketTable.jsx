@@ -30,6 +30,7 @@ import { Info, Layers, SlidersHorizontal } from "lucide-react";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
 import { HeroBadge } from "@/components/lab/controls";
+import { TermTip } from "@/components/lab/TermTip";
 import { useResultsLens } from "@/data/useResultsLens";
 import {
     summarizeBuckets,
@@ -58,6 +59,7 @@ function buildColumns(schema, { basis, account, renderers }) {
         const base = {
             key: col.key,
             label: col.label,
+            tip: col.tip, // glossary key → DataTable renders a header tooltip when present
             align: col.align,
             sortable: col.sortable,
             heatmap: col.heatmap === true ? undefined : false, // enable heatmap only where requested
@@ -309,7 +311,7 @@ export function CanonicalBucketTable({
             {/* Results Basis label — suppressed when hideResultsBasis or basisFooter is used */}
             {!hideResultsBasis && !basisFooter && (
                 <div className="flex items-center gap-2">
-                    <span className="text-[9px] font-ui uppercase tracking-widest text-[hsl(var(--text-muted))]">Results Basis</span>
+                    <span className="text-[9px] font-ui uppercase tracking-widest text-[hsl(var(--text-muted))]"><TermTip termKey="results_basis">Results Basis</TermTip></span>
                     <HeroBadge tone={lens.isCurrentEquity ? "secondary" : "muted"}>{lens.isCurrentEquity ? "Current Equity" : "Raw R"}</HeroBadge>
                 </div>
             )}

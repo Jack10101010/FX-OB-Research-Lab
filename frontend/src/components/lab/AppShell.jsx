@@ -4,25 +4,31 @@ import { TopBar } from "./TopBar";
 import AppBlueprintBackground from "./AppBlueprintBackground";
 import { MasterControlsProvider } from "@/components/masterControls/MasterControlsContext";
 import { MasterControlsDrawer } from "@/components/masterControls/MasterControlsDrawer";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 export function AppShell({ children }) {
     return (
-        <MasterControlsProvider>
-            <div className="min-h-screen flex bg-[#050A12] relative">
-                {/* Global blueprint-grid background (base + grid + glow) */}
-                <AppBlueprintBackground />
-                {/* Subtle noise texture overlay */}
-                <div className="pointer-events-none fixed inset-0 noise" />
-                <Sidebar />
-                <div className="flex-1 min-w-0 flex flex-col relative">
-                    <TopBar />
-                    <main data-testid="app-main" className="flex-1 overflow-x-hidden overflow-y-auto scrollbar-thin">
-                        {children}
-                    </main>
+        // App-wide TooltipProvider so glossary tooltips (TermTip / ConfidenceChip)
+        // resolve on every page without per-panel providers. Panels may still nest
+        // their own provider to override delay locally.
+        <TooltipProvider delayDuration={150} skipDelayDuration={300}>
+            <MasterControlsProvider>
+                <div className="min-h-screen flex bg-[#050A12] relative">
+                    {/* Global blueprint-grid background (base + grid + glow) */}
+                    <AppBlueprintBackground />
+                    {/* Subtle noise texture overlay */}
+                    <div className="pointer-events-none fixed inset-0 noise" />
+                    <Sidebar />
+                    <div className="flex-1 min-w-0 flex flex-col relative">
+                        <TopBar />
+                        <main data-testid="app-main" className="flex-1 overflow-x-hidden overflow-y-auto scrollbar-thin">
+                            {children}
+                        </main>
+                    </div>
+                    <MasterControlsDrawer />
                 </div>
-                <MasterControlsDrawer />
-            </div>
-        </MasterControlsProvider>
+            </MasterControlsProvider>
+        </TooltipProvider>
     );
 }
 
