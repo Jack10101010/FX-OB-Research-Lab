@@ -1492,8 +1492,31 @@ export function buildStreaksData(sessionTrades) {
   return { wlSequence, streakSummary, streakDistribution, mode: "real" };
 }
 
-// ─── Phase A+B: Deep Dive Exploration Filters ────────────────────────────────
+// ─── Phase A+B+C: Deep Dive Exploration Filters ──────────────────────────────
 // normReason is already defined in Phase C3 above — reused here.
+
+/**
+ * Compute OB field availability from a session trade slice.
+ * Called on selectedSessionTrades (pre-filter) so visibility of OB groups
+ * in QuickControls remains stable while the user toggles OB filters.
+ *
+ * @param {object[]} sessionTrades
+ * @returns {{ hasNews: boolean, hasAge: boolean, hasWidth: boolean }}
+ */
+export function buildObFieldMeta(sessionTrades) {
+  if (!Array.isArray(sessionTrades) || sessionTrades.length === 0) {
+    return { hasNews: false, hasAge: false, hasWidth: false };
+  }
+  return {
+    hasNews:  sessionTrades.some(
+      (t) => t.hasNewsCreatedTagFields === true || t.ob_origin_news_window != null
+    ),
+    hasAge:   sessionTrades.some((t) => t.bars_to_fill != null),
+    hasWidth: sessionTrades.some(
+      (t) => t.obWidthPips != null || t.ob_width_pips != null
+    ),
+  };
+}
 
 /**
  * Resolve which Phase B cancelReason bucket a cancelled trade belongs to.
@@ -1536,15 +1559,22 @@ function countOutcomes(trades) {
  *
  * Phase A: entryModel + teDelay
  * Phase B: outcome + cancelReason
+ * Phase C: obQuality (news/clean) + obAge (fresh/normal/old)
  *
  * These filters are purely exploratory — they affect Deep Dive tabs only.
  * They do NOT affect RunImpactSummary, VisualSummaryStrip, or session card metrics.
  *
- * @param {object[]} sessionTrades — already filtered by sessionRules direction/structure
- * @param {object}   filters       — deepDiveFilters state shape
+ * @param {object[]} sessionTrades  — already filtered by sessionRules direction/structure
+ * @param {object}   filters        — deepDiveFilters state shape
+ * @param {object}   [obFieldMeta]  — from buildObFieldMeta(selectedSessionTrades); used to gate
+ *                                    activeFilterCount on field availability
  * @returns {{ includedTrades, excludedCount, activeFilterCount, isFiltered, byOutcome }}
  */
-export function applyDeepDiveFilters(sessionTrades, filters) {
+export function applyDeepDiveFilters(
+  sessionTrades,
+  filters,
+  obFieldMeta = { hasNews: true, hasAge: true, hasWidth: true }
+) {
   if (!Array.isArray(sessionTrades) || !sessionTrades.length || !filters) {
     return {
       includedTrades:    sessionTrades ?? [],
@@ -1557,7 +1587,7 @@ export function applyDeepDiveFilters(sessionTrades, filters) {
 
   const { entryModel, teDelay } = filters;
 
-  // Undefined-safe: if Phase B keys absent, treat as all-on
+  // Undefined-safe defaults for Phase B keys
   const outcome = filters.outcome ?? {
     win: true, loss: true, breakeven: true, cancelled: true, unfilled: true,
   };
@@ -1565,32 +1595,30 @@ export function applyDeepDiveFilters(sessionTrades, filters) {
     firstFailedTag: true, retrace: true, news: true, session: true, other: true,
   };
 
+  // Undefined-safe defaults for Phase C keys
+  const obQuality = filters.obQuality ?? { news: true, clean: true };
+  const obAge     = filters.obAge     ?? { fresh: true, normal: true, old: true };
+
+  // ── All-on flags ──────────────────────────────────────────────────────────
   const emAllOn =
     entryModel.baseline &&
     entryModel.penetration &&
     entryModel.triggeredEdge;
   const tdAllOn =
-    teDelay.same &&
-    teDelay.next &&
-    teDelay.d2 &&
-    teDelay.d3;
+    teDelay.same && teDelay.next && teDelay.d2 && teDelay.d3;
   const outAllOn =
-    outcome.win &&
-    outcome.loss &&
-    outcome.breakeven &&
-    outcome.cancelled &&
-    outcome.unfilled;
+    outcome.win && outcome.loss && outcome.breakeven &&
+    outcome.cancelled && outcome.unfilled;
   const crAllOn =
-    cancelReason.firstFailedTag &&
-    cancelReason.retrace &&
-    cancelReason.news &&
-    cancelReason.session &&
-    cancelReason.other;
-  // cancelReason gate is only active when cancelled trades are included AND not all CR toggles on
+    cancelReason.firstFailedTag && cancelReason.retrace &&
+    cancelReason.news && cancelReason.session && cancelReason.other;
   const crActive = outcome.cancelled && !crAllOn;
 
-  // Short-circuit: no filtering needed when all groups are unfiltered.
-  if (emAllOn && tdAllOn && outAllOn && !crActive) {
+  const obNewsAllOn = obQuality.news && obQuality.clean;
+  const obAgeAllOn  = obAge.fresh && obAge.normal && obAge.old;
+
+  // Short-circuit when all groups unfiltered
+  if (emAllOn && tdAllOn && outAllOn && !crActive && obNewsAllOn && obAgeAllOn) {
     return {
       includedTrades:    sessionTrades,
       excludedCount:     0,
@@ -1626,7 +1654,7 @@ export function applyDeepDiveFilters(sessionTrades, filters) {
       if (!outcome[bucket]) return false;
     }
 
-    // Gate 4 — Cancel reason (only applies to cancelled trades when outcome.cancelled is on)
+    // Gate 4 — Cancel reason (only for cancelled trades when outcome.cancelled is on)
     if (crActive) {
       if (EXCLUDED_CATEGORIES.has(classifyTrade(t)) && classifyTrade(t) !== "UNFILLED") {
         const bucket = resolveCancelReasonBucket(t);
@@ -1634,13 +1662,45 @@ export function applyDeepDiveFilters(sessionTrades, filters) {
       }
     }
 
+    // Gate 5 — OB Quality (news vs clean)
+    // Pass through trades with no news field data (permissive)
+    if (!obNewsAllOn) {
+      const hasNewsField =
+        t.hasNewsCreatedTagFields === true || t.ob_origin_news_window != null;
+      if (hasNewsField) {
+        const isNewsOB =
+          t.obCreatedDuringNews === true ||
+          t.ob_origin_news_window === true ||
+          t.ob_detection_news_window === true ||
+          t.obDetectedDuringNews === true;
+        if (isNewsOB  && !obQuality.news)  return false;
+        if (!isNewsOB && !obQuality.clean) return false;
+      }
+    }
+
+    // Gate 6 — OB Age (bars_to_fill buckets)
+    // Pass through trades where bars_to_fill is absent (permissive)
+    if (!obAgeAllOn) {
+      const n = t.bars_to_fill;
+      if (n != null) {
+        const age = Number(n);
+        if (age <= 4           && !obAge.fresh)  return false;
+        if (age >= 5 && age <= 10 && !obAge.normal) return false;
+        if (age > 10            && !obAge.old)   return false;
+      }
+    }
+
     return true;
   });
+
+  // activeFilterCount: only count OB groups when the field actually exists in the session
+  const obNewsActive = !obNewsAllOn && (obFieldMeta?.hasNews ?? true);
+  const obAgeActive  = !obAgeAllOn  && (obFieldMeta?.hasAge  ?? true);
 
   return {
     includedTrades:    included,
     excludedCount:     sessionTrades.length - included.length,
-    activeFilterCount: [!emAllOn, !tdAllOn, !outAllOn, crActive].filter(Boolean).length,
+    activeFilterCount: [!emAllOn, !tdAllOn, !outAllOn, crActive, obNewsActive, obAgeActive].filter(Boolean).length,
     isFiltered:        included.length < sessionTrades.length,
     byOutcome:         countOutcomes(included),
   };
