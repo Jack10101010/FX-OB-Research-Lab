@@ -69,6 +69,27 @@ export function RobustnessLab({
         });
     }, [nonBaselineRows, tradesByMode, activeVariant]);
 
+    // Outlier dependency per model — surfaces the already-computed
+    // buildOutlierDependency output (top-5 share of Net R + risk standing) so the
+    // ConfidencePanel can render it. No analytics change; container-level wiring only.
+    const outlierData = useMemo(() => {
+        if (!nonBaselineRows.length || !tradesByMode) return [];
+        return nonBaselineRows.map(row => {
+            const trades = resolveModelTrades(row.mode, tradesByMode, activeVariant);
+            if (!trades?.length) return null;
+            const o = buildOutlierDependency(trades);
+            if (!o) return null;
+            return {
+                mode:            row.mode,
+                label:           row.label,
+                top5Pct:         o.top5Pct,
+                withoutBestNetR: o.withoutBestNetR,
+                totalNetR:       o.totalNetR,
+                risk:            o.outlierRisk,
+            };
+        }).filter(Boolean);
+    }, [nonBaselineRows, tradesByMode, activeVariant]);
+
     return (
         <div className="space-y-4">
 
@@ -164,6 +185,7 @@ export function RobustnessLab({
             <ConfidencePanel
                 exactRows={exactRows || []}
                 halfSplitData={halfSplitData}
+                outlierData={outlierData}
                 robustnessScores={robustnessScores}
             />
 

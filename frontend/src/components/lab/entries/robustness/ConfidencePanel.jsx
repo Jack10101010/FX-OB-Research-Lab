@@ -61,32 +61,29 @@ function HalfSplitRow({ label, first, second, dim }) {
 }
 
 // ─── Outlier Dependency ───────────────────────────────────────────────────────
+// Faithful to buildOutlierDependency (robustnessAnalytics): top-5 share of Net R +
+// the LOW/MODERATE/HIGH risk standing. Bar idiom matches SampleAdequacyBar so the
+// panel stays visually consistent. (The previous OutlierRow expected a with/without-
+// outlier expectancy comparison that the analytics never produced — it was dead UI.)
 
-function OutlierRow({ label, withOutliers, withoutOutliers, n, removed }) {
-    const dependency = isFiniteNumber(withOutliers) && isFiniteNumber(withoutOutliers)
-        ? Math.abs(num(withoutOutliers) - num(withOutliers)) / (Math.abs(num(withOutliers)) + 0.001) * 100
-        : null;
-    const fragile = dependency != null && dependency > 30;
+function OutlierBar({ top5Pct, risk }) {
+    const pct   = Math.max(0, Math.min(100, num(top5Pct) || 0));
+    const color = risk === "HIGH"     ? "hsl(var(--danger))"
+                : risk === "MODERATE" ? "hsl(var(--warning))"
+                : "hsl(var(--success))";
+    const standing = risk === "HIGH" ? "outlier-led" : risk === "MODERATE" ? "some reliance" : "reliable";
     return (
-        <tr className="border-t border-[hsl(var(--border-soft)/0.2)]">
-            <td className="py-1 px-2 text-[10px] font-ui text-[hsl(var(--text-2))]">{label}</td>
-            <td className="py-1 px-2 text-center text-[10px] font-num tabular-nums text-white">
-                {isFiniteNumber(withOutliers) ? num(withOutliers).toFixed(3) : "—"}
-            </td>
-            <td className="py-1 px-2 text-center text-[10px] font-num tabular-nums text-white">
-                {isFiniteNumber(withoutOutliers) ? num(withoutOutliers).toFixed(3) : "—"}
-            </td>
-            <td className="py-1 px-2 text-center text-[9px] font-ui text-muted-lab">
-                {removed != null ? `${removed} removed` : "—"}
-            </td>
-            <td className="py-1 px-2 text-center">
-                {dependency != null && (
-                    <span className={cn("text-[8.5px] font-ui uppercase", fragile ? "text-[hsl(var(--danger))]" : "text-[hsl(var(--success))]")}>
-                        {fragile ? `fragile (${dependency.toFixed(0)}%)` : `robust (${dependency.toFixed(0)}%)`}
-                    </span>
-                )}
-            </td>
-        </tr>
+        <div className="flex items-center gap-3">
+            <div className="flex-1 h-2 bg-[hsl(var(--panel-2))] rounded-full overflow-hidden">
+                <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: color }} />
+            </div>
+            <span className="text-[10px] font-num tabular-nums w-10 text-right" style={{ color }}>
+                {pct.toFixed(0)}%
+            </span>
+            <span className="text-[9px] font-ui uppercase tracking-wider w-16" style={{ color }}>
+                {standing}
+            </span>
+        </div>
     );
 }
 
@@ -94,7 +91,7 @@ function OutlierRow({ label, withOutliers, withoutOutliers, n, removed }) {
 
 export function ConfidencePanel({ exactRows, halfSplitData, outlierData, robustnessScores }) {
     return (
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
 
             {/* Sample adequacy */}
             <NeonPanel title="Sample Adequacy" className="xl:col-span-1"
@@ -118,7 +115,7 @@ export function ConfidencePanel({ exactRows, halfSplitData, outlierData, robustn
                 action={<Pill tone="secondary">COMPOSITE 0–100</Pill>}
             >
                 <p className="mb-3 text-[10px] font-ui text-muted-lab">
-                    Composite score: sample confidence, half-split consistency, outlier independence, trade-off ratio.
+                    Composite 0–100 score based on sample size, edge vs baseline, drawdown control, trade-off quality, and fill rate.
                 </p>
                 {robustnessScores?.length > 0 ? (
                     <div className="space-y-2">
@@ -139,7 +136,7 @@ export function ConfidencePanel({ exactRows, halfSplitData, outlierData, robustn
                     </div>
                 ) : (
                     <div className="py-4 text-[10.5px] font-ui text-muted-lab">
-                        Requires per-model entry trade exports (trades_*__entry_*.csv). Summary entry results are loaded, but trade-level model lists are missing.
+                        Load this model's trade file to see this trust analysis.
                     </div>
                 )}
             </NeonPanel>
@@ -175,7 +172,30 @@ export function ConfidencePanel({ exactRows, halfSplitData, outlierData, robustn
                     </div>
                 ) : (
                     <div className="py-4 text-[10.5px] font-ui text-muted-lab">
-                        Requires per-model entry trade exports (trades_*__entry_*.csv). Summary entry results are loaded, but trade-level model lists are missing.
+                        Load this model's trade file to see this trust analysis.
+                    </div>
+                )}
+            </NeonPanel>
+
+            {/* Outlier dependency — was computed but never rendered; now surfaced. */}
+            <NeonPanel title="Outlier Dependency" className="xl:col-span-1"
+                action={<Pill tone="secondary">TOP 5 SHARE OF NET R</Pill>}
+            >
+                <p className="mb-3 text-[10px] font-ui text-muted-lab">
+                    Share of total Net R coming from each model's 5 best trades. Lower is more reliable; a high share means results lean on a few outliers.
+                </p>
+                {outlierData?.length > 0 ? (
+                    <div className="space-y-2">
+                        {outlierData.map(row => (
+                            <div key={row.mode} className="space-y-1">
+                                <span className="text-[9.5px] font-ui text-[hsl(var(--text-2))]">{row.label}</span>
+                                <OutlierBar top5Pct={row.top5Pct} risk={row.risk} />
+                            </div>
+                        ))}
+                    </div>
+                ) : (
+                    <div className="py-4 text-[10.5px] font-ui text-muted-lab">
+                        Load this model's trade file to see this trust analysis.
                     </div>
                 )}
             </NeonPanel>
