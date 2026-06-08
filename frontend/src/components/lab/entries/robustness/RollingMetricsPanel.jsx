@@ -50,8 +50,8 @@ export function RollingMetricsPanel({ rollingData, modelLabel, window: windowSiz
                     : <Pill tone="warning">NO TRADE DATA</Pill>
             }
         >
-            <p className="mb-3 text-[10.5px] font-ui text-muted-lab">
-                {modelLabel ? <><span className="text-white">{modelLabel}</span> · </> : ""}
+            <p className="mb-3 text-[11.5px] font-ui text-[hsl(var(--text-2))]">
+                {modelLabel ? <><span className="text-[hsl(var(--text))] font-semibold">{modelLabel}</span> · </> : ""}
                 Rolling {windowSize}-trade {metric.label.toLowerCase()} over time. A stable, positive plateau confirms robustness.
                 Wide swings signal fragility.
             </p>
@@ -92,8 +92,8 @@ export function RollingMetricsPanel({ rollingData, modelLabel, window: windowSiz
                     </LineChart>
                 </ResponsiveContainer>
             ) : (
-                <div className="py-8 text-center text-[10.5px] font-ui text-muted-lab">
-                    Requires per-model entry trade exports (trades_*__entry_*.csv). Summary entry results are loaded, but trade-level model lists are missing.
+                <div className="py-8 text-center text-[11.5px] font-ui text-[hsl(var(--text-2))]">
+                    Load this model's trade file to see rolling metrics.
                 </div>
             )}
         </NeonPanel>

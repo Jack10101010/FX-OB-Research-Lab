@@ -22,10 +22,10 @@ function SampleAdequacyBar({ n }) {
             <div className="flex-1 h-2 bg-[hsl(var(--panel-2))] rounded-full overflow-hidden">
                 <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: color }} />
             </div>
-            <span className="text-[10px] font-num tabular-nums w-8 text-right" style={{ color }}>
+            <span className="text-[11px] font-num tabular-nums w-10 text-right" style={{ color }}>
                 {n}
             </span>
-            <span className="text-[9px] font-ui uppercase tracking-wider w-16" style={{ color }}>
+            <span className="text-[10px] font-ui uppercase tracking-wider w-16" style={{ color }}>
                 {conf.label.toLowerCase()}
             </span>
         </div>
@@ -39,20 +39,20 @@ function HalfSplitRow({ label, first, second, dim }) {
     const consistent = delta != null && Math.abs(delta) < 0.15 * Math.abs(num(first) || 1);
     return (
         <tr className="border-t border-[hsl(var(--border-soft)/0.2)]">
-            <td className="py-1 px-2 text-[10px] font-ui text-[hsl(var(--text-2))]">{label}</td>
-            <td className="py-1 px-2 text-center text-[10px] font-num tabular-nums text-white">
+            <td className="py-1.5 px-2 text-[11px] font-ui text-[hsl(var(--text))]">{label}</td>
+            <td className="py-1.5 px-2 text-center text-[11px] font-num tabular-nums text-white">
                 {isFiniteNumber(first) ? dim.fmt(num(first)) : "—"}
             </td>
-            <td className="py-1 px-2 text-center text-[10px] font-num tabular-nums text-white">
+            <td className="py-1.5 px-2 text-center text-[11px] font-num tabular-nums text-white">
                 {isFiniteNumber(second) ? dim.fmt(num(second)) : "—"}
             </td>
-            <td className={cn("py-1 px-2 text-center text-[10px] font-num tabular-nums", consistent ? "text-[hsl(var(--success))]" : "text-[hsl(var(--warning))]")}>
+            <td className={cn("py-1.5 px-2 text-center text-[11px] font-num tabular-nums", consistent ? "text-[hsl(var(--success))]" : "text-[hsl(var(--warning))]")}>
                 {delta != null ? `${delta >= 0 ? "+" : ""}${delta.toFixed(3)}` : "—"}
             </td>
-            <td className="py-1 px-2 text-center">
+            <td className="py-1.5 px-2 text-center">
                 {delta != null && (
-                    <span className={cn("text-[8.5px] font-ui uppercase", consistent ? "text-[hsl(var(--success))]" : "text-[hsl(var(--warning))]")}>
-                        {consistent ? "consistent" : "divergent"}
+                    <span className={cn("text-[9.5px] font-ui font-semibold uppercase", consistent ? "text-[hsl(var(--success))]" : "text-[hsl(var(--warning))]")}>
+                        {consistent ? "holds up" : "breaks down"}
                     </span>
                 )}
             </td>
@@ -77,10 +77,10 @@ function OutlierBar({ top5Pct, risk }) {
             <div className="flex-1 h-2 bg-[hsl(var(--panel-2))] rounded-full overflow-hidden">
                 <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: color }} />
             </div>
-            <span className="text-[10px] font-num tabular-nums w-10 text-right" style={{ color }}>
+            <span className="text-[11px] font-num tabular-nums w-10 text-right" style={{ color }}>
                 {pct.toFixed(0)}%
             </span>
-            <span className="text-[9px] font-ui uppercase tracking-wider w-16" style={{ color }}>
+            <span className="text-[10px] font-ui uppercase tracking-wider w-16" style={{ color }}>
                 {standing}
             </span>
         </div>
@@ -93,17 +93,17 @@ export function ConfidencePanel({ exactRows, halfSplitData, outlierData, robustn
     return (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
 
-            {/* Sample adequacy */}
-            <NeonPanel title="Sample Adequacy" className="xl:col-span-1"
-                action={<Pill tone="secondary">N THRESHOLDS</Pill>}
+            {/* Sample adequacy → Enough data? */}
+            <NeonPanel title="Enough data?" className="xl:col-span-1"
+                action={<Pill tone="secondary">BY TRADE COUNT</Pill>}
             >
-                <p className="mb-3 text-[10px] font-ui text-muted-lab">
-                    Thresholds: insufficient &lt;{LOW_SAMPLE_N} · low &lt;{MODERATE_SAMPLE_N} · moderate &lt;{ROBUST_SAMPLE_N} · robust ≥{ROBUST_SAMPLE_N}
+                <p className="mb-3 text-[11.5px] font-ui text-[hsl(var(--text-2))]">
+                    How many trades back each model. Too few &lt;{LOW_SAMPLE_N} · thin &lt;{MODERATE_SAMPLE_N} · ok &lt;{ROBUST_SAMPLE_N} · strong ≥{ROBUST_SAMPLE_N}
                 </p>
                 <div className="space-y-2">
                     {exactRows.filter(r => r.exact).map(row => (
                         <div key={row.mode} className="space-y-1">
-                            <span className="text-[9.5px] font-ui text-[hsl(var(--text-2))]">{row.label}</span>
+                            <span className="text-[11px] font-ui text-[hsl(var(--text))]">{row.label}</span>
                             <SampleAdequacyBar n={row.trades || 0} />
                         </div>
                     ))}
@@ -114,7 +114,7 @@ export function ConfidencePanel({ exactRows, halfSplitData, outlierData, robustn
             <NeonPanel title="Robustness Scores" className="xl:col-span-1"
                 action={<Pill tone="secondary">COMPOSITE 0–100</Pill>}
             >
-                <p className="mb-3 text-[10px] font-ui text-muted-lab">
+                <p className="mb-3 text-[11.5px] font-ui text-[hsl(var(--text-2))]">
                     Composite 0–100 score based on sample size, edge vs baseline, drawdown control, trade-off quality, and fill rate.
                 </p>
                 {robustnessScores?.length > 0 ? (
@@ -124,37 +124,37 @@ export function ConfidencePanel({ exactRows, halfSplitData, outlierData, robustn
                             const color  = score >= 70 ? "hsl(var(--success))" : score >= 45 ? "hsl(var(--warning))" : "hsl(var(--danger))";
                             return (
                                 <div key={mode} className="flex items-center gap-3">
-                                    <span className="text-[10px] font-ui text-[hsl(var(--text-2))] w-28 truncate">{label}</span>
+                                    <span className="text-[11px] font-ui text-[hsl(var(--text))] w-28 truncate">{label}</span>
                                     <div className="flex-1 h-2 bg-[hsl(var(--panel-2))] rounded-full overflow-hidden">
                                         <div className="h-full rounded-full" style={{ width: `${score}%`, background: color }} />
                                     </div>
-                                    <span className="text-[10px] font-num tabular-nums w-8 text-right" style={{ color }}>{score}</span>
-                                    <span className="text-[9px] font-ui uppercase tracking-wider w-16" style={{ color }}>{rInfo.label}</span>
+                                    <span className="text-[11px] font-num tabular-nums w-8 text-right" style={{ color }}>{score}</span>
+                                    <span className="text-[10px] font-ui uppercase tracking-wider w-16" style={{ color }}>{rInfo.label}</span>
                                 </div>
                             );
                         })}
                     </div>
                 ) : (
-                    <div className="py-4 text-[10.5px] font-ui text-muted-lab">
+                    <div className="py-4 text-[11.5px] font-ui text-[hsl(var(--text-2))]">
                         Load this model's trade file to see this trust analysis.
                     </div>
                 )}
             </NeonPanel>
 
-            {/* Half-split */}
-            <NeonPanel title="Half-Split Consistency" className="xl:col-span-1"
+            {/* Half-split → Holds over time? */}
+            <NeonPanel title="Holds over time?" className="xl:col-span-1"
                 action={<Pill tone="secondary">FIRST vs SECOND HALF</Pill>}
             >
-                <p className="mb-3 text-[10px] font-ui text-muted-lab">
-                    Split trades 50/50 chronologically. Consistent results in both halves reduce overfit risk.
+                <p className="mb-3 text-[11.5px] font-ui text-[hsl(var(--text-2))]">
+                    Split each model's trades 50/50 by time. An edge that holds in both halves is less likely to be overfit.
                 </p>
                 {halfSplitData?.length > 0 ? (
                     <div className="overflow-x-auto scrollbar-thin">
-                        <table className="w-full text-[10px] border-separate border-spacing-0">
+                        <table className="w-full text-[11px] border-separate border-spacing-0">
                             <thead>
                                 <tr>
-                                    {["Model", "H1 Exp", "H2 Exp", "Δ", ""].map((h, i) => (
-                                        <th key={i} className="text-left text-[8.5px] uppercase tracking-wider text-muted-lab px-2 py-1.5">{h}</th>
+                                    {["Model", "First half", "Second half", "Change", ""].map((h, i) => (
+                                        <th key={i} className="text-left text-[10px] font-ui font-semibold uppercase tracking-[0.05em] text-[hsl(var(--text-2))] px-2 py-1.5">{h}</th>
                                     ))}
                                 </tr>
                             </thead>
@@ -171,30 +171,30 @@ export function ConfidencePanel({ exactRows, halfSplitData, outlierData, robustn
                         </table>
                     </div>
                 ) : (
-                    <div className="py-4 text-[10.5px] font-ui text-muted-lab">
+                    <div className="py-4 text-[11.5px] font-ui text-[hsl(var(--text-2))]">
                         Load this model's trade file to see this trust analysis.
                     </div>
                 )}
             </NeonPanel>
 
-            {/* Outlier dependency — was computed but never rendered; now surfaced. */}
-            <NeonPanel title="Outlier Dependency" className="xl:col-span-1"
+            {/* Outlier dependency → Luck or real? (was computed but never rendered; now surfaced) */}
+            <NeonPanel title="Luck or real?" className="xl:col-span-1"
                 action={<Pill tone="secondary">TOP 5 SHARE OF NET R</Pill>}
             >
-                <p className="mb-3 text-[10px] font-ui text-muted-lab">
+                <p className="mb-3 text-[11.5px] font-ui text-[hsl(var(--text-2))]">
                     Share of total Net R coming from each model's 5 best trades. Lower is more reliable; a high share means results lean on a few outliers.
                 </p>
                 {outlierData?.length > 0 ? (
                     <div className="space-y-2">
                         {outlierData.map(row => (
                             <div key={row.mode} className="space-y-1">
-                                <span className="text-[9.5px] font-ui text-[hsl(var(--text-2))]">{row.label}</span>
+                                <span className="text-[11px] font-ui text-[hsl(var(--text))]">{row.label}</span>
                                 <OutlierBar top5Pct={row.top5Pct} risk={row.risk} />
                             </div>
                         ))}
                     </div>
                 ) : (
-                    <div className="py-4 text-[10.5px] font-ui text-muted-lab">
+                    <div className="py-4 text-[11.5px] font-ui text-[hsl(var(--text-2))]">
                         Load this model's trade file to see this trust analysis.
                     </div>
                 )}
