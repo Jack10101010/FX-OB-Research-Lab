@@ -84,6 +84,26 @@ const nullCls = buildTradeClassification(null);
 ok(eq(nullCls.entry_context, ["unknown_at_arm"]), "null-trade fallback entry_context = [unknown_at_arm]");
 ok(nullCls.fill_state === "unknown_at_arm", "null-trade fallback fill_state = unknown_at_arm");
 
+console.log("deriveEntryModel — baseline normalization + TE/EP unchanged");
+const em = (key) => buildTradeClassification({ entry_model_key: key }).entry_model;
+// Baseline normalization (the fix): all baseline spellings → "baseline".
+ok(em("baseline") === "baseline", '"baseline" → baseline');
+ok(em("entry_baseline") === "baseline", '"entry_baseline" → baseline (was unknown_model)');
+ok(em("single_position__entry_baseline") === "baseline", "single_position__entry_baseline → baseline");
+ok(em("allow_multi_position__entry_baseline") === "baseline", "allow_multi_position__entry_baseline → baseline");
+ok(em("one_per_direction__entry_baseline") === "baseline", "one_per_direction__entry_baseline → baseline");
+ok(em("") === "baseline", "empty entry_model_key → baseline");
+ok(buildTradeClassification({}).entry_model === "baseline", "missing entry_model_key → baseline");
+// TE / EP mapping unchanged.
+ok(em("entry_triggered_edge_25p0_same") === "te_same", "te_same unchanged");
+ok(em("entry_triggered_edge_25p0_next") === "te_next", "te_next unchanged");
+ok(em("entry_triggered_edge_25p0_d2") === "te_d2", "entry_triggered_edge_25p0_d2 → te_d2 (unchanged)");
+ok(em("entry_triggered_edge_25p0_d3") === "te_d3", "te_d3 unchanged");
+ok(em("single_position__entry_triggered_edge_25p0_d2") === "te_d2", "prefixed te_d2 unchanged");
+ok(em("entry_penetration_50p0") === "ep_50", "entry_penetration_50p0 → ep_50 (unchanged)");
+// A genuinely unrecognized key must still be unknown_model (fix is not over-broad).
+ok(em("some_unrecognized_key") === "unknown_model", "unrecognized key still → unknown_model");
+
 console.log("classificationRegistry — alias resolution");
 ok(getTagMeta("ob_not_occupied").label === "Vacant — No AAE", 'getTagMeta("ob_not_occupied") → "Vacant — No AAE"');
 ok(getTagMeta("clean").label === "Occupied At Arm", 'getTagMeta("clean") → "Occupied At Arm"');

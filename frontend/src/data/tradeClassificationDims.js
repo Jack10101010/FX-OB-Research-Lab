@@ -143,7 +143,7 @@ export function deriveFillState(trade) {
  * Canonical key format (from normalizeEntryModeKey in importer.js):
  *   entry_triggered_edge_25p0[_same|_next|_d2|_d3]
  *   entry_penetration_25p0
- *   baseline | "" | null | undefined
+ *   baseline | entry_baseline | <position>__entry_baseline | "" | null | undefined
  *
  * @param {object} trade
  * @returns {string}
@@ -153,7 +153,16 @@ function deriveEntryModel(trade) {
         trade.entry_model_key ?? trade.entryModelKey ?? ""
     ).toLowerCase().trim();
 
-    if (!raw || raw === "baseline") return "baseline";
+    // Baseline — bare, importer-prefixed (entry_baseline), and position-variant-
+    // prefixed (single_position__entry_baseline, allow_multi_position__…,
+    // one_per_direction__…) all normalize to baseline. This mirrors canonicalEntryKey
+    // in the adapters (enabledVariantBreakdown / modelFamily) so the CORE derivation
+    // agrees with them: without it, entry_baseline fell through to "unknown_model" and
+    // rendered as "Unknown Model" in Entry Model Breakdown + Research Signals.
+    if (!raw || raw === "baseline" || raw === "entry_baseline"
+        || raw.endsWith("__entry_baseline") || raw.endsWith("__baseline")) {
+        return "baseline";
+    }
 
     // Triggered-edge delay variants — check most specific suffixes first.
     if (raw.includes("_d3"))   return "te_d3";
