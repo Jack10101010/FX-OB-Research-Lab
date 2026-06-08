@@ -68,6 +68,24 @@ const TAG_ORDER = {
 };
 const orderOf = (tag) => (tag in TAG_ORDER ? TAG_ORDER[tag] : 90); // unrecognized → before unknown_model
 
+// The importer stores each variant's trades under TWO keys (see importer
+// `entryTradesByMode`): a bare `<mode>` key and a `<positionVariant>__<mode>` key,
+// both referencing the SAME trades. Stripping the position-variant prefix collapses
+// those into one canonical entry-model key, which (a) prevents duplicate rows and
+// (b) lets a prefixed `..__baseline` resolve to Baseline rather than Unknown Model.
+const POSITION_VARIANT_PREFIXES = ["single_position", "allow_multi_position", "one_per_direction"];
+function canonicalEntryKey(key) {
+    let k = String(key || "");
+    for (const p of POSITION_VARIANT_PREFIXES) {
+        if (k.startsWith(`${p}__`)) { k = k.slice(p.length + 2); break; }
+    }
+    // The importer keys baseline as `entry_baseline` (filename `..__entry_baseline.csv`);
+    // deriveEntryModel only recognizes the literal "baseline", so map it here — mirrors
+    // tradeUniverse.normalizeEntryModelKey's `entry_baseline → baseline` rule.
+    if (k === "entry_baseline") k = "baseline";
+    return k;
+}
+
 /**
  * Aggregate per-entry-model-variant trade lists into comparison rows.
  *
@@ -78,11 +96,20 @@ const orderOf = (tag) => (tag in TAG_ORDER ? TAG_ORDER[tag] : 90); // unrecogniz
  */
 export function buildVariantRows(tradesByMode) {
     const map = tradesByMode && typeof tradesByMode === "object" ? tradesByMode : {};
-    const rows = [];
 
+    // Collapse position-variant-prefixed aliases into one canonical entry-model key.
+    // Bare and prefixed keys reference the SAME trades, so we keep one (preferring the
+    // bare key) — never concatenate, which would double-count.
+    const byCanon = new Map();
     for (const [key, trades] of Object.entries(map)) {
         if (!Array.isArray(trades)) continue;
+        const canon = canonicalEntryKey(key);
+        const isBare = key === canon;
+        if (isBare || !byCanon.has(canon)) byCanon.set(canon, trades);
+    }
 
+    const rows = [];
+    for (const [canon, trades] of byCanon) {
         let count = 0, wins = 0, losses = 0, sumR = 0;
         for (const trade of trades) {
             if (!isPerformanceTrade(trade)) continue;
@@ -95,12 +122,12 @@ export function buildVariantRows(tradesByMode) {
         if (count === 0) continue; // drop empty / non-performance-only variants
 
         let tag;
-        try { tag = buildTradeClassification({ entry_model_key: key }).entry_model; }
+        try { tag = buildTradeClassification({ entry_model_key: canon }).entry_model; }
         catch { tag = "unknown_model"; }
         const wl = wins + losses;
 
         rows.push({
-            key,
+            key:        canon,
             tag,
             label:      getTagMeta(tag).label,
             tooltipKey: tag,

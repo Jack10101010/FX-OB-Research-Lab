@@ -77,5 +77,57 @@ ok(fromSnake.length === 7, "reads bundle.entry_results.trades_by_mode (snake ali
 ok(buildEnabledVariantBreakdown({}).length === 0, "empty bundle → []");
 ok(buildEnabledVariantBreakdown(null).length === 0, "null bundle → [] (no throw)");
 
+// ── Regression: importer dual-key structure (ENABLED-VARIANT-COMPARISON-2 fix) ──
+// The importer stores each variant under BOTH a bare `<mode>` key and a
+// `<positionVariant>__<mode>` key, referencing the SAME trades. Must collapse to
+// one row per variant, no double-count, and prefixed baseline → Baseline.
+console.log("importer dual-key dedup");
+
+const NEXT = [T({ outcome: "Win", r: 1 }), T({ outcome: "Loss", r: -1 }), T({ outcome: "Win", r: 2 })]; // n3 net+2
+const D2 = [T({ outcome: "Win", r: 1 })];
+const D3 = [T({ outcome: "Loss", r: -1 })];
+const BASE = [T({ outcome: "Win", r: 1 }), T({ outcome: "Win", r: 1 })]; // n2 net+2
+const dualKey = {
+    "single_position__entry_triggered_edge_25p0_next": NEXT, // prefixed
+    "entry_triggered_edge_25p0_next":                  NEXT, // bare (SAME array)
+    "single_position__entry_triggered_edge_25p0_d2":   D2,
+    "entry_triggered_edge_25p0_d2":                    D2,
+    "single_position__entry_triggered_edge_25p0_d3":   D3,
+    "entry_triggered_edge_25p0_d3":                    D3,
+    "single_position__entry_baseline":                 BASE, // REAL importer baseline key (was Unknown Model)
+    "entry_baseline":                                  BASE,
+};
+const dr = buildVariantRows(dualKey);
+const drTags = dr.map((r) => r.tag);
+
+ok(JSON.stringify(drTags) === JSON.stringify(["baseline", "te_next", "te_d2", "te_d3"]),
+   `dual-key collapses to one row each: ${drTags.join(", ")}`);
+ok(drTags.filter((t) => t === "te_next").length === 1, "TE C1 appears once (was twice)");
+ok(drTags.filter((t) => t === "te_d2").length === 1, "TE C2 appears once (was twice)");
+ok(drTags.filter((t) => t === "te_d3").length === 1, "TE C3 appears once (was twice)");
+ok(!drTags.includes("unknown_model"), "no Unknown Model (prefixed baseline resolved)");
+const baseRow = dr.find((r) => r.tag === "baseline");
+ok(baseRow && baseRow.label === "Baseline", "prefixed/bare baseline → Baseline (not Unknown Model)");
+const nextRow = dr.find((r) => r.tag === "te_next");
+ok(nextRow.count === 3 && approx(nextRow.netR, 2),
+   "no double-count: TE C1 n=3 net=+2 (bare+prefixed same trades counted once, not 6)");
+
+// ── Regression: entry_baseline → Baseline (ENABLED-VARIANT-BASELINE-FIX) ────────
+console.log("baseline key normalization (entry_baseline → Baseline)");
+const b1 = buildVariantRows({ "entry_baseline": [T({ outcome: "Win", r: 1 })] });
+ok(b1.length === 1 && b1[0].tag === "baseline" && b1[0].label === "Baseline",
+   "bare entry_baseline → Baseline (not Unknown Model)");
+const b2 = buildVariantRows({ "single_position__entry_baseline": [T({ outcome: "Win", r: 1 })] });
+ok(b2.length === 1 && b2[0].tag === "baseline" && b2[0].label === "Baseline",
+   "prefixed single_position__entry_baseline → Baseline");
+const standard = buildVariantRows({
+    "entry_baseline":                                  [T({ outcome: "Win", r: 1 })],
+    "single_position__entry_triggered_edge_25p0_next": [T({ outcome: "Win", r: 1 })],
+    "entry_triggered_edge_25p0_next":                  [T({ outcome: "Win", r: 1 })],
+    "entry_penetration_25p0":                          [T({ outcome: "Win", r: 1 })],
+});
+ok(!standard.some((r) => r.tag === "unknown_model"),
+   "no Unknown Model for standard baseline / TE / EP keys");
+
 console.log(`\n${failures === 0 ? "ALL PASS" : failures + " FAILURE(S)"}`);
 process.exit(failures === 0 ? 0 : 1);
