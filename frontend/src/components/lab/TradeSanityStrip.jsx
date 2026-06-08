@@ -31,7 +31,7 @@
  */
 
 import React from "react";
-import { summarizeTradeSanity } from "@/data/tradeClassification";
+import { summarizeTradeSanity, buildDirStructMatrix } from "@/data/tradeClassification";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Formatters
@@ -201,6 +201,14 @@ export function TradeSanityStrip({
         return summarizeTradeSanity(trades || []);
     }, [stats, trades]);
 
+    // Structure matrix (BOS/CHoCH × dir × outcome) — research variant only, and
+    // only when raw trades are available. Hook runs every render to satisfy the
+    // rules of hooks, but only does work for the research strip.
+    const structMatrix = React.useMemo(
+        () => (variant === "research" && Array.isArray(trades) ? buildDirStructMatrix(trades) : null),
+        [variant, trades],
+    );
+
     const {
         total = 0,
         performanceTrades = 0,
@@ -248,8 +256,9 @@ export function TradeSanityStrip({
         ];
 
         const composition = [
-            { key: "valid", label: "Valid", value: fmtCount(performanceTrades),
-              hint: performanceTrades !== total ? `of ${fmtCount(total)}` : null },
+            { key: "valid", label: "Valid Trades",
+              value: `${fmtCount(performanceTrades)} of ${fmtCount(total)}`,
+              hint: "valid / total rows" },
             { key: "wlf", label: flats > 0 ? "W / L / F" : "W / L",
               value: flats > 0
                   ? `${fmtCount(wins)} / ${fmtCount(losses)} / ${fmtCount(flats)}`
@@ -259,6 +268,27 @@ export function TradeSanityStrip({
               value: `${fmtCount(longCount)} / ${fmtCount(shortCount)}`,
               zero: longCount + shortCount === 0,
               hint: longCount + shortCount === 0 ? "no direction" : null },
+        ];
+
+        // Structure group — BOS / CHoCH win-loss, derived from the existing
+        // buildDirStructMatrix. Directional (Long/Short) split is available from
+        // the same matrix rows but deferred to keep the strip uncrowded.
+        const structAgg = (struct) =>
+            (structMatrix?.rows || [])
+                .filter((row) => row.struct === struct)
+                .reduce((acc, row) => ({ win: acc.win + row.win, loss: acc.loss + row.loss, total: acc.total + row.total }),
+                        { win: 0, loss: 0, total: 0 });
+        const bos = structAgg("BOS");
+        const choch = structAgg("CHoCH");
+        const structure = [
+            ...(bos.total > 0
+                ? [{ key: "bos", label: "BOS W / L", value: `${fmtCount(bos.win)} / ${fmtCount(bos.loss)}`,
+                    tone: bos.win > bos.loss ? "success" : bos.loss > bos.win ? "danger" : "muted" }]
+                : []),
+            ...(choch.total > 0
+                ? [{ key: "choch", label: "CHoCH W / L", value: `${fmtCount(choch.win)} / ${fmtCount(choch.loss)}`,
+                    tone: choch.win > choch.loss ? "success" : choch.loss > choch.win ? "danger" : "muted" }]
+                : []),
         ];
 
         const secondary = [
@@ -301,6 +331,7 @@ export function TradeSanityStrip({
                 )}
                 <ResearchGroup label="Outcome" tiles={outcome} accent />
                 <ResearchGroup label="Composition" tiles={composition} />
+                <ResearchGroup label="Structure" tiles={structure} />
                 <ResearchGroup label="Secondary" tiles={secondary} dim />
             </div>
         );
