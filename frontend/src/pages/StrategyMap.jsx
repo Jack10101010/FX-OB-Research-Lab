@@ -864,6 +864,7 @@ export default function StrategyMap() {
                             sessionRanges={sessionRanges}
                             showSessionHighlights={showSessions}
                             selectedTradeId={selectedTradeId}
+                            highlightObId={selectedOverlay?.obId ?? null}
                             height={chartHeight}
                             triggeredEdgeOverlays={triggeredEdgeOverlays}
                             showTriggeredEdgeLevels={showTriggeredEdgeLevels}

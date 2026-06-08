@@ -265,6 +265,7 @@ export function CandleChart({
     onTradeClick,
     onSelectTrade,           // (tradeId | null) => void — Phase 2: chart-side activation of the Intrabar Inspector
     selectedTradeId,
+    highlightObId = null,    // OB id to treat as "selected" (FFT map-link focus) — reuses the selected styling path
     verificationOverlay = null,
     rrTools = [],
     newsEvents = [],
@@ -309,7 +310,9 @@ export function CandleChart({
     // used by obLookupKey, so OBs / badges / dots can compare against it. Pre-built
     // ob→trade map lets us resolve an OB click to a tradeId even when the OB
     // wasn't enriched upstream (enrichObsWithTradeLabels usually does this).
-    const selectedKey = obLookupKey(selectedTradeId);
+    // Treat selectedTradeId OR highlightObId as "selected" — single selection path,
+    // no second visual language. highlightObId drives the FFT map-link focus highlight.
+    const selectedKey = obLookupKey(selectedTradeId) ?? obLookupKey(highlightObId);
     const tradeByObKey = useMemo(() => {
         const map = new Map();
         for (const t of trades || []) {
@@ -1684,9 +1687,9 @@ function OrderBlockOverlay({ ob, debugIndex = 0, debugOverlays = false, showObLa
     const visual = resolveObVisual(ob);
     const interactive = !!onClick;
     const selectionRing = selected
-        ? "0 0 0 2px rgba(56, 189, 248, 0.92), 0 0 6px rgba(56, 189, 248, 0.45)"
+        ? "0 0 0 3px rgba(56, 189, 248, 1), 0 0 12px 2px rgba(56, 189, 248, 0.6)"
         : "none";
-    const borderColor = selected ? "rgba(14, 116, 144, 0.92)" : visual.border;
+    const borderColor = selected ? "rgba(56, 189, 248, 0.98)" : visual.border;
 
     return (
         <div
@@ -1701,9 +1704,9 @@ function OrderBlockOverlay({ ob, debugIndex = 0, debugOverlays = false, showObLa
                 top: ob.top,
                 height: ob.height,
                 background: visual.fill,
-                border: `${selected ? 2 : 1}px solid ${borderColor}`,
+                border: `${selected ? 3 : 1}px solid ${borderColor}`,
                 boxShadow: selectionRing,
-                zIndex: selected ? 13 : 12,
+                zIndex: selected ? 30 : 12,
                 pointerEvents: interactive ? "auto" : "none",
                 cursor: interactive ? "pointer" : "default",
             }}
@@ -1958,8 +1961,9 @@ function TriggeredEdgeBadge({ badge, selected = false, onClick }) {
             style={{
                 left: badge.left,
                 top: badge.top,
-                zIndex: selected ? 17 : 16,
-                transform: "translateX(-100%)",
+                zIndex: selected ? 32 : 16,
+                transform: selected ? "translateX(-100%) scale(1.12)" : "translateX(-100%)",
+                transformOrigin: "right center",
                 cursor: interactive ? "pointer" : "default",
             }}
         >
@@ -1970,7 +1974,7 @@ function TriggeredEdgeBadge({ badge, selected = false, onClick }) {
                     background: badge.color.bg,
                     color: badge.color.text,
                     boxShadow: selected
-                        ? "0 0 0 2px rgba(56, 189, 248, 0.92), 0 0 4px rgba(56, 189, 248, 0.5)"
+                        ? "0 0 0 3px rgba(56, 189, 248, 1), 0 0 8px 1px rgba(56, 189, 248, 0.7)"
                         : "none",
                     outline: "none",
                 }}
