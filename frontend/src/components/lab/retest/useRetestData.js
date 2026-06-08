@@ -40,8 +40,24 @@ export const RETEST_STATUS = {
     READY: "ready",
 };
 
+// A run may yield candles either in-memory, via the imported bundle flags, OR via
+// the SAME lazy sidecar/output-folder reload path other pages use. The earlier
+// gate only checked in-memory/hasCandles/candlesStorage, so runs whose candles
+// live in the sidecar (hasCandles=false until loaded) were wrongly shown as
+// "no candle data" before any load was attempted. Include reload identifiers so
+// those runs attempt loadCandlesForRun first.
 function runMayHaveCandles(run) {
-    return !!(run && (run.hasCandles || run.candlesStorage || (Array.isArray(run.candles) && run.candles.length)));
+    if (!run) return false;
+    if (Array.isArray(run.candles) && run.candles.length) return true;
+    if (run.hasCandles || run.candlesStorage) return true;
+    // Reloadable via sidecar / output folder — loadCandlesForRun can fetch these.
+    return !!(
+        run.reloadAvailable ||
+        run.sidecarRunId || run.sidecarJobId || run.originalRunId ||
+        run.outputFolder || run.sourceOutputFolder || run.run_id ||
+        run.summary?.sidecarRunId || run.summary?.sidecarJobId ||
+        run.summary?.originalRunId || run.summary?.outputFolder
+    );
 }
 
 export function useRetestData({ orderBlocks = [], trades = [], activeRun = null, activeRunId = null, enabled = false } = {}) {
@@ -49,7 +65,7 @@ export function useRetestData({ orderBlocks = [], trades = [], activeRun = null,
 
     const [config, setConfigState] = React.useState(DEFAULT_RETEST_CONFIG);
     const [candles, setCandles] = React.useState(null);
-    const [loadState, setLoadState] = React.useState("idle"); // idle | loading | ready | failed
+    const [loadState, setLoadState] = React.useState("idle"); // idle | loading | ready | empty | failed
     const [error, setError] = React.useState("");
 
     const setConfig = React.useCallback((patch) => {
@@ -80,8 +96,10 @@ export function useRetestData({ orderBlocks = [], trades = [], activeRun = null,
             if (token !== loadToken.current) return; // superseded by a newer run
             const arr = Array.isArray(result) ? result : (result?.candles || []);
             setCandles(arr);
-            setLoadState(arr.length ? "ready" : "failed");
-            if (!arr.length) setError("Candle data was empty for this run.");
+            // Loaded successfully but no candles present → genuinely "no candles"
+            // (NO_CANDLES), distinct from a transient sidecar/load error (FAILED).
+            setLoadState(arr.length ? "ready" : "empty");
+            if (!arr.length) setError("This run has no candle data available to load.");
         } catch (e) {
             if (token !== loadToken.current) return;
             setCandles(null);
@@ -150,13 +168,18 @@ export function useRetestData({ orderBlocks = [], trades = [], activeRun = null,
         };
     }, [result, activeRun]);
 
-    // Resolve the public status enum. Backend mode is READY immediately (no candles).
+    // Resolve the public status enum. Candle availability is decided by the load
+    // RESULT (not just the imported `hasCandles` flag): backend events win; a
+    // completed-but-empty load is NO_CANDLES; a thrown load error is FAILED (retry);
+    // only a run with no candle source at all short-circuits to NO_CANDLES without
+    // a load attempt; otherwise we are still loading.
     let status;
     if (!activeRunId) status = RETEST_STATUS.NO_RUN;
     else if (hasBackend) status = RETEST_STATUS.READY;
-    else if (!mayHaveCandles) status = RETEST_STATUS.NO_CANDLES;
-    else if (loadState === "failed") status = RETEST_STATUS.FAILED;
     else if (loadState === "ready" && derived) status = RETEST_STATUS.READY;
+    else if (loadState === "empty") status = RETEST_STATUS.NO_CANDLES;
+    else if (loadState === "failed") status = RETEST_STATUS.FAILED;
+    else if (!mayHaveCandles) status = RETEST_STATUS.NO_CANDLES;
     else status = RETEST_STATUS.LOADING;
 
     return {

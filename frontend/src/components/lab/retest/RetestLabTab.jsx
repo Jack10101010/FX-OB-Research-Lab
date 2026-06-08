@@ -81,11 +81,12 @@ export function RetestLabTab({ orderBlocks = [], trades = [], activeRun = null, 
     if (status === RETEST_STATUS.NO_CANDLES) {
         return (
             <GateShell title="Retest Lab" badge={<Pill tone="muted">No candles</Pill>}>
-                <div className="text-[13px] font-ui text-[hsl(var(--text-2))]">This run was imported without candle data.</div>
+                <div className="text-[13px] font-ui text-[hsl(var(--text-2))]">No candle data is available for this run.</div>
                 <div className="text-[11px] text-muted-lab max-w-md leading-relaxed">
-                    Retest analysis replays execution-timeframe candles against each OB.
-                    Re-import this run with <span className="text-[hsl(var(--text))]">candles.csv</span> included,
-                    or load candles via the sidecar, then reopen this tab.
+                    Retest analysis replays execution-timeframe candles against each OB. We tried to
+                    load candles for this run (in-memory and via the sidecar) and found none — re-run or
+                    re-import it with <span className="text-[hsl(var(--text))]">candles.csv</span> included,
+                    or import the backend <span className="text-[hsl(var(--text))]">ob_retests.csv</span> for verified results.
                 </div>
             </GateShell>
         );
