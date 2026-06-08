@@ -363,6 +363,26 @@ export const GLOSSARY = {
         definition: "Of retests that resolved (survived or failed), the share that survived — i.e. price re-entered the order block and it held without a breach inside the reaction window. Open (right-censored) retests are excluded.",
         whyItMatters: "The headline measure of whether a retested OB still offers a reaction or has lost its edge.",
     },
+    retest_rate: {
+        friendlyName: "Retest Rate",
+        definition: "Of order blocks that had a first touch, the share that were later revisited at least once.",
+        whyItMatters: "Shows how often OBs are actually re-tested at all — the denominator for everything else here.",
+    },
+    retest_failure_rate: {
+        friendlyName: "Failure Rate",
+        definition: "Of retests that resolved (survived or failed), the share that failed — price re-entered and then breached the OB within the reaction window. Open retests are excluded. = 1 − survival rate.",
+        whyItMatters: "The complement of survival; high failure means retested OBs are breaking rather than holding.",
+    },
+    retest_candles_to_failure: {
+        friendlyName: "Avg Candles to Failure",
+        definition: "For failed retests only, the average number of candles from re-entry until the breach.",
+        whyItMatters: "How quickly a failing retest breaks — fast breaks leave little room to react.",
+    },
+    retest_open: {
+        friendlyName: "Open (Excluded)",
+        definition: "Retests whose reaction window extended past the available data (right-censored). Counted but excluded from survival/failure rates.",
+        whyItMatters: "Keeps rates honest — unresolved retests aren't scored as wins or losses.",
+    },
     retest_reaction: {
         friendlyName: "Reaction",
         definition: "How far price moved away from the order block after the retest, measured in pips (favorable excursion).",

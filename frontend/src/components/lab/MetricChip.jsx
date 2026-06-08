@@ -1,6 +1,7 @@
 import React from "react";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { TermTip } from "@/components/lab/TermTip";
 
 const SIZE_STYLES = {
     default: {
@@ -35,6 +36,7 @@ export function MetricChip({
     subClassName,
     testId,
     infoLabel = "Click for breakdown",   // hover hint on the ⓘ when the chip is clickable
+    tip,                                  // optional researchGlossary key → ⓘ marker (needs a TooltipProvider ancestor)
 }) {
     const sz = SIZE_STYLES[size] || SIZE_STYLES.default;
 
@@ -67,6 +69,11 @@ export function MetricChip({
                     </TooltipTrigger>
                     <TooltipContent side="top">{infoLabel}</TooltipContent>
                 </Tooltip>
+            )}
+            {tip && !onClick && (
+                <div className="absolute top-1.5 right-1.5 z-10 opacity-60 hover:opacity-100 transition-opacity">
+                    <TermTip termKey={tip} />
+                </div>
             )}
             <div
                 className={cn(

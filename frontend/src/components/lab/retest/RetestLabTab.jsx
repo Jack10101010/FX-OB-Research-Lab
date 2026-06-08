@@ -118,8 +118,8 @@ export function RetestLabTab({ orderBlocks = [], trades = [], activeRun = null, 
             <div className="px-6 mt-4 space-y-4">
                 <BasisBanner candleCount={candleCount} meta={meta} summary={summary} source={source} />
                 <ConfigBar config={config} setConfig={setConfig} source={source} />
-                <SummaryCards summary={summary} />
                 <RetestIntelligence bestWorst={bestWorstConditions} findings={findings} minN={minN} />
+                <SummaryCards summary={summary} />
                 <SessionMatrix matrix={sessionMatrix} minN={minN} />
                 <EdgeDiscoveryTabs edgeBreakdowns={edgeBreakdowns} minN={minN} />
                 <EventTable events={events} />
@@ -201,18 +201,18 @@ function SummaryCards({ summary }) {
     const closed = summary.survived + summary.failed;
     const cards = [
         { label: "OBs Retested", value: String(summary.obsRetested), sub: `of ${summary.obsWithFirstTouch} touched`, tone: "primary", icon: Boxes },
-        { label: "Retest Rate", value: summary.obsWithFirstTouch ? pct(summary.retestRate, 0) : "—", sub: "touched OBs revisited", tone: "secondary", icon: Repeat2 },
-        { label: "Survival Rate", value: closed ? pct(summary.survivalRate, 0) : "—", sub: `${summary.survived} survived (closed)`, tone: "success", icon: ShieldCheck },
-        { label: "Failure Rate", value: closed ? pct(summary.failureRate, 0) : "—", sub: `${summary.failed} failed (closed)`, tone: "danger", icon: ShieldAlert },
-        { label: "Avg Reaction", value: pips(summary.avgReactionPips, 1), sub: "pips, closed retests", tone: "primary", icon: Activity },
-        { label: "Avg Candles to Fail", value: summary.failed ? pips(summary.avgCandlesToFailure, 1) : "—", sub: "across failed retests", tone: "warning", icon: Timer },
-        { label: "Open (excluded)", value: String(summary.open), sub: "right-censored", tone: "muted", icon: Hourglass },
+        { label: "Retest Rate", value: summary.obsWithFirstTouch ? pct(summary.retestRate, 0) : "—", sub: "touched OBs revisited", tone: "secondary", icon: Repeat2, tip: "retest_rate" },
+        { label: "Survival Rate", value: closed ? pct(summary.survivalRate, 0) : "—", sub: `${summary.survived} survived (closed)`, tone: "success", icon: ShieldCheck, tip: "retest_survival" },
+        { label: "Failure Rate", value: closed ? pct(summary.failureRate, 0) : "—", sub: `${summary.failed} failed (closed)`, tone: "danger", icon: ShieldAlert, tip: "retest_failure_rate" },
+        { label: "Avg Reaction", value: pips(summary.avgReactionPips, 1), sub: "pips, closed retests", tone: "primary", icon: Activity, tip: "retest_reaction" },
+        { label: "Avg Candles to Fail", value: summary.failed ? pips(summary.avgCandlesToFailure, 1) : "—", sub: "across failed retests", tone: "warning", icon: Timer, tip: "retest_candles_to_failure" },
+        { label: "Open (excluded)", value: String(summary.open), sub: "right-censored", tone: "muted", icon: Hourglass, tip: "retest_open" },
     ];
     return (
         <div className="space-y-1.5">
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2.5">
                 {cards.map((c) => (
-                    <MetricChip key={c.label} label={c.label} value={c.value} sub={c.sub} tone={c.tone} icon={c.icon} size="compact" />
+                    <MetricChip key={c.label} label={c.label} value={c.value} sub={c.sub} tone={c.tone} icon={c.icon} size="compact" tip={c.tip} />
                 ))}
             </div>
             <div className="text-[10.5px] text-muted-lab leading-relaxed">
@@ -226,12 +226,13 @@ function SummaryCards({ summary }) {
 // showed now lives, with min-N gating + survival bands, in the categorized
 // Edge Discovery tabs below. No research dimension was lost in the move.)
 
-// ── Event table (C1.6: collapsed to 10 rows by default) ─────────────────────────
+// ── Event table (C1.6 collapsed default; C1.7 incremental View More) ─────────────
 function EventTable({ events }) {
-    const [expanded, setExpanded] = React.useState(false);
     const DEFAULT_ROWS = 10;
+    const STEP = 10;
     const total = events.length;
-    const shown = expanded ? events : events.slice(0, DEFAULT_ROWS);
+    const [visible, setVisible] = React.useState(DEFAULT_ROWS);
+    const shown = events.slice(0, visible);
     const columns = [
         { key: "obId", label: "OB", align: "left", render: (r) => String(r.obId ?? "—") },
         { key: "direction", label: "Dir", align: "left", tip: "retest_direction", render: (r) => <Pill tone={r.direction === "bull" ? "success" : "danger"}>{r.direction === "bull" ? "Bull" : "Bear"}</Pill> },
@@ -242,7 +243,13 @@ function EventTable({ events }) {
         { key: "retestTime", label: "Retest time", align: "left", render: (r) => fmtTime(r.retestTime) },
         { key: "retestType", label: "Type", align: "left", render: (r) => RETEST_TYPE_LABEL[r.retestType] || r.retestType },
         { key: "maxPenetrationPct", label: "Max pen", align: "right", tip: "retest_max_penetration", render: (r) => `${pips(r.maxPenetrationPct, 0)}%` },
-        { key: "reactionMaxPips", label: "Reaction", align: "right", tip: "retest_reaction", render: (r) => `${pips(r.reactionMaxPips, 1)}p${r.reactionMet ? "" : " ·"}` },
+        { key: "reactionMaxPips", label: "Reaction", align: "right", tip: "retest_reaction",
+          render: (r) => (
+              <span>
+                  {pips(r.reactionMaxPips, 1)}p
+                  {!r.reactionMet && <span className="text-muted-lab text-[9.5px]"> weak</span>}
+              </span>
+          ) },
         { key: "outcome", label: "Outcome", align: "left", render: (r) => <Pill tone={OUTCOME_TONE[r.outcome] || "muted"}>{r.outcome}</Pill> },
         { key: "candlesToFailure", label: "→ Fail", align: "right", render: (r) => (r.candlesToFailure == null ? "—" : r.candlesToFailure) },
         { key: "session", label: "Session", align: "left", tip: "retest_retest_session" },
@@ -262,21 +269,24 @@ function EventTable({ events }) {
                         rowKey="_k"
                         defaultSortKey="retestTime"
                         defaultSortDir="asc"
-                        maxHeight={expanded ? "540px" : undefined}
+                        maxHeight={shown.length > 25 ? "560px" : undefined}
                         compact
                     />
                     {total > DEFAULT_ROWS && (
-                        <div className="mt-2 flex items-center justify-center gap-2">
-                            <span className="text-[10.5px] text-muted-lab mr-1">
-                                Showing {shown.length} of {total}
-                            </span>
-                            {!expanded && (
-                                <NeonButton tone="ghost" onClick={() => setExpanded(true)}>
+                        <div className="mt-2 flex items-center justify-center gap-2 flex-wrap">
+                            <span className="text-[10.5px] text-muted-lab mr-1">Showing {shown.length} of {total}</span>
+                            {visible < total && (
+                                <NeonButton tone="ghost" onClick={() => setVisible((v) => Math.min(total, v + STEP))}>
+                                    View {Math.min(STEP, total - visible)} more
+                                </NeonButton>
+                            )}
+                            {visible < total && (
+                                <NeonButton tone="ghost" onClick={() => setVisible(total)}>
                                     Expand all ({total})
                                 </NeonButton>
                             )}
-                            {expanded && (
-                                <NeonButton tone="ghost" onClick={() => setExpanded(false)}>
+                            {visible > DEFAULT_ROWS && (
+                                <NeonButton tone="ghost" onClick={() => setVisible(DEFAULT_ROWS)}>
                                     Collapse
                                 </NeonButton>
                             )}
@@ -309,9 +319,13 @@ function EdgeBreakdownTable({ entry, minN }) {
         { key: "avgReactionPips", label: "Avg React", align: "right", tip: "retest_reaction", render: (r) => pips(r.avgReactionPips, 1) },
         { key: "avgCandlesToFailure", label: "→ Fail", align: "right", render: (r) => (r.avgCandlesToFailure == null ? "—" : pips(r.avgCandlesToFailure, 1)) },
     ];
+    const hasThin = rows.some((r) => r.belowMinN);
     return (
         <NeonPanel title={entry.label} dense collapsible defaultCollapsed={false}>
             <DataTable columns={columns} rows={rows} rowKey="key" defaultSortKey="n" compact />
+            {hasThin && (
+                <div className="mt-1.5 text-[10px] text-muted-lab">* = below min sample (n &lt; {minN}); shown but not ranked/emphasized.</div>
+            )}
         </NeonPanel>
     );
 }
@@ -397,11 +411,11 @@ function RetestIntelligence({ bestWorst, findings, minN }) {
                 <div className="space-y-4">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                         <StrongestCard label={<TermTip termKey="retest_strongest_segment">Strongest survived segment</TermTip>} icon={Trophy} item={bestWorst.best?.[0]} />
-                        <StrongestCard label="Strongest failed segment" icon={ShieldAlert} item={bestWorst.worst?.[0]} />
+                        <StrongestCard label={<TermTip termKey="retest_strongest_segment">Strongest failed segment</TermTip>} icon={ShieldAlert} item={bestWorst.worst?.[0]} />
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <ConditionList title={<TermTip termKey="retest_best_worst">Top positive conditions</TermTip>} icon={TrendingUp} items={bestWorst.best} />
-                        <ConditionList title="Top negative conditions" icon={TrendingDown} items={bestWorst.worst} />
+                        <ConditionList title={<TermTip termKey="retest_best_worst">Top negative conditions</TermTip>} icon={TrendingDown} items={bestWorst.worst} />
                     </div>
                     <div>
                         <div className="flex items-center gap-1.5 text-[10.5px] uppercase tracking-[0.08em] text-muted-lab mb-1.5">
@@ -435,7 +449,8 @@ function SessionMatrix({ matrix, minN }) {
     return (
         <NeonPanel title={<TermTip termKey="retest_session_matrix">Session Matrix — Origin × Retest</TermTip>} dense>
             <div className="text-[10.5px] text-muted-lab mb-2">
-                Survival % by origin session (rows) vs retest session (columns). Cells below n ≥ {minN} are muted (*).
+                Survival % by origin session (rows) vs retest session (columns).
+                <span className="ml-1">* = below min sample (n &lt; {minN}); muted, not emphasized.</span>
             </div>
             <div className="overflow-x-auto scrollbar-thin">
                 <table className="border-collapse text-[11.5px] font-display">
