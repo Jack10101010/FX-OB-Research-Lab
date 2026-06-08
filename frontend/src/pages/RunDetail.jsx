@@ -252,8 +252,8 @@ function FundingPhaseCard({ title, phase, currency }) {
 // Display strings only; no analytics/pairing values are derived here.
 const FFT_TIPS = {
     cancels:       "Number of OBs removed by First Failed Visit before the trigger was reached.",
-    winsRemoved:   "How many cancelled OBs became winners in the FFT-OFF control. These are trades FFT would have wrongly removed.",
-    lossesAvoided: "How many cancelled OBs became losers in the FFT-OFF control. These are losses FFT avoided.",
+    winsRemoved:   "Cancelled OBs that became winners in the matching FFT-OFF control. This is the cost side of FFT protection.",
+    lossesAvoided: "Cancelled OBs that became losers in the matching FFT-OFF control. This is the benefit side of FFT protection.",
     netR:          "Authoritative paired result: losses avoided minus winners removed, using the matched FFT-OFF control run.",
     known:         "Cancelled OBs with a trustworthy paired FFT-OFF result. These are the rows counted in Wins Removed, Losses Avoided, and Net R Impact.",
     unknown:       "Cancelled OBs where the paired FFT-OFF result was missing, invalid, unfilled, or timing-diverged. These are not counted in Net R Impact.",
@@ -281,6 +281,107 @@ function FftKpi({ hint, children }) {
     );
 }
 
+// ── FFT Protection drilldown — display-only over computePairedFftAnalytics().pairs ──
+// No pairing is recomputed here; rows are filtered/formatted from the existing
+// `pairs` array (each from pairFftCancel). Outcomes that count toward the loss
+// side of Net R Impact, mirroring the analytics (LOSS / NEWS_FLATTEN / PROTECTION_EXIT).
+const FFT_LOSS_OUTCOMES = new Set(["LOSS", "NEWS_FLATTEN", "PROTECTION_EXIT"]);
+
+// Per-row Net R contribution — DISPLAY ONLY; mirrors computePairedFftAnalytics
+// (HIGH-confidence WIN/LOSS rows contribute -pairedOffR; everything else 0).
+function fftRowContribution(p) {
+    if (p.confidence !== "HIGH" || p.pairedOffR == null) return 0;
+    if (p.pairedOffOutcome === "WIN" || FFT_LOSS_OUTCOMES.has(p.pairedOffOutcome)) return -p.pairedOffR;
+    return 0;
+}
+
+function fftRowReason(p) {
+    if (!p.hasPairedRow) return "No matching FFT-OFF control row was found.";
+    if (p.confidence === "HIGH") {
+        if (p.pairedOffOutcome === "WIN")
+            return "This cancelled OB became a winner in the FFT-OFF control, so FFT removed a winning trade.";
+        if (FFT_LOSS_OUTCOMES.has(p.pairedOffOutcome))
+            return "This cancelled OB became a loser in the FFT-OFF control, so FFT avoided a losing trade.";
+        return "Paired result was a neutral/breakeven outcome, so it does not move Net R Impact.";
+    }
+    if (p.pairedOffTradeStatus === "filled")
+        return "The control fill timing diverged from the FFT row, so confidence is low.";
+    return "This row is not counted in Net R Impact because the paired result was not a trustworthy filled outcome.";
+}
+
+const FFT_DRILL = {
+    cancels:       { title: "FFT Cancels — all cancelled OBs",        filter: () => true },
+    winsRemoved:   { title: "Cost: Winners Removed (HIGH · WIN)",     filter: (p) => p.confidence === "HIGH" && p.pairedOffOutcome === "WIN" },
+    lossesAvoided: { title: "Benefit: Losses Avoided (HIGH · LOSS)",  filter: (p) => p.confidence === "HIGH" && FFT_LOSS_OUTCOMES.has(p.pairedOffOutcome) },
+    known:         { title: "Known Paired Outcomes (HIGH confidence)", filter: (p) => p.confidence === "HIGH" },
+    unknown:       { title: "Unknown / Low Confidence",              filter: (p) => p.confidence !== "HIGH" },
+};
+
+// Compact drilldown table rendered directly under the FFT strip.
+function FftDrilldown({ which, pairs, onClose }) {
+    const cfg = FFT_DRILL[which];
+    if (!cfg) return null;
+    const rows = (Array.isArray(pairs) ? pairs : []).filter(cfg.filter);
+    const cell = "px-2 py-1 align-top";
+    return (
+        <div className="px-6 mt-2">
+            <div className="rounded-[4px] border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel))] overflow-hidden">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-[hsl(var(--border-soft))]">
+                    <span className="text-[9.5px] font-ui uppercase tracking-[0.1em] text-[hsl(var(--accent-primary))]">
+                        {cfg.title} · {rows.length} row{rows.length === 1 ? "" : "s"}
+                    </span>
+                    <button onClick={onClose} className="text-[9px] font-ui text-muted-lab hover:text-[hsl(var(--text))] transition-colors">
+                        Close ✕
+                    </button>
+                </div>
+                {rows.length === 0 ? (
+                    <div className="px-3 py-3 text-[10px] font-ui text-muted-lab italic">No rows for this view.</div>
+                ) : (
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-[10px] font-ui border-collapse">
+                            <thead>
+                                <tr className="text-[8.5px] uppercase tracking-[0.08em] text-muted-lab border-b border-[hsl(var(--border-soft)/0.5)]">
+                                    <th className={`${cell} text-left`}>OB</th>
+                                    <th className={`${cell} text-left`}>Dir</th>
+                                    <th className={`${cell} text-left`}>Structure</th>
+                                    <th className={`${cell} text-left`}>FFT cancel reason</th>
+                                    <th className={`${cell} text-left`}>Paired OFF outcome</th>
+                                    <th className={`${cell} text-right`}>OFF R</th>
+                                    <th className={`${cell} text-left`}>Confidence</th>
+                                    <th className={`${cell} text-right`}>Contribution</th>
+                                    <th className={`${cell} text-left min-w-[260px]`}>Reason</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {rows.map((p, i) => {
+                                    const t = p.cancelTrade || {};
+                                    const contrib = fftRowContribution(p);
+                                    const contribTone = contrib > 0.005 ? "text-[hsl(var(--success))]"
+                                        : contrib < -0.005 ? "text-[hsl(var(--danger))]" : "text-muted-lab";
+                                    const confTone = p.confidence === "HIGH" ? "text-[hsl(var(--success))]" : "text-[hsl(var(--warning))]";
+                                    return (
+                                        <tr key={i} className="border-b border-[hsl(var(--border-soft)/0.25)] last:border-b-0">
+                                            <td className={`${cell} whitespace-nowrap`}>{t.displayObId || (p.obId != null && p.obId !== "" ? `OB-${p.obId}` : "—")}</td>
+                                            <td className={`${cell} whitespace-nowrap`}>{p.direction || "—"}</td>
+                                            <td className={`${cell} whitespace-nowrap`}>{t.structure || "—"}</td>
+                                            <td className={`${cell} whitespace-nowrap`}>{t.cancel_reason || t.cancelReason || "first_failed_tag"}</td>
+                                            <td className={`${cell} whitespace-nowrap`}>{p.pairedOffOutcome || "—"}</td>
+                                            <td className={`${cell} text-right tabular-nums whitespace-nowrap`}>{p.pairedOffR == null ? "—" : fmtFftR(p.pairedOffR)}</td>
+                                            <td className={`${cell} whitespace-nowrap ${confTone}`}>{p.confidence}</td>
+                                            <td className={`${cell} text-right tabular-nums whitespace-nowrap ${contribTone}`}>{contrib === 0 ? "0.00R" : fmtFftR(contrib)}</td>
+                                            <td className={`${cell} min-w-[260px] text-muted-lab`}>{fftRowReason(p)}</td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
 export default function RunDetail() {
     const { ACTIVE_RUN, TRADES, RUNS, PROJECTS, getRunData, ACTIVE_TRADE_VARIANT, AVAILABLE_TRADE_VARIANTS, SCENARIO } = useDataset();
     // RB-8b: basis + account config consumed through the canonical lens hook.
@@ -291,6 +392,9 @@ export default function RunDetail() {
     const run = RUNS.find((r) => r.id === runId) || ACTIVE_RUN;
     // Per-run lookup: imported bundles carry their own trades + equity curve.
     const runData = getRunData(runId);
+
+    // FFT Protection strip — which KPI drilldown is expanded (null = none).
+    const [fftDrill, setFftDrill] = React.useState(null);
 
     // ── Result View state ────────────────────────────────────────────────────
     // Isolated from the global SCENARIO so a stale Strategy Map selection for
@@ -2381,6 +2485,9 @@ export default function RunDetail() {
                                     sub="pre-trigger cancels"
                                     tone="warning"
                                     icon={XIcon}
+                                    onClick={() => setFftDrill((d) => (d === "cancels" ? null : "cancels"))}
+                                    selected={fftDrill === "cancels"}
+                                    infoLabel="Click for cancelled-OB rows"
                                 />
                             </FftKpi>
                             {hasPaired ? (
@@ -2388,21 +2495,27 @@ export default function RunDetail() {
                                     <FftKpi hint={FFT_TIPS.winsRemoved}>
                                         <MetricChip
                                             size="compact"
-                                            label="Wins Removed"
+                                            label="Cost: Winners Removed"
                                             value={String(paired.confirmedWinsRemoved)}
                                             sub="confirmed · paired OFF"
                                             tone="danger"
                                             icon={AlertTriangle}
+                                            onClick={() => setFftDrill((d) => (d === "winsRemoved" ? null : "winsRemoved"))}
+                                            selected={fftDrill === "winsRemoved"}
+                                            infoLabel="Click for winner rows"
                                         />
                                     </FftKpi>
                                     <FftKpi hint={FFT_TIPS.lossesAvoided}>
                                         <MetricChip
                                             size="compact"
-                                            label="Losses Avoided"
+                                            label="Benefit: Losses Avoided"
                                             value={String(paired.confirmedLossesAvoided)}
                                             sub="confirmed · paired OFF"
                                             tone="success"
                                             icon={TrendingUp}
+                                            onClick={() => setFftDrill((d) => (d === "lossesAvoided" ? null : "lossesAvoided"))}
+                                            selected={fftDrill === "lossesAvoided"}
+                                            infoLabel="Click for loser rows"
                                         />
                                     </FftKpi>
                                     <FftKpi hint={FFT_TIPS.netR}>
@@ -2423,6 +2536,9 @@ export default function RunDetail() {
                                             sub="trustworthy paired rows"
                                             tone="muted"
                                             icon={Hash}
+                                            onClick={() => setFftDrill((d) => (d === "known" ? null : "known"))}
+                                            selected={fftDrill === "known"}
+                                            infoLabel="Click for HIGH-confidence rows"
                                         />
                                     </FftKpi>
                                     <FftKpi hint={FFT_TIPS.unknown}>
@@ -2433,6 +2549,9 @@ export default function RunDetail() {
                                             sub="not counted in Net R"
                                             tone="muted"
                                             icon={Hash}
+                                            onClick={() => setFftDrill((d) => (d === "unknown" ? null : "unknown"))}
+                                            selected={fftDrill === "unknown"}
+                                            infoLabel="Click for low-confidence rows"
                                         />
                                     </FftKpi>
                                 </>
@@ -2493,6 +2612,13 @@ export default function RunDetail() {
                                 </FftKpi>
                             )}
                         </div>
+                        {fftDrill && (
+                            <FftDrilldown
+                                which={fftDrill}
+                                pairs={paired.pairs}
+                                onClose={() => setFftDrill(null)}
+                            />
+                        )}
                     </TooltipProvider>
                 );
             })()}
