@@ -74,9 +74,9 @@ const SAFE_EDITABLE_SUBSET = new Set([
     "bosShort",
     "chochLong",
     "chochShort",
-    // NOTE: `direction` (inputType "select") is intentionally NOT here — the safe
-    // editable path renders only boolean/number controls. The filter predicate still
-    // honours it; exposing it needs a select control (follow-up).
+    // Trade direction — Tier 1 / instant_filter (Phase 10A.1). The only `select`
+    // field exposed for editing; the safe-edit path now renders a SelectInput for it.
+    "direction",
 ]);
 
 // Readable labels for structure-direction tags in the filter summary.
@@ -829,6 +829,13 @@ function ConfigFieldRow({ entry, value, isDirty, errorMsg, isLast, showEditMode,
                             value={value}
                             setDraftField={setDraftField}
                         />
+                    ) : entry.inputType === "select" ? (
+                        <SelectInput
+                            entryKey={entry.key}
+                            value={value}
+                            options={entry.options}
+                            setDraftField={setDraftField}
+                        />
                     ) : (
                         // number fields (all remaining safe subset entries are numbers)
                         <NumberFieldInput
@@ -943,6 +950,37 @@ function BoolToggle({ entryKey, value, setDraftField }) {
         >
             {on ? "On" : "Off"}
         </button>
+    );
+}
+
+/**
+ * Compact select control (Phase 10A.1).
+ * Native <select> styled to match the dark compact controls. Options come from
+ * the registry entry's `options` array; selecting an option commits to the draft
+ * immediately via setDraftField. Generic — reusable by any `inputType:"select"`
+ * field added to SAFE_EDITABLE_SUBSET later (today: `direction` only).
+ */
+function SelectInput({ entryKey, value, options, setDraftField }) {
+    const opts = Array.isArray(options) ? options : [];
+    return (
+        <select
+            value={value ?? ""}
+            onChange={(e) => setDraftField(entryKey, e.target.value)}
+            className={[
+                "shrink-0 h-6 px-1.5 max-w-[120px]",
+                "text-[11px] text-white font-medium",
+                "bg-[hsl(var(--panel-2))] rounded cursor-pointer",
+                "border border-[hsl(var(--border-soft))]",
+                "focus:outline-none focus:border-[hsl(var(--accent-primary)/0.6)]",
+                "transition-colors",
+            ].join(" ")}
+        >
+            {opts.map((opt) => (
+                <option key={String(opt)} value={opt}>
+                    {String(opt)}
+                </option>
+            ))}
+        </select>
     );
 }
 
