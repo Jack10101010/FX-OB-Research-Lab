@@ -101,7 +101,13 @@ export function ModelAnalysis({
     setSelectedModelKey,
     filters,
     offTrades,          // optional — trades from a paired FFT-OFF run for authoritative pairing
+    fftTrades,          // optional — active-scenario trades (where FFT cancels live); falls back to `trades`
 }) {
+    // FFT panels analyse the active *scenario* trades (which carry the
+    // first_failed_tag cancels), not the base ACTIVE_TRADE_VARIANT list. Falls
+    // back to `trades` when no scenario trades are available (old runs / no model).
+    const fftSource = fftTrades && fftTrades.length ? fftTrades : trades;
+
     // Build equity curves only when tradesByMode is available
     const curvesData = useMemo(() => {
         if (!tradesByMode || !exactRows?.length) return null;
@@ -115,14 +121,15 @@ export function ModelAnalysis({
 
     // FFT cancel presence check — drives FftProtectionPanel visibility.
     // Checks cancel_reason (camelCase + snake_case) and outcome string.
+    // Reads the scenario source (fftSource), not the base `trades`.
     const hasFftCancels = useMemo(() => {
-        return (trades || []).some(t => {
+        return (fftSource || []).some(t => {
             const cr = String(t?.cancel_reason ?? t?.cancelReason ?? "").toLowerCase();
             if (cr === "first_failed_tag") return true;
             const oc = String(t?.outcome ?? "").toUpperCase();
             return oc === "FIRST_FAILED_TAG_CANCEL";
         });
-    }, [trades]);
+    }, [fftSource]);
 
     // Phase 2: Lifecycle row — controls Tier 1.5 visibility.
     //
@@ -200,14 +207,14 @@ export function ModelAnalysis({
                         {lifecycleRow && hasGhostData && <GhostOutcomePanel trades={trades} />}
                         {hasFftCancels && (
                             <FftProtectionPanel
-                                trades={trades}
+                                trades={fftSource}
                                 offTrades={offTrades || []}
                             />
                         )}
                     </div>
                     {/* Stage 1 FFT breakdown — Overall / Structure / Direction / Session.
-                        Full-width under the protection grid; same trades array. */}
-                    {hasFftCancels && <FftClassificationPanel trades={trades} />}
+                        Full-width under the protection grid; scenario trades (fftSource). */}
+                    {hasFftCancels && <FftClassificationPanel trades={fftSource} />}
                 </>
             ) : null}
 
@@ -215,8 +222,8 @@ export function ModelAnalysis({
                 in the current scenario's trades, so the researcher knows why the
                 panel is absent rather than assuming a data or wiring issue. */}
             {!hasFftCancels && (
-                <p className="text-[9px] font-ui text-muted-lab opacity-35 italic px-0.5 -mt-1">
-                    FFT Protection — no FFT cancels in this scenario&apos;s trades
+                <p className="text-[10px] font-ui text-muted-lab opacity-60 italic px-0.5 -mt-1">
+                    FFT Protection — no first-failed-tag cancels in this scenario&apos;s trades
                 </p>
             )}
 

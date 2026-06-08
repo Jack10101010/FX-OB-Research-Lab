@@ -87,6 +87,21 @@ export function EntriesWorkspace() {
 
     const tradesByMode = entryResults.tradesByMode || {};
 
+    // FFT panels need the *active scenario* trades (where first_failed_tag cancels
+    // live), not the base ACTIVE_TRADE_VARIANT list. Resolve the same scenario
+    // source RunDetail uses (entryResults.tradesByMode keyed by selectedModelKey),
+    // apply the global filters, and fall back to filteredTrades for older runs or
+    // when no scenario is selected.
+    const fftTrades = useMemo(() => {
+        const tbm = tradesByMode || {};
+        const scenarioTrades = selectedModelKey
+            ? (tbm[`${ACTIVE_TRADE_VARIANT}__${selectedModelKey}`] || tbm[selectedModelKey])
+            : null;
+        return scenarioTrades && scenarioTrades.length
+            ? applyFilters(scenarioTrades)
+            : filteredTrades;
+    }, [tradesByMode, selectedModelKey, ACTIVE_TRADE_VARIANT, applyFilters, filteredTrades]);
+
     // Shared props passed down to every tab
     const sharedProps = {
         trades: filteredTrades,
@@ -101,6 +116,7 @@ export function EntriesWorkspace() {
         selectedModelKey, setSelectedModelKey,
         filters,
         offTrades,
+        fftTrades,
     };
 
     return (
