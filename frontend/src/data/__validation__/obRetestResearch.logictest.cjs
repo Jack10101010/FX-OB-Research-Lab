@@ -129,6 +129,40 @@ for (const dim of ["byRetestNumber", "byObSize", "byOriginSession", "byRetestSes
     check(`has ${dim} with rows[]`, bd[dim] && Array.isArray(bd[dim].rows));
 }
 
+// ── Test 9: new dimensions surfaced in breakdowns (C1.6) ─────────────────────────
+console.log("\nTest 9 — new dimensions surfaced (no new math, just views)");
+const bd9 = R.buildRetestEdgeBreakdowns(enBatch, { minN: 20 });
+check("bySameSession present (sessions group + tip)", bd9.bySameSession && bd9.bySameSession.group === "sessions" && !!bd9.bySameSession.tip);
+check("byStructureDirection present (structure group)", bd9.byStructureDirection && bd9.byStructureDirection.group === "structure");
+check("byEntryPenetration present (penetration group)", bd9.byEntryPenetration && bd9.byEntryPenetration.group === "penetration");
+check("byTimeSincePrevRetest present (timing group)", bd9.byTimeSincePrevRetest && bd9.byTimeSincePrevRetest.group === "timing");
+check("byFailureBehavior + byReactionQuality + byFirstTouchOutcome present (behavior)",
+    bd9.byFailureBehavior?.group === "behavior" && bd9.byReactionQuality?.group === "behavior" && bd9.byFirstTouchOutcome?.group === "behavior");
+
+// ── Test 10: session matrix (Origin × Retest) ────────────────────────────────────
+console.log("\nTest 10 — session matrix");
+const findEvents = [];
+for (let i = 0; i < 20; i++) findEvents.push(mkEvent({ obId: `A${i}`, retestTime: at(2025, 5, 2, 4), firstTouchTime: at(2025, 5, 2, 4), outcome: "survived" })); // London
+for (let i = 0; i < 20; i++) findEvents.push(mkEvent({ obId: `B${i}`, retestTime: at(2025, 5, 2, 11), firstTouchTime: at(2025, 5, 2, 11), outcome: "failed" })); // New York
+const enFind = R.enrichRetestEvents(findEvents, []); // no OB join → origin "Unknown"
+const mx = R.buildSessionMatrix(enFind, { minN: 20 });
+check("matrix rows include Unknown (no OB join origin)", mx.rows.includes("Unknown"));
+check("matrix cols ordered London before New York", mx.cols.indexOf("London") < mx.cols.indexOf("New York"));
+const cL = mx.cells["Unknown"]["London"];
+const cNY = mx.cells["Unknown"]["New York"];
+check("cell Unknown×London n=20 survival=1 belowMinN=false", cL.n === 20 && cL.survivalRate === 1 && cL.belowMinN === false);
+check("cell Unknown×NewYork n=20 survival=0", cNY.n === 20 && cNY.survivalRate === 0);
+
+// ── Test 11: deterministic findings ──────────────────────────────────────────────
+console.log("\nTest 11 — deterministic findings (no AI, stat comparisons only)");
+const bdFind = R.buildRetestEdgeBreakdowns(enFind, { minN: 20 });
+const f1 = R.buildRetestFindings(bdFind, { minN: 20 });
+const f2 = R.buildRetestFindings(bdFind, { minN: 20 });
+check("findings are deterministic (run twice equal)", JSON.stringify(f1) === JSON.stringify(f2));
+check("findings non-empty for a 100%-vs-0% split", f1.length >= 1, String(f1.length));
+check("includes a Retest session comparison (+100pp)", f1.some((x) => x.dimension === "Retest session" && x.deltaPP === 100), JSON.stringify(f1[0] || {}));
+check("thin-only data → no findings (min-N respected)", R.buildRetestFindings(R.buildRetestEdgeBreakdowns(R.enrichRetestEvents([mkEvent()], []), { minN: 20 }), { minN: 20 }).length === 0);
+
 // ── result ───────────────────────────────────────────────────────────────────────
 console.log(`\n${"=".repeat(52)}`);
 console.log(`Results: ${PASS} passed, ${FAIL} failed`);

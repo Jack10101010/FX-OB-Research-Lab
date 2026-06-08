@@ -13,7 +13,9 @@ import { NeonPanel } from "@/components/lab/NeonPanel";
 import { MetricChip } from "@/components/lab/MetricChip";
 import { DataTable, Pill } from "@/components/lab/DataTable";
 import { Field, Segment, HeroBadge, NeonButton } from "@/components/lab/controls";
-import { Repeat2, ShieldCheck, ShieldAlert, Activity, Timer, Hourglass, Boxes, AlertTriangle, Loader2 } from "lucide-react";
+import { TermTip, TooltipProvider } from "@/components/lab/TermTip";
+import { Repeat2, ShieldCheck, ShieldAlert, Activity, Timer, Hourglass, Boxes, AlertTriangle, Loader2, TrendingUp, TrendingDown, Trophy, Lightbulb } from "lucide-react";
+import { RETEST_DIMENSION_GROUPS } from "@/data/obRetestResearch";
 import { useRetestData, RETEST_STATUS } from "./useRetestData";
 
 // ── formatting helpers ──────────────────────────────────────────────────────────
@@ -25,6 +27,16 @@ const fmtTime = (epochSec) => {
     const p = (n) => String(n).padStart(2, "0");
     return `${dt.getUTCFullYear()}-${p(dt.getUTCMonth() + 1)}-${p(dt.getUTCDate())} ${p(dt.getUTCHours())}:${p(dt.getUTCMinutes())}`;
 };
+
+// Survival color bands (C1.5) — uses ONLY existing design tokens, no hardcoded hex.
+// 90%+ strong success · 75-90% success · 60-75% neutral · <60% weak.
+function survivalBandClass(rate) {
+    if (rate == null || !isFinite(rate)) return "text-muted-lab";
+    if (rate >= 0.90) return "text-[hsl(var(--success))] text-glow-success font-semibold";
+    if (rate >= 0.75) return "text-[hsl(var(--success))]";
+    if (rate >= 0.60) return "text-[hsl(var(--warning))]";
+    return "text-[hsl(var(--danger))]";
+}
 
 const OUTCOME_TONE = { survived: "success", failed: "danger", open: "muted" };
 const RETEST_TYPE_LABEL = {
@@ -49,7 +61,7 @@ function GateShell({ title, badge, children }) {
 }
 
 export function RetestLabTab({ orderBlocks = [], trades = [], activeRun = null, activeRunId = null, enabled = false }) {
-    const { status, source, error, candleCount, events, perOB, summary, meta, edgeBreakdowns, bestWorstConditions, minN, config, setConfig, retryLoad } = useRetestData({
+    const { status, source, error, candleCount, events, perOB, summary, meta, edgeBreakdowns, bestWorstConditions, sessionMatrix, findings, minN, config, setConfig, retryLoad } = useRetestData({
         orderBlocks, trades, activeRun, activeRunId, enabled,
     });
 
@@ -99,15 +111,20 @@ export function RetestLabTab({ orderBlocks = [], trades = [], activeRun = null, 
     }
 
     // ── READY ───────────────────────────────────────────────────────────────────
+    // IA (C1.6): Intelligence hero → Session Matrix → categorized Edge Discovery
+    // tabs → (collapsed) raw event table. One TooltipProvider wraps the surface.
     return (
-        <div className="px-6 mt-4 space-y-4">
-            <BasisBanner candleCount={candleCount} meta={meta} summary={summary} source={source} />
-            <ConfigBar config={config} setConfig={setConfig} source={source} />
-            <SummaryCards summary={summary} />
-            <RetestEdgeDiscovery edgeBreakdowns={edgeBreakdowns} bestWorst={bestWorstConditions} minN={minN} />
-            <Breakdowns events={events} />
-            <EventTable events={events} />
-        </div>
+        <TooltipProvider>
+            <div className="px-6 mt-4 space-y-4">
+                <BasisBanner candleCount={candleCount} meta={meta} summary={summary} source={source} />
+                <ConfigBar config={config} setConfig={setConfig} source={source} />
+                <SummaryCards summary={summary} />
+                <RetestIntelligence bestWorst={bestWorstConditions} findings={findings} minN={minN} />
+                <SessionMatrix matrix={sessionMatrix} minN={minN} />
+                <EdgeDiscoveryTabs edgeBreakdowns={edgeBreakdowns} minN={minN} />
+                <EventTable events={events} />
+            </div>
+        </TooltipProvider>
     );
 }
 
@@ -205,154 +222,139 @@ function SummaryCards({ summary }) {
     );
 }
 
-// ── Breakdowns ────────────────────────────────────────────────────────────────
-const MIN_N = 5; // suppress rate emphasis below this sample size
+// (The pre-C1 basic Breakdowns block was removed in C1.6 — every dimension it
+// showed now lives, with min-N gating + survival bands, in the categorized
+// Edge Discovery tabs below. No research dimension was lost in the move.)
 
-function groupRows(events, keyFn, labelFn = (k) => k) {
-    const map = new Map();
-    for (const e of events) {
-        const key = keyFn(e);
-        if (key == null || key === "") continue;
-        if (!map.has(key)) map.set(key, { key, label: labelFn(key), n: 0, survived: 0, failed: 0, open: 0, reactSum: 0, reactN: 0 });
-        const row = map.get(key);
-        row.n += 1;
-        if (e.outcome === "survived") row.survived += 1;
-        else if (e.outcome === "failed") row.failed += 1;
-        else row.open += 1;
-        if (e.outcome !== "open" && isFinite(e.reactionMaxPips)) { row.reactSum += e.reactionMaxPips; row.reactN += 1; }
-    }
-    return [...map.values()].map((r) => {
-        const closed = r.survived + r.failed;
-        return { ...r, survivalRate: closed ? r.survived / closed : null, avgReaction: r.reactN ? r.reactSum / r.reactN : null };
-    });
-}
-
-function BreakdownTable({ title, rows }) {
-    if (!rows.length) return null;
-    const columns = [
-        { key: "label", label: title, align: "left" },
-        { key: "n", label: "Retests", align: "right" },
-        { key: "survived", label: "Surv", align: "right" },
-        { key: "failed", label: "Fail", align: "right" },
-        { key: "open", label: "Open", align: "right" },
-        {
-            key: "survivalRate", label: "Survival", align: "right",
-            sortValue: (r) => (r.survivalRate == null ? -1 : r.survivalRate),
-            render: (r) => (
-                <span className={r.n < MIN_N ? "text-muted-lab" : (r.survivalRate >= 0.5 ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]")}>
-                    {r.survivalRate == null ? "—" : pct(r.survivalRate, 0)}{r.n < MIN_N ? " *" : ""}
-                </span>
-            ),
-        },
-        { key: "avgReaction", label: "Avg React", align: "right", render: (r) => pips(r.avgReaction, 1) },
-    ];
-    return (
-        <NeonPanel title={`By ${title}`} dense collapsible defaultCollapsed={false}>
-            <DataTable columns={columns} rows={rows} rowKey="key" defaultSortKey="n" compact />
-            <div className="mt-1.5 text-[10px] text-muted-lab">* sample below {MIN_N} retests — rate not emphasised.</div>
-        </NeonPanel>
-    );
-}
-
-function Breakdowns({ events }) {
-    if (!events.length) return null;
-    const bySession = groupRows(events, (e) => e.session);
-    const byStructure = groupRows(events, (e) => e.structure);
-    const byDirection = groupRows(events, (e) => e.direction, (k) => (k === "bull" ? "Bullish" : "Bearish"));
-    const byFirstTouch = groupRows(events, (e) => e.firstTouchOutcome || "untraded");
-    const byRetestIdx = groupRows(events, (e) => (e.retestIndex >= 3 ? "3+" : String(e.retestIndex)), (k) => `Retest ${k}`);
-    return (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            <BreakdownTable title="Session" rows={bySession} />
-            <BreakdownTable title="Structure" rows={byStructure} />
-            <BreakdownTable title="Direction" rows={byDirection} />
-            <BreakdownTable title="First-touch outcome" rows={byFirstTouch} />
-            <BreakdownTable title="Retest #" rows={byRetestIdx} />
-        </div>
-    );
-}
-
-// ── Event table ───────────────────────────────────────────────────────────────
+// ── Event table (C1.6: collapsed to 10 rows by default) ─────────────────────────
 function EventTable({ events }) {
+    const [expanded, setExpanded] = React.useState(false);
+    const DEFAULT_ROWS = 10;
+    const total = events.length;
+    const shown = expanded ? events : events.slice(0, DEFAULT_ROWS);
     const columns = [
         { key: "obId", label: "OB", align: "left", render: (r) => String(r.obId ?? "—") },
-        { key: "direction", label: "Dir", align: "left", render: (r) => <Pill tone={r.direction === "bull" ? "success" : "danger"}>{r.direction === "bull" ? "Bull" : "Bear"}</Pill> },
-        { key: "structure", label: "Struct", align: "left" },
+        { key: "direction", label: "Dir", align: "left", tip: "retest_direction", render: (r) => <Pill tone={r.direction === "bull" ? "success" : "danger"}>{r.direction === "bull" ? "Bull" : "Bear"}</Pill> },
+        { key: "structure", label: "Struct", align: "left", tip: "retest_structure" },
         { key: "firstTouchTime", label: "First touch", align: "left", render: (r) => fmtTime(r.firstTouchTime) },
-        { key: "firstTouchOutcome", label: "FT outcome", align: "left", render: (r) => String(r.firstTouchOutcome || "—") },
-        { key: "retestIndex", label: "#", align: "right" },
+        { key: "firstTouchOutcome", label: "FT outcome", align: "left", tip: "retest_first_touch_outcome", render: (r) => String(r.firstTouchOutcome || "—") },
+        { key: "retestIndex", label: "#", align: "right", tip: "retest_number" },
         { key: "retestTime", label: "Retest time", align: "left", render: (r) => fmtTime(r.retestTime) },
         { key: "retestType", label: "Type", align: "left", render: (r) => RETEST_TYPE_LABEL[r.retestType] || r.retestType },
-        { key: "maxPenetrationPct", label: "Max pen", align: "right", render: (r) => `${pips(r.maxPenetrationPct, 0)}%` },
-        { key: "reactionMaxPips", label: "Reaction", align: "right", render: (r) => `${pips(r.reactionMaxPips, 1)}p${r.reactionMet ? "" : " ·"}` },
+        { key: "maxPenetrationPct", label: "Max pen", align: "right", tip: "retest_max_penetration", render: (r) => `${pips(r.maxPenetrationPct, 0)}%` },
+        { key: "reactionMaxPips", label: "Reaction", align: "right", tip: "retest_reaction", render: (r) => `${pips(r.reactionMaxPips, 1)}p${r.reactionMet ? "" : " ·"}` },
         { key: "outcome", label: "Outcome", align: "left", render: (r) => <Pill tone={OUTCOME_TONE[r.outcome] || "muted"}>{r.outcome}</Pill> },
         { key: "candlesToFailure", label: "→ Fail", align: "right", render: (r) => (r.candlesToFailure == null ? "—" : r.candlesToFailure) },
-        { key: "session", label: "Session", align: "left" },
+        { key: "session", label: "Session", align: "left", tip: "retest_retest_session" },
         { key: "minutesSinceFirstTouch", label: "Min since FT", align: "right", render: (r) => (r.minutesSinceFirstTouch == null ? "—" : r.minutesSinceFirstTouch) },
     ];
     return (
-        <NeonPanel title={`Retest Events (${events.length})`} dense>
-            {events.length === 0 ? (
+        <NeonPanel title={`Retest Events (${total})`} dense>
+            {total === 0 ? (
                 <div className="py-6 text-center text-[12px] text-muted-lab">
                     No retests detected for the current criteria. OBs may not have been revisited, or were invalidated on first touch.
                 </div>
             ) : (
-                <DataTable
-                    columns={columns}
-                    rows={events.map((e, i) => ({ ...e, _k: `${e.obId}-${e.retestIndex}-${i}` }))}
-                    rowKey="_k"
-                    defaultSortKey="retestTime"
-                    defaultSortDir="asc"
-                    maxHeight="540px"
-                    compact
-                />
+                <>
+                    <DataTable
+                        columns={columns}
+                        rows={shown.map((e, i) => ({ ...e, _k: `${e.obId}-${e.retestIndex}-${i}` }))}
+                        rowKey="_k"
+                        defaultSortKey="retestTime"
+                        defaultSortDir="asc"
+                        maxHeight={expanded ? "540px" : undefined}
+                        compact
+                    />
+                    {total > DEFAULT_ROWS && (
+                        <div className="mt-2 flex items-center justify-center gap-2">
+                            <span className="text-[10.5px] text-muted-lab mr-1">
+                                Showing {shown.length} of {total}
+                            </span>
+                            {!expanded && (
+                                <NeonButton tone="ghost" onClick={() => setExpanded(true)}>
+                                    Expand all ({total})
+                                </NeonButton>
+                            )}
+                            {expanded && (
+                                <NeonButton tone="ghost" onClick={() => setExpanded(false)}>
+                                    Collapse
+                                </NeonButton>
+                            )}
+                        </div>
+                    )}
+                </>
             )}
         </NeonPanel>
     );
 }
 
-// ── Retest Edge Discovery (Phase C1) ────────────────────────────────────────────
-const EDGE_ORDER = [
-    "byRetestNumber", "byObSize", "byOriginSession", "byRetestSession", "byStructure",
-    "byDirection", "byPenetration", "byTimeSinceDetection", "byTimeSinceFirstTouch",
-];
-
-function EdgeBreakdownTable({ title, rows, minN }) {
-    if (!rows || !rows.length) return null;
+// ── Retest Edge Discovery (C1.6 — categorized + survival bands + tooltips) ───────
+function EdgeBreakdownTable({ entry, minN }) {
+    const rows = entry?.rows || [];
+    if (!rows.length) return null;
     const columns = [
-        { key: "key", label: title, align: "left",
+        { key: "key", label: entry.label, align: "left", tip: entry.tip,
           render: (r) => (r.belowMinN ? <span className="text-muted-lab">{r.key} *</span> : r.key) },
-        { key: "n", label: "n", align: "right" },
+        { key: "n", label: "n", align: "right", tip: "retest_sample" },
         { key: "survived", label: "Surv", align: "right" },
         { key: "failed", label: "Fail", align: "right" },
         { key: "open", label: "Open", align: "right" },
-        { key: "survivalRate", label: "Survival", align: "right",
+        { key: "survivalRate", label: "Survival", align: "right", tip: "retest_survival",
           sortValue: (r) => (r.survivalRate == null ? -1 : r.survivalRate),
           render: (r) => (r.survivalRate == null ? "—" : (
-              <span className={r.belowMinN ? "text-muted-lab" : (r.survivalRate >= 0.5 ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]")}>
+              <span className={r.belowMinN ? "text-muted-lab" : survivalBandClass(r.survivalRate)}>
                   {pct(r.survivalRate, 0)}{r.belowMinN ? " *" : ""}
               </span>
           )) },
-        { key: "avgReactionPips", label: "Avg React", align: "right", render: (r) => pips(r.avgReactionPips, 1) },
+        { key: "avgReactionPips", label: "Avg React", align: "right", tip: "retest_reaction", render: (r) => pips(r.avgReactionPips, 1) },
         { key: "avgCandlesToFailure", label: "→ Fail", align: "right", render: (r) => (r.avgCandlesToFailure == null ? "—" : pips(r.avgCandlesToFailure, 1)) },
     ];
     return (
-        <NeonPanel title={title} dense collapsible defaultCollapsed={false}>
+        <NeonPanel title={entry.label} dense collapsible defaultCollapsed={false}>
             <DataTable columns={columns} rows={rows} rowKey="key" defaultSortKey="n" compact />
         </NeonPanel>
     );
 }
 
-function ConditionList({ title, tone, items }) {
+function EdgeDiscoveryTabs({ edgeBreakdowns, minN }) {
+    const dims = edgeBreakdowns || {};
+    const entries = Object.values(dims).filter((d) => d?.rows?.length);
+    const groups = RETEST_DIMENSION_GROUPS.filter((g) => entries.some((e) => e.group === g.key));
+    const [active, setActive] = React.useState(groups[0]?.key);
+    React.useEffect(() => {
+        if (groups.length && !groups.some((g) => g.key === active)) setActive(groups[0].key);
+    }, [groups, active]);
+    if (!entries.length) return null;
+    const activeEntries = entries.filter((e) => e.group === active);
+    return (
+        <div className="space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="panel-title-label uppercase text-title-lab">Retest Edge Discovery</div>
+                <div className="text-[10px] text-muted-lab">Survival closed-only; rows below n ≥ {minN} shown but not ranked (*).</div>
+            </div>
+            <Segment options={groups.map((g) => ({ value: g.key, label: g.label }))} value={active} onChange={setActive} />
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                {activeEntries.map((entry) => <EdgeBreakdownTable key={entry.label} entry={entry} minN={minN} />)}
+            </div>
+        </div>
+    );
+}
+
+// ── Retest Intelligence hero (C1.5) ─────────────────────────────────────────────
+function ConditionList({ title, icon: Icon, items }) {
     return (
         <div>
-            <div className="text-[10.5px] uppercase tracking-[0.08em] text-muted-lab mb-1.5">{title}</div>
+            <div className="flex items-center gap-1.5 text-[10.5px] uppercase tracking-[0.08em] text-muted-lab mb-1.5">
+                {Icon && <Icon className="w-3 h-3" />}{title}
+            </div>
             <div className="space-y-1">
-                {(items || []).map((c, i) => (
+                {(items || []).length === 0 ? (
+                    <div className="text-[11px] text-muted-lab">—</div>
+                ) : items.map((c, i) => (
                     <div key={i} className="flex items-center justify-between text-[12px] gap-2">
                         <span className="text-[hsl(var(--text-2))] truncate">{c.condition}</span>
                         <span className="shrink-0 tabular-nums">
-                            <span className={tone === "success" ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]"}>{pct(c.survivalRate, 0)}</span>
+                            <span className={survivalBandClass(c.survivalRate)}>{pct(c.survivalRate, 0)}</span>
                             <span className="text-muted-lab"> · n={c.n} · {pips(c.avgReactionPips, 1)}p</span>
                         </span>
                     </div>
@@ -362,42 +364,112 @@ function ConditionList({ title, tone, items }) {
     );
 }
 
-function BestWorstPanel({ bestWorst, minN }) {
+function StrongestCard({ label, icon: Icon, item }) {
+    return (
+        <div className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.35)] px-3 py-2.5">
+            <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.08em] text-muted-lab">
+                {Icon && <Icon className="w-3 h-3" />}{label}
+            </div>
+            {item ? (
+                <>
+                    <div className="text-[13px] text-[hsl(var(--text))] mt-1 leading-snug">{item.condition}</div>
+                    <div className="mt-1 text-[12px]">
+                        <span className={survivalBandClass(item.survivalRate)}>{pct(item.survivalRate, 0)} survival</span>
+                        <span className="text-muted-lab"> · n={item.n} · {pips(item.avgReactionPips, 1)}p react</span>
+                    </div>
+                </>
+            ) : (
+                <div className="text-[12px] text-muted-lab mt-1">Not enough samples</div>
+            )}
+        </div>
+    );
+}
+
+function RetestIntelligence({ bestWorst, findings, minN }) {
     const eligible = bestWorst?.eligible || 0;
     return (
-        <NeonPanel title="Best / Worst Retest Conditions" dense>
+        <NeonPanel title={<TermTip termKey="retest_intelligence">Retest Intelligence</TermTip>} tone="primary">
             {eligible === 0 ? (
                 <div className="py-4 text-center text-[12px] text-muted-lab">
-                    Not enough samples (need n ≥ {minN}) to rank conditions yet.
+                    Not enough samples yet (need n ≥ {minN} per condition) to surface intelligence — see breakdowns below.
                 </div>
             ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <ConditionList title="Best — highest survival" tone="success" items={bestWorst.best} />
-                    <ConditionList title="Worst — lowest survival" tone="danger" items={bestWorst.worst} />
+                <div className="space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <StrongestCard label={<TermTip termKey="retest_strongest_segment">Strongest survived segment</TermTip>} icon={Trophy} item={bestWorst.best?.[0]} />
+                        <StrongestCard label="Strongest failed segment" icon={ShieldAlert} item={bestWorst.worst?.[0]} />
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <ConditionList title={<TermTip termKey="retest_best_worst">Top positive conditions</TermTip>} icon={TrendingUp} items={bestWorst.best} />
+                        <ConditionList title="Top negative conditions" icon={TrendingDown} items={bestWorst.worst} />
+                    </div>
+                    <div>
+                        <div className="flex items-center gap-1.5 text-[10.5px] uppercase tracking-[0.08em] text-muted-lab mb-1.5">
+                            <Lightbulb className="w-3 h-3" /><TermTip termKey="retest_key_findings">Key findings</TermTip>
+                        </div>
+                        {(findings || []).length === 0 ? (
+                            <div className="text-[11px] text-muted-lab">No strong findings at n ≥ {minN} yet.</div>
+                        ) : (
+                            <ul className="space-y-1">
+                                {findings.map((f, i) => (
+                                    <li key={i} className="text-[12px] text-[hsl(var(--text-2))] leading-snug">
+                                        • {f.text} <span className="text-muted-lab">(n={f.samples})</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+                    </div>
+                    <div className="text-[10px] text-muted-lab">
+                        Conditions &amp; findings respect a minimum sample of n ≥ {minN}; survival is closed-only (open excluded). Deterministic — derived only from the statistics above.
+                    </div>
                 </div>
             )}
         </NeonPanel>
     );
 }
 
-function RetestEdgeDiscovery({ edgeBreakdowns, bestWorst, minN }) {
-    const dims = edgeBreakdowns || {};
-    const hasAny = EDGE_ORDER.some((k) => dims[k]?.rows?.length);
-    if (!hasAny) return null;
+// ── Session Matrix (C1.5) — Origin × Retest survival grid ───────────────────────
+function SessionMatrix({ matrix, minN }) {
+    if (!matrix || !matrix.rows?.length || !matrix.cols?.length) return null;
+    const { rows, cols, cells } = matrix;
     return (
-        <div className="space-y-3">
-            <div className="panel-title-label uppercase text-title-lab">Retest Edge Discovery</div>
-            <div className="text-[10.5px] text-muted-lab">
-                Survival = survived ÷ (survived + failed); open (right-censored) excluded.
-                Rows below min sample (n &lt; {minN}) are shown but not ranked.
+        <NeonPanel title={<TermTip termKey="retest_session_matrix">Session Matrix — Origin × Retest</TermTip>} dense>
+            <div className="text-[10.5px] text-muted-lab mb-2">
+                Survival % by origin session (rows) vs retest session (columns). Cells below n ≥ {minN} are muted (*).
             </div>
-            <BestWorstPanel bestWorst={bestWorst} minN={minN} />
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                {EDGE_ORDER.map((k) => (dims[k] ? (
-                    <EdgeBreakdownTable key={k} title={dims[k].label} rows={dims[k].rows} minN={minN} />
-                ) : null))}
+            <div className="overflow-x-auto scrollbar-thin">
+                <table className="border-collapse text-[11.5px] font-display">
+                    <thead>
+                        <tr>
+                            <th className="px-2 py-1.5 text-left text-[10px] uppercase tracking-[0.05em] text-title-lab whitespace-nowrap">Origin ↓ / Retest →</th>
+                            {cols.map((c) => (
+                                <th key={c} className="px-2 py-1.5 text-center text-[10px] uppercase tracking-[0.05em] text-title-lab whitespace-nowrap">{c}</th>
+                            ))}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {rows.map((o) => (
+                            <tr key={o} className="border-t border-[hsl(var(--border-soft)/0.4)]">
+                                <td className="px-2 py-1.5 text-left text-[hsl(var(--text-2))] whitespace-nowrap">{o}</td>
+                                {cols.map((c) => {
+                                    const cell = cells[o]?.[c];
+                                    if (!cell || cell.n === 0) return <td key={c} className="px-2 py-1.5 text-center text-muted-lab">·</td>;
+                                    const muted = cell.belowMinN || cell.survivalRate == null;
+                                    return (
+                                        <td key={c} className="px-2 py-1.5 text-center tabular-nums">
+                                            <div className={muted ? "text-muted-lab" : survivalBandClass(cell.survivalRate)}>
+                                                {cell.survivalRate == null ? "—" : pct(cell.survivalRate, 0)}{cell.belowMinN ? " *" : ""}
+                                            </div>
+                                            <div className="text-[9.5px] text-muted-lab">n={cell.n}</div>
+                                        </td>
+                                    );
+                                })}
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
             </div>
-        </div>
+        </NeonPanel>
     );
 }
 

@@ -224,25 +224,146 @@ export function groupRetestsByDimension(events = [], dimension, { minN = DEFAULT
     }).sort((a, b) => b.n - a.n);
 }
 
-// Dimension accessors for the standard Edge Discovery tables.
+// Dimension accessors for the Edge Discovery tables. Each is a VIEW over a field
+// already produced by enrichRetestEvents (Phase C1) — no new statistic/computation
+// is introduced here (C1.6 surfaces existing dimensions, it does not add research
+// dimensions). `tip` is the researchGlossary key for the header tooltip.
 export const RETEST_DIMENSIONS = {
-    byRetestNumber: { label: "Retest #", fn: (e) => e.retestNumberBucket },
-    byObSize: { label: "OB Size", fn: (e) => e.sizeBucket },
-    byOriginSession: { label: "Origin Session", fn: (e) => e.originSession },
-    byRetestSession: { label: "Retest Session", fn: (e) => e.retestSession },
-    byStructure: { label: "Structure (BOS/CHoCH)", fn: (e) => e.structure },
-    byDirection: { label: "Direction", fn: (e) => (e.direction === "bull" ? "Bullish" : e.direction === "bear" ? "Bearish" : e.direction) },
-    byPenetration: { label: "Max Penetration", fn: (e) => e.maxPenetrationBucket },
-    byTimeSinceDetection: { label: "Time Since Detection", fn: (e) => e.timeSinceDetectionBucket },
-    byTimeSinceFirstTouch: { label: "Time Since First Touch", fn: (e) => e.timeSinceFirstTouchBucket },
+    byRetestNumber: { label: "Retest #", group: "timing", tip: "retest_number", fn: (e) => e.retestNumberBucket },
+    byObSize: { label: "OB Size", group: "structure", tip: "retest_ob_size", fn: (e) => e.sizeBucket },
+    byOriginSession: { label: "Origin Session", group: "sessions", tip: "retest_origin_session", fn: (e) => e.originSession },
+    byRetestSession: { label: "Retest Session", group: "sessions", tip: "retest_retest_session", fn: (e) => e.retestSession },
+    bySameSession: { label: "Same vs Cross Session", group: "sessions", tip: "retest_same_cross_session", fn: (e) => e.sameSession },
+    byStructure: { label: "Structure (BOS/CHoCH)", group: "structure", tip: "retest_structure", fn: (e) => e.structure },
+    byDirection: { label: "Direction", group: "structure", tip: "retest_direction", fn: (e) => (e.direction === "bull" ? "Bullish" : e.direction === "bear" ? "Bearish" : e.direction) },
+    byStructureDirection: { label: "Structure × Direction", group: "structure", tip: "retest_structure_direction", fn: (e) => e.structureDirection },
+    byEntryPenetration: { label: "Entry Penetration", group: "penetration", tip: "retest_entry_penetration", fn: (e) => e.entryPenetrationBucket },
+    byPenetration: { label: "Max Penetration", group: "penetration", tip: "retest_max_penetration", fn: (e) => e.maxPenetrationBucket },
+    byTimeSinceDetection: { label: "Time Since Detection", group: "timing", tip: "retest_time_since_detection", fn: (e) => e.timeSinceDetectionBucket },
+    byTimeSinceFirstTouch: { label: "Time Since First Touch", group: "timing", tip: "retest_time_since_first_touch", fn: (e) => e.timeSinceFirstTouchBucket },
+    byTimeSincePrevRetest: { label: "Time Since Previous Retest", group: "timing", tip: "retest_time_since_prev", fn: (e) => e.timeSincePrevRetestBucket },
+    byFirstTouchOutcome: { label: "First Touch Outcome", group: "behavior", tip: "retest_first_touch_outcome", fn: (e) => e.firstTouchOutcome || "unknown" },
+    byFailureBehavior: { label: "Failure Behaviour", group: "behavior", tip: "retest_failure_behavior", fn: (e) => e.failureBehavior },
+    byReactionQuality: { label: "Reaction Quality", group: "behavior", tip: "retest_reaction_quality", fn: (e) => e.reactionQuality },
 };
+
+// IA grouping (C1.6) — which dimensions live under each Edge Discovery sub-tab.
+export const RETEST_DIMENSION_GROUPS = [
+    { key: "sessions", label: "Sessions" },
+    { key: "structure", label: "Structure" },
+    { key: "penetration", label: "Penetration" },
+    { key: "timing", label: "Timing" },
+    { key: "behavior", label: "Behavior" },
+];
 
 export function buildRetestEdgeBreakdowns(events = [], { minN = DEFAULT_MIN_N } = {}) {
     const out = {};
     for (const [key, dim] of Object.entries(RETEST_DIMENSIONS)) {
-        out[key] = { label: dim.label, rows: groupRetestsByDimension(events, dim.fn, { minN }) };
+        out[key] = { label: dim.label, group: dim.group, tip: dim.tip, rows: groupRetestsByDimension(events, dim.fn, { minN }) };
     }
     return out;
+}
+
+// Canonical session ordering for axes/matrix (mirrors sessionOf bands).
+export const SESSION_ORDER = ["Asia", "London", "London Lull", "New York", "Outside"];
+
+/**
+ * Session Matrix — Origin Session (rows) × Retest Session (cols). Each cell: n +
+ * survival rate (closed-only) + belowMinN flag. Pure 2-D grouping over the already
+ * enriched originSession / retestSession fields (no new statistic).
+ */
+export function buildSessionMatrix(events = [], { minN = DEFAULT_MIN_N } = {}) {
+    const agg = new Map(); // "origin|retest" → counts
+    const seenOrigin = new Set();
+    const seenRetest = new Set();
+    for (const e of events) {
+        const o = e.originSession || "Unknown";
+        const r = e.retestSession || "Unknown";
+        seenOrigin.add(o); seenRetest.add(r);
+        const k = `${o}|${r}`;
+        if (!agg.has(k)) agg.set(k, { n: 0, survived: 0, failed: 0, open: 0 });
+        const c = agg.get(k);
+        c.n += 1;
+        if (e.outcome === "survived") c.survived += 1;
+        else if (e.outcome === "failed") c.failed += 1;
+        else c.open += 1;
+    }
+    const orderBy = (seen) => SESSION_ORDER.filter((s) => seen.has(s)).concat([...seen].filter((s) => !SESSION_ORDER.includes(s)));
+    const rows = orderBy(seenOrigin);
+    const cols = orderBy(seenRetest);
+    const cells = {};
+    for (const o of rows) {
+        cells[o] = {};
+        for (const r of cols) {
+            const c = agg.get(`${o}|${r}`);
+            if (!c) { cells[o][r] = { n: 0, survivalRate: null, belowMinN: true }; continue; }
+            const closed = c.survived + c.failed;
+            cells[o][r] = {
+                n: c.n, survived: c.survived, failed: c.failed, open: c.open,
+                survivalRate: closed ? c.survived / closed : null,
+                belowMinN: c.n < minN,
+            };
+        }
+    }
+    return { rows, cols, cells, minN };
+}
+
+/**
+ * Deterministic, data-driven findings (NO AI, NO scoring). Each finding is a plain
+ * survival-rate comparison between two existing buckets, gated by min sample and a
+ * minimum percentage-point delta, then ranked by |delta|. Operates on the already
+ * computed breakdowns so no statistic is recomputed.
+ */
+export function buildRetestFindings(breakdowns, { minN = DEFAULT_MIN_N, minDeltaPP = 10 } = {}) {
+    const findings = [];
+    const fmt = (x) => `${Math.round(x * 100)}%`;
+    const pp = (a, b) => Math.round((a - b) * 100);
+    const eligibleRows = (k) => (breakdowns?.[k]?.rows || []).filter((r) => r.n >= minN && r.survivalRate != null);
+
+    const bestWorst = (dimKey, label) => {
+        const rows = eligibleRows(dimKey);
+        if (rows.length < 2) return;
+        const sorted = [...rows].sort((a, b) => b.survivalRate - a.survivalRate);
+        const top = sorted[0], bot = sorted[sorted.length - 1];
+        const delta = pp(top.survivalRate, bot.survivalRate);
+        if (delta >= minDeltaPP) {
+            findings.push({ dimension: label, deltaPP: delta, samples: Math.min(top.n, bot.n),
+                text: `${label}: "${top.key}" survives ${fmt(top.survivalRate)} vs "${bot.key}" ${fmt(bot.survivalRate)} (+${delta}pp).` });
+        }
+    };
+    bestWorst("byRetestSession", "Retest session");
+    bestWorst("byOriginSession", "Origin session");
+    bestWorst("byObSize", "OB size");
+    bestWorst("byStructureDirection", "Structure × direction");
+
+    const pair = (dimKey, aKey, bKey, label, minPP = 5) => {
+        const rows = breakdowns?.[dimKey]?.rows || [];
+        const a = rows.find((r) => r.key === aKey), b = rows.find((r) => r.key === bKey);
+        if (!a || !b || a.n < minN || b.n < minN || a.survivalRate == null || b.survivalRate == null) return;
+        const delta = Math.abs(pp(a.survivalRate, b.survivalRate));
+        if (delta < minPP) return;
+        const better = a.survivalRate >= b.survivalRate;
+        findings.push({ dimension: label, deltaPP: delta, samples: Math.min(a.n, b.n),
+            text: `${aKey} retests ${better ? "outperform" : "underperform"} ${bKey} (${fmt(a.survivalRate)} vs ${fmt(b.survivalRate)}).` });
+    };
+    pair("byRetestNumber", "R2", "R1", "Retest number");
+    pair("bySameSession", "same", "cross", "Session continuity", 10);
+    pair("byReactionQuality", "met", "missed", "Reaction quality", 10);
+
+    // Full penetration vs shallower
+    const penRows = breakdowns?.byPenetration?.rows || [];
+    const full = penRows.find((r) => r.key === "full (100%)");
+    const others = penRows.filter((r) => r.key !== "full (100%)" && r.n >= minN && r.survivalRate != null);
+    if (full && full.n >= minN && full.survivalRate != null && others.length) {
+        const avgOther = others.reduce((s, r) => s + r.survivalRate, 0) / others.length;
+        const delta = pp(avgOther, full.survivalRate);
+        if (delta >= minDeltaPP) {
+            findings.push({ dimension: "Max penetration", deltaPP: delta, samples: full.n,
+                text: `Full penetrations underperform shallower retests (${fmt(full.survivalRate)} vs ~${fmt(avgOther)}).` });
+        }
+    }
+
+    return findings.sort((a, b) => Math.abs(b.deltaPP) - Math.abs(a.deltaPP)).slice(0, 6);
 }
 
 /**

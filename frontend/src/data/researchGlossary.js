@@ -356,6 +356,128 @@ export const GLOSSARY = {
             "Wider — less certain",
         ],
     },
+
+    // ── OB Retest Lab (Phase C education layer; additive, no logic) ──────────────
+    retest_survival: {
+        friendlyName: "Survival Rate",
+        definition: "Of retests that resolved (survived or failed), the share that survived — i.e. price re-entered the order block and it held without a breach inside the reaction window. Open (right-censored) retests are excluded.",
+        whyItMatters: "The headline measure of whether a retested OB still offers a reaction or has lost its edge.",
+    },
+    retest_reaction: {
+        friendlyName: "Reaction",
+        definition: "How far price moved away from the order block after the retest, measured in pips (favorable excursion).",
+        whyItMatters: "Survival says the OB held; reaction says how tradeable that hold actually was.",
+    },
+    retest_sample: {
+        friendlyName: "Sample Size (n)",
+        definition: "The number of retest events in this group. Groups below the minimum sample are shown but not ranked or color-emphasized.",
+        whyItMatters: "Small samples produce unreliable rates — n guards against reading noise as edge.",
+    },
+    retest_number: {
+        friendlyName: "Retest Number",
+        definition: "Which return this is for the same OB after first touch: R1 (first retest), R2 (second), R3+ (third or later).",
+        whyItMatters: "Later retests may behave differently — testing whether an OB weakens or strengthens with repeated touches.",
+    },
+    retest_ob_size: {
+        friendlyName: "OB Size",
+        definition: "The order block's height in pips, bucketed small (<10p) / medium (10–20p) / large (>20p).",
+        whyItMatters: "Size can relate to how decisively price reacts on a retest.",
+    },
+    retest_origin_session: {
+        friendlyName: "Origin Session",
+        definition: "The trading session in which the order block's origin candle formed.",
+        whyItMatters: "Where an OB was created may predict how well it holds on later retests.",
+    },
+    retest_retest_session: {
+        friendlyName: "Retest Session",
+        definition: "The trading session in which the retest itself occurred.",
+        whyItMatters: "Liquidity and volatility differ by session, which can change retest outcomes.",
+    },
+    retest_same_cross_session: {
+        friendlyName: "Same vs Cross Session",
+        definition: "Whether the retest happened in the same session as the first touch (same) or a different one (cross).",
+        whyItMatters: "Cross-session retests test the OB after a regime/liquidity change.",
+    },
+    retest_structure: {
+        friendlyName: "Structure (BOS / CHoCH)",
+        definition: "The structural break that created the OB — Break of Structure (continuation) or Change of Character (reversal).",
+        whyItMatters: "Continuation and reversal blocks can have different retest reliability.",
+    },
+    retest_direction: {
+        friendlyName: "Direction",
+        definition: "Whether the order block is bullish (demand) or bearish (supply).",
+        whyItMatters: "Lets you check for long/short asymmetry in retest survival.",
+    },
+    retest_structure_direction: {
+        friendlyName: "Structure × Direction",
+        definition: "The combination of structure (BOS/CHoCH) and direction (bull/bear), e.g. 'CHoCH bear'.",
+        whyItMatters: "Surfaces specific institutional patterns that a single dimension would hide.",
+    },
+    retest_entry_penetration: {
+        friendlyName: "Entry Penetration",
+        definition: "How deep price was inside the OB on the candle that began the retest, bucketed clean (0–33%) / mid (33–66%) / deep (66–99%) / full (100%).",
+        whyItMatters: "Shallow taps vs deep pushes into the block can resolve very differently.",
+    },
+    retest_max_penetration: {
+        friendlyName: "Max Penetration",
+        definition: "The deepest price reached into the OB during the retest window, bucketed clean / mid / deep / full.",
+        whyItMatters: "A full penetration that doesn't close beyond is a different signal than a clean rejection.",
+    },
+    retest_time_since_detection: {
+        friendlyName: "Time Since Detection",
+        definition: "Elapsed time from when the OB was detected to this retest (<1h / 1–6h / 6–24h / 1–3d / 3d+).",
+        whyItMatters: "Tests whether OBs decay (or mature) with age before being retested.",
+    },
+    retest_time_since_first_touch: {
+        friendlyName: "Time Since First Touch",
+        definition: "Elapsed time from the OB's first touch to this retest (<30m / 30m–2h / 2–8h / 8–24h / 24h+).",
+        whyItMatters: "Quick re-tests vs delayed returns can carry different odds.",
+    },
+    retest_time_since_prev: {
+        friendlyName: "Time Since Previous Retest",
+        definition: "Elapsed time from the previous retest of the same OB ('first' for R1, then bucketed).",
+        whyItMatters: "Rapid repeated retests may signal a weakening block.",
+    },
+    retest_first_touch_outcome: {
+        friendlyName: "First-Touch Outcome",
+        definition: "What happened on the OB's first interaction — win / loss / breakeven / untraded (no setup placed).",
+        whyItMatters: "Conditions later retest behavior on how the OB first resolved.",
+    },
+    retest_failure_behavior: {
+        friendlyName: "Failure Behaviour",
+        definition: "Joint outcome × depth class: survived/failed × shallow/deep (deep = max penetration ≥ 66%), or 'open'.",
+        whyItMatters: "Distinguishes clean shallow holds from deep saves, and shallow vs deep failures.",
+    },
+    retest_reaction_quality: {
+        friendlyName: "Reaction Quality",
+        definition: "Whether the retest's reaction met the configured minimum pip threshold (met) or not (missed). Independent of survival.",
+        whyItMatters: "An OB can 'survive' without producing a tradeable move — this separates the two.",
+    },
+    retest_intelligence: {
+        friendlyName: "Retest Intelligence",
+        definition: "The hero summary that surfaces the strongest and weakest retest conditions and deterministic key findings from the breakdowns below.",
+        whyItMatters: "Turns a wall of tables into the few conditions that actually matter.",
+    },
+    retest_strongest_segment: {
+        friendlyName: "Strongest Segment",
+        definition: "The single condition with the highest (or lowest) survival rate among groups meeting the minimum sample size.",
+        whyItMatters: "The clearest single signal to investigate first.",
+    },
+    retest_best_worst: {
+        friendlyName: "Top Conditions",
+        definition: "Conditions ranked by survival rate, filtered to those with at least the minimum sample size; thin slices are excluded from ranking.",
+        whyItMatters: "Highlights where retests work best and worst without overfitting tiny samples.",
+    },
+    retest_key_findings: {
+        friendlyName: "Key Findings",
+        definition: "Deterministic, data-driven statements comparing two existing buckets (e.g. R2 vs R1), gated by minimum sample and a minimum survival-gap. No AI, no scoring.",
+        whyItMatters: "Plain-language read of the most material differences in the data.",
+    },
+    retest_session_matrix: {
+        friendlyName: "Session Matrix",
+        definition: "A grid of survival rate by origin session (rows) versus retest session (columns), with the same minimum-sample safeguards.",
+        whyItMatters: "Reveals origin/retest session combinations that a one-dimensional breakdown would miss.",
+    },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
