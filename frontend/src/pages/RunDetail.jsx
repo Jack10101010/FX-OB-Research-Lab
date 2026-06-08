@@ -9,7 +9,7 @@ import { NeonButton, NeonInput, NeonSelect, FilterToggle } from "@/components/la
 import { RunConfigStrip } from "@/components/lab/RunConfigStrip";
 import { TradeSanityCard } from "@/components/lab/TradeSanityCard";
 import { compactTimeframe, formatRunDateRange, getRunDisplayName, reloadFullRunFromSidecar, updateRunBundle, useDataset } from "@/data/store";
-import { setActiveRunId, setSelectedTradeVariant } from "@/data/store";
+import { setActiveRunId, setSelectedTradeVariant, setScenario, setFocusedFftEvent } from "@/data/store";
 import { getNextStep, resolveRunReference, summarizeRunForDelta, buildRunDelta } from "@/data/projectWorkflow";
 import { ResearchStrip } from "@/components/lab/ResearchStrip";
 import { useResultsLens } from "@/data/useResultsLens";
@@ -324,7 +324,7 @@ const FFT_DRILL = {
 };
 
 // Compact drilldown table rendered directly under the FFT strip.
-function FftDrilldown({ which, pairs, onClose }) {
+function FftDrilldown({ which, pairs, onClose, onShowOnMap }) {
     const cfg = FFT_DRILL[which];
     if (!cfg) return null;
     const rows = (Array.isArray(pairs) ? pairs : []).filter(cfg.filter);
@@ -356,6 +356,7 @@ function FftDrilldown({ which, pairs, onClose }) {
                                     <th className={`${cell} text-left`}>Confidence</th>
                                     <th className={`${cell} text-right`}>Contribution</th>
                                     <th className={`${cell} text-left min-w-[260px]`}>Reason</th>
+                                    {onShowOnMap && <th className={`${cell} text-left`}>Map</th>}
                                 </tr>
                             </thead>
                             <tbody>
@@ -376,6 +377,18 @@ function FftDrilldown({ which, pairs, onClose }) {
                                             <td className={`${cell} whitespace-nowrap ${confTone}`}>{p.confidence}</td>
                                             <td className={`${cell} text-right tabular-nums whitespace-nowrap ${contribTone}`}>{contrib === 0 ? "0.00R" : fmtFftR(contrib)}</td>
                                             <td className={`${cell} min-w-[260px] text-muted-lab`}>{fftRowReason(p)}</td>
+                                            {onShowOnMap && (
+                                                <td className={`${cell} whitespace-nowrap`}>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => onShowOnMap(p)}
+                                                        title="Open Strategy Map and highlight this OB"
+                                                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[3px] text-[9px] font-ui uppercase tracking-wide border border-[hsl(var(--accent-primary)/0.5)] text-[hsl(var(--accent-primary))] hover:bg-[hsl(var(--accent-primary)/0.12)] transition-colors"
+                                                    >
+                                                        Map
+                                                    </button>
+                                                </td>
+                                            )}
                                         </tr>
                                     );
                                 })}
@@ -1764,7 +1777,7 @@ export default function RunDetail() {
 
                             return (
                                 <div className={[
-                                    "clip-bevel-sm border mb-2",
+                                    "clip-bevel-sm border mb-2 preview-surface",
                                     isScenarioView
                                         ? hasSelectedUniverseTrades
                                             ? "border-[hsl(var(--accent-primary)/0.45)] bg-[hsl(var(--accent-primary)/0.05)]"
@@ -2041,7 +2054,7 @@ export default function RunDetail() {
             <TradeSanityCard
                 trades={displayTrades}
                 resultView={resultView}
-                className="mx-6 mb-3"
+                className="mx-6 mb-3 preview-surface"
             />
 
             {isIndexOnlyRun && (
@@ -2637,6 +2650,21 @@ export default function RunDetail() {
                                 which={fftDrill}
                                 pairs={paired.pairs}
                                 onClose={() => setFftDrill(null)}
+                                onShowOnMap={(p) => {
+                                    setActiveRunId(runId);
+                                    setScenario({ runId, family: resultView.family, threshold: resultView.threshold, fillMode: resultView.fillMode });
+                                    setFocusedFftEvent({
+                                        runId,
+                                        variant: universe?.variant ?? ACTIVE_TRADE_VARIANT,
+                                        scenario: { family: resultView.family, threshold: resultView.threshold, fillMode: resultView.fillMode },
+                                        obId: p.cancelTrade?.ob_id ?? p.obId,
+                                        direction: p.direction,
+                                        entryModelKey: p.modelKey,
+                                        cancelTime: p.cancelTrade?.fft_cancel_time || p.cancelTrade?.exit_time || p.cancelTrade?.tapped_time || null,
+                                        ts: Date.now(),
+                                    });
+                                    navigate("/strategy-map");
+                                }}
                             />
                         )}
                     </TooltipProvider>
@@ -3174,7 +3202,7 @@ export default function RunDetail() {
                         </div>
                     ) : (
                         <TooltipProvider delayDuration={150}>
-                            <div className="space-y-5">
+                            <div className="space-y-6">
 
                                 {/* Research Signals — auto-surfaced edges & risks with confidence */}
                                 <ResearchSignalsSection signals={researchSignals} />
@@ -3196,6 +3224,7 @@ export default function RunDetail() {
                                                     sub={s.count
                                                         ? `${s.winRate != null ? `${Math.round(s.winRate * 100)}% WR` : "— WR"} · n=${s.count} · ${formatSignedR(s.netR, 1)}`
                                                         : "no trades"}
+                                                    subClassName="!text-[hsl(var(--text-2))]"
                                                 />
                                             );
                                         })}
@@ -5045,8 +5074,11 @@ const CLASS_BREAKDOWN_GRID = "minmax(120px,auto) repeat(4,minmax(52px,1fr))";
 
 function ClassSectionHeader({ label }) {
     return (
-        <div className="text-[10px] font-ui uppercase tracking-wider text-[hsl(var(--text-3))] mb-2">
-            {label}
+        <div className="flex items-center gap-2 mb-2.5">
+            <span className="inline-block w-[3px] h-[12px] bg-[hsl(var(--accent-primary))] clip-bevel-sm shrink-0" aria-hidden="true" />
+            <span className="text-[11px] font-ui font-semibold uppercase tracking-[0.13em] text-[hsl(var(--text-2))]">
+                {label}
+            </span>
         </div>
     );
 }
@@ -5186,7 +5218,7 @@ function ModelFamilyTable({ rows, families, winnerRowId }) {
     return (
         <div>
             <div
-                className="grid items-center gap-x-3 px-2 mb-1 text-[9px] font-ui uppercase tracking-wider text-[hsl(var(--text-3)/0.7)]"
+                className="grid items-center gap-x-3 px-2 mb-1 text-[10.5px] font-ui uppercase tracking-wider text-[hsl(var(--muted))]"
                 style={{ gridTemplateColumns: MODEL_FAMILY_GRID }}
             >
                 <span>Variant</span>
@@ -5208,22 +5240,22 @@ function ModelFamilyTable({ rows, families, winnerRowId }) {
                     return (
                         <React.Fragment key={row.rowId || `${row.label}-${i}`}>
                             {showHeader && (
-                                <div className="px-2 pt-1 text-[9px] font-ui uppercase tracking-wider text-[hsl(var(--text-3))]">
+                                <div className="px-2 pt-2 pb-0.5 mt-0.5 border-t border-[hsl(var(--border-soft))] text-[9.5px] font-ui font-semibold uppercase tracking-[0.1em] text-[hsl(var(--text-2)/0.8)]">
                                     {row.familyLabel}
                                 </div>
                             )}
                             <div
                                 className={`grid items-center gap-x-3 px-2 py-1.5 border clip-bevel-sm ${
                                     isWinner
-                                        ? "bg-[hsl(var(--accent-primary)/0.07)] border-[hsl(var(--accent-primary)/0.4)]"
+                                        ? "bg-[hsl(var(--accent-primary)/0.12)] border-[hsl(var(--accent-primary)/0.4)]"
                                         : "bg-[hsl(var(--panel-2)/0.35)] border-[hsl(var(--border-soft))]"
                                 }`}
                                 style={{ gridTemplateColumns: MODEL_FAMILY_GRID }}
                             >
-                                <div className="min-w-0 flex items-center gap-1.5 text-[11px] text-[hsl(var(--text-2))]">
-                                    {isWinner && <Crown className="w-3 h-3 shrink-0 text-[hsl(var(--accent-primary))]" />}
+                                <div className={`min-w-0 flex items-center gap-1.5 text-[11px] ${isWinner ? "text-[hsl(var(--text))] font-medium" : "text-[hsl(var(--text-2))]"}`}>
+                                    {isWinner && <Crown className="w-3.5 h-3.5 shrink-0 text-[hsl(var(--accent-primary))]" />}
                                     <span className="truncate"><TermTip termKey={row.tooltipKey}>{row.label}</TermTip></span>
-                                    <ConfidenceChip level={row.confidence?.level} />
+                                    <ConfidenceChip level={row.confidence?.level} className="shrink-0" />
                                 </div>
                                 <span className="font-num tabular-nums text-right text-[11px] text-[hsl(var(--text-2))]">{row.count}</span>
                                 <span className={`font-num tabular-nums text-right text-[11px] ${wrTone}`}>
@@ -5259,7 +5291,7 @@ function ClassBreakdownTable({ rows, extraCol }) {
     return (
         <div>
             <div
-                className="grid items-center gap-x-3 px-2 mb-1 text-[9px] font-ui uppercase tracking-wider text-[hsl(var(--text-3)/0.7)]"
+                className="grid items-center gap-x-3 px-2 mb-1 text-[10.5px] font-ui uppercase tracking-wider text-[hsl(var(--muted))]"
                 style={{ gridTemplateColumns: gridCols }}
             >
                 <span>Tag</span>

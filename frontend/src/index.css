@@ -386,6 +386,41 @@
             0 0 0 1px hsl(var(--accent-secondary) / var(--glow-strength, 0.40)) inset,
             0 0 20px -6px hsl(var(--accent-secondary) / var(--glow-bloom, 0.50));
     }
+
+    /* ── Preview Lens surfaces (Phase 8C) ──────────────────────────────────────
+       Inert by default. Only when the app root carries data-preview-active="true"
+       do tagged high-value result surfaces gain a subtle amber border, an inset
+       soft glow (inset so it survives clip-path / clip-bevel cards), and a small
+       PREVIEW chip — so the user always knows these numbers are temporary. Reuses
+       the --warning (amber) token; intentionally a calm "research preview" look,
+       NOT alarming error styling. Add the `preview-surface` class to a card to
+       opt it in; it does nothing outside preview mode. */
+    .preview-surface { position: relative; }
+    [data-preview-active="true"] .preview-surface {
+        border-color: hsl(var(--warning) / 0.6);
+        box-shadow:
+            0 0 0 1px hsl(var(--warning) / 0.28) inset,
+            0 0 16px -5px hsl(var(--warning) / 0.30) inset,
+            0 0 20px -8px hsl(var(--warning) / 0.28);
+        transition: border-color 200ms ease, box-shadow 200ms ease;
+    }
+    [data-preview-active="true"] .preview-surface::after {
+        content: "PREVIEW";
+        position: absolute;
+        top: 5px;
+        right: 7px;
+        z-index: 6;
+        padding: 0 5px;
+        font-size: 8px;
+        font-weight: 600;
+        letter-spacing: 0.14em;
+        line-height: 1.65;
+        color: hsl(var(--warning));
+        background: hsl(var(--panel) / 0.92);
+        border: 1px solid hsl(var(--warning) / 0.55);
+        border-radius: 2px;
+        pointer-events: none;
+    }
     .text-glow-primary {
         text-shadow: 0 0 12px hsl(var(--accent-primary) / var(--text-glow-strength, 0.55));
     }

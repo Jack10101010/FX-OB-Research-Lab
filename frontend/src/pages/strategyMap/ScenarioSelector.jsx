@@ -343,7 +343,7 @@ export function ScenarioSelector({ resolvedScenario, onScenarioChange, onVariant
                 Replaces the old sparse Rows / Fills / WR / Net R / Exp / PF
                 row. Driven by summarizeTradeSanity so the numbers track every
                 other strip in the app (Run Detail ledger, other labs). */}
-            <TradeSanityStrip stats={sanity} trades={trades} showBreakdown={true} variant="research" />
+            <TradeSanityStrip stats={sanity} trades={trades} showBreakdown={true} variant="research" className="preview-surface" />
 
             {/* ── FFT summary row — shown only when FFT cancels are present ── */}
             {fftStats.fftCancels > 0 && (

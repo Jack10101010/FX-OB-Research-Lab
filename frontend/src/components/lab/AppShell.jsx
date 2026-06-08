@@ -2,9 +2,46 @@ import React from "react";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import AppBlueprintBackground from "./AppBlueprintBackground";
-import { MasterControlsProvider } from "@/components/masterControls/MasterControlsContext";
+import { MasterControlsProvider, useMasterControls } from "@/components/masterControls/MasterControlsContext";
 import { MasterControlsDrawer } from "@/components/masterControls/MasterControlsDrawer";
+import { GlobalPreviewBanner } from "@/components/masterControls/GlobalPreviewBanner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+
+/**
+ * Inner layout — lives INSIDE MasterControlsProvider so it can read the Preview
+ * Lens (Phase 8C). It stamps the app root with `data-preview-active` /
+ * `data-preview-mode` (a CSS hook for preview-aware surface styling, and a
+ * future-proof signal for anything else that needs to know preview is live) and
+ * renders the persistent GlobalPreviewBanner just under the TopBar — outside the
+ * scrolling <main>, so it stays pinned and persists across every page.
+ */
+function AppShellLayout({ children }) {
+    const { previewLens } = useMasterControls();
+    const lensActive = !!previewLens?.active;
+
+    return (
+        <div
+            className="min-h-screen flex bg-[#050A12] relative"
+            data-preview-active={lensActive ? "true" : "false"}
+            data-preview-mode={lensActive ? (previewLens.mode || "unknown") : undefined}
+        >
+            {/* Global blueprint-grid background (base + grid + glow) */}
+            <AppBlueprintBackground />
+            {/* Subtle noise texture overlay */}
+            <div className="pointer-events-none fixed inset-0 noise" />
+            <Sidebar />
+            <div className="flex-1 min-w-0 flex flex-col relative">
+                <TopBar />
+                {/* Persistent, non-modal preview indicator — pinned under the top bar. */}
+                <GlobalPreviewBanner />
+                <main data-testid="app-main" className="flex-1 overflow-x-hidden overflow-y-auto scrollbar-thin">
+                    {children}
+                </main>
+            </div>
+            <MasterControlsDrawer />
+        </div>
+    );
+}
 
 export function AppShell({ children }) {
     return (
@@ -13,20 +50,7 @@ export function AppShell({ children }) {
         // their own provider to override delay locally.
         <TooltipProvider delayDuration={150} skipDelayDuration={300}>
             <MasterControlsProvider>
-                <div className="min-h-screen flex bg-[#050A12] relative">
-                    {/* Global blueprint-grid background (base + grid + glow) */}
-                    <AppBlueprintBackground />
-                    {/* Subtle noise texture overlay */}
-                    <div className="pointer-events-none fixed inset-0 noise" />
-                    <Sidebar />
-                    <div className="flex-1 min-w-0 flex flex-col relative">
-                        <TopBar />
-                        <main data-testid="app-main" className="flex-1 overflow-x-hidden overflow-y-auto scrollbar-thin">
-                            {children}
-                        </main>
-                    </div>
-                    <MasterControlsDrawer />
-                </div>
+                <AppShellLayout>{children}</AppShellLayout>
             </MasterControlsProvider>
         </TooltipProvider>
     );
