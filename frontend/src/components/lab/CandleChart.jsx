@@ -1194,6 +1194,15 @@ export function CandleChart({
         const rangeFrom = normalizeChartTimestamp(visibleRange?.from);
         const rangeTo = normalizeChartTimestamp(visibleRange?.to);
         const isVisible = (t) => (rangeFrom == null || t >= rangeFrom) && (rangeTo == null || t <= rangeTo);
+        // Resolve a timestamp to an x coordinate (used for the threshold x-window fallback).
+        const toX = (t) => {
+            const parsed = normalizeChartTimestamp(t);
+            if (parsed == null) return null;
+            const snap = hasRealCandleTime ? snapFloor(parsed) : parsed;
+            if (snap == null) return null;
+            const x = chart.timeScale().timeToCoordinate(snap);
+            return x != null ? x : null;
+        };
         const bounds = containerRef.current?.getBoundingClientRect();
         const maxHeight = bounds?.height || height;
         // Move-away threshold config
@@ -1216,6 +1225,7 @@ export function CandleChart({
             // ── Per-OB threshold computation ──────────────────────────────────
             let effectivePips = 0;
             let thresholdLabel = null;
+            let thresholdY = null;       // captured here; the line is pushed later with x-bounds
             let cancelY = y; // default: cancel at entry edge (immediate mode / no data)
             if (hasThreshold && ov.obTop != null && ov.obBot != null && pipSize > 0) {
                 const obHeightPips = (ov.obTop - ov.obBot) / pipSize;
@@ -1229,16 +1239,11 @@ export function CandleChart({
                     : ov.obBot - thresholdPriceOffset;
                 const rawThresholdY = series.priceToCoordinate(thresholdPriceLevel);
                 if (rawThresholdY != null) {
-                    const tY = clamp(rawThresholdY, 0, maxHeight);
-                    // Label: show which threshold is active
+                    thresholdY = clamp(rawThresholdY, 0, maxHeight);
+                    // Compact label (shown once on the short segment, FFT cancels only)
                     thresholdLabel = obT > pipT
-                        ? `FFT: ${moveAwayObMultiple}× OB`
-                        : `FFT: ${effectivePips.toFixed(1)} pips`;
-                    thresholdLines.push({
-                        id: `fft-threshold-${ov.tradeId || ov.obId}`,
-                        y: tY,
-                        label: thresholdLabel,
-                    });
+                        ? `${moveAwayObMultiple}×OB`
+                        : `${effectivePips.toFixed(1)}p`;
                 }
                 // Cancel dot Y: place at actual cancel price when data is available
                 const actualPips = ov.fftMoveAwayPipsAtCancel;
@@ -1308,6 +1313,34 @@ export function CandleChart({
                     x1, x2, y,
                     color: "rgba(219,39,119,0.55)",
                 });
+            }
+            // FFT move-away threshold — short segment, ONLY for actual FFT cancels.
+            // Localised to the tap→cancel x-window (fallback: OB start→end). No
+            // full-width lines, no per-OB clutter.
+            if (ov.isFftCancel && thresholdY != null) {
+                const PAD = 10;
+                let tx1 = null;
+                let tx2 = null;
+                if (tapX != null && cancelX != null) {
+                    tx1 = Math.min(tapX, cancelX) - PAD;
+                    tx2 = Math.max(tapX, cancelX) + PAD;
+                } else {
+                    const obStartX = toX(ov.obStartTime);
+                    const obEndX = toX(ov.obEndTime);
+                    if (obStartX != null && obEndX != null) {
+                        tx1 = Math.min(obStartX, obEndX);
+                        tx2 = Math.max(obStartX, obEndX);
+                    }
+                }
+                if (tx1 != null && tx2 != null && tx2 > tx1) {
+                    thresholdLines.push({
+                        id: `fft-threshold-${ov.tradeId || ov.obId}`,
+                        x1: tx1,
+                        x2: tx2,
+                        y: thresholdY,
+                        label: thresholdLabel,
+                    });
+                }
             }
         }
         return { dots, lines, thresholdLines };
@@ -1855,8 +1888,8 @@ function FftThresholdLine({ line }) {
         <div
             className="absolute pointer-events-none"
             style={{
-                left: 0,
-                right: 0,
+                left: line.x1,
+                width: Math.max(0, line.x2 - line.x1),
                 top: line.y,
                 height: 1,
                 zIndex: 16,
@@ -1865,21 +1898,18 @@ function FftThresholdLine({ line }) {
             <div style={{
                 width: "100%",
                 height: "100%",
-                borderTop: "1px dashed rgba(219,39,119,0.65)",
+                borderTop: "1px dashed rgba(219,39,119,0.35)",
             }} />
             {line.label && (
                 <span style={{
                     position: "absolute",
-                    right: 6,
-                    top: -11,
-                    fontSize: 9,
+                    left: 0,
+                    top: -10,
+                    fontSize: 8,
                     fontFamily: "ui-monospace, monospace",
-                    color: "rgba(219,39,119,0.90)",
-                    background: "rgba(0,0,0,0.55)",
-                    padding: "1px 4px",
-                    borderRadius: 2,
+                    color: "rgba(219,39,119,0.70)",
                     whiteSpace: "nowrap",
-                    letterSpacing: "0.03em",
+                    letterSpacing: "0.02em",
                 }}>
                     {line.label}
                 </span>
