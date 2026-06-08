@@ -129,5 +129,43 @@ const standard = buildVariantRows({
 ok(!standard.some((r) => r.tag === "unknown_model"),
    "no Unknown Model for standard baseline / TE / EP keys");
 
+// ── Max DD from per-variant equity curves (ENABLED-VARIANT-MAX-DD-1) ────────────
+console.log("Max DD from equity curves");
+
+const ddTrades = [T({ outcome: "Win", r: 2 }), T({ outcome: "Loss", r: -3 }), T({ outcome: "Win", r: 1 })];
+// cumulative netR: 2, -1, 0 → peak 2, trough -1 → maxDD = -1 - 2 = -3
+const ddCurveNext = [{ i: 0, netR: 2 }, { i: 1, netR: -1 }, { i: 2, netR: 0 }];
+const ddCurveUp   = [{ i: 0, netR: 1 }, { i: 1, netR: 2 }, { i: 2, netR: 3 }]; // monotonic → 0
+
+const ddTradesByMode = {
+    "single_position__entry_triggered_edge_25p0_next": ddTrades,
+    "entry_triggered_edge_25p0_next":                  ddTrades,
+    "single_position__entry_triggered_edge_25p0_d2":   [T({ outcome: "Win", r: 1 })],
+    "entry_triggered_edge_25p0_d2":                    [T({ outcome: "Win", r: 1 })],
+    "entry_baseline":                                  [T({ outcome: "Win", r: 1 })], // no curve → null
+};
+const ddCurveByMode = {
+    // curve only under the PREFIXED key — must still match via canonicalEntryKey
+    "single_position__entry_triggered_edge_25p0_next": ddCurveNext,
+    "entry_triggered_edge_25p0_d2":                    ddCurveUp,
+};
+
+const ddRows = buildVariantRows(ddTradesByMode, ddCurveByMode);
+const ddNextRow = ddRows.find((r) => r.tag === "te_next");
+const ddD2Row   = ddRows.find((r) => r.tag === "te_d2");
+const ddBaseRow = ddRows.find((r) => r.tag === "baseline");
+
+ok(ddNextRow.maxDdR === -3, "losing sequence → maxDdR = -3 (NOT incorrectly 0)");
+ok(ddD2Row.maxDdR === 0, "monotonic-up curve → maxDdR = 0");
+ok(ddBaseRow.maxDdR === null, "variant with no curve → maxDdR = null (not 0)");
+
+const ddFromBundle = buildEnabledVariantBreakdown({
+    entryResults: { tradesByMode: ddTradesByMode, equityCurveByMode: ddCurveByMode },
+});
+ok(ddFromBundle.find((r) => r.tag === "te_next").maxDdR === -3,
+   "buildEnabledVariantBreakdown wires equityCurveByMode → maxDdR");
+ok(buildVariantRows(ddTradesByMode).every((r) => r.maxDdR === null),
+   "no equityCurveByMode arg → maxDdR null for all rows (additive, back-compatible)");
+
 console.log(`\n${failures === 0 ? "ALL PASS" : failures + " FAILURE(S)"}`);
 process.exit(failures === 0 ? 0 : 1);

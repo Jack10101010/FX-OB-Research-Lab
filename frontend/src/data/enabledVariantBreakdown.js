@@ -53,6 +53,36 @@ function readEntryTradesByMode(bundle) {
     return out;
 }
 
+// Per-variant equity curves: entryResults.equityCurveByMode[<mode>] = computeEquityCurve(trades)
+// (importer) → ordered points { i, date, label, netR } where netR is cumulative R. Keyed
+// identically to tradesByMode (dual bare + positionVariant__mode), so canonicalEntryKey aligns.
+function readEquityCurveByMode(bundle) {
+    const results = resolveEntryResults(bundle || {});
+    const raw = results?.equityCurveByMode || results?.equity_curve_by_mode || {};
+    const out = {};
+    for (const [key, value] of Object.entries(raw || {})) {
+        if (Array.isArray(value)) out[key] = value;
+    }
+    return out;
+}
+
+// Max drawdown (in R) from an equity curve's cumulative `netR` points — byte-for-byte the
+// canonical resultsBasis.maxDrawdownFromCurve (inlined to keep this module node-testable).
+// Returns ≤ 0, or null when the curve is empty/absent.
+function maxDrawdownFromCurve(equityCurve) {
+    if (!Array.isArray(equityCurve) || equityCurve.length === 0) return null;
+    let peak = -Infinity;
+    let maxDd = 0;
+    for (const p of equityCurve) {
+        const v = Number(p && p.netR);
+        if (!isFinite(v)) continue;
+        if (v > peak) peak = v;
+        const dd = v - peak; // ≤ 0
+        if (dd < maxDd) maxDd = dd;
+    }
+    return maxDd;
+}
+
 // Canonical display order: baseline → TE C0..C3 → EP 25..100 → unknown/other.
 const TAG_ORDER = {
     baseline:      0,
@@ -94,7 +124,7 @@ function canonicalEntryKey(key) {
  *   count:number, wins:number, losses:number, winRate:number|null, netR:number, avgR:number }>}
  *   Sorted canonically; variants with no performance trades are dropped.
  */
-export function buildVariantRows(tradesByMode) {
+export function buildVariantRows(tradesByMode, equityCurveByMode) {
     const map = tradesByMode && typeof tradesByMode === "object" ? tradesByMode : {};
 
     // Collapse position-variant-prefixed aliases into one canonical entry-model key.
@@ -106,6 +136,16 @@ export function buildVariantRows(tradesByMode) {
         const canon = canonicalEntryKey(key);
         const isBare = key === canon;
         if (isBare || !byCanon.has(canon)) byCanon.set(canon, trades);
+    }
+
+    // Per-variant equity curves, canonicalized the same way (optional → maxDdR is null
+    // when no curve is available for a variant).
+    const curveByCanon = new Map();
+    for (const [key, curve] of Object.entries(equityCurveByMode || {})) {
+        if (!Array.isArray(curve)) continue;
+        const canon = canonicalEntryKey(key);
+        const isBare = key === canon;
+        if (isBare || !curveByCanon.has(canon)) curveByCanon.set(canon, curve);
     }
 
     const rows = [];
@@ -126,6 +166,8 @@ export function buildVariantRows(tradesByMode) {
         catch { tag = "unknown_model"; }
         const wl = wins + losses;
 
+        const curve = curveByCanon.get(canon);
+
         rows.push({
             key:        canon,
             tag,
@@ -137,6 +179,7 @@ export function buildVariantRows(tradesByMode) {
             winRate: wl > 0 ? wins / wl : null,
             netR:    sumR,
             avgR:    count > 0 ? sumR / count : 0,
+            maxDdR:  curve ? maxDrawdownFromCurve(curve) : null,
         });
     }
 
@@ -155,5 +198,5 @@ export function buildVariantRows(tradesByMode) {
  * @returns {object[]} variant rows (see buildVariantRows)
  */
 export function buildEnabledVariantBreakdown(runData) {
-    return buildVariantRows(readEntryTradesByMode(runData));
+    return buildVariantRows(readEntryTradesByMode(runData), readEquityCurveByMode(runData));
 }

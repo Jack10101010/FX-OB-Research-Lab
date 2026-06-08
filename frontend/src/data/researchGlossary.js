@@ -15,10 +15,13 @@
  *
  * Each entry:
  *   {
- *     term:         short token shown in dense UI (e.g. "AAE", "WR")
- *     friendlyName: human-readable name (e.g. "Armed After OB Exit")
- *     definition:   plain-language tooltip body
- *     whyItMatters: one line on why the term is decision-relevant
+ *     term:           short token shown in dense UI (e.g. "AAE", "WR")
+ *     friendlyName:   human-readable name (e.g. "Armed After OB Exit")
+ *     definition:     plain-language tooltip body
+ *     whyItMatters:   one line on why the term is decision-relevant
+ *     interpretation?: OPTIONAL string[] — short "how to read it" lines for advanced
+ *                     metrics (thresholds / bands). Rendered as the card's
+ *                     Interpretation section; omit for simple terms.
  *   }
  *
  * NOTE on "Clean": it is intentionally NOT a key. The textbook fill is
@@ -221,6 +224,11 @@ export const GLOSSARY = {
         whyItMatters:
             "A big edge on a tiny or noisy sample isn't actionable; confidence stops flukes from " +
             "outranking real, well-evidenced findings.",
+        interpretation: [
+            "High — trustworthy enough to act on",
+            "Medium — corroborate before leaning on it",
+            "Low / Very Low — treat as a hint; gather more data",
+        ],
     },
     confidence_high: {
         term: "High",
@@ -245,6 +253,102 @@ export const GLOSSARY = {
         friendlyName: "Very Low Confidence",
         definition: "Too little data to trust (e.g. fewer than ~5 decided trades).",
         whyItMatters: "Do not act on it; shown for completeness only.",
+    },
+    max_drawdown: {
+        term: "Max DD",
+        friendlyName: "Max Drawdown",
+        definition:
+            "The largest drop from a peak in cumulative R before a new peak — how deep this " +
+            "variant's worst losing stretch went.",
+        whyItMatters:
+            "Lower drawdown generally means a smoother, safer strategy; critical for funded-account " +
+            "risk limits.",
+    },
+
+    // ── Phase 1 — Explainability quick wins ──────────────────────────────────
+    rr: {
+        term: "RR",
+        friendlyName: "Reward-to-Risk Ratio",
+        definition:
+            "Reward-to-risk ratio. RR 2 means the target is 2× the stop risk (1R = the stop distance).",
+        whyItMatters:
+            "RR and win rate together determine expectancy — a low win rate can still profit at high RR.",
+        interpretation: [
+            "Higher RR — tolerates a lower win rate",
+            "Lower RR — needs a higher win rate",
+        ],
+    },
+    fft: {
+        term: "FFT",
+        friendlyName: "First Failed Tag (FFT)",
+        definition:
+            "The move-away cancel filter. It cancels a triggered-edge order if price moves too far " +
+            "past the order block edge before filling.",
+        whyItMatters:
+            "It trades fill rate for fewer fakeout entries.",
+    },
+    ghost: {
+        term: "Ghost",
+        friendlyName: "Ghost Trade",
+        definition:
+            "The hypothetical result of a trade that FFT cancelled, simulated as if it had been " +
+            "allowed to run.",
+        whyItMatters:
+            "Ghosts show whether FFT is cancelling likely winners or likely losers.",
+    },
+    ep: {
+        term: "EP",
+        friendlyName: "Entry Penetration",
+        definition:
+            "The limit order is placed N% into the order block. Deeper entry can improve price but " +
+            "reduce fill rate.",
+        whyItMatters:
+            "Controls the trade-off between entry-price quality and how often setups actually fill.",
+    },
+    stat_pf: {
+        term: "PF",
+        friendlyName: "Profit Factor",
+        definition: "Gross wins divided by gross losses.",
+        whyItMatters:
+            "A quick read on whether winners outweigh losers, independent of trade count.",
+        interpretation: [
+            "Above 1.0 — profitable",
+            "Above 1.5 — strong edge",
+            "Below 1.0 — losing",
+        ],
+    },
+    stat_exp: {
+        term: "Exp",
+        friendlyName: "Expectancy",
+        definition: "Average R per trade (Net R ÷ trade count).",
+        whyItMatters:
+            "It combines win rate and reward/risk into one number.",
+        interpretation: [
+            "Positive — wins on average",
+            "Negative — loses on average",
+            "0 — breakeven",
+        ],
+    },
+    results_basis: {
+        term: "Results Basis",
+        friendlyName: "Results Basis",
+        definition:
+            "How figures are measured. Raw R shows risk multiples. Current Equity shows account-based " +
+            "results using starting balance and risk settings.",
+        whyItMatters:
+            "Switching basis changes the scale of every number on the page.",
+    },
+    ci_95: {
+        term: "95% CI",
+        friendlyName: "95% Confidence Interval",
+        definition: "The likely range of the true value, given this sample size.",
+        whyItMatters:
+            "If the range crosses zero, the edge may not be reliable.",
+        interpretation: [
+            "Fully above 0 — reliable positive edge",
+            "Crosses 0 — not yet reliable",
+            "Wider — less certain",
+        ],
     },
 };
 

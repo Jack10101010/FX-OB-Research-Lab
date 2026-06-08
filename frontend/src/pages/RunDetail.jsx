@@ -52,6 +52,8 @@ import { getTagMeta } from "@/data/classificationRegistry";
 import { buildFillStateBreakdown, buildSessionBreakdown, buildSignalCards } from "@/data/fillStateBreakdown";
 import { buildResearchSignals } from "@/data/researchSignals";
 import { TermTip, TooltipProvider } from "@/components/lab/TermTip";
+// `Tooltip` is already imported from recharts above — alias the Radix UI tooltip.
+import { Tooltip as UiTooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { ConfidenceChip } from "@/components/lab/ConfidenceChip";
 import { buildEnabledVariantBreakdown } from "@/data/enabledVariantBreakdown";
 
@@ -243,6 +245,39 @@ function FundingPhaseCard({ title, phase, currency }) {
                 Target {formatAccountValue(phase?.targetEquity, currency)} · Max loss floor {formatAccountValue(phase?.lossFloor, currency)}
             </div>
         </div>
+    );
+}
+
+// ── FFT Protection strip — plain-English tooltip copy (explainability only) ──
+// Display strings only; no analytics/pairing values are derived here.
+const FFT_TIPS = {
+    cancels:       "Number of OBs removed by First Failed Visit before the trigger was reached.",
+    winsRemoved:   "How many cancelled OBs became winners in the FFT-OFF control. These are trades FFT would have wrongly removed.",
+    lossesAvoided: "How many cancelled OBs became losers in the FFT-OFF control. These are losses FFT avoided.",
+    netR:          "Authoritative paired result: losses avoided minus winners removed, using the matched FFT-OFF control run.",
+    known:         "Cancelled OBs with a trustworthy paired FFT-OFF result. These are the rows counted in Wins Removed, Losses Avoided, and Net R Impact.",
+    unknown:       "Cancelled OBs where the paired FFT-OFF result was missing, invalid, unfilled, or timing-diverged. These are not counted in Net R Impact.",
+    moveAway:      "Average distance price moved away from the OB before FFT cancelled it.",
+    badge:         "This run includes its own FFT-OFF control CSV. Paired metrics are using that automatic control, not ghost simulation.",
+    // Ghost-only fallback chips (no paired control present) — flagged unverified.
+    ghostWins:     "Ghost simulation estimate (unverified): cancelled OBs the in-run ghost thinks would have won. Import a paired FFT-OFF control for authoritative numbers.",
+    ghostLosses:   "Ghost simulation estimate (unverified): cancelled OBs the ghost thinks would have stopped out.",
+    ghostUnfilled: "Ghost simulation estimate (unverified): cancelled OBs that never re-triggered after the cancel.",
+    ghostNetR:     "Ghost simulation net R (unverified). Replaced by the authoritative paired Net R Impact when an FFT-OFF control is present.",
+};
+
+// Wraps an FFT-strip MetricChip in a hover tooltip. The wrapper <div> stays the
+// kpi-strip grid item, so the chip renders exactly as before.
+function FftKpi({ hint, children }) {
+    return (
+        <UiTooltip>
+            <TooltipTrigger asChild>
+                <div className="cursor-help">{children}</div>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-[260px] whitespace-normal leading-snug text-[10.5px] font-ui">
+                {hint}
+            </TooltipContent>
+        </UiTooltip>
     );
 }
 
@@ -2316,115 +2351,149 @@ export default function RunDetail() {
                 const pairedNetRTone = paired.confirmedNetRImpact > 0.005 ? "success"
                     : paired.confirmedNetRImpact < -0.005 ? "danger" : "muted";
                 return (
-                    <>
+                    <TooltipProvider delayDuration={150}>
                         <div className="px-6 mt-4 mb-1 flex items-center gap-2 text-[9px] font-ui uppercase tracking-[0.12em] text-[hsl(var(--warning)/0.65)]">
                             <span>◆ FFT Protection — First Failed Visit</span>
                             {autoControl.available && (
-                                <span className="px-1.5 py-[2px] rounded-[2px] bg-[hsl(var(--accent-primary)/0.14)] text-[hsl(var(--accent-primary))] normal-case tracking-normal text-[8px]">
-                                    Auto-paired control
-                                </span>
+                                <UiTooltip>
+                                    <TooltipTrigger asChild>
+                                        <span className="px-1.5 py-[2px] rounded-[2px] bg-[hsl(var(--accent-primary)/0.14)] text-[hsl(var(--accent-primary))] normal-case tracking-normal text-[8px] cursor-help">
+                                            Auto-paired control
+                                        </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top" className="max-w-[260px] whitespace-normal leading-snug text-[10.5px] font-ui">
+                                        {FFT_TIPS.badge}
+                                    </TooltipContent>
+                                </UiTooltip>
                             )}
                         </div>
+                        {hasPaired && (
+                            <div className="px-6 -mt-0.5 mb-1.5 text-[8.5px] font-ui text-muted-lab opacity-55">
+                                FFT Cancels = known paired outcomes + unknown/low-confidence outcomes.
+                            </div>
+                        )}
                         <div className="kpi-strip">
-                            <MetricChip
-                                size="compact"
-                                label="FFT Cancels"
-                                value={String(fft.fftCancels)}
-                                sub="pre-trigger cancels"
-                                tone="warning"
-                                icon={XIcon}
-                            />
+                            <FftKpi hint={FFT_TIPS.cancels}>
+                                <MetricChip
+                                    size="compact"
+                                    label="FFT Cancels"
+                                    value={String(fft.fftCancels)}
+                                    sub="pre-trigger cancels"
+                                    tone="warning"
+                                    icon={XIcon}
+                                />
+                            </FftKpi>
                             {hasPaired ? (
                                 <>
-                                    <MetricChip
-                                        size="compact"
-                                        label="Wins Removed"
-                                        value={String(paired.confirmedWinsRemoved)}
-                                        sub="confirmed · paired OFF"
-                                        tone="danger"
-                                        icon={AlertTriangle}
-                                    />
-                                    <MetricChip
-                                        size="compact"
-                                        label="Losses Avoided"
-                                        value={String(paired.confirmedLossesAvoided)}
-                                        sub="confirmed · paired OFF"
-                                        tone="success"
-                                        icon={TrendingUp}
-                                    />
-                                    <MetricChip
-                                        size="compact"
-                                        label="Net R Impact"
-                                        value={fmtFftR(paired.confirmedNetRImpact)}
-                                        sub={`authoritative · ghost ${ghostNetRStr} (unverified)`}
-                                        tone={pairedNetRTone}
-                                        icon={Activity}
-                                    />
-                                    <MetricChip
-                                        size="compact"
-                                        label="HIGH Confidence"
-                                        value={String(paired.highConfCount)}
-                                        sub="paired high-conf"
-                                        tone="muted"
-                                        icon={Hash}
-                                    />
-                                    <MetricChip
-                                        size="compact"
-                                        label="LOW Confidence"
-                                        value={String(paired.lowConfCount)}
-                                        sub="paired low-conf"
-                                        tone="muted"
-                                        icon={Hash}
-                                    />
+                                    <FftKpi hint={FFT_TIPS.winsRemoved}>
+                                        <MetricChip
+                                            size="compact"
+                                            label="Wins Removed"
+                                            value={String(paired.confirmedWinsRemoved)}
+                                            sub="confirmed · paired OFF"
+                                            tone="danger"
+                                            icon={AlertTriangle}
+                                        />
+                                    </FftKpi>
+                                    <FftKpi hint={FFT_TIPS.lossesAvoided}>
+                                        <MetricChip
+                                            size="compact"
+                                            label="Losses Avoided"
+                                            value={String(paired.confirmedLossesAvoided)}
+                                            sub="confirmed · paired OFF"
+                                            tone="success"
+                                            icon={TrendingUp}
+                                        />
+                                    </FftKpi>
+                                    <FftKpi hint={FFT_TIPS.netR}>
+                                        <MetricChip
+                                            size="compact"
+                                            label="Net R Impact"
+                                            value={fmtFftR(paired.confirmedNetRImpact)}
+                                            sub={`authoritative · ghost ${ghostNetRStr} (unverified)`}
+                                            tone={pairedNetRTone}
+                                            icon={Activity}
+                                        />
+                                    </FftKpi>
+                                    <FftKpi hint={FFT_TIPS.known}>
+                                        <MetricChip
+                                            size="compact"
+                                            label="Known Paired Outcomes"
+                                            value={String(paired.highConfCount)}
+                                            sub="trustworthy paired rows"
+                                            tone="muted"
+                                            icon={Hash}
+                                        />
+                                    </FftKpi>
+                                    <FftKpi hint={FFT_TIPS.unknown}>
+                                        <MetricChip
+                                            size="compact"
+                                            label="Unknown / Low Confidence"
+                                            value={String(paired.lowConfCount)}
+                                            sub="not counted in Net R"
+                                            tone="muted"
+                                            icon={Hash}
+                                        />
+                                    </FftKpi>
                                 </>
                             ) : (
                                 <>
-                                    <MetricChip
-                                        size="compact"
-                                        label="Ghost Wins"
-                                        value={String(fft.ghostWins)}
-                                        sub={wrSub}
-                                        tone={fft.hasGhostData ? "success" : "muted"}
-                                        icon={TrendingUp}
-                                    />
-                                    <MetricChip
-                                        size="compact"
-                                        label="Ghost Losses"
-                                        value={String(fft.ghostLosses)}
-                                        sub="would have stopped out"
-                                        tone={fft.hasGhostData ? "danger" : "muted"}
-                                        icon={AlertTriangle}
-                                    />
-                                    <MetricChip
-                                        size="compact"
-                                        label="Ghost Unfilled"
-                                        value={String(fft.ghostUnfilled)}
-                                        sub="never triggered after cancel"
-                                        tone="muted"
-                                        icon={Hash}
-                                    />
-                                    <MetricChip
-                                        size="compact"
-                                        label="Ghost Net R (unverified)"
-                                        value={fft.hasGhostData ? fmtFftR(fft.ghostNetR) : "—"}
-                                        sub="simulated · load paired run for actuals"
-                                        tone={fft.hasGhostData ? netRTone : "muted"}
-                                        icon={Activity}
-                                    />
+                                    <FftKpi hint={FFT_TIPS.ghostWins}>
+                                        <MetricChip
+                                            size="compact"
+                                            label="Ghost Wins"
+                                            value={String(fft.ghostWins)}
+                                            sub={wrSub}
+                                            tone={fft.hasGhostData ? "success" : "muted"}
+                                            icon={TrendingUp}
+                                        />
+                                    </FftKpi>
+                                    <FftKpi hint={FFT_TIPS.ghostLosses}>
+                                        <MetricChip
+                                            size="compact"
+                                            label="Ghost Losses"
+                                            value={String(fft.ghostLosses)}
+                                            sub="would have stopped out"
+                                            tone={fft.hasGhostData ? "danger" : "muted"}
+                                            icon={AlertTriangle}
+                                        />
+                                    </FftKpi>
+                                    <FftKpi hint={FFT_TIPS.ghostUnfilled}>
+                                        <MetricChip
+                                            size="compact"
+                                            label="Ghost Unfilled"
+                                            value={String(fft.ghostUnfilled)}
+                                            sub="never triggered after cancel"
+                                            tone="muted"
+                                            icon={Hash}
+                                        />
+                                    </FftKpi>
+                                    <FftKpi hint={FFT_TIPS.ghostNetR}>
+                                        <MetricChip
+                                            size="compact"
+                                            label="Ghost Net R (unverified)"
+                                            value={fft.hasGhostData ? fmtFftR(fft.ghostNetR) : "—"}
+                                            sub="simulated · load paired run for actuals"
+                                            tone={fft.hasGhostData ? netRTone : "muted"}
+                                            icon={Activity}
+                                        />
+                                    </FftKpi>
                                 </>
                             )}
                             {fft.hasMoveAwayData && (
-                                <MetricChip
-                                    size="compact"
-                                    label="Avg Move-Away"
-                                    value={`${fmtFftPips(fft.avgMoveAwayAtCancel)} pips`}
-                                    sub="past OB edge at cancel"
-                                    tone="muted"
-                                    icon={Target}
-                                />
+                                <FftKpi hint={FFT_TIPS.moveAway}>
+                                    <MetricChip
+                                        size="compact"
+                                        label="Avg Move-Away"
+                                        value={`${fmtFftPips(fft.avgMoveAwayAtCancel)} pips`}
+                                        sub="past OB edge at cancel"
+                                        tone="muted"
+                                        icon={Target}
+                                    />
+                                </FftKpi>
                             )}
                         </div>
-                    </>
+                    </TooltipProvider>
                 );
             })()}
 
@@ -3037,11 +3106,21 @@ export default function RunDetail() {
                                 {enabledVariantBreakdown.length >= 2 && (
                                     <div>
                                         <ClassSectionHeader label="Enabled Variant Comparison" />
-                                        <ClassBreakdownTable rows={enabledVariantBreakdown.map((row) => ({
-                                            label: row.label,
-                                            tooltipKey: row.tag,
-                                            stats: row,
-                                        }))} />
+                                        <ClassBreakdownTable
+                                            rows={enabledVariantBreakdown.map((row) => ({
+                                                label: row.label,
+                                                tooltipKey: row.tag,
+                                                stats: row,
+                                            }))}
+                                            extraCol={{
+                                                header: <TermTip termKey="max_drawdown">Max DD</TermTip>,
+                                                render: (r) => {
+                                                    const dd = r.stats?.maxDdR;
+                                                    if (dd == null) return <span className="text-muted-lab">—</span>;
+                                                    return <span className={dd < 0 ? "text-[hsl(var(--danger))]" : "text-muted-lab"}>{formatSignedR(dd)}</span>;
+                                                },
+                                            }}
+                                        />
                                     </div>
                                 )}
 
@@ -4906,28 +4985,34 @@ function ResearchSignalRow({ signal }) {
  * every dimension shares the same columns, metrics, and tooltips.
  * Each row: { label, tooltipKey, stats:{count,winRate,netR,avgR}, branch?, emphasis?, muted?, danger?, footnote? }.
  */
-function ClassBreakdownTable({ rows }) {
+// `extraCol` (optional) appends a 6th column: { header, render(row) }. Used only by the
+// Enabled Variant Comparison (for Max DD); all other tables omit it and stay 5 columns.
+function ClassBreakdownTable({ rows, extraCol }) {
     if (!rows || !rows.length) return null;
+    const gridCols = extraCol
+        ? "minmax(120px,auto) repeat(5,minmax(52px,1fr))"
+        : CLASS_BREAKDOWN_GRID;
     return (
         <div>
             <div
                 className="grid items-center gap-x-3 px-2 mb-1 text-[9px] font-ui uppercase tracking-wider text-[hsl(var(--text-3)/0.7)]"
-                style={{ gridTemplateColumns: CLASS_BREAKDOWN_GRID }}
+                style={{ gridTemplateColumns: gridCols }}
             >
                 <span>Tag</span>
                 <span className="text-right"><TermTip termKey="stat_n">Trades</TermTip></span>
                 <span className="text-right"><TermTip termKey="stat_wr">Win Rate</TermTip></span>
                 <span className="text-right"><TermTip termKey="stat_net_r">Net R</TermTip></span>
                 <span className="text-right"><TermTip termKey="stat_avg_r">Avg R</TermTip></span>
+                {extraCol && <span className="text-right">{extraCol.header}</span>}
             </div>
             <div className="space-y-1">
-                {rows.map((row, i) => <ClassBreakdownRow key={`${row.label}-${i}`} row={row} />)}
+                {rows.map((row, i) => <ClassBreakdownRow key={`${row.label}-${i}`} row={row} gridCols={gridCols} extraCol={extraCol} />)}
             </div>
         </div>
     );
 }
 
-function ClassBreakdownRow({ row }) {
+function ClassBreakdownRow({ row, gridCols = CLASS_BREAKDOWN_GRID, extraCol }) {
     const { label, tooltipKey, stats, branch, emphasis, muted, danger, footnote } = row;
     const wrTone = stats.winRate == null
         ? "text-muted-lab"
@@ -4947,7 +5032,7 @@ function ClassBreakdownRow({ row }) {
     return (
         <div
             className={`grid items-center gap-x-3 px-2 py-1.5 border clip-bevel-sm ${frame}`}
-            style={{ gridTemplateColumns: CLASS_BREAKDOWN_GRID }}
+            style={{ gridTemplateColumns: gridCols }}
         >
             <div className={`min-w-0 flex items-center gap-1 ${footnote ? "text-[10px]" : "text-[11px]"} ${emphasis ? "font-semibold text-[hsl(var(--text))]" : "text-[hsl(var(--text-2))]"} ${muted ? "opacity-60" : ""}`}>
                 {branch && <span className="text-[hsl(var(--text-3))] font-num shrink-0">{branch}</span>}
@@ -4965,6 +5050,11 @@ function ClassBreakdownRow({ row }) {
             <span className={`font-num tabular-nums text-right text-[11px] ${rTone(stats.avgR)}`}>
                 {formatSignedR(stats.avgR, 2)}
             </span>
+            {extraCol && (
+                <span className="font-num tabular-nums text-right text-[11px]">
+                    {extraCol.render(row)}
+                </span>
+            )}
         </div>
     );
 }
