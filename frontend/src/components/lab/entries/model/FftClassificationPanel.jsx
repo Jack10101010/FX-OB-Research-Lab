@@ -21,7 +21,7 @@
 
 import React, { useMemo } from "react";
 import { NeonPanel } from "@/components/lab/NeonPanel";
-import { computePairedFftAnalytics } from "@/data/fftPairingAnalytics";
+import { computePairedFftAnalytics, summarizeFftPairBuckets } from "@/data/fftPairingAnalytics";
 import { computeFftAnalytics, fmtFftR, fmtFftPips } from "@/data/fftAnalytics";
 import { cn } from "@/lib/utils";
 
@@ -245,6 +245,7 @@ function PairedView({ paired }) {
         return rows;
     }, [pairs]);
 
+    const buckets = summarizeFftPairBuckets(pairs);
     const overallVerdict = verdictFor(overall);
     const bannerTone = overallVerdict.tone;
     const bannerVerb = overallVerdict.label === "HELPS" ? "FFT helps overall"
@@ -274,6 +275,17 @@ function PairedView({ paired }) {
                 Authoritative — paired FFT-OFF control. Net R = Σ −(control R) over trustworthy (high-confidence) pairs:{" "}
                 <span className="text-[hsl(var(--success))]">positive = FFT helped</span>,{" "}
                 <span className="text-[hsl(var(--danger))]">negative = FFT hurt</span>. Verdicts are confidence-gated.
+            </p>
+
+            {/* Coverage explanation — clarifies that "coverage" is outcome quality,
+                not a matching failure, and breaks the non-counted rows into buckets. */}
+            <p className="text-[9px] font-ui text-[hsl(var(--text-2))] opacity-90 leading-snug mb-2">
+                <span className="text-[hsl(var(--text))]">High-confidence coverage {buckets.coveragePct != null ? `${Math.round(buckets.coveragePct)}%` : "—"}</span>
+                {" "}({buckets.high} of {buckets.total}).
+                {" "}Not counted: <span title="The FFT-OFF control also produced no clean filled trade, so there is no counterfactual R to count.">{buckets.selfInvalidated} no-counterfactual (self-invalidated)</span>
+                {" · "}<span title="The control filled but too far in time to be high-confidence — shown as secondary evidence, not in primary Net R.">{buckets.timingDivergent} timing-divergent</span>
+                {buckets.otherLow > 0 ? ` · ${buckets.otherLow} other` : ""}.
+                {" "}Coverage reflects how many cancels have a trustworthy control outcome — it does <span className="text-[hsl(var(--text))]">not</span> mean matching failed.
             </p>
 
             <div className="overflow-x-auto">

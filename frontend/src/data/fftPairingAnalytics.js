@@ -346,3 +346,48 @@ export function pairedOffOutcomeTone(outcome) {
         default:                return "muted";
     }
 }
+
+// ── pair bucket classification (display-only) ──────────────────────────────────
+//
+// Splits the existing pair result into meaningful buckets so the UI can stop
+// lumping every non-HIGH pair as "Unknown / Low Confidence". This is a pure,
+// READ-ONLY classification of fields already produced by pairFftCancel — it does
+// NOT change pairing, matching, or confidence logic, and does not affect net R.
+//
+//   "high"             — HIGH confidence (counted in net R impact).
+//   "timing_divergent" — LOW, control DID fill but fill timing diverged > tolerance
+//                        (a real outcome, just not high-confidence). Secondary evidence.
+//   "self_invalidated" — LOW, a control row matched but it produced no clean filled
+//                        trade (INVALID / unfilled / news-touch-cancel). No direct
+//                        counterfactual R exists — FFT's cancel was effectively neutral.
+//   "other_low"        — LOW with no matching control candidate at all (genuinely unresolved).
+export function classifyFftPairBucket(pair) {
+    if (!pair) return "other_low";
+    if (pair.confidence === "HIGH") return "high";
+    if (!pair.hasPairedRow) return "other_low";
+    // A matched control row that is LOW but "filled" can only be a timing divergence
+    // (a filled, non-diverged control would have classified HIGH).
+    if (pair.pairedOffTradeStatus === "filled") return "timing_divergent";
+    return "self_invalidated";
+}
+
+/**
+ * Tally pairs into the buckets above. Display-only; net R is unchanged (HIGH only).
+ * @param {Array<object>} pairs — computePairedFftAnalytics(...).pairs
+ * @returns {{ high:number, timingDivergent:number, selfInvalidated:number, otherLow:number, total:number, lowTotal:number, coveragePct:(number|null) }}
+ */
+export function summarizeFftPairBuckets(pairs) {
+    const out = { high: 0, timingDivergent: 0, selfInvalidated: 0, otherLow: 0, total: 0 };
+    for (const p of (Array.isArray(pairs) ? pairs : [])) {
+        out.total += 1;
+        switch (classifyFftPairBucket(p)) {
+            case "high":             out.high += 1; break;
+            case "timing_divergent": out.timingDivergent += 1; break;
+            case "self_invalidated": out.selfInvalidated += 1; break;
+            default:                 out.otherLow += 1; break;
+        }
+    }
+    out.lowTotal = out.total - out.high;
+    out.coveragePct = out.total > 0 ? (out.high / out.total) * 100 : null;
+    return out;
+}

@@ -38,7 +38,7 @@ import {
 import { TradeSanityStrip } from "@/components/lab/TradeSanityStrip";
 import { computeFftAnalytics, fmtFftR, fmtFftPips } from "@/data/fftAnalytics";
 // Phase 4: auto-control paired FFT analytics (consumes importer controlTradesByScenario).
-import { computePairedFftAnalytics } from "@/data/fftPairingAnalytics";
+import { computePairedFftAnalytics, summarizeFftPairBuckets } from "@/data/fftPairingAnalytics";
 import { extractOffTrades, getAutoControlInfo } from "@/data/fftPairingResolver";
 // RW-2: scenario-aware result-view selector (display-only; analytics wired in RW-3).
 import { useTradeUniverse } from "@/data/useTradeUniverse";
@@ -257,7 +257,10 @@ const FFT_TIPS = {
     lossesAvoided: "Cancelled OBs that became losers in the matching FFT-OFF control. This is the benefit side of FFT protection.",
     netR:          "Authoritative paired result: losses avoided minus winners removed, using the matched FFT-OFF control run.",
     known:         "Cancelled OBs with a trustworthy paired FFT-OFF result. These are the rows counted in Wins Removed, Losses Avoided, and Net R Impact.",
-    unknown:       "Cancelled OBs where the paired FFT-OFF result was missing, invalid, unfilled, or timing-diverged. These are not counted in Net R Impact.",
+    unknown:       "Cancelled OBs not counted in Net R Impact, split by reason below. Most are informative, not noise — see the breakdown.",
+    selfInvalidated: "Self-invalidated: the FFT-OFF control also failed to produce a clean filled trade (invalidated / unfilled / news-touch-cancel), so there is no direct counterfactual R to count. FFT's cancel was effectively neutral here.",
+    timingDivergent: "Timing-divergent: the FFT-OFF control filled, but too far away in time to count as high-confidence. A real outcome, shown as secondary evidence — not yet in primary Net R.",
+    otherLow:      "Other unresolved: no matching FFT-OFF control candidate was found for these cancels.",
     moveAway:      "Average distance price moved away from the OB before FFT cancelled it.",
     badge:         "This run includes its own FFT-OFF control CSV. Paired metrics are using that automatic control, not ghost simulation.",
     // Ghost-only fallback chips (no paired control present) — flagged unverified.
@@ -991,6 +994,37 @@ export default function RunDetail() {
     const tradeSubtext = totalTradeRows && totalTradeRows !== validTradeCount
         ? `${validTradeCount} valid · ${totalTradeRows} rows`
         : `${validTradeCount || Number(run.trades) || 0} valid trades`;
+
+    // ── Funding-overlay scope reconciliation (display-only) ────────────────────
+    // When the FTMO overlay is ON and the challenge fails before the run ends, the
+    // KPI cards (whole-run aggregates) and the truncated challenge curve/panel
+    // describe DIFFERENT scopes. These values drive an explicit reconciliation
+    // banner, scope chips, and a chart caption. No calculations/arrays changed.
+    const fundingFailedPhase =
+        fundingChallenge.phase1?.status === "failed" ? fundingChallenge.phase1
+        : fundingChallenge.phase2?.status === "failed" ? fundingChallenge.phase2
+        : null;
+    const fundingFailedPhaseLabel =
+        fundingChallenge.phase1?.status === "failed" ? "Phase 1"
+        : fundingChallenge.phase2?.status === "failed" ? "Phase 2"
+        : null;
+    const fundingFailedTradeNumber = fundingFailedPhase
+        ? (fundingFailedPhase.tradeNumber
+            ?? (fundingFailedPhase.tradeIndex != null ? fundingFailedPhase.tradeIndex + 1 : null))
+        : null;
+    const fundingChallengeFailedEarly =
+        useFundingPhaseChart && fundingChallenge.status === "failed" && fundingFailedTradeNumber != null;
+    const fundingStatusLabel =
+        fundingChallenge.status === "failed" ? "Failed"
+        : fundingChallenge.status === "funded" ? "Funded"
+        : fundingChallenge.status === "in_progress" ? "In progress"
+        : null;
+    const fundingStatusTone =
+        fundingChallenge.status === "failed" ? "danger"
+        : fundingChallenge.status === "funded" ? "success" : "muted";
+    const fundingWholeRunText = validNetR > 0
+        ? `Later trades recovered the run to ${netMetricValue} overall.`
+        : `Whole-run net is ${netMetricValue} overall.`;
 
     // ── Scope chip data ──────────────────────────────────────────────────────
     // Surfaces the active trade universe, variant, Results Basis, and Account
@@ -2318,6 +2352,39 @@ export default function RunDetail() {
                     )}
                 </div>
             </div>
+            {/* Scope cue — clarifies that the KPI strip is whole-run while the
+                funding overlay panel/curve are challenge-scoped (and may truncate). */}
+            {useFundingPhaseChart && (
+                <div className="px-6 mt-3 flex flex-wrap items-center gap-2">
+                    <span className="text-[9px] font-ui uppercase tracking-[0.12em] px-1.5 py-px rounded-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel)/0.5)] text-[hsl(var(--text-2))]">
+                        Whole run · {validTradeCount} valid trades
+                    </span>
+                    {fundingStatusLabel && (
+                        <span className={`text-[9px] font-ui uppercase tracking-[0.12em] font-semibold px-1.5 py-px rounded-sm border ${
+                            fundingStatusTone === "danger" ? "border-[hsl(var(--danger)/0.45)] bg-[hsl(var(--danger)/0.14)] text-[hsl(var(--danger))]"
+                            : fundingStatusTone === "success" ? "border-[hsl(var(--success)/0.45)] bg-[hsl(var(--success)/0.14)] text-[hsl(var(--success))]"
+                            : "border-[hsl(var(--border-soft))] bg-[hsl(var(--panel)/0.5)] text-[hsl(var(--text-2))]"
+                        }`}>
+                            FTMO 2-Step: {fundingStatusLabel}
+                        </span>
+                    )}
+                </div>
+            )}
+            {fundingChallengeFailedEarly && (
+                <div className="px-6 mt-2">
+                    <div className="flex items-start gap-2 px-3 py-2 rounded-sm border border-[hsl(var(--warning)/0.35)] bg-[hsl(var(--warning)/0.07)] text-[10.5px] font-ui text-[hsl(var(--text-1))] leading-snug">
+                        <AlertTriangle className="w-3.5 h-3.5 mt-px shrink-0 text-[hsl(var(--warning))]" />
+                        <span>
+                            <span className="font-semibold">Two scopes shown.</span>{" "}
+                            Whole-run KPIs use all {validTradeCount} valid trades. FTMO 2-Step failed {fundingFailedPhaseLabel} at trade {fundingFailedTradeNumber} of {validTradeCount}
+                            {fundingFailedPhase?.equity != null
+                                ? ` (equity ${formatAccountValue(fundingFailedPhase.equity, accountCurrency)} ≤ floor ${formatAccountValue(fundingLossFloor, accountCurrency)})`
+                                : ""}
+                            , so the challenge equity curve below stops at the breach. {fundingWholeRunText}
+                        </span>
+                    </div>
+                </div>
+            )}
             <div className="kpi-strip">
                 <MetricChip
                     label={accountModeEnabled ? "Net PnL" : "Net R"}
@@ -2475,6 +2542,8 @@ export default function RunDetail() {
                 const canonicalKey = buildCanonicalKey(resultView.family, resultView.threshold, resultView.fillMode);
                 const offTrades = extractOffTrades(runData, null, universe?.variant ?? null, canonicalKey);
                 const paired = computePairedFftAnalytics(allTrades, offTrades);
+                // Display-only split of the non-HIGH pairs into meaningful buckets.
+                const fftBuckets = summarizeFftPairBuckets(paired.pairs);
                 const autoControl = getAutoControlInfo(runData, universe?.variant ?? null);
                 const hasPaired = paired.hasPairedData && paired.hasHighConfPairs;
 
@@ -2577,14 +2646,14 @@ export default function RunDetail() {
                                     <FftKpi hint={FFT_TIPS.unknown}>
                                         <MetricChip
                                             size="compact"
-                                            label="Unknown / Low Confidence"
+                                            label="Not counted (excl.)"
                                             value={String(paired.lowConfCount)}
-                                            sub="not counted in Net R"
+                                            sub={`${fftBuckets.selfInvalidated} self-inval · ${fftBuckets.timingDivergent} timing · ${fftBuckets.otherLow} other`}
                                             tone="muted"
                                             icon={Hash}
                                             onClick={() => setFftDrill((d) => (d === "unknown" ? null : "unknown"))}
                                             selected={fftDrill === "unknown"}
-                                            infoLabel="Click for low-confidence rows"
+                                            infoLabel="Click for excluded rows"
                                         />
                                     </FftKpi>
                                 </>
@@ -2786,6 +2855,11 @@ export default function RunDetail() {
                     {/* Reference levels footer — shown below chart when funding phase overlay is active */}
                     {useFundingPhaseChart && (
                         <div className="mt-2 text-[9.5px] font-ui text-[hsl(var(--text-2)/0.5)] leading-relaxed">
+                            {fundingChallengeFailedEarly && (
+                                <span className="text-[hsl(var(--warning))]">
+                                    Curve truncated at {fundingFailedPhaseLabel} breach (trade {fundingFailedTradeNumber} of {validTradeCount}) ·
+                                </span>
+                            )}
                             Reference levels: Challenge target {formatAccountValue(fundingPhase1Target, accountCurrency)} · Verification target {formatAccountValue(fundingPhase2Target, accountCurrency)} · Loss floor {formatAccountValue(fundingLossFloor, accountCurrency)}
                         </div>
                     )}

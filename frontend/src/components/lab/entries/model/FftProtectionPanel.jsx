@@ -32,6 +32,7 @@ import {
     pairedOffOutcomeLabel,
     pairedOffOutcomeTone,
     isFftCancel,
+    summarizeFftPairBuckets,
 } from "@/data/fftPairingAnalytics";
 import { cn } from "@/lib/utils";
 
@@ -231,21 +232,128 @@ function CompactPairRow({ pair }) {
     );
 }
 
+// Per-row Net R contribution — DISPLAY ONLY (mirrors the analytics aggregation:
+// HIGH-confidence WIN/loss-like rows contribute -pairedOffR, else 0). Used for the
+// "Impact R" sort only; no analytics value is derived from it.
+function fftPairContribution(p) {
+    if (p.confidence !== "HIGH" || p.pairedOffR == null) return 0;
+    if (p.pairedOffOutcome === "WIN" || FFT_LOSS_OUTCOMES.has(p.pairedOffOutcome)) return -p.pairedOffR;
+    return 0;
+}
+
+const FFT_TABLE_TOP_N = 10;
+const FFT_TABLE_FILTERS = [
+    { key: "all",      label: "All" },
+    { key: "counted",  label: "Counted" },
+    { key: "excluded", label: "Excluded" },
+    { key: "winners",  label: "Winners" },
+    { key: "losses",   label: "Losses" },
+];
+const FFT_TABLE_SORTS = [
+    { key: "impact",     label: "Impact R" },
+    { key: "ob",         label: "OB" },
+    { key: "confidence", label: "Conf" },
+    { key: "outcome",    label: "Outcome" },
+];
+
 function PairedOffTable({ pairs }) {
+    const [open, setOpen] = useState(false);          // collapsed by default
+    const [expanded, setExpanded] = useState(false);  // top-N vs all
+    const [filterKey, setFilterKey] = useState("all");
+    const [sortKey, setSortKey] = useState("impact");
+    const [sortDir, setSortDir] = useState("desc");
     if (!pairs?.length) return null;
-    // Counted (high-confidence) rows first; display-only ordering.
-    const sorted = [...pairs].sort(
-        (a, b) => (a.confidence === "HIGH" ? 0 : 1) - (b.confidence === "HIGH" ? 0 : 1),
+
+    const matchesFilter = (p) => {
+        const counted = p.confidence === "HIGH";
+        if (filterKey === "counted") return counted;
+        if (filterKey === "excluded") return !counted;
+        if (filterKey === "winners") return counted && p.pairedOffOutcome === "WIN";
+        if (filterKey === "losses") return counted && FFT_LOSS_OUTCOMES.has(p.pairedOffOutcome);
+        return true;
+    };
+    const dir = sortDir === "asc" ? 1 : -1;
+    const sorted = pairs.filter(matchesFilter).sort((a, b) => {
+        if (sortKey === "outcome") {
+            return dir * String(a.pairedOffOutcome || "").localeCompare(String(b.pairedOffOutcome || ""));
+        }
+        let av, bv;
+        if (sortKey === "ob") { av = Number(a.obId) || 0; bv = Number(b.obId) || 0; }
+        else if (sortKey === "confidence") { av = a.confidence === "HIGH" ? 1 : 0; bv = b.confidence === "HIGH" ? 1 : 0; }
+        else { av = fftPairContribution(a); bv = fftPairContribution(b); }
+        return dir * (av - bv);
+    });
+    const total = sorted.length;
+    const shown = expanded ? sorted : sorted.slice(0, FFT_TABLE_TOP_N);
+
+    const chipCls = (active) => cn(
+        "text-[8.5px] font-ui uppercase tracking-[0.06em] px-1.5 py-px rounded-[2px] border transition-colors",
+        active
+            ? "border-[hsl(var(--accent-primary)/0.5)] bg-[hsl(var(--accent-primary)/0.12)] text-[hsl(var(--accent-primary))]"
+            : "border-[hsl(var(--border-soft)/0.6)] bg-[hsl(var(--panel-2))] text-[hsl(var(--text-2))]",
     );
+
     return (
         <div className="mt-2">
-            <div className="grid grid-cols-[2.8rem_1fr_3.4rem_4.4rem] items-center gap-2 pb-1 mb-0.5 border-b border-[hsl(var(--border-soft)/0.22)] text-[8.5px] font-ui text-[hsl(var(--text-2))] opacity-90 uppercase tracking-[0.08em]">
-                <span>OB</span>
-                <span>Control outcome</span>
-                <span className="text-right">Control R</span>
-                <span className="text-right">Impact?</span>
-            </div>
-            {sorted.map((p, i) => <CompactPairRow key={p.obId + "-" + i} pair={p} />)}
+            <button
+                type="button"
+                onClick={() => setOpen((o) => !o)}
+                className="w-full flex items-center justify-between py-1 text-[9px] font-ui uppercase tracking-[0.1em] text-[hsl(var(--text-2))] hover:text-[hsl(var(--text))]"
+            >
+                <span>Per-cancel detail · {pairs.length} cancels</span>
+                <span className="opacity-70">{open ? "▾ hide" : "▸ show"}</span>
+            </button>
+
+            {open && (
+                <>
+                    <div className="flex flex-wrap items-center gap-1 mt-1">
+                        {FFT_TABLE_FILTERS.map((f) => (
+                            <button key={f.key} type="button" onClick={() => setFilterKey(f.key)} className={chipCls(filterKey === f.key)}>
+                                {f.label}
+                            </button>
+                        ))}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1 mt-1">
+                        <span className="text-[8.5px] font-ui uppercase tracking-[0.08em] text-[hsl(var(--text-2))] opacity-70 mr-0.5">Sort</span>
+                        {FFT_TABLE_SORTS.map((s) => (
+                            <button
+                                key={s.key}
+                                type="button"
+                                onClick={() => {
+                                    if (sortKey === s.key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+                                    else { setSortKey(s.key); setSortDir("desc"); }
+                                }}
+                                className={chipCls(sortKey === s.key)}
+                            >
+                                {s.label}{sortKey === s.key ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+                            </button>
+                        ))}
+                    </div>
+
+                    <div className="grid grid-cols-[2.8rem_1fr_3.4rem_4.4rem] items-center gap-2 pb-1 mt-2 mb-0.5 border-b border-[hsl(var(--border-soft)/0.22)] text-[8.5px] font-ui text-[hsl(var(--text-2))] opacity-90 uppercase tracking-[0.08em]">
+                        <span>OB</span>
+                        <span>Control outcome</span>
+                        <span className="text-right">Control R</span>
+                        <span className="text-right">Impact?</span>
+                    </div>
+
+                    {shown.length === 0 ? (
+                        <div className="py-2 text-[10px] font-ui text-[hsl(var(--text-2))] italic">No cancels match this filter.</div>
+                    ) : (
+                        shown.map((p, i) => <CompactPairRow key={p.obId + "-" + i} pair={p} />)
+                    )}
+
+                    {total > FFT_TABLE_TOP_N && (
+                        <button
+                            type="button"
+                            onClick={() => setExpanded((e) => !e)}
+                            className="mt-1.5 text-[9px] font-ui uppercase tracking-[0.08em] text-[hsl(var(--accent-primary))] hover:underline"
+                        >
+                            {expanded ? "Show less" : `Show all (${total})`}
+                        </button>
+                    )}
+                </>
+            )}
         </div>
     );
 }
@@ -295,11 +403,38 @@ function PairedSummarySection({ pairedStats }) {
 
             <TrustBar high={highConfCount} low={lowConfCount} />
 
+            {/* Not-counted breakdown — the "unclear" rows split by reason, so they
+                read as informative buckets rather than one lump of noise. */}
+            {(() => {
+                const b = summarizeFftPairBuckets(pairedStats.pairs);
+                if (b.lowTotal === 0) return null;
+                const cell = "rounded-[3px] bg-[hsl(var(--panel-2))] px-2 py-1.5 cursor-help";
+                return (
+                    <div className="grid grid-cols-3 gap-1.5 mt-2">
+                        <div className={cell} title="Self-invalidated: the FFT-OFF control also failed to produce a clean filled trade (invalidated / unfilled / news-touch-cancel), so there is no direct counterfactual R to count. FFT's cancel was effectively neutral here.">
+                            <div className="text-[8.5px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--text-2))]">Self-invalidated</div>
+                            <div className="text-[15px] font-num font-semibold tabular-nums leading-tight mt-0.5 text-[hsl(var(--text))]">{b.selfInvalidated}</div>
+                            <div className="text-[8.5px] font-ui text-[hsl(var(--text-2))] opacity-90 leading-snug">no counterfactual fill</div>
+                        </div>
+                        <div className={cell} title="Timing-divergent: the FFT-OFF control filled, but too far away in time to count as high-confidence. A real outcome shown as secondary evidence — not yet in primary Net R.">
+                            <div className="text-[8.5px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--text-2))]">Timing-divergent</div>
+                            <div className="text-[15px] font-num font-semibold tabular-nums leading-tight mt-0.5 text-[hsl(var(--warning))]">{b.timingDivergent}</div>
+                            <div className="text-[8.5px] font-ui text-[hsl(var(--text-2))] opacity-90 leading-snug">filled · secondary evidence</div>
+                        </div>
+                        <div className={cell} title="Other unresolved: no matching FFT-OFF control candidate was found for these cancels.">
+                            <div className="text-[8.5px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--text-2))]">Other</div>
+                            <div className="text-[15px] font-num font-semibold tabular-nums leading-tight mt-0.5 text-[hsl(var(--text-2))]">{b.otherLow}</div>
+                            <div className="text-[8.5px] font-ui text-[hsl(var(--text-2))] opacity-90 leading-snug">no control candidate</div>
+                        </div>
+                    </div>
+                );
+            })()}
+
             <PairedOffTable pairs={pairedStats.pairs} />
 
             <div className="mt-2 flex gap-1.5 items-start text-[9.5px] font-ui text-[hsl(var(--text-2))] opacity-95 leading-snug">
                 <span className="text-[hsl(var(--accent-primary))] shrink-0">ⓘ</span>
-                <span>Only counted (high-confidence) rows move net R impact. Excluded rows had a missing, invalid, unfilled, or timing-diverged control result.</span>
+                <span>Only counted (high-confidence) rows move net R impact. "Not counted" rows are split above: self-invalidated (no counterfactual), timing-divergent (filled but uncertain timing — secondary evidence), and other (no control candidate).</span>
             </div>
 
             {ghostAccuracyRate != null && highConfCount > 0 && (
