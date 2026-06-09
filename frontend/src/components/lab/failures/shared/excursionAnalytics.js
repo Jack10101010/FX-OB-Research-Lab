@@ -39,6 +39,25 @@ export function getMfeR(trade) {
     return numOrNull(trade?.mfeR ?? trade?.mfe_r ?? trade?.mfe);
 }
 
+// maeR — max ADVERSE excursion in R (stop-anchored: -1.0R = the full stop distance,
+// so values are ≤ 0). Aliases mirror the importer (maeR / mae_r) plus legacy bare `mae`.
+export function getMaeR(trade) {
+    return numOrNull(trade?.maeR ?? trade?.mae_r ?? trade?.mae);
+}
+
+// Stop-pressure MAE accessor (Phase 2B). Prefers the to-original-exit field (adverse R
+// over the trade's REAL life — the correct "how close did the winner come to the stop
+// before winning?" measure) and falls back to the stop-anchored mae_r for legacy bundles
+// that predate the backend Phase 11A.2 export. Returns { value, source } where source is
+// "to_original_exit" | "stop_anchored_fallback", or { value: null, source: null }.
+export function getMaeForStopPressure(trade) {
+    const toExit = numOrNull(trade?.maeRToOriginalExit ?? trade?.mae_r_to_original_exit);
+    if (toExit != null) return { value: toExit, source: "to_original_exit" };
+    const stopAnchored = getMaeR(trade);
+    if (stopAnchored != null) return { value: stopAnchored, source: "stop_anchored_fallback" };
+    return { value: null, source: null };
+}
+
 // Target RR multiple. Per-trade `rr_config` is preferred; falls back to the
 // run/config RR. Returns null when no usable (>0) target exists.
 export function getTargetRR(trade, config) {
@@ -478,13 +497,23 @@ export function buildPairDrivers(losers, { minSample = DRILL_SAMPLE_FLOOR, topN 
 // so the controls never present an all-Unknown column. Requested dimension keys
 // fall back to the first available one rather than rendering an empty table.
 
+// Rank modes — default Lift (we want "disproportionately damaging", not "frequent").
 export const EXPLORER_METRICS = [
-    { key: "lift",       label: "Lift" },
-    { key: "lossR",      label: "Loss-R" },
-    { key: "lossRate",   label: "Loss rate" },
-    { key: "tradeShare", label: "Trade share" },
+    { key: "lift",         label: "Lift" },
+    { key: "lossR",        label: "Loss-R" },
+    { key: "lossRate",     label: "Loss rate" },
+    { key: "contribution", label: "Contribution" },
+    { key: "count",        label: "Trade count" },
 ];
 export const EXPLORER_FLOORS = [4, 8, 12, 20];
+
+// PHASE E — a cohort is a "real driver" worth surfacing only when the sample floor
+// is met AND its lift clears this threshold. Used to highlight rows without
+// promoting noise. Pure + testable.
+export const EXPLORER_LIFT_HIGHLIGHT = 1.5;
+export function isHighlightCell(cell, threshold = EXPLORER_LIFT_HIGHLIGHT) {
+    return !!cell && cell.rankable === true && (cell.lift ?? 0) >= threshold;
+}
 
 export function buildExplorer(trades, { dimA = "session", dimB = null, sampleFloor = DRILL_SAMPLE_FLOOR, metric = "lift" } = {}) {
     const list = Array.isArray(trades) ? trades : [];
@@ -507,7 +536,9 @@ export function buildExplorer(trades, { dimA = "session", dimB = null, sampleFlo
     const metricVal = (c) => (
         metric === "lossR" ? c.lossR
         : metric === "lossRate" ? c.lossRate
-        : metric === "tradeShare" ? c.tradeSharePct
+        : metric === "contribution" ? c.contributionPct
+        : metric === "count" ? c.count
+        : metric === "tradeShare" ? c.tradeSharePct // back-compat
         : c.lift
     );
     // Keep low-sample cells last (never a "strong finding"), then rank by metric,
@@ -519,6 +550,122 @@ export function buildExplorer(trades, { dimA = "session", dimB = null, sampleFlo
     );
 
     return { available, dimA: aKey, dimB: bKey, metric, sampleFloor, rows, totals };
+}
+
+// ── Bucket Explorer rows with TRUE denominators (cohort-context fix) ────────────
+// When an MFE bucket is selected, the Explorer must answer two things per row:
+//   (1) how much of the SELECTED BUCKET's damage came from this dimension value/pair
+//       — computed from `bucketLosers` only (losers inside the bucket); and
+//   (2) the FULL-COHORT context for that same value/pair — winners + losers + loss
+//       rate vs baseline — computed from `allTrades`.
+// MFE buckets are a loser-only concept, so winners can NEVER live in a bucket; we
+// recover the real denominator by MATCHING `allTrades` on the same dimension key(s)
+// (e.g. Session=New York AND Structure=CHoCH) rather than pretending winners belong
+// to the bucket. This does NOT touch MFE bucket logic — `bucketLosers` is produced
+// upstream (losersInRawBucket); we only read it.
+//
+// Rows are the value/pair combinations that actually contributed losses to the
+// bucket ("what caused THIS bucket"), each enriched with its full denominator.
+export function buildBucketExplorerRows({ bucketLosers, allTrades, dimA, dimB = null, sampleFloor = DRILL_SAMPLE_FLOOR } = {}) {
+    const bl = Array.isArray(bucketLosers) ? bucketLosers : [];
+    const at = Array.isArray(allTrades) ? allTrades : [];
+
+    // Availability + dim resolution judged over the winners-inclusive population.
+    const available = availableDimensions(at.length ? at : bl);
+    const availKeys = new Set(available.map((d) => d.key));
+    const reqA = resolveDimension(dimA);
+    const reqB = dimB != null ? resolveDimension(dimB) : null;
+    const aKey = reqA && availKeys.has(reqA.key) ? reqA.key : (available[0]?.key ?? null);
+    const bKey = reqB && reqB.key !== aKey && availKeys.has(reqB.key) ? reqB.key : null;
+    const dA = resolveDimension(aKey);
+    const dB = bKey ? resolveDimension(bKey) : null;
+
+    // Baseline loss rate over ALL trades (the genuine denominator).
+    const baseLosers = at.filter((t) => rOf(t) < 0).length;
+    const baselineLossRate = at.length ? (baseLosers / at.length) * 100 : 0;
+    const totalAll = at.length;
+    const allLossR = at.reduce((s, t) => s + lossRof(t), 0);
+
+    const totals = {
+        bucketTrades: bl.length,
+        bucketLossR: round1(sumLossR(bl)),
+        allTrades: totalAll,
+        baselineLossRate: round1(baselineLossRate),
+    };
+    if (!dA) return { available, dimA: null, dimB: null, sampleFloor, rows: [], totals };
+
+    const SEP = "\u0000";
+    const idOf = (t, dim2) => {
+        const va = dA.accessor(t);
+        if (va == null) return null;
+        if (dim2) { const vb = dim2.accessor(t); if (vb == null) return null; return `${String(va)}${SEP}${String(vb)}`; }
+        return String(va);
+    };
+
+    // Bucket-side groups (losers inside the selected bucket).
+    const bucketTotalLossR = sumLossR(bl);
+    const bucketGroups = new Map(); // id → { keyA, keyB, losers, lossR }
+    for (const t of bl) {
+        const id = idOf(t, dB);
+        if (id == null) continue;
+        const [keyA, keyB] = dB ? id.split(SEP) : [id, null];
+        let g = bucketGroups.get(id);
+        if (!g) { g = { keyA, keyB, losers: 0, lossR: 0 }; bucketGroups.set(id, g); }
+        g.losers += 1;
+        g.lossR += lossRof(t);
+    }
+
+    // Full-cohort groups (ALL trades matching the same key) — single pass.
+    const fullGroups = new Map(); // id → { total, losers, lossR }
+    for (const t of at) {
+        const id = idOf(t, dB);
+        if (id == null) continue;
+        let g = fullGroups.get(id);
+        if (!g) { g = { total: 0, losers: 0, lossR: 0 }; fullGroups.set(id, g); }
+        g.total += 1;
+        const r = rOf(t);
+        if (r < 0) { g.losers += 1; g.lossR += -r; }
+    }
+
+    const rows = [...bucketGroups.values()].map((g) => {
+        const id = dB ? `${g.keyA}${SEP}${g.keyB}` : g.keyA;
+        const full = fullGroups.get(id) || { total: 0, losers: 0, lossR: 0 };
+        const fullWinners = full.total - full.losers;
+        const fullLossRate = full.total ? (full.losers / full.total) * 100 : 0;
+        const lossRateDelta = fullLossRate - baselineLossRate;
+        const tradeSharePct = totalAll ? (full.total / totalAll) * 100 : 0;
+        const lossSharePct = allLossR > 0 ? (full.lossR / allLossR) * 100 : 0;
+        const lift = tradeSharePct > 0 ? lossSharePct / tradeSharePct : 0;
+        const lowSample = full.total < sampleFloor;
+        const bucketContributionPct = bucketTotalLossR > 0 ? round1((g.lossR / bucketTotalLossR) * 100) : 0;
+        const row = {
+            keyA: g.keyA, labelA: dA.label,
+            // ── selected-bucket metrics (losses inside the bucket only) ──
+            bucketLosers: g.losers,
+            bucketLossR: round1(g.lossR),
+            bucketLossRSharePct: bucketContributionPct,
+            bucketContributionPct, // alias
+            // ── full-cohort denominator (ALL trades matching the same key) ──
+            fullLosers: full.losers,
+            fullWinners,
+            fullTotal: full.total,
+            fullLossRate: round1(fullLossRate),
+            baselineLossRate: round1(baselineLossRate),
+            lossRateDelta: round1(lossRateDelta),
+            tradeSharePct: round1(tradeSharePct),
+            lossSharePct: round1(lossSharePct),
+            lift: round2(lift),
+            lowSample,
+            rankable: !lowSample,
+        };
+        if (dB) { row.keyB = g.keyB; row.labelB = dB.label; }
+        return row;
+    });
+
+    // "What caused THIS bucket": rank by bucket damage (rankable-first by full sample).
+    rows.sort((a, b) => (Number(b.rankable) - Number(a.rankable)) || (b.bucketLossR - a.bucketLossR));
+
+    return { available, dimA: aKey, dimB: bKey, sampleFloor, rows, totals };
 }
 
 // ── MFE-by-dimension outcome (V4 Phase 2) ──────────────────────────────────────
@@ -574,14 +721,45 @@ export function buildMfeByDimension(losers, dimKey, { sampleFloor = DRILL_SAMPLE
 // no hardcoded findings, no AI, no speculative language. Priority mirrors research
 // value: contribution > over-representation (lift) > unusually-large MFE. Returns
 // 0..maxInsights; we never fabricate to hit a minimum. MFE-only / realized losses.
-const INSIGHT_TIER = { contribution: 100, bucket_driver: 95, reach: 85, lift: 70, overrep: 55, mfe: 40 };
+// Priority mirrors actionability: a disproportionately-damaging cohort (high lift)
+// or one that loses far more often than baseline (high loss-rate delta) outranks raw
+// contribution — "large because genuinely problematic", not "large because frequent".
+const INSIGHT_TIER = { cohort_lift: 130, cohort_delta: 120, contribution: 100, bucket_driver: 95, reach: 85, lift: 70, overrep: 55, mfe: 40 };
+// Thresholds for cohort context insights (need a winners-inclusive `allTrades`).
+const COHORT_INSIGHT_LIFT = 1.5;      // ≥ this lift = disproportionate damage
+const COHORT_INSIGHT_DELTA = 10;      // ≥ this many pts above baseline loss rate
+const COHORT_INSIGHT_DIMS = ["session", "structure", "direction", "archetype"];
 
-export function buildDistanceInsights(losers, { config = {}, activeBucketKey = null, maxInsights = 6 } = {}) {
+export function buildDistanceInsights(losers, { config = {}, activeBucketKey = null, allTrades = null, maxInsights = 6 } = {}) {
     const list = (Array.isArray(losers) ? losers : []).filter((t) => getMfeR(t) != null);
     if (!list.length) return { insights: [], eligible: 0 };
 
     const out = [];
     const push = (kind, text, weight) => out.push({ kind, tier: INSIGHT_TIER[kind] ?? 0, weight: Number(weight) || 0, text });
+
+    // ── Cohort context (needs winners) — the highest-value findings ──────────────
+    // Over a winners-inclusive population, surface the cohort that is disproportionately
+    // damaging (lift) and the one that loses far more often than baseline (delta).
+    let cohortLiftShown = false;
+    const pop = Array.isArray(allTrades) ? allTrades.filter((t) => getMfeR(t) != null) : [];
+    if (pop.length) {
+        const cohortCells = [];
+        for (const dk of COHORT_INSIGHT_DIMS) {
+            const dim = resolveDimension(dk);
+            if (!dim || !dimensionAvailable(dim, pop)) continue;
+            const { cells } = aggregateFailures(pop, { dimA: dim, sampleFloor: DRILL_SAMPLE_FLOOR, requireKnown: true });
+            for (const c of cells) if (c.rankable) cohortCells.push(c);
+        }
+        const byLift = [...cohortCells].filter((c) => c.lift >= COHORT_INSIGHT_LIFT).sort((a, b) => b.lift - a.lift)[0];
+        if (byLift) {
+            push("cohort_lift", `${byLift.keyA} contributes ${byLift.contributionPct}% of loss-R from only ${byLift.tradeSharePct}% of trades (${byLift.lift}× lift).`, byLift.lift);
+            cohortLiftShown = true;
+        }
+        const byDelta = [...cohortCells].filter((c) => c.lossRateDelta >= COHORT_INSIGHT_DELTA).sort((a, b) => b.lossRateDelta - a.lossRateDelta)[0];
+        if (byDelta && byDelta.keyA !== byLift?.keyA) {
+            push("cohort_delta", `${byDelta.keyA} loses ${byDelta.lossRate}% of the time vs ${byDelta.baselineLossRate}% baseline (+${byDelta.lossRateDelta} pts).`, byDelta.lossRateDelta);
+        }
+    }
 
     const dist = buildRawRDistribution(list);
     const reach = buildLoserMfeReachTable(list);
@@ -615,9 +793,12 @@ export function buildDistanceInsights(losers, { config = {}, activeBucketKey = n
         }
     }
 
-    // 4. lift — most over-represented single factor
-    const topLift = [...drivers.drivers].filter((d) => d.lift >= 1.15).sort((a, b) => b.lift - a.lift)[0];
-    if (topLift) push("lift", `${topLift.value} carries ${topLift.lift}× its share of losses — disproportionate damage.`, (topLift.lift - 1) * 100);
+    // 4. lift — most over-represented single factor (losers-only fallback; skipped
+    //    when the winners-inclusive cohort-lift insight above already covers this).
+    if (!cohortLiftShown) {
+        const topLift = [...drivers.drivers].filter((d) => d.lift >= 1.15).sort((a, b) => b.lift - a.lift)[0];
+        if (topLift) push("lift", `${topLift.value} carries ${topLift.lift}× its share of losses — disproportionate damage.`, (topLift.lift - 1) * 100);
+    }
 
     // 5. overrep — structure reach gap at +1R (e.g. BOS vs CHoCH)
     if (struct.available && struct.rows.length >= 2) {
@@ -643,4 +824,102 @@ export function buildDistanceInsights(losers, { config = {}, activeBucketKey = n
     out.sort((a, b) => (b.tier - a.tier) || (b.weight - a.weight));
     const insights = out.slice(0, Math.max(0, maxInsights)).map((x, i) => ({ id: `${x.kind}-${i}`, ...x }));
     return { insights, eligible: list.length };
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// V2 Phase 2 — Winner MAE / stop-pressure distribution
+// "How close did WINNING trades come to the stop before succeeding?" Bucketed by worst
+// adverse excursion (maeR ≤ 0; -1R = the full stop distance). Describes realized winners
+// — it does NOT prove a tighter stop would still have won (winners that dipped deep would
+// likely have been stopped under a tighter stop; only a replay can confirm). Source array
+// is never mutated.
+// ══════════════════════════════════════════════════════════════════════════════
+
+export const MAE_BUCKETS = [
+    { key: "0_025",  label: "0 to -0.25R",    flag: null },
+    { key: "025_05", label: "-0.25 to -0.5R", flag: null },
+    { key: "05_075", label: "-0.5 to -0.75R", flag: null },
+    { key: "075_1",  label: "-0.75 to -1R",   flag: "near_stop" },
+    { key: "le_1",   label: "≤ -1R",          flag: "anomaly" },
+];
+
+// maeR (≤ 0) → exactly one MAE_BUCKETS key by depth toward the stop d = |maeR|. Lower
+// (deeper) edge inclusive: exactly -0.25R lands in -0.25→-0.5R; exactly -1R lands in
+// ≤ -1R. Positive noise clamps to depth 0 (shallowest band). null when MAE absent.
+export function bucketMaeDepth(maeR) {
+    if (!isFiniteNumber(maeR)) return null;
+    const d = Math.max(0, -Number(maeR));
+    if (d < 0.25) return "0_025";
+    if (d < 0.5)  return "025_05";
+    if (d < 0.75) return "05_075";
+    if (d < 1)    return "075_1";
+    return "le_1";
+}
+
+export function buildWinnerMaeDistribution(winners) {
+    const list = Array.isArray(winners) ? winners : [];
+    const total = list.length;
+    // Resolve each winner's stop-pressure MAE: prefer to-original-exit, fall back to the
+    // stop-anchored mae_r (legacy export). Trades carrying neither are excluded.
+    const resolved = list
+        .map((t) => ({ t, res: getMaeForStopPressure(t) }))
+        .filter((x) => x.res.value != null);
+    const eligible = resolved.length;
+    const fallbackCount = resolved.filter((x) => x.res.source === "stop_anchored_fallback").length;
+    const totalWinR = resolved.reduce((s, x) => s + (rOf(x.t) || 0), 0);
+
+    const counts = Object.fromEntries(MAE_BUCKETS.map((b) => [b.key, { count: 0, winR: 0 }]));
+    for (const { t, res } of resolved) {
+        const k = bucketMaeDepth(res.value);
+        if (k == null) continue;
+        counts[k].count += 1;
+        counts[k].winR += (rOf(t) || 0);
+    }
+
+    const rows = MAE_BUCKETS.map((b) => {
+        const c = counts[b.key];
+        return {
+            key: b.key,
+            label: b.label,
+            flag: b.flag ?? null,
+            count: c.count,
+            pctOfWinners: eligible ? round1((c.count / eligible) * 100) : 0,
+            winR: round1(c.winR),
+            avgWinR: c.count ? round2(c.winR / c.count) : 0,
+            lowSample: c.count > 0 && c.count < SAMPLE_FLOOR,
+        };
+    });
+
+    // Source provenance for the UI: all to-exit / all legacy / mixed.
+    const allFallback = eligible > 0 && fallbackCount === eligible;
+    const source = eligible === 0
+        ? null
+        : fallbackCount === 0 ? "to_original_exit"
+        : allFallback ? "stop_anchored_fallback"
+        : "mixed";
+    const warning = fallbackCount === 0
+        ? null
+        : allFallback
+            ? "This run uses legacy stop-anchored MAE. Re-export with mae_r_to_original_exit for accurate stop-pressure research."
+            : "Some trades use legacy stop-anchored MAE because mae_r_to_original_exit is missing.";
+
+    return {
+        rows,
+        eligible,
+        coverage: { total, eligible, pct: total ? round1((eligible / total) * 100) : 0 },
+        totalWinR: round1(totalWinR),
+        sampleFloor: SAMPLE_FLOOR,
+        // headline counts: winners that nearly failed (≤ -0.75R) and the ≤ -1R anomalies.
+        nearStopCount: counts["075_1"].count + counts["le_1"].count,
+        anomalyCount: counts["le_1"].count,
+        // source provenance (Phase 2B).
+        fallbackCount,
+        fallbackPct: eligible ? round1((fallbackCount / eligible) * 100) : 0,
+        source,
+        sourceLabel: source === "to_original_exit" ? "To original exit"
+            : source === "stop_anchored_fallback" ? "Stop-anchored (legacy)"
+            : source === "mixed" ? "Mixed (some legacy)"
+            : null,
+        warning,
+    };
 }

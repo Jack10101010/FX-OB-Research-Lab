@@ -403,6 +403,12 @@ export function parseTradesCSV(text) {
             mfe_r: numOrNull(pick(r, "mfe_r", "mfeR")),
             maeR: numOrNull(pick(r, "mae_r", "maeR")),
             mae_r: numOrNull(pick(r, "mae_r", "maeR")),
+            // To-original-exit adverse excursion (backend Phase 11A.2). Adverse R over the
+            // trade's REAL life [fill, exit] — the correct field for winner stop-pressure
+            // (stop-anchored mae_r above can go ≤ -1R for winners after the original exit).
+            // Absent in old bundles → null; the Stop-Pressure panel falls back to mae_r.
+            maeRToOriginalExit: numOrNull(pick(r, "mae_r_to_original_exit", "maeRToOriginalExit")),
+            mae_r_to_original_exit: numOrNull(pick(r, "mae_r_to_original_exit", "maeRToOriginalExit")),
             rIfNoTarget: numOrNull(pick(r, "r_if_no_target", "rIfNoTarget")),
             r_if_no_target: numOrNull(pick(r, "r_if_no_target", "rIfNoTarget")),
             rIfNoTargetModel: String(pick(r, "r_if_no_target_model", "rIfNoTargetModel") || ""),

@@ -54,13 +54,19 @@ const exc = loadCjs(`${BASE}/excursionAnalytics.js`, (spec) => {
     if (spec.includes("failuresRegistry")) return registry;
     return {};
 });
+// tradeClassification is import-free — it provides the canonical valid-universe
+// predicate (isPerformanceTrade) that the Explorer denominator must use.
+const tc = loadCjs("src/data/tradeClassification.js", () => ({}));
+const { isPerformanceTrade } = tc;
 
 const {
     getMfeR, getTargetRR, mfePctOfTarget, bucketMfePct, bucketMfeRaw,
     buildMfeDistribution, buildBeOpportunity,
     buildBeExclusiveRanges, bucketBeExclusive,
     buildRawRDistribution, buildBucketDrilldown, losersInRawBucket, buildFailureDrivers, buildPairDrivers,
-    buildExplorer, buildLoserMfeReachTable, buildMfeByDimension, buildDistanceInsights,
+    buildExplorer, buildBucketExplorerRows, buildLoserMfeReachTable, buildMfeByDimension, buildDistanceInsights,
+    isHighlightCell, EXPLORER_LIFT_HIGHLIGHT,
+    getMaeR, bucketMaeDepth, buildWinnerMaeDistribution, getMaeForStopPressure,
 } = exc;
 
 let failures = 0;
@@ -389,6 +395,213 @@ ok(/\d/.test(ins.insights[0].text), "top insight contains a computed number (dat
 ok(ins.insights.some((i) => i.kind === "contribution"), "includes a contribution insight");
 ok(ins.insights.some((i) => i.kind === "bucket_driver"), "includes a within-bucket driver insight when a bucket is active");
 ok(buildDistanceInsights([], {}).insights.length === 0, "no insights on empty input (never fabricates)");
+
+// ── V2 Phase 2: Winner MAE / stop-pressure distribution ────────────────────────
+console.log("getMaeR + bucketMaeDepth");
+ok(getMaeR({ maeR: -0.5 }) === -0.5, "getMaeR reads maeR");
+ok(getMaeR({ mae_r: -0.8 }) === -0.8, "getMaeR reads mae_r");
+ok(getMaeR({ mae: -0.3 }) === -0.3, "getMaeR reads legacy mae");
+ok(getMaeR({}) === null, "getMaeR null when absent");
+ok(bucketMaeDepth(0) === "0_025", "depth 0 → 0 to -0.25R");
+ok(bucketMaeDepth(-0.1) === "0_025", "-0.1R → 0 to -0.25R");
+ok(bucketMaeDepth(-0.25) === "025_05", "-0.25R lower edge → -0.25 to -0.5R (deeper band)");
+ok(bucketMaeDepth(-0.5) === "05_075", "-0.5R lower edge → -0.5 to -0.75R");
+ok(bucketMaeDepth(-0.75) === "075_1", "-0.75R lower edge → -0.75 to -1R");
+ok(bucketMaeDepth(-1) === "le_1", "6. -1R lower edge → ≤ -1R (anomaly band)");
+ok(bucketMaeDepth(-2) === "le_1", "6. -2R → ≤ -1R");
+ok(bucketMaeDepth(0.05) === "0_025", "positive maeR noise clamps to shallowest band");
+ok(bucketMaeDepth(null) === null, "non-finite maeR → null");
+
+console.log("buildWinnerMaeDistribution");
+const maeWinners = [
+    { r: 2, maeR: -0.1 },   // 0_025
+    { r: 2, maeR: -0.25 },  // 025_05
+    { r: 2, maeR: -0.3 },   // 025_05
+    { r: 2, maeR: -0.6 },   // 05_075
+    { r: 2, maeR: -0.8 },   // 075_1  (near_stop)
+    { r: 2, maeR: -1.0 },   // le_1   (anomaly)
+    { r: 2, maeR: -1.5 },   // le_1   (anomaly)
+    { r: 2 },               // no maeR → excluded
+];
+const maeSnapshot = JSON.stringify(maeWinners);
+const maeDist = buildWinnerMaeDistribution(maeWinners);
+const mrow = (k) => maeDist.rows.find((r) => r.key === k);
+ok(maeDist.rows.length === 5, "MAE: 5 bands");
+ok(maeDist.eligible === 7 && maeDist.coverage.total === 8, "2. one winner without maeR excluded (7 of 8 eligible)");
+// 1. winners bucket into all bands
+ok(mrow("0_025").count === 1, "1. 0 to -0.25R → 1 winner");
+ok(mrow("025_05").count === 2, "1. -0.25 to -0.5R → 2 winners");
+ok(mrow("05_075").count === 1, "1. -0.5 to -0.75R → 1");
+ok(mrow("075_1").count === 1 && mrow("075_1").flag === "near_stop", "1. -0.75 to -1R → 1 (near_stop)");
+ok(mrow("le_1").count === 2 && mrow("le_1").flag === "anomaly", "6. ≤ -1R → 2 (anomaly band)");
+ok(maeDist.nearStopCount === 3 && maeDist.anomalyCount === 2, "nearStop=3 (≤ -0.75R), anomaly=2 (≤ -1R)");
+// 4. pct calculations (over eligible 7)
+ok(Math.abs(mrow("0_025").pctOfWinners - 14.3) <= 0.1, `4. 0 to -0.25R pctOfWinners ~14.3 (got ${mrow("0_025").pctOfWinners})`);
+ok(Math.abs(mrow("025_05").pctOfWinners - 28.6) <= 0.1, `4. -0.25 to -0.5R pctOfWinners ~28.6 (got ${mrow("025_05").pctOfWinners})`);
+ok(mrow("025_05").winR === 4 && mrow("025_05").avgWinR === 2, "winR sum + avg correct (2 × 2R = 4R, avg 2R)");
+ok(maeDist.totalWinR === 14, "totalWinR = 14 (7 winners × 2R)");
+// 7. source not mutated
+ok(JSON.stringify(maeWinners) === maeSnapshot, "7. source winners array not mutated");
+
+// 3. zero eligible — empty input + all-missing-maeR input
+console.log("MAE graceful degrade");
+const maeEmpty = buildWinnerMaeDistribution([]);
+ok(maeEmpty.eligible === 0 && maeEmpty.rows.length === 5, "3. empty winners → eligible 0, 5 zeroed bands");
+ok(maeEmpty.rows.every((r) => r.count === 0 && r.pctOfWinners === 0), "3. empty winners → all bands zeroed (no crash)");
+const maeNoField = buildWinnerMaeDistribution([{ r: 1 }, { r: 2 }]);
+ok(maeNoField.eligible === 0 && maeNoField.coverage.total === 2, "2. winners without maeR → eligible 0 (safely excluded)");
+
+// 5. low-sample flags (SAMPLE_FLOOR = 10)
+console.log("MAE low-sample flags");
+ok(mrow("0_025").lowSample === true, "5. band with 1 winner → low-sample");
+const maeBig = buildWinnerMaeDistribution(Array.from({ length: 12 }, () => ({ r: 1, maeR: -0.1 })));
+ok(maeBig.rows.find((r) => r.key === "0_025").count === 12, "MAE big: 12 winners in shallow band");
+ok(maeBig.rows.find((r) => r.key === "0_025").lowSample === false, "5. band with 12 winners → not low-sample");
+ok(maeBig.rows.find((r) => r.key === "le_1").lowSample === false, "5. empty band → not flagged low-sample");
+
+// ── COHORT-CONTEXT-METRICS: ranking modes, highlight, cohort insights ───────────
+// Reuses exTrades: 5 short losers (-2), 5 long losers (-1), 10 long winners (+1).
+console.log("Cohort: Explorer rank modes (PHASE C)");
+const exContrib = buildExplorer(exTrades, { dimA: "direction", metric: "contribution", sampleFloor: 1 });
+ok(exContrib.rows[0].contributionPct >= exContrib.rows[exContrib.rows.length - 1].contributionPct, "contribution rank: first ≥ last (Short 66.7% on top)");
+const exCount = buildExplorer(exTrades, { dimA: "direction", metric: "count", sampleFloor: 1 });
+ok(exCount.rows[0].count >= exCount.rows[exCount.rows.length - 1].count, "trade-count rank: first ≥ last (Long 15 on top)");
+
+console.log("Cohort: context fields on Explorer cells (PHASE A surfaced)");
+const expHL = buildExplorer(exTrades, { dimA: "direction", sampleFloor: 1 });
+const shortHL = expHL.rows.find((c) => c.keyA === "Short");
+const longHL = expHL.rows.find((c) => c.keyA === "Long");
+ok(shortHL.losers === 5 && shortHL.winners === 0 && shortHL.totalTrades === 5, "Short cell carries losers/winners/total");
+ok(longHL.winners === 10 && Math.abs(longHL.lossRate - 33.3) <= 0.1 && Math.abs(longHL.lossRateDelta - (-16.7)) <= 0.1, "Long cell: 10 winners, lossRate 33.3%, Δ -16.7");
+ok("baselineLossRate" in shortHL && shortHL.baselineLossRate === 50, "explorer cells expose baselineLossRate");
+
+console.log("Cohort: highlight thresholds (PHASE E)");
+ok(isHighlightCell(shortHL) === true, `Short highlighted (lift ${shortHL.lift} ≥ ${EXPLORER_LIFT_HIGHLIGHT}, rankable)`);
+ok(isHighlightCell(longHL) === false, "Long not highlighted (lift < 1.5)");
+ok(isHighlightCell({ rankable: false, lift: 5 }) === false, "below-floor cell never highlighted (sample floor gate)");
+ok(isHighlightCell(shortHL, 3) === false, "custom threshold respected (2.67 < 3)");
+
+console.log("Cohort: insight engine prioritises lift / delta over contribution (PHASE F)");
+const cohort = [
+    ...Array.from({ length: 18 }, (_, i) => ({ r: i < 2 ? -1 : 1, structureTag: "bos",   direction: "long",  mfeR: 0.5 })),
+    ...Array.from({ length: 10 }, (_, i) => ({ r: i < 8 ? -2 : 1, structureTag: "choch", direction: "short", mfeR: 0.8 })),
+];
+const cohortLosers = cohort.filter((t) => t.r < 0);
+const insC = buildDistanceInsights(cohortLosers, { allTrades: cohort });
+ok(insC.insights.some((i) => i.kind === "cohort_lift"), "cohort_lift insight generated when allTrades (winners) supplied");
+ok(insC.insights[0].kind === "cohort_lift", "cohort_lift is the top-priority insight (outranks contribution)");
+const liftText = insC.insights.find((i) => i.kind === "cohort_lift").text;
+ok(/×\s*lift/.test(liftText) && /% of trades/.test(liftText), "cohort_lift text cites lift multiplier + trade share (actionable)");
+const insNo = buildDistanceInsights(cohortLosers, {});
+ok(!insNo.insights.some((i) => i.kind === "cohort_lift" || i.kind === "cohort_delta"), "no cohort insights without allTrades (losers-only)");
+ok(insNo.insights.length >= 1, "losers-only insights still generated (no regression)");
+
+// ── TRUE-DENOMINATOR FIX: buildBucketExplorerRows (PHASE F) ─────────────────────
+// Session is stubbed Unknown in the harness, so we model "NY × CHOCH / London × BOS"
+// with direction × structure (both real accessors). All trades:
+//   short×choch: 7 losers (all in bucket) + 12 winners  → 19 total
+//   long×bos:    3 losers (all in bucket) + 20 winners  → 23 total
+console.log("True-denominator bucket Explorer rows (PHASE F)");
+const denomAll = [
+    ...Array.from({ length: 7 },  () => ({ direction: "short", structureTag: "choch", r: -1 })),
+    ...Array.from({ length: 12 }, () => ({ direction: "short", structureTag: "choch", r: 1 })),
+    ...Array.from({ length: 3 },  () => ({ direction: "long",  structureTag: "bos",   r: -1 })),
+    ...Array.from({ length: 20 }, () => ({ direction: "long",  structureTag: "bos",   r: 1 })),
+];
+const denomBucket = denomAll.filter((t) => t.r < 0); // the 10 losers = the selected bucket
+const bx = buildBucketExplorerRows({ bucketLosers: denomBucket, allTrades: denomAll, dimA: "direction", dimB: "structure", sampleFloor: 8 });
+const nyCh = bx.rows.find((r) => r.keyA === "Short" && r.keyB === "CHoCH");
+const lonBos = bx.rows.find((r) => r.keyA === "Long" && r.keyB === "BOS");
+ok(nyCh && lonBos, "pair rows keyed by direction × structure");
+ok(nyCh.bucketLosers === 7 && nyCh.bucketLossR === 7, "2. bucket metrics count ONLY bucket losers (7 losers, 7R)");
+ok(nyCh.fullLosers === 7 && nyCh.fullWinners === 12 && nyCh.fullTotal === 19, "1+3. full denominator = ALL matching trades (7L / 12W / 19 total)");
+ok(nyCh.fullWinners > 0, "7. winners recovered (the original bug: winners were 0 in bucket mode)");
+ok(nyCh.bucketLosers <= nyCh.fullLosers, "7. no winners falsely assigned to the MFE bucket (bucketLosers ≤ fullLosers)");
+ok(Math.abs(nyCh.fullLossRate - 36.8) <= 0.1, "full loss rate 36.8% (7/19)");
+ok(Math.abs(bx.totals.baselineLossRate - 23.8) <= 0.1, "5. baseline loss rate uses allTrades (10/42 = 23.8%)");
+ok(Math.abs(nyCh.lossRateDelta - 13.0) <= 0.1, "6. loss-rate delta = fullLossRate − baseline (+13.0)");
+ok(nyCh.bucketContributionPct === 70 && lonBos.bucketContributionPct === 30, "bucket contribution % from bucket losers only (70 / 30)");
+ok(lonBos.fullLosers === 3 && lonBos.fullWinners === 20 && lonBos.fullTotal === 23, "4. pair matching works for the second group (3L / 20W / 23)");
+ok(Math.abs(lonBos.lossRateDelta - (-10.8)) <= 0.1, "London×BOS delta negative (13.0% − 23.8% ≈ -10.8)");
+// single-dimension matching
+const bx1 = buildBucketExplorerRows({ bucketLosers: denomBucket, allTrades: denomAll, dimA: "direction", sampleFloor: 8 });
+const shortRow = bx1.rows.find((r) => r.keyA === "Short");
+ok(shortRow.bucketLosers === 7 && shortRow.fullWinners === 12 && shortRow.fullTotal === 19, "single-dim denominator works (Short: 7 bucket L, 12W, 19 total)");
+// multi-word value safety (values containing spaces must group correctly)
+const spaced = [
+    { direction: "long", structureTag: "bos", r: -1 },
+    { direction: "long", structureTag: "bos", r: 1 },
+];
+// (direction caps to "Long"; this just exercises the NUL-separated pair id path)
+const bxSpace = buildBucketExplorerRows({ bucketLosers: spaced.filter((t) => t.r < 0), allTrades: spaced, dimA: "direction", dimB: "structure", sampleFloor: 1 });
+ok(bxSpace.rows.length === 1 && bxSpace.rows[0].keyA === "Long" && bxSpace.rows[0].keyB === "BOS", "pair id keeps keyA/keyB intact (no split corruption)");
+// empty-safe
+ok(buildBucketExplorerRows({ bucketLosers: [], allTrades: [], dimA: "direction" }).rows.length === 0, "empty input → no rows, no crash");
+
+// ── V2 Phase 2B: to-original-exit MAE preference + legacy fallback ─────────────
+console.log("getMaeForStopPressure (to-exit preferred, stop-anchored fallback)");
+ok(getMaeForStopPressure({ maeRToOriginalExit: -0.3, maeR: -2.5 }).value === -0.3, "prefers maeRToOriginalExit value over maeR");
+ok(getMaeForStopPressure({ maeRToOriginalExit: -0.3, maeR: -2.5 }).source === "to_original_exit", "source = to_original_exit when present");
+ok(getMaeForStopPressure({ mae_r_to_original_exit: -0.6 }).value === -0.6, "reads snake mae_r_to_original_exit");
+ok(getMaeForStopPressure({ maeR: -1.5 }).source === "stop_anchored_fallback", "falls back to maeR → source stop_anchored_fallback");
+ok(getMaeForStopPressure({ maeR: -1.5 }).value === -1.5, "fallback value = stop-anchored maeR");
+ok(getMaeForStopPressure({}).value === null && getMaeForStopPressure({}).source === null, "neither field → { value:null, source:null }");
+
+console.log("buildWinnerMaeDistribution source preference + fallback metadata");
+const spWinners = [
+    { r: 2, maeRToOriginalExit: -0.3, maeR: -2.5 },  // prefers to-exit (-0.3 → 0.25–0.5R, NOT ≤ -1R)
+    { r: 2, mae_r_to_original_exit: -0.6 },           // to-exit only
+    { r: 2, maeR: -1.5 },                             // legacy fallback (→ ≤ -1R)
+    { r: 2 },                                         // neither → excluded
+];
+const spSnapshot = JSON.stringify(spWinners);
+const spDist = buildWinnerMaeDistribution(spWinners);
+const spRow = (k) => spDist.rows.find((r) => r.key === k);
+ok(spDist.eligible === 3, "missing-both winner excluded (3 of 4 eligible)");
+ok(spDist.fallbackCount === 1 && spDist.fallbackPct === 33.3, "fallbackCount=1, fallbackPct=33.3 (the legacy-only winner)");
+ok(spDist.source === "mixed" && /Some trades use legacy/.test(spDist.warning), "mixed source → soft warning");
+ok(spRow("025_05").count === 1, "to-exit winner (-0.3) buckets to -0.25→-0.5R (NOT pinned to ≤ -1R by stop-anchored -2.5)");
+ok(spRow("le_1").count === 1, "only the legacy-fallback winner (-1.5) lands in ≤ -1R");
+ok(JSON.stringify(spWinners) === spSnapshot, "source winners array not mutated");
+
+console.log("all-fallback → stronger warning; all-to-exit → no warning");
+const spAllLegacy = buildWinnerMaeDistribution([{ r: 2, maeR: -1.2 }, { r: 2, maeR: -0.5 }]);
+ok(spAllLegacy.source === "stop_anchored_fallback" && spAllLegacy.fallbackCount === 2, "all legacy → source stop_anchored_fallback");
+ok(/Re-export with mae_r_to_original_exit/.test(spAllLegacy.warning), "all-fallback → stronger re-export warning");
+const spAllToExit = buildWinnerMaeDistribution([{ r: 2, maeRToOriginalExit: -0.4 }]);
+ok(spAllToExit.source === "to_original_exit" && spAllToExit.fallbackCount === 0 && spAllToExit.warning == null, "all to-exit → no fallback, no warning");
+
+// ── VALID-UNIVERSE DENOMINATOR FIX ──────────────────────────────────────────────
+// Bug: the Explorer denominator used useTradeUniverse().trades (raw imported rows,
+// e.g. 330) instead of the valid/performance universe shown on Run Detail (e.g.
+// 165). The component now gates `allTrades` through isPerformanceTrade — the SAME
+// predicate Run Detail uses — before any denominator math. This proves that gating
+// at the data layer (the exact transform the component performs).
+console.log("Valid-universe denominator (Run Detail parity)");
+const validUniverseHasFn = typeof isPerformanceTrade === "function";
+ok(validUniverseHasFn, "isPerformanceTrade loaded from tradeClassification (canonical predicate)");
+// Cohort short×choch: 7 real losers + 12 real winners (valid) + 80 excluded rows
+// (UNFILLED / SESSION_FILTERED) that share the SAME dimension key but are NOT trades.
+const mixedAll = [
+    ...Array.from({ length: 7 },  () => ({ direction: "short", structureTag: "choch", r: -1, outcome: "LOSS", entry: "x" })),
+    ...Array.from({ length: 12 }, () => ({ direction: "short", structureTag: "choch", r: 1,  outcome: "WIN",  entry: "x" })),
+    ...Array.from({ length: 50 }, () => ({ direction: "short", structureTag: "choch", outcome: "UNFILLED" })),
+    ...Array.from({ length: 30 }, () => ({ direction: "short", structureTag: "choch", outcome: "SESSION_FILTERED" })),
+]; // 99 raw rows; valid universe = 19
+const validUniverse = mixedAll.filter(isPerformanceTrade);
+ok(mixedAll.length === 99 && validUniverse.length === 19, "valid universe drops excluded setups (99 raw → 19 valid)");
+const vuBucketLosers = validUniverse.filter((t) => t.r < 0); // 7 performance losers
+const fixed = buildBucketExplorerRows({ bucketLosers: vuBucketLosers, allTrades: validUniverse, dimA: "direction", dimB: "structure", sampleFloor: 8 });
+const fixedRow = fixed.rows.find((r) => r.keyA === "Short" && r.keyB === "CHoCH");
+ok(fixedRow.fullTotal === 19, "denominator = valid universe (fullTotal 19, NOT 99 raw rows)");
+ok(fixedRow.fullLosers === 7 && fixedRow.fullWinners === 12, "valid denominator splits 7L / 12W");
+ok(fixedRow.bucketLosers === 7 && fixedRow.bucketLosers <= fixedRow.fullLosers, "bucket losers ⊆ valid denominator (no orphan losers)");
+ok(Math.abs(fixed.totals.baselineLossRate - (7 / 19) * 100) <= 0.1, "baseline loss rate uses valid universe (7/19 = 36.8%)");
+// Counter-proof: feeding the RAW rows (the old bug) inflates the denominator.
+const buggy = buildBucketExplorerRows({ bucketLosers: vuBucketLosers, allTrades: mixedAll, dimA: "direction", dimB: "structure", sampleFloor: 8 });
+const buggyRow = buggy.rows.find((r) => r.keyA === "Short" && r.keyB === "CHoCH");
+ok(buggyRow.fullTotal === 99, "raw-rows denominator (the bug) would report 99 total");
+ok(fixedRow.fullTotal < buggyRow.fullTotal, "valid-universe denominator < raw-rows denominator (fix confirmed: 19 < 99)");
 
 console.log(`\n${failures === 0 ? "ALL PASS" : failures + " FAILURE(S)"}`);
 process.exit(failures === 0 ? 0 : 1);

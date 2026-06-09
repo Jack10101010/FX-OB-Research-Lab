@@ -14,12 +14,14 @@ import { Pill } from "@/components/lab/DataTable";
 import { cn } from "@/lib/utils";
 import { Info, AlertTriangle } from "lucide-react";
 import { TermTip } from "@/components/lab/TermTip";
-import { isModuleAvailable } from "../shared/failuresDataQuality";
+import { isPerformanceTrade } from "@/data/tradeClassification";
+import { filterWinners } from "../shared/failuresUtils";
 import {
     buildRawRDistribution, buildBucketDrilldown, losersInRawBucket,
     buildFailureDrivers, buildPairDrivers,
     buildBeOpportunity, buildBeExclusiveRanges,
     buildLoserMfeReachTable, buildMfeByDimension, buildDistanceInsights,
+    buildWinnerMaeDistribution,
 } from "../shared/excursionAnalytics";
 import { FailureExplorer, LiftCell } from "./FailureExplorer";
 
@@ -70,6 +72,8 @@ function BucketBar({ b, maxLossR, selected, onSelect }) {
 
 // ── Distance-to-Stop insights (Command Center) — data-driven, no hardcoded text ──
 const INSIGHT_DOT = {
+    cohort_lift: "hsl(var(--danger))",
+    cohort_delta: "hsl(var(--danger))",
     contribution: "hsl(var(--danger))",
     bucket_driver: "hsl(var(--danger))",
     reach: "hsl(var(--accent-secondary))",
@@ -335,11 +339,130 @@ function BeOpportunityTable({ be, ranges }) {
     );
 }
 
+// ── Winner MAE / stop-pressure (how close winners came to the stop) ────────────
+// Gated independently on maeR: renders its own inline "Requires maeR" state without
+// blocking the MFE panels above. The ≤ -1R band is a stop-touch tie / same-candle path
+// anomaly (full stop distance reached yet booked a win) — flagged, not read casually.
+const MAE_BAND_COLOR = (flag) => (
+    flag === "anomaly" ? "hsl(var(--danger)/0.7)"
+    : flag === "near_stop" ? "hsl(var(--warning)/0.7)"
+    : "hsl(var(--success)/0.6)"
+);
+
+function MaeStopPressurePanel({ mae }) {
+    if (!mae) return null;
+
+    // ── MAE-only unavailable state (does NOT block the rest of the tab) ──
+    if (!mae.eligible) {
+        return (
+            <NeonPanel title={<TermTip termKey="stop_pressure">Winner MAE / Stop Pressure</TermTip>}>
+                <div className="p-4 flex items-start gap-3 text-[11.5px] font-ui text-[hsl(var(--text-2))] leading-relaxed">
+                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-[hsl(var(--warning))]" />
+                    <div>
+                        <div className="text-[hsl(var(--text))] font-medium mb-1">Requires maeR (adverse excursion).</div>
+                        This run's winners don't carry per-trade <span className="font-num text-[hsl(var(--text))]">maeR</span> data.
+                        Re-export with the adverse-excursion field to see stop-pressure analysis. (MFE panels above are unaffected.)
+                    </div>
+                </div>
+            </NeonPanel>
+        );
+    }
+
+    const maxCount = Math.max(...mae.rows.map((r) => r.count), 1);
+
+    return (
+        <NeonPanel
+            title={<TermTip termKey="stop_pressure">Winner MAE / Stop Pressure</TermTip>}
+            tone="secondary"
+            action={<Pill tone="muted">{mae.eligible} winners w/ MAE</Pill>}
+        >
+            <div className="p-3 space-y-1">
+                <p className="px-2 text-[10.5px] font-ui text-[hsl(var(--text-2))] leading-relaxed">
+                    How close did <span className="text-[hsl(var(--text))]">winning</span> trades come to the stop before succeeding?
+                    Winners bucketed by worst <TermTip termKey="mae">adverse excursion</TermTip> (MAE) — deeper = nearer the stop.
+                </p>
+                {/* Source provenance — to-original-exit vs legacy stop-anchored fallback (Phase 2B). */}
+                {mae.warning && (
+                    <div className={cn(
+                        "mx-2 mt-1 flex items-start gap-2 clip-bevel-sm border p-2",
+                        mae.source === "stop_anchored_fallback"
+                            ? "border-[hsl(var(--danger)/0.4)] bg-[hsl(var(--danger)/0.06)]"
+                            : "border-[hsl(var(--warning)/0.35)] bg-[hsl(var(--warning)/0.05)]",
+                    )}>
+                        <AlertTriangle className={cn(
+                            "w-3.5 h-3.5 shrink-0 mt-0.5",
+                            mae.source === "stop_anchored_fallback" ? "text-[hsl(var(--danger))]" : "text-[hsl(var(--warning))]",
+                        )} />
+                        <p className="text-[10.5px] font-ui text-[hsl(var(--text-2))] leading-relaxed">
+                            {mae.warning}
+                            {mae.source === "mixed" && (
+                                <span className="text-[hsl(var(--text-3))]"> ({mae.fallbackCount}/{mae.eligible} · {mae.fallbackPct}%)</span>
+                            )}
+                        </p>
+                    </div>
+                )}
+                {mae.nearStopCount > 0 && (
+                    <p className="px-2 text-[10.5px] font-ui text-[hsl(var(--text-2))]">
+                        <span className="text-[hsl(var(--warning))] font-semibold">{mae.nearStopCount}</span> winner{mae.nearStopCount === 1 ? "" : "s"} nearly failed (≤ -0.75R)
+                        {mae.anomalyCount > 0 && (
+                            <> · <span className="text-[hsl(var(--danger))] font-semibold">{mae.anomalyCount}</span> at ≤ -1R (stop-touch tie / same-candle path — verify)</>
+                        )}.
+                    </p>
+                )}
+                <div className="flex items-center gap-3 px-2 pt-1 text-[9.5px] font-ui uppercase tracking-[0.05em] text-[hsl(var(--text-2))]">
+                    <span className="w-28"><TermTip termKey="mae">MAE</TermTip> band</span>
+                    <span className="flex-1" />
+                    <span className="w-16 text-right">Winners</span>
+                    <span className="w-16 text-right">% winners</span>
+                    <span className="w-16 text-right">Win-R</span>
+                    <span className="w-16 text-right">Avg R</span>
+                    <span className="w-16 text-right">Sample</span>
+                </div>
+                {mae.rows.map((r) => (
+                    <div key={r.key} className={cn("flex items-center gap-3 px-2 py-1.5 text-[11.5px] font-ui", r.lowSample && "opacity-55")}>
+                        <span className="w-28 shrink-0 text-[hsl(var(--text))] font-num tabular-nums">{r.label}</span>
+                        <div className="flex-1 h-1.5 bg-[hsl(var(--panel-2))] rounded-full overflow-hidden">
+                            <div className="h-full rounded-full" style={{ width: `${Math.min(100, (r.count / maxCount) * 100)}%`, background: MAE_BAND_COLOR(r.flag) }} />
+                        </div>
+                        <span className="w-16 text-right font-num tabular-nums text-white">{r.count}</span>
+                        <span className="w-16 text-right font-num tabular-nums text-[hsl(var(--text-2))]">{r.pctOfWinners}%</span>
+                        <span className="w-16 text-right font-num tabular-nums text-[hsl(var(--text-2))]">{r.winR}R</span>
+                        <span className="w-16 text-right font-num tabular-nums text-[hsl(var(--text))]">{r.avgWinR}R</span>
+                        <span className="w-16 text-right">
+                            {r.flag === "anomaly" && r.count > 0 ? <Pill tone="danger">verify</Pill>
+                                : r.lowSample ? <Pill tone="warning">low n</Pill>
+                                : r.count > 0 ? <Pill tone="muted">ok</Pill>
+                                : <span className="text-[hsl(var(--text-3))]">—</span>}
+                        </span>
+                    </div>
+                ))}
+                <p className="px-2 pt-1 text-[10px] font-ui text-[hsl(var(--text-3))] leading-relaxed">
+                    This helps judge <TermTip termKey="stop_buffer_sensitivity">stop-buffer sensitivity</TermTip>. It does not prove a tighter
+                    stop would still win — winners that dipped deep would likely have been stopped under a tighter stop. Validate with a replay.
+                </p>
+            </div>
+        </NeonPanel>
+    );
+}
+
 export function ExcursionAnalysis({ losers = [], allLosers = [], allTrades = [], config = {} }) {
     const source = losers.length ? losers : allLosers;
+    // VALID TRADE UNIVERSE — the Explorer / cohort denominators must match the
+    // "valid trades" KPI on Run Detail (e.g. 165), NOT the raw imported rows (e.g.
+    // 330). `allTrades` (= useTradeUniverse().trades) is the unfiltered row list;
+    // we gate it through the canonical performance classifier — the SAME predicate
+    // Run Detail uses (isValidExecutedTrade → isPerformanceTrade) — so winners,
+    // totals, loss rate, baseline and lift all use the active trade universe.
+    const validTrades = useMemo(
+        () => (Array.isArray(allTrades) ? allTrades.filter(isPerformanceTrade) : []),
+        [allTrades],
+    );
     // Explorer runs over a winners-inclusive population so loss-rate / lift are real.
-    const explorerSource = allTrades.length ? allTrades : source;
-    const available = useMemo(() => isModuleAvailable("excursion", source), [source]);
+    const explorerSource = validTrades.length ? validTrades : source;
+    // MAE / stop-pressure runs over WINNERS (valid universe, cohort-independent like
+    // the Explorer) — "how close did winners come to the stop before succeeding?".
+    const winners = useMemo(() => filterWinners(validTrades), [validTrades]);
+    const mae = useMemo(() => buildWinnerMaeDistribution(winners), [winners]);
     const reach = useMemo(() => buildLoserMfeReachTable(source), [source]);
     const dist = useMemo(() => buildRawRDistribution(source), [source]);
     const be = useMemo(() => buildBeOpportunity(source, BE_LEVELS, { config, mode: "raw" }), [source, config]);
@@ -363,8 +486,8 @@ export function ExcursionAnalysis({ losers = [], allLosers = [], allTrades = [],
     // Insight synthesis (Command Center) — bucket-aware so the headline tracks the
     // selected bucket. MFE-by-dimension outcomes for Structure / Session panels.
     const insights = useMemo(
-        () => buildDistanceInsights(source, { config, activeBucketKey: activeBucket }),
-        [source, config, activeBucket],
+        () => buildDistanceInsights(source, { config, activeBucketKey: activeBucket, allTrades: validTrades }),
+        [source, config, activeBucket, validTrades],
     );
     const mfeByStructure = useMemo(() => buildMfeByDimension(source, "structure"), [source]);
     const mfeBySession = useMemo(() => buildMfeByDimension(source, "session"), [source]);
@@ -383,7 +506,9 @@ export function ExcursionAnalysis({ losers = [], allLosers = [], allTrades = [],
     }, [activeBucket, activeBucketDef, drill, source]);
 
     // ── Gated empty state ──────────────────────────────────────────────────────
-    if (!available || dist.coverage.withMfe === 0) {
+    // Phase 2: gate on MFE only. A run carrying mfeR renders the MFE panels even when
+    // maeR is absent; the MAE / Stop-Pressure panel gates itself separately below.
+    if (dist.coverage.withMfe === 0) {
         return (
             <div className="p-6">
                 <NeonPanel title={<TermTip termKey="distance_before_stop">Distance to Stop</TermTip>}>
@@ -451,6 +576,9 @@ export function ExcursionAnalysis({ losers = [], allLosers = [], allTrades = [],
 
             {/* ── Break-even opportunity by arm level (upper bound) ─────────── */}
             <BeOpportunityTable be={be} ranges={beRanges} />
+
+            {/* ── Winner MAE / Stop Pressure (Phase 2; gates on maeR separately) ── */}
+            <MaeStopPressurePanel mae={mae} />
 
             {/* ── Selected-bucket drilldown ─────────────────────────────────── */}
             {drill && activeBucketDef && (
