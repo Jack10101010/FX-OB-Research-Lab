@@ -134,12 +134,12 @@ export function prettyModeName(mode) {
 
 const DATA_QUALITY_FIELDS = [
     { key: "ob_fully_breached",         label: "Hard Invalidation Flag",    desc: "Panels B & C — Research Estimate models", special: "bool" },
-    { key: "max_ob_penetration_pct",    label: "Max OB Penetration %",      desc: "Panel D + penetration sensitivity curve" },
+    { key: "max_ob_penetration_pct",    label: "Max OB Penetration %",      desc: "Panel D + penetration sensitivity curve", special: "num" },
     { key: "close_confirmed_ob_breach", label: "Close-Confirmed Invalidation", desc: "Close-confirmed invalidation heatmap", special: "bool" },
     { key: "close_breach_time",         label: "Invalidation Close Timestamp", desc: "Close-confirmed invalidation timing" },
-    { key: "minutes_to_exit",           label: "Minutes to Exit",           desc: "Panel E — fast stopout analysis" },
+    { key: "minutes_to_exit",           label: "Minutes to Exit",           desc: "Panel E — fast stopout analysis", special: "num" },
     { key: "same_candle_exit",          label: "Same-Candle Exit Flag",     desc: "Panel E — same-candle exits", special: "bool" },
-    { key: "obWidthPips",               label: "OB Width (pips)",           desc: "OB characteristic breakdown — width" },
+    { key: "obWidthPips",               label: "OB Width (pips)",           desc: "OB characteristic breakdown — width", special: "num" },
     { key: "obOriginSession",           label: "OB Origin Session",         desc: "Origin × invalidation session matrix" },
     { key: "direction",                 label: "Trade Direction",           desc: "Direction breakdown" },
     { key: "structureTag",              label: "Structure Tag (BOS/CHoCH)", desc: "Structure breakdown" },
@@ -158,21 +158,25 @@ export function buildDataQuality(trades) {
     }
 
     const fields = DATA_QUALITY_FIELDS.map((f) => {
+        // Honest presence-based coverage (matches the documented spec:
+        // count(field present) / n). Booleans count true/false; numeric fields
+        // require a finite number so junk strings aren't counted as data; all
+        // other fields count any non-empty value.
+        // (Previous logic used `Number.isFinite(Number(v) || 0)`, which is always
+        // true for any non-empty value — it silently overstated numeric coverage.)
         let present;
         if (f.special === "bool") {
             present = list.filter((t) => t?.[f.key] === true || t?.[f.key] === false).length;
+        } else if (f.special === "num") {
+            present = list.filter((t) => {
+                const v = t?.[f.key];
+                return v != null && v !== "" && Number.isFinite(Number(v));
+            }).length;
         } else {
             present = list.filter((t) => {
                 const v = t?.[f.key];
-                return v != null && v !== "" && Number.isFinite(Number(v) || 0) !== false;
+                return v != null && v !== "";
             }).length;
-            // more lenient: any truthy-ish value
-            if (present === 0) {
-                present = list.filter((t) => {
-                    const v = t?.[f.key];
-                    return v != null && v !== "";
-                }).length;
-            }
         }
         const pct = Math.round((present / n) * 100);
         const status = pct >= 80 ? "good" : pct >= 40 ? "partial" : pct > 0 ? "limited" : "missing";
@@ -665,4 +669,94 @@ export function computeEquityPoints(trades) {
         cum += _rMulti(t);
         return _round2(cum);
     });
+}
+
+// ── Data-derived confidence layer (Restructure Plan · Step 2) ─────────────────
+// A reusable, presentation-layer classification of how trustworthy each
+// protection approach's evidence is — derived from ACTUAL data presence, NOT from
+// the static per-panel ConfidenceTag labels. This is the foundation a future
+// verdict UI will consume; it intentionally produces NO verdicts, rankings, or
+// recommendations.
+//
+//   exact        — an exporter-backed protection backtest exists for the mode.
+//   estimate     — only a directional research estimate is possible (its required
+//                  fields are present) and there is no exact backtest.
+//   insufficient — required exporter field(s) are missing; cannot evaluate.
+//
+// Pure: no React, no side-effects.
+
+// The research-estimate approaches the page can model from raw trade fields, and
+// the exporter field each one requires. (These mirror Panels B/C/D in the UI.)
+export const ESTIMATE_APPROACHES = [
+    { key: "break_even_escape",  label: "Break-even escape",                requires: ["ob_fully_breached"] },
+    { key: "immediate_exit",     label: "Immediate hard-invalidation exit", requires: ["ob_fully_breached"] },
+    { key: "penetration_defense", label: "OB penetration defense",          requires: ["max_ob_penetration_pct"] },
+];
+
+/**
+ * Pure 3-state classifier. No data access — just the two booleans a caller has
+ * already derived from real data.
+ * @returns {"exact"|"estimate"|"insufficient"}
+ */
+export function classifyConfidence({ hasExact, estimateAvailable }) {
+    if (hasExact) return "exact";
+    if (estimateAvailable) return "estimate";
+    return "insufficient";
+}
+
+/**
+ * Build the per-mode + page-level confidence source.
+ * @param {object} opts
+ * @param {Array}  opts.exactRows   exactProtectionRows (exporter-backed; may include baseline)
+ * @param {object} opts.dataQuality output of buildDataQuality(trades)
+ * @returns {{
+ *   pageBasis: "exact"|"estimate"|"insufficient",
+ *   exactModes: Array<{key,label,basis:"exact",reason}>,
+ *   estimates:  Array<{key,label,basis:"estimate"|"insufficient",requires,missing,reason}>,
+ *   hasExact: boolean,
+ *   anyEstimate: boolean
+ * }}
+ */
+export function buildProtectionConfidence({ exactRows = [], dataQuality = null } = {}) {
+    // Exact modes = non-baseline exporter rows. These are EXACT by definition.
+    const exactModes = (Array.isArray(exactRows) ? exactRows : [])
+        .filter((r) => r && !r.isBaseline && r.mode)
+        .map((r) => ({
+            key: r.mode,
+            label: prettyModeName(r.mode),
+            basis: "exact",
+            reason: "Exporter-backed protection backtest",
+        }));
+
+    // Field coverage lookup from the (now-honest) data-quality output.
+    const coverage = {};
+    if (dataQuality && Array.isArray(dataQuality.fields)) {
+        dataQuality.fields.forEach((f) => { coverage[f.key] = f; });
+    }
+    const fieldPresent = (key) => {
+        const f = coverage[key];
+        return !!f && Number(f.present) > 0;
+    };
+
+    // Estimate approaches: estimable only if every required field is present.
+    const estimates = ESTIMATE_APPROACHES.map((a) => {
+        const missing = a.requires.filter((k) => !fieldPresent(k));
+        const ok = missing.length === 0;
+        return {
+            key: a.key,
+            label: a.label,
+            basis: ok ? "estimate" : "insufficient",
+            requires: a.requires,
+            missing,
+            reason: ok
+                ? "Directional research estimate (optimistic; unproven)"
+                : `Missing required field(s): ${missing.join(", ")}`,
+        };
+    });
+
+    const hasExact = exactModes.length > 0;
+    const anyEstimate = estimates.some((e) => e.basis === "estimate");
+    const pageBasis = classifyConfidence({ hasExact, estimateAvailable: anyEstimate });
+
+    return { pageBasis, exactModes, estimates, hasExact, anyEstimate };
 }

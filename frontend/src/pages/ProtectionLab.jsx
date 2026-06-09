@@ -16,7 +16,7 @@ import { ProtectionDataQualityPanel } from "@/components/lab/protection/Protecti
 import { ProtectionSectionDivider } from "@/components/lab/protection/ProtectionSectionDivider";
 import { ProtectionVisualAnalytics } from "@/components/lab/protection/ProtectionVisualAnalytics";
 import { ProtectionPowerTools } from "@/components/lab/protection/ProtectionPowerTools";
-import { buildPairedTrades, calcEfficiencyRatio, calcRobustnessScore } from "@/components/lab/protection/protectionAnalytics";
+import { buildPairedTrades, calcEfficiencyRatio, calcRobustnessScore, buildDataQuality, buildProtectionConfidence } from "@/components/lab/protection/protectionAnalytics";
 
 // ── Protection Lab V1 ────────────────────────────────────────────────
 // Read-only research surface for defensive-logic ideas derived from enriched
@@ -101,6 +101,15 @@ export default function ProtectionLab() {
     const exactProtectionRows = React.useMemo(() => buildExactProtectionRows(activeRun, p.netR), [activeRun, p.netR]);
     const whatIf = React.useMemo(() => buildWhatIfSimulation(trades, whatIfFilters), [trades, whatIfFilters]);
     const hasExactProtection = exactProtectionRows.length > 0;
+
+    // Step 2 (Restructure Plan): data-derived confidence layer. Reusable source for
+    // the future verdict UI — classifies each mode EXACT / ESTIMATE / INSUFFICIENT
+    // from actual data presence (not the static ConfidenceTag labels). No verdicts.
+    const protectionDataQuality = React.useMemo(() => buildDataQuality(trades), [trades]);
+    const protectionConfidence = React.useMemo(
+        () => buildProtectionConfidence({ exactRows: exactProtectionRows, dataQuality: protectionDataQuality }),
+        [exactProtectionRows, protectionDataQuality],
+    );
 
     // ── Phase 1–3 upgrade additions ──────────────────────────────────────────
     const protectionTradesByMode = React.useMemo(() => {
@@ -202,6 +211,12 @@ export default function ProtectionLab() {
 
             {/* Data quality panel — collapsed when all critical fields are present */}
             <ProtectionDataQualityPanel trades={trades} />
+
+            {/* TEMPORARY · validation only — confirms the data-derived confidence
+                classification (Restructure Plan Step 2). Not the verdict UI; to be
+                removed/replaced when the verdict-first hero + zones land. */}
+            <ConfidenceClassificationValidation confidence={protectionConfidence} />
+
 
             <ProtectionSectionDivider
                 icon={<Shield className="w-3.5 h-3.5" />}
@@ -551,6 +566,71 @@ export default function ProtectionLab() {
                 activeRunId={activeRunId}
             />
         </div>
+    );
+}
+
+// ── TEMPORARY validation surface (Restructure Plan · Step 2) ─────────────────
+// Renders the data-derived confidence classification so the EXACT / ESTIMATE /
+// INSUFFICIENT split can be visually verified before the verdict-first UI is
+// built. Intentionally minimal and clearly labeled; to be removed/replaced by the
+// verdict hero + A1/A2/A3 zones in a later, separately-approved phase.
+const CONF_BASIS_TONE = { exact: "success", estimate: "warning", insufficient: "muted" };
+function BasisPill({ basis }) {
+    return <Pill tone={CONF_BASIS_TONE[basis] || "muted"}>{String(basis || "—").toUpperCase()}</Pill>;
+}
+function ConfidenceClassificationValidation({ confidence }) {
+    if (!confidence) return null;
+    const { pageBasis, exactModes = [], estimates = [] } = confidence;
+    return (
+        <NeonPanel
+            className="mx-6 mb-4"
+            title="Confidence Classification · validation (temporary)"
+            collapsible
+            defaultCollapsed
+            action={<BasisPill basis={pageBasis} />}
+        >
+            <p className="mb-3 text-[11.5px] font-ui text-[hsl(var(--text-2))]">
+                Data-derived basis per protection approach (not a verdict). Exact = exporter backtest present ·
+                Estimate = directional only · Insufficient = required fields missing.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <div className="mb-1.5 text-[10px] font-ui font-semibold uppercase tracking-[0.05em] text-[hsl(var(--text-2))]">
+                        Exact modes ({exactModes.length})
+                    </div>
+                    {exactModes.length ? (
+                        <div className="space-y-1">
+                            {exactModes.map((m) => (
+                                <div key={m.key} className="flex items-center justify-between gap-2 text-[11.5px] font-ui text-[hsl(var(--text))]">
+                                    <span className="truncate">{m.label}</span>
+                                    <BasisPill basis={m.basis} />
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="text-[11px] font-ui text-[hsl(var(--text-2))]">No exporter-backed modes loaded.</div>
+                    )}
+                </div>
+                <div>
+                    <div className="mb-1.5 text-[10px] font-ui font-semibold uppercase tracking-[0.05em] text-[hsl(var(--text-2))]">
+                        Estimate approaches
+                    </div>
+                    <div className="space-y-1">
+                        {estimates.map((e) => (
+                            <div key={e.key} className="flex items-center justify-between gap-2 text-[11.5px] font-ui text-[hsl(var(--text))]">
+                                <span className="truncate">
+                                    {e.label}
+                                    {e.basis === "insufficient" && e.missing?.length ? (
+                                        <span className="ml-1.5 text-[10px] text-[hsl(var(--text-2))]">· needs {e.missing.join(", ")}</span>
+                                    ) : null}
+                                </span>
+                                <BasisPill basis={e.basis} />
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        </NeonPanel>
     );
 }
 
