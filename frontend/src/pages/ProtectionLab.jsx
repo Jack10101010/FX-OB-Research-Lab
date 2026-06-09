@@ -1,4 +1,5 @@
 import React from "react";
+import { cn } from "@/lib/utils";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { MetricChip } from "@/components/lab/MetricChip";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
@@ -94,6 +95,7 @@ export default function ProtectionLab() {
     const baselineUniverse = useTradeUniverse(null, BASELINE_SCENARIO_OVERRIDE);
     const [whatIfFilters, setWhatIfFilters] = React.useState({});
     const [selectedProtectionMode, setSelectedProtectionMode] = React.useState(null);
+    const [protTab, setProtTab] = React.useState("overview"); // IA Phase 3: overview | deepdive | research
     const activeRun = activeRunId ? runs?.[activeRunId] : null;
     const closeTimingTrades = React.useMemo(() => tradesForCloseBreachTiming(trades, activeRun), [trades, activeRun]);
     const p = React.useMemo(() => buildProtection(trades), [trades]);
@@ -215,6 +217,14 @@ export default function ProtectionLab() {
                 </div>
             )}
 
+            {/* ── Internal tabs (IA Phase 3) — Overview / Deep dive / Research ──── */}
+            <div className="px-6 mb-4">
+                <ProtTabBar tab={protTab} onChange={setProtTab} />
+            </div>
+
+            {/* ════════════════ OVERVIEW ════════════════ */}
+            {protTab === "overview" && (<>
+
             {/* Baseline KPI row — 8 chips (4×2 grid at lg; canonical kpi-strip base) */}
             <div className="kpi-strip mb-5 lg:!grid-cols-4">
                 <MetricChip label="Trades"       value={String(p.n)}              sub="active trade variant"         tone="primary"   icon={Hash} />
@@ -228,8 +238,10 @@ export default function ProtectionLab() {
                 <MetricChip label="No Hard Invalidation" value={String(p.nonBreached)} sub={`${p.breachUnknown} unknown`} tone={p.nonBreached ? "success" : "muted"} icon={ShieldCheck} />
             </div>
 
-            {/* Data quality panel — collapsed when all critical fields are present */}
-            <ProtectionDataQualityPanel trades={trades} />
+            {/* Compact coverage summary (full panel lives in Deep dive) */}
+            <div className="px-6 mt-2">
+                <CoverageSummary dataQuality={protectionDataQuality} pageBasis={protectionConfidence.pageBasis} />
+            </div>
 
             {/* ── ZONE 0 · VERDICT HERO — the 5-second answer ─────────────────── */}
             <div className="px-6 mt-2">
@@ -244,6 +256,14 @@ export default function ProtectionLab() {
                     onSelect={setSelectedProtectionMode}
                 />
             </div>
+
+            </>)}{/* ════════════════ /OVERVIEW ════════════════ */}
+
+            {/* ════════════════ DEEP DIVE ════════════════ */}
+            {protTab === "deepdive" && (<>
+
+            {/* Full data-quality coverage (supporting detail) */}
+            <ProtectionDataQualityPanel trades={trades} />
 
             <ProtectionSectionDivider
                 icon={<Shield className="w-3.5 h-3.5" />}
@@ -571,6 +591,11 @@ export default function ProtectionLab() {
                 hasProtectedData={Object.keys(protectionTradesByMode).length > 0}
             />
 
+            </>)}{/* ════════════════ /DEEP DIVE ════════════════ */}
+
+            {/* ════════════════ RESEARCH ════════════════ */}
+            {protTab === "research" && (<>
+
             {/* ── ZONE D · Research & workbench (demoted — not a decision surface) ── */}
             <ProtectionSectionDivider
                 icon={<Zap className="w-3.5 h-3.5" />}
@@ -598,6 +623,8 @@ export default function ProtectionLab() {
                 baselineMaxDD={p.maxDD}
                 activeRunId={activeRunId}
             />
+
+            </>)}{/* ════════════════ /RESEARCH ════════════════ */}
         </div>
     );
 }
@@ -617,6 +644,57 @@ const BASIS_LABEL = { exact: "EXACT", estimate: "ESTIMATE", insufficient: "INSUF
 
 function BasisPill({ basis }) {
     return <Pill tone={CONF_BASIS_TONE[basis] || "muted"}>{BASIS_LABEL[basis] || "—"}</Pill>;
+}
+
+// ── Internal tab bar (IA Phase 3) ─────────────────────────────────────────────
+const PROT_TABS = [
+    { key: "overview", label: "Overview",  hint: "Decision" },
+    { key: "deepdive", label: "Deep dive", hint: "Analysis" },
+    { key: "research", label: "Research",  hint: "Experimentation" },
+];
+function ProtTabBar({ tab, onChange }) {
+    return (
+        <div className="inline-flex items-center gap-1 p-1 clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.4)]">
+            {PROT_TABS.map((t) => {
+                const active = tab === t.key;
+                return (
+                    <button key={t.key} type="button" onClick={() => onChange(t.key)}
+                        className={cn(
+                            "px-3.5 py-1.5 text-[12px] font-ui font-semibold rounded-[2px] transition-colors",
+                            active
+                                ? "bg-[hsl(var(--accent-primary)/0.16)] text-[hsl(var(--accent-primary))] border border-[hsl(var(--accent-primary)/0.45)]"
+                                : "text-[hsl(var(--text-2))] border border-transparent hover:text-[hsl(var(--text))]",
+                        )}
+                    >
+                        {t.label}
+                        <span className="ml-1.5 text-[10px] font-normal opacity-70">{t.hint}</span>
+                    </button>
+                );
+            })}
+        </div>
+    );
+}
+
+// Compact data-readiness summary for the Overview tab (full panel lives in Deep dive).
+function CoverageSummary({ dataQuality, pageBasis }) {
+    const fields = dataQuality?.fields || [];
+    const total = fields.length;
+    const present = fields.filter((f) => f.status !== "missing").length;
+    const pct = total ? Math.round((present / total) * 100) : 0;
+    const tok = pageBasis === "exact" ? "--success" : pageBasis === "estimate" ? "--warning" : "--text-2";
+    return (
+        <div className="flex items-center gap-3 flex-wrap px-3 py-2 clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.35)]">
+            <span className="text-[10.5px] font-ui font-semibold uppercase tracking-[0.06em] text-[hsl(var(--text-2))]">Data readiness</span>
+            <div className="flex items-center gap-2 flex-1 min-w-[140px] max-w-[260px]">
+                <div className="flex-1 h-1.5 rounded-full bg-[hsl(var(--panel-2))] overflow-hidden">
+                    <div className="h-full rounded-full" style={{ width: `${pct}%`, background: `hsl(var(${tok}))` }} />
+                </div>
+                <span className="font-num tabular-nums text-[11px] text-[hsl(var(--text))]">{present}/{total} fields</span>
+            </div>
+            <BasisPill basis={pageBasis} />
+            <span className="text-[10.5px] font-ui text-[hsl(var(--text-2))]">Full coverage in Deep dive</span>
+        </div>
+    );
 }
 
 function ProtectionVerdictBadge({ verdict, lg = false }) {
