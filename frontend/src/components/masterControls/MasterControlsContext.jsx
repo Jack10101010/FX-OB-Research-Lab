@@ -20,10 +20,11 @@ import { REGISTRY_BY_KEY, highestRerunTierForKeys } from "@/data/configRegistry"
 import { buildRunConfigLoadReport, getDefaultBuilderConfig, buildBacktesterConfig } from "@/data/configTranslator";
 import { startSidecarRun, getSidecarRun, getSidecarRunBundle, cancelSidecarRun } from "@/data/sidecarClient";
 import { ingestRunBundle } from "@/data/importer";
-import { isCostOnlyDirty, rescoreCostsForBundle, buildRescoredBundle } from "./costRescore";
-import { isFilterOnlyDirty, buildTradePredicate, buildFilteredBundle } from "./tradeFilter";
+import { isCostOnlyDirty, rescoreCostsForBundle, buildRescoredBundle, COST_KEYS } from "./costRescore";
+import { isFilterOnlyDirty, buildTradePredicate, buildFilteredBundle, FILTER_KEYS } from "./tradeFilter";
 import { buildFftPreviewBundle } from "./controlSwap";
 import { canRescoreRr, rescoreRrForBundle, buildRrPreviewBundle } from "./rrRescore";
+import { composePreviewBundle } from "./previewComposer";
 
 // The single config key that drives the FFT preview lens (Phase 10B).
 const FFT_DRAFT_KEY = "triggeredEdgeCancelOnFirstFailedTag";
@@ -77,6 +78,58 @@ function rrSignature(runId, cfg) {
         runId: runId || null,
         [RR_DRAFT_KEY]: cfg?.[RR_DRAFT_KEY] ?? null,
     });
+}
+
+// ─── Phase 12B-2 — composed preview ──────────────────────────────────────────
+// The composed preview (previewComposer) combines the four instant transforms
+// (Swap → Filter → RR → Cost) into ONE bundle. It covers the MIXED case the four
+// single-kind lenses above cannot: more than one instant stage dirty at once
+// (e.g. filter + cost, RR + cost, filter + FFT). Single-kind dirty sets are still
+// handled by their dedicated lens, so this never fights them.
+//
+// The full set of instant-previewable draft keys (union of the four lens key-sets).
+// A dirty set is composer-eligible only when EVERY dirty field is in here AND at
+// least two distinct stage kinds are dirty. stopBuffer / entryBuffer and any
+// backend-tier field are intentionally absent (they need a real rerun).
+const COMPOSED_INSTANT_KEYS = new Set([
+    ...COST_KEYS,
+    ...FILTER_KEYS,
+    FFT_DRAFT_KEY,
+    RR_DRAFT_KEY,
+]);
+
+// Combined signature across every instant field (run id + cost + filter + FFT + RR).
+// Used so a manually-cleared composed bundle isn't rebuilt until one of the relevant
+// fields or the run changes (mirrors the per-lens signatures above, unified).
+function composedSignature(runId, cfg) {
+    return JSON.stringify({
+        runId: runId || null,
+        spread: cfg?.spread ?? null,
+        slippage: cfg?.slippage ?? null,
+        commission: cfg?.commission ?? null,
+        sessionFilter: cfg?.sessionFilter ?? null,
+        london: cfg?.london ?? null,
+        lull: cfg?.lull ?? null,
+        newYork: cfg?.newYork ?? null,
+        asia: cfg?.asia ?? null,
+        outside: cfg?.outside ?? null,
+        bosLong: cfg?.bosLong ?? null,
+        bosShort: cfg?.bosShort ?? null,
+        chochLong: cfg?.chochLong ?? null,
+        chochShort: cfg?.chochShort ?? null,
+        direction: cfg?.direction ?? null,
+        [FFT_DRAFT_KEY]: cfg?.[FFT_DRAFT_KEY] ?? null,
+        [RR_DRAFT_KEY]: cfg?.[RR_DRAFT_KEY] ?? null,
+    });
+}
+
+// Human label from the stages that actually applied, e.g. "Filter + Cost Preview".
+const COMPOSED_STAGE_LABEL = { fft: "FFT", filter: "Filter", rr: "RR", cost: "Cost" };
+function composedLabelFor(appliedStages) {
+    const parts = (Array.isArray(appliedStages) ? appliedStages : [])
+        .map((s) => COMPOSED_STAGE_LABEL[s])
+        .filter(Boolean);
+    return parts.length ? `${parts.join(" + ")} Preview` : "Composed Preview";
 }
 
 // ─── Preview state ────────────────────────────────────────────────────────────
@@ -153,6 +206,11 @@ const MasterControlsContext = createContext({
     rrPreviewUnavailable:    false,
     clearRrPreview:          () => {},
     applyRrPreviewLens:      () => {},
+    // Composed preview bundle — Phase 12B-2 (mixed instant stages in one bundle)
+    composedPreviewResult:   null,
+    localComposedBundle:     null,
+    clearComposedPreview:    () => {},
+    applyComposedPreviewLens: () => {},
 });
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
@@ -213,6 +271,13 @@ export function MasterControlsProvider({ children }) {
     const [rrPreviewUnavailable, setRrPreviewUnavailable] = useState(false);
     const rrSuppressRef = useRef("");
 
+    // ── Phase 12B-2 — composed preview (mixed instant stages) ───────────────
+    // Full result of composePreviewBundle ({ bundle, ok, appliedStages, stages, … }).
+    // Built ONLY when the dirty set spans ≥2 instant stage kinds (the case the four
+    // single lenses don't cover). Held in context ONLY — never stored / persisted.
+    const [composedPreviewResult, setComposedPreviewResult] = useState(null);
+    const composedSuppressRef = useRef("");
+
     // Reset draft AND preview whenever the active run changes
     useEffect(() => {
         setDraftConfigState(null);
@@ -227,6 +292,8 @@ export function MasterControlsProvider({ children }) {
         setLocalRrBundle(null);
         setRrPreviewUnavailable(false);
         rrSuppressRef.current = "";
+        setComposedPreviewResult(null);
+        composedSuppressRef.current = "";
     }, [activeRunId]);
 
     // ── activeConfig — derived from the active run bundle ───────────────────
@@ -353,6 +420,8 @@ export function MasterControlsProvider({ children }) {
         setLocalRrBundle(null);
         setRrPreviewUnavailable(false);
         rrSuppressRef.current = "";
+        setComposedPreviewResult(null);
+        composedSuppressRef.current = "";
     }, []);
 
     // ── Preview actions — Phase 4A ────────────────────────────────────────────
@@ -410,6 +479,7 @@ export function MasterControlsProvider({ children }) {
         setLocalFftBundle(null);
         setLocalRrBundle(null);
         setRrPreviewUnavailable(false);
+        setComposedPreviewResult(null);
     }, []);
 
     /**
@@ -449,6 +519,16 @@ export function MasterControlsProvider({ children }) {
     const clearRrPreview = useCallback(() => {
         rrSuppressRef.current = rrSignature(activeRunId, effectiveConfig);
         setLocalRrBundle(null);
+    }, [activeRunId, effectiveConfig]);
+
+    /**
+     * Manually dismiss the temporary composed bundle (drawer "Clear" button).
+     * Suppresses the auto-build effect for this exact combination of instant fields
+     * until one of them or the active run changes (Phase 12B-2).
+     */
+    const clearComposedPreview = useCallback(() => {
+        composedSuppressRef.current = composedSignature(activeRunId, effectiveConfig);
+        setComposedPreviewResult(null);
     }, [activeRunId, effectiveConfig]);
 
     /**
@@ -496,6 +576,7 @@ export function MasterControlsProvider({ children }) {
         setLocalFftBundle(null);
         setLocalRrBundle(null);
         setRrPreviewUnavailable(false);
+        setComposedPreviewResult(null);
     }, [preview.status, preview.job]);
 
     // ── Polling effect — drives "queued"/"running" → "completed"/"failed" ────
@@ -745,6 +826,53 @@ export function MasterControlsProvider({ children }) {
         }));
     }, [activeRunId, dirtyFieldList, effectiveConfig, highestRerunTier]); // eslint-disable-line react-hooks/exhaustive-deps
 
+    // ── Phase 12B-2 build effect — keep composedPreviewResult in sync (mixed only) ─
+    // Builds the composed preview ONLY when the dirty set is fully instant AND spans ≥2
+    // stage kinds (cost / filter / FFT / RR) — the case none of the four single lenses
+    // above handle (each requires its own kind exclusively). For single-kind dirty sets
+    // this stays null, leaving those lenses untouched. Composes from the RAW run bundle
+    // (lens-immune) so it never compounds with an already-applied lens. Passes ONLY the
+    // dirty stages' inputs, so a non-dirty stage is never spuriously applied. The composer
+    // degrades per stage (unavailable RR/cost/FFT are skipped, not fatal). No store writes,
+    // no addRunBundle, no setActiveRunId, no persistence. Sole writer of composedPreviewResult
+    // (plus the explicit resets above).
+    useEffect(() => {
+        const costDirty   = dirtyFieldList.some((k) => COST_KEYS.includes(k));
+        const filterDirty = dirtyFieldList.some((k) => FILTER_KEYS.includes(k));
+        const fftDirty    = dirtyFields.has(FFT_DRAFT_KEY);
+        const rrDirty     = dirtyFields.has(RR_DRAFT_KEY);
+        const stageKinds  = [costDirty, filterDirty, fftDirty, rrDirty].filter(Boolean).length;
+        const instantOnly = dirtyFieldList.length > 0
+            && dirtyFieldList.every((k) => COMPOSED_INSTANT_KEYS.has(k));
+
+        if (!instantOnly || stageKinds < 2 || !effectiveConfig || !activeRunId) {
+            composedSuppressRef.current = "";
+            setComposedPreviewResult(null);
+            return;
+        }
+        // Respect a manual dismissal of this exact combination.
+        if (composedSuppressRef.current === composedSignature(activeRunId, effectiveConfig)) return;
+
+        const sourceBundle = getRawRunData(activeRunId);
+        if (!sourceBundle) {
+            setComposedPreviewResult(null);
+            return;
+        }
+
+        // Pass only the dirty stages so a non-dirty stage is never applied.
+        const input = { dirtyFields: dirtyFieldList, rerunTier: highestRerunTier };
+        if (filterDirty) input.filters = effectiveConfig;
+        if (fftDirty)    input.fft = { fftEnabled: Boolean(effectiveConfig[FFT_DRAFT_KEY]) };
+        if (rrDirty)     input.rr = effectiveConfig[RR_DRAFT_KEY];
+        if (costDirty)   input.costs = {
+            spread: effectiveConfig.spread,
+            slippage: effectiveConfig.slippage,
+            commission: effectiveConfig.commission,
+        };
+
+        setComposedPreviewResult(composePreviewBundle(sourceBundle, input));
+    }, [activeRunId, dirtyFieldList, effectiveConfig, highestRerunTier]); // eslint-disable-line react-hooks/exhaustive-deps
+
     // ── Phase 8B — apply the temporary bundle to the whole app via the store lens ─
     // `previewLens` is read live from the store. The context re-renders on every store
     // notify() (it subscribes through useDataset above), so this read stays fresh.
@@ -883,6 +1011,51 @@ export function MasterControlsProvider({ children }) {
         }
     }, [localRrBundle, activeRunId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+    // ── Phase 12B-2 — derive the composed bundle + label from the result ─────────
+    // The applyable bundle exists only when at least one stage applied (result.ok).
+    // When nothing applied (e.g. every requested stage was unavailable) we keep the
+    // result for its stage warnings but expose no bundle, so there is nothing to Apply.
+    const localComposedBundle = useMemo(
+        () => (composedPreviewResult?.ok ? composedPreviewResult.bundle : null),
+        [composedPreviewResult],
+    );
+    const composedLabel = useMemo(
+        () => composedLabelFor(composedPreviewResult?.appliedStages),
+        [composedPreviewResult],
+    );
+
+    /** Apply the temporary composed bundle as a read-only Preview Lens (mode "composed"). */
+    const applyComposedPreviewLens = useCallback(() => {
+        if (!localComposedBundle || !activeRunId) return;
+        setPreviewLens({
+            sourceRunId: activeRunId,
+            bundle: localComposedBundle,
+            mode: "composed",
+            label: composedLabel,
+        });
+    }, [localComposedBundle, activeRunId, composedLabel]);
+
+    // Keep OUR composed lens in sync with localComposedBundle, mirroring the four lenses
+    // above. Only manages the "composed" lens — never touches a lens of another mode, so
+    // the composed lens and the four single-mode lenses can't fight: each sync clears /
+    // repushes only its own kind, and applying one mode overwrites the single store lens.
+    useEffect(() => {
+        const lens = getPreviewLens();
+        if (!lens || lens.mode !== "composed") return;
+        if (!localComposedBundle || !activeRunId || lens.sourceRunId !== activeRunId) {
+            clearPreviewLens();
+            return;
+        }
+        if (lens.bundle !== localComposedBundle) {
+            setPreviewLens({
+                sourceRunId: activeRunId,
+                bundle: localComposedBundle,
+                mode: "composed",
+                label: composedLabel,
+            });
+        }
+    }, [localComposedBundle, activeRunId]); // eslint-disable-line react-hooks/exhaustive-deps
+
     // ── Context value ────────────────────────────────────────────────────────
 
     const value = useMemo(() => ({
@@ -937,6 +1110,11 @@ export function MasterControlsProvider({ children }) {
         rrPreviewUnavailable,
         clearRrPreview,
         applyRrPreviewLens,
+        // Composed preview lens — Phase 12B-2
+        composedPreviewResult,
+        localComposedBundle,
+        clearComposedPreview,
+        applyComposedPreviewLens,
     }), [
         isOpen,
         openMasterControls,
@@ -977,6 +1155,11 @@ export function MasterControlsProvider({ children }) {
         rrPreviewUnavailable,
         clearRrPreview,
         applyRrPreviewLens,
+        composedPreviewResult,
+        localComposedBundle,
+        clearComposedPreview,
+        applyComposedPreviewLens,
+        composedLabel,
     ]);
 
     return (

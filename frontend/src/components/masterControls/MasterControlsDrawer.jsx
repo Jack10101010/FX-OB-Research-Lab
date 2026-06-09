@@ -180,6 +180,7 @@ export function MasterControlsDrawer() {
         localFilterBundle, clearLocalFilterBundle, applyLocalFilterLens,
         localFftBundle, clearFftPreview, applyFftPreviewLens,
         localRrBundle, rrPreviewUnavailable, clearRrPreview, applyRrPreviewLens,
+        composedPreviewResult, localComposedBundle, clearComposedPreview, applyComposedPreviewLens,
     } = useMasterControls();
     const { activeRunId } = useDataset();
 
@@ -257,6 +258,14 @@ export function MasterControlsDrawer() {
     const rrAfterMetrics = useMemo(
         () => (localRrBundle ? extractPreviewMetrics(localRrBundle) : null),
         [localRrBundle],
+    );
+
+    // Phase 12B-2 — composed preview (mixed instant stages). The context builds it only
+    // when ≥2 instant stage kinds are dirty, so its mere presence drives this block.
+    const composedLensActive = !!(
+        previewLens?.active
+        && previewLens.mode === "composed"
+        && previewLens.sourceRunId === activeRunId
     );
 
     return (
@@ -748,6 +757,23 @@ export function MasterControlsDrawer() {
                                     Backend Run Preview is still available below.
                                 </p>
                             </div>
+                        )}
+
+                        {/* Composed preview — Phase 12B-2. Shown when ≥2 instant stage kinds
+                            are dirty (filter + cost, RR + cost, filter + FFT, …) — the mixed
+                            case the four single-stage blocks above don't cover. One bundle,
+                            canonical order Swap → Filter → RR → Cost; unavailable stages are
+                            flagged but never block the others. */}
+                        {composedPreviewResult && (
+                            <ComposedPreviewBlock
+                                result={composedPreviewResult}
+                                bundle={localComposedBundle}
+                                lensActive={composedLensActive}
+                                activeMetrics={activeMetrics}
+                                onApply={applyComposedPreviewLens}
+                                onExit={exitPreviewLens}
+                                onClear={clearComposedPreview}
+                            />
                         )}
                     </section>
 
@@ -1499,6 +1525,137 @@ function CostRescorePanel({ data }) {
                 Active baseline uses the run&apos;s primary variant
                 {a.variant ? ` (${a.variant})` : ""}, raw R, and all rows. It may differ from the
                 page&apos;s selected scenario / Trade Sanity view.
+            </p>
+        </div>
+    );
+}
+
+// ─── Composed preview block — Phase 12B-2 (mixed instant stages) ──────────────
+
+const COMPOSED_STAGE_ORDER = ["fft", "filter", "rr", "cost"];
+const COMPOSED_STAGE_LABEL = { fft: "FFT", filter: "Filter", rr: "RR", cost: "Cost" };
+
+/** A small per-stage chip: green = applied, red = unavailable, dim = skipped (no-op). */
+function ComposedStageChip({ label, state }) {
+    const cls =
+        state === "applied"
+            ? "text-[hsl(142_55%_55%)] bg-[hsl(142_55%_45%/0.12)] border-[hsl(142_55%_45%/0.35)]"
+            : state === "unavailable"
+                ? "text-[hsl(0_65%_62%)] bg-[hsl(0_60%_50%/0.10)] border-[hsl(0_60%_50%/0.3)]"
+                : "text-muted-lab bg-[hsl(var(--panel-2))] border-[hsl(var(--border-soft))]";
+    const suffix = state === "applied" ? "" : state === "unavailable" ? " ✕" : " –";
+    return (
+        <span className={`text-[8px] px-1 py-0.5 rounded border font-medium leading-none ${cls}`}>
+            {label}{suffix}
+        </span>
+    );
+}
+
+/**
+ * Composed-preview readout. Pure display: reads the composePreviewBundle result
+ * (stages / appliedStages / unavailableStages / warnings) plus the applyable bundle,
+ * and surfaces Apply / Exit / Clear. Never mutates the store. The "Active" column is
+ * the raw run (activeMetrics); the "after" column is the composed bundle's metrics.
+ */
+function ComposedPreviewBlock({ result, bundle, lensActive, activeMetrics, onApply, onExit, onClear }) {
+    const after = useMemo(() => (bundle ? extractPreviewMetrics(bundle) : null), [bundle]);
+    const stages = result?.stages || {};
+    const warnings = Array.isArray(result?.warnings) ? result.warnings : [];
+    const unavailable = Array.isArray(result?.unavailableStages) ? result.unavailableStages : [];
+    const hasBundle = !!bundle;
+
+    const chips = COMPOSED_STAGE_ORDER
+        .filter((s) => stages[s]?.requested)
+        .map((s) => {
+            const st = stages[s];
+            const state = st.applied ? "applied" : st.available === false ? "unavailable" : "skipped";
+            return { key: s, label: COMPOSED_STAGE_LABEL[s], state };
+        });
+
+    return (
+        <div className={`mt-2 rounded border px-3 py-2 ${
+            lensActive
+                ? "border-[hsl(var(--warning)/0.5)] bg-[hsl(var(--warning)/0.10)]"
+                : "border-[hsl(var(--warning)/0.28)] bg-[hsl(var(--warning)/0.05)]"
+        }`}>
+            <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] font-semibold uppercase tracking-widest text-[hsl(var(--warning))]">
+                    {lensActive ? "Applied to page preview" : hasBundle ? "Composed preview ready" : "Composed preview"}
+                </span>
+                <div className="flex items-center gap-1.5">
+                    {lensActive ? (
+                        <button
+                            type="button"
+                            onClick={onExit}
+                            className="text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--warning)/0.45)] text-[hsl(var(--warning))] hover:bg-[hsl(var(--warning)/0.15)] transition-colors"
+                        >
+                            Exit page preview
+                        </button>
+                    ) : (
+                        <>
+                            {hasBundle && (
+                                <button
+                                    type="button"
+                                    onClick={onApply}
+                                    className="text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.12)] text-[hsl(var(--warning))] font-medium hover:bg-[hsl(var(--warning)/0.2)] transition-colors"
+                                >
+                                    Apply to page
+                                </button>
+                            )}
+                            <button
+                                type="button"
+                                onClick={onClear}
+                                className="text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--border-soft))] text-muted-lab hover:text-white transition-colors"
+                            >
+                                Clear
+                            </button>
+                        </>
+                    )}
+                </div>
+            </div>
+
+            {/* Per-stage chips in canonical order */}
+            {chips.length > 0 && (
+                <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                    {chips.map((c) => (
+                        <ComposedStageChip key={c.key} label={c.label} state={c.state} />
+                    ))}
+                </div>
+            )}
+
+            {/* Before → after metrics (raw run vs composed) */}
+            {hasBundle && after?.ok && activeMetrics?.ok && (
+                <p className="mt-1.5 text-[9px] font-num tabular-nums text-muted-lab leading-snug">
+                    Trades {fmtPreviewInt(activeMetrics.trades)}
+                    <span className="text-muted-lab"> → </span>
+                    {fmtPreviewInt(after.trades)}
+                    <span className="mx-1 text-[hsl(var(--border-mid))]">·</span>
+                    Net R {fmtPreviewR(activeMetrics.netR)}
+                    <span className="text-muted-lab"> → </span>
+                    {fmtPreviewR(after.netR)}
+                </p>
+            )}
+
+            {/* Unavailable-stage reasons — a dead stage never blocks the others */}
+            {unavailable.map((s) => (
+                <p key={s} className="mt-0.5 text-[9px] text-[hsl(0_65%_62%)] leading-snug">
+                    {COMPOSED_STAGE_LABEL[s] || s} unavailable{stages[s]?.reason ? `: ${stages[s].reason}` : ""}
+                </p>
+            ))}
+
+            {/* Stage warnings (e.g. RR stop-anchored boundary) */}
+            {warnings.map((w, i) => (
+                <p key={`w${i}`} className="mt-0.5 text-[9px] text-[hsl(var(--warning)/0.85)] leading-snug">
+                    {w}
+                </p>
+            ))}
+
+            <p className="mt-0.5 text-[9px] text-muted-lab/70 leading-snug">
+                {lensActive
+                    ? "The page is viewing temporary composed data — not saved."
+                    : hasBundle
+                        ? "Order: Swap → Filter → RR → Cost · Not saved · Not applied to page yet"
+                        : "No stage could be applied to this run."}
             </p>
         </div>
     );
