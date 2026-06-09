@@ -397,6 +397,16 @@ export function parseTradesCSV(text) {
             commission_r: numOrNull(pick(r, "commission_r", "commissionR")),
             totalCostR: numOrNull(pick(r, "total_cost_r", "totalCostR")),
             total_cost_r: numOrNull(pick(r, "total_cost_r", "totalCostR")),
+            // Stop-anchored post-entry excursion (backend Phase 11A). Powers the future
+            // RR Preview Lens. Absent in old bundles → null (numeric) / "" (model); no throw.
+            mfeR: numOrNull(pick(r, "mfe_r", "mfeR")),
+            mfe_r: numOrNull(pick(r, "mfe_r", "mfeR")),
+            maeR: numOrNull(pick(r, "mae_r", "maeR")),
+            mae_r: numOrNull(pick(r, "mae_r", "maeR")),
+            rIfNoTarget: numOrNull(pick(r, "r_if_no_target", "rIfNoTarget")),
+            r_if_no_target: numOrNull(pick(r, "r_if_no_target", "rIfNoTarget")),
+            rIfNoTargetModel: String(pick(r, "r_if_no_target_model", "rIfNoTargetModel") || ""),
+            r_if_no_target_model: String(pick(r, "r_if_no_target_model", "rIfNoTargetModel") || ""),
             outcome,
             obWidth:        Number(pick(r, "ob_width", "obwidth") ?? 0),
             reverseConflict: Boolean(pick(r, "reverse_conflict", "reverse_cancel")),
