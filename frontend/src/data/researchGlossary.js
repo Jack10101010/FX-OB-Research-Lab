@@ -357,6 +357,56 @@ export const GLOSSARY = {
         ],
     },
 
+    // ── Failures Lab · Distance to Stop (MFE) ────────────────────────────────────
+    distance_before_stop: {
+        term: "Distance Before Stop",
+        friendlyName: "Distance Before Stop",
+        definition: "How far a losing trade moved in your favour (in R) before it ultimately stopped out.",
+        whyItMatters: "Separates trades that never worked from trades that nearly hit target — the core input for break-even and partials research.",
+    },
+    mfe: {
+        term: "MFE",
+        friendlyName: "Max Favourable Excursion",
+        definition: "The peak profit, in R, a trade reached before exiting (1R = the stop distance).",
+        whyItMatters: "It's the highest a trade got in your favour — what a break-even or partial could have captured.",
+    },
+    raw_r_bucket: {
+        term: "Raw R bucket",
+        friendlyName: "Raw R bucket",
+        definition: "Losers grouped by how far they moved in your favour, measured in R (not % of target).",
+        whyItMatters: "R buckets survive RR / target changes and map directly to risk, so the read stays valid as the strategy evolves.",
+    },
+    dist_never_moved: {
+        term: "Never moved",
+        friendlyName: "Never moved in favour",
+        definition: "Losers whose favourable excursion was effectively zero — price never moved your way.",
+        whyItMatters: "Break-even can't help these; they fail at or near entry.",
+    },
+    dist_instant_failure: {
+        term: "Instant failure",
+        friendlyName: "Instant failure",
+        definition: "Losers that moved less than 0.25R in favour before stopping out.",
+        whyItMatters: "Too little favourable movement for any break-even or partial to engage.",
+    },
+    dist_almost_worked: {
+        term: "Almost worked",
+        friendlyName: "Almost worked",
+        definition: "Losers that reached 1R or more in favour before failing.",
+        whyItMatters: "These are the strongest break-even / partial candidates — they moved a full risk distance your way first.",
+    },
+    contribution_pct: {
+        term: "Contribution %",
+        friendlyName: "Loss-R contribution %",
+        definition: "A group's share of total loss-R — how much of the damage it accounts for.",
+        whyItMatters: "Ranks by damage, not failure rate: a 65% rate on 40 trades hurts more than 90% on 5.",
+    },
+    loss_r_contribution: {
+        term: "Loss-R",
+        friendlyName: "Loss-R contribution",
+        definition: "Total R lost by the trades in a group (sum of their negative R).",
+        whyItMatters: "The absolute size of the damage a session, structure, or setup is causing.",
+    },
+
     // ── OB Retest Lab (Phase C education layer; additive, no logic) ──────────────
     retest_survival: {
         friendlyName: "Survival Rate",
