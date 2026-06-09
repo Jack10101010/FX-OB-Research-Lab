@@ -9,6 +9,8 @@ import {
     buildDataQuality,
     buildProtectionConfidence,
     classifyConfidence,
+    deriveExactVerdict,
+    PROTECTION_NEUTRAL_BAND_R,
 } from "../../components/lab/protection/protectionAnalytics.js";
 
 let failures = 0;
@@ -74,6 +76,22 @@ const insufficientCase = buildProtectionConfidence({
 ok(insufficientCase.pageBasis === "insufficient", "no exact + no fields → pageBasis insufficient");
 ok(insufficientCase.estimates.every((e) => e.basis === "insufficient"), "all estimate approaches classify as insufficient");
 ok(insufficientCase.estimates.every((e) => e.missing.length > 0), "insufficient estimates report missing fields");
+
+// ── 4. deriveExactVerdict (exact rows only; drawdown excluded) ────────────────
+console.log("deriveExactVerdict");
+ok(deriveExactVerdict({ netVsBaseline: 3.0, winnersCut: 2, loserRSaved: 5 }).key === "helping", "net +3 → helping");
+ok(deriveExactVerdict({ netVsBaseline: 0.0 }).key === "neutral", "net 0 → neutral");
+ok(deriveExactVerdict({ netVsBaseline: -3.0 }).key === "hurting", "net -3 → hurting");
+ok(deriveExactVerdict({ isBaseline: true, netVsBaseline: 9 }) === null, "baseline row → no verdict");
+ok(/winner cost unknown/.test(deriveExactVerdict({ netVsBaseline: 3.0 }).reason),
+    "helping with no winner/loser breakdown → 'winner cost unknown' qualifier");
+ok(deriveExactVerdict({ netVsBaseline: PROTECTION_NEUTRAL_BAND_R - 0.01 }).key === "neutral",
+    "within neutral band → neutral");
+
+// Drawdown-exclusion guard: a wildly different maxDD must NOT change the verdict.
+const vNoDD  = deriveExactVerdict({ netVsBaseline: 3.0 });
+const vBigDD = deriveExactVerdict({ netVsBaseline: 3.0, maxDD: -999 });
+ok(vNoDD.key === vBigDD.key, "maxDD does not influence the verdict (drawdown excluded)");
 
 console.log(`\n${failures === 0 ? "ALL PASS" : failures + " FAILURE(S)"}`);
 process.exit(failures === 0 ? 0 : 1);

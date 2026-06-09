@@ -16,7 +16,7 @@ import { ProtectionDataQualityPanel } from "@/components/lab/protection/Protecti
 import { ProtectionSectionDivider } from "@/components/lab/protection/ProtectionSectionDivider";
 import { ProtectionVisualAnalytics } from "@/components/lab/protection/ProtectionVisualAnalytics";
 import { ProtectionPowerTools } from "@/components/lab/protection/ProtectionPowerTools";
-import { buildPairedTrades, calcEfficiencyRatio, calcRobustnessScore, buildDataQuality, buildProtectionConfidence } from "@/components/lab/protection/protectionAnalytics";
+import { buildPairedTrades, calcEfficiencyRatio, calcRobustnessScore, buildDataQuality, buildProtectionConfidence, prettyModeName, deriveExactVerdict, estimateVerdict, needsDataVerdict } from "@/components/lab/protection/protectionAnalytics";
 
 // ── Protection Lab V1 ────────────────────────────────────────────────
 // Read-only research surface for defensive-logic ideas derived from enriched
@@ -110,6 +110,25 @@ export default function ProtectionLab() {
         () => buildProtectionConfidence({ exactRows: exactProtectionRows, dataQuality: protectionDataQuality }),
         [exactProtectionRows, protectionDataQuality],
     );
+
+    // Verdict layer (Phase 2). Exact rows get a Net-vs-Unprotected verdict and are
+    // ranked; estimate / missing-data approaches come from the confidence layer and
+    // are kept in separate, unranked groups. Drawdown is intentionally not used.
+    const protectionVerdicts = React.useMemo(() => {
+        const exact = (exactProtectionRows || [])
+            .filter((r) => r && !r.isBaseline && r.mode)
+            .map((r) => ({ ...r, label: prettyModeName(r.mode), verdict: deriveExactVerdict(r) }))
+            .sort((a, b) => {
+                const av = isFiniteNumber(a.netVsBaseline) ? Number(a.netVsBaseline) : -Infinity;
+                const bv = isFiniteNumber(b.netVsBaseline) ? Number(b.netVsBaseline) : -Infinity;
+                return bv - av;
+            });
+        const baselineRow = (exactProtectionRows || []).find((r) => r.isBaseline) || null;
+        const estimateRows = (protectionConfidence.estimates || []).filter((e) => e.basis === "estimate");
+        const needsDataRows = (protectionConfidence.estimates || []).filter((e) => e.basis === "insufficient");
+        const best = exact[0] || null; // highest Net vs Unprotected (exact only)
+        return { exact, baselineRow, estimateRows, needsDataRows, best };
+    }, [exactProtectionRows, protectionConfidence]);
 
     // ── Phase 1–3 upgrade additions ──────────────────────────────────────────
     const protectionTradesByMode = React.useMemo(() => {
@@ -212,15 +231,23 @@ export default function ProtectionLab() {
             {/* Data quality panel — collapsed when all critical fields are present */}
             <ProtectionDataQualityPanel trades={trades} />
 
-            {/* TEMPORARY · validation only — confirms the data-derived confidence
-                classification (Restructure Plan Step 2). Not the verdict UI; to be
-                removed/replaced when the verdict-first hero + zones land. */}
-            <ConfidenceClassificationValidation confidence={protectionConfidence} />
+            {/* ── ZONE 0 · VERDICT HERO — the 5-second answer ─────────────────── */}
+            <div className="px-6 mt-2">
+                <ProtectionHero pageBasis={protectionConfidence.pageBasis} verdicts={protectionVerdicts} />
+            </div>
 
+            {/* ── ZONE A · PROTECTION MODES (A1 exact / A2 estimate / A3 needs-data) ── */}
+            <div className="px-6 mt-4">
+                <ProtectionVerdictZones
+                    verdicts={protectionVerdicts}
+                    selected={selectedProtectionMode}
+                    onSelect={setSelectedProtectionMode}
+                />
+            </div>
 
             <ProtectionSectionDivider
                 icon={<Shield className="w-3.5 h-3.5" />}
-                label="Protection Overview"
+                label="Protection Evidence"
                 subLabel="exact backtests, research estimates, and defensive screening"
             />
 
@@ -275,7 +302,7 @@ export default function ProtectionLab() {
                                 { key: "protectionExits", label: "Defense Exits", align: "right", render: (r) => fmtCount(r.protectionExits) },
                                 { key: "avgProtectionExitR", label: "Avg Exit R", align: "right", render: (r) => fmtMaybeExp(r.avgProtectionExitR) },
                                 { key: "totalProtectionExitR", label: "Total Exit R", align: "right", render: (r) => fmtMaybeR(r.totalProtectionExitR) },
-                                { key: "winnersCut", label: "Winner Cost", align: "right", render: (r) => fmtCount(r.winnersCut) },
+                                { key: "winnersCut", label: "Winners cut", align: "right", render: (r) => fmtCount(r.winnersCut) },
                                 { key: "loserRSaved", label: "Loss R Saved", align: "right", render: (r) => fmtMaybeR(r.loserRSaved) },
                                 { key: "netVsBaseline", label: "Net vs Unprotected", align: "right", render: (r) => <DeltaVsBaseline row={r} /> },
                             ]}
@@ -287,15 +314,8 @@ export default function ProtectionLab() {
                     </NeonPanel>
                 )}
 
-                <WhatIfFilterSimulator
-                    filters={WHAT_IF_FILTERS}
-                    activeFilters={whatIfFilters}
-                    onToggle={(key) => setWhatIfFilters((prev) => ({ ...prev, [key]: !prev[key] }))}
-                    onClear={() => setWhatIfFilters({})}
-                    onPreset={(keys) => setWhatIfFilters(Object.fromEntries(keys.map((key) => [key, true])))}
-                    onRestoreFilters={(keys) => setWhatIfFilters(Object.fromEntries((keys || []).map((key) => [key, true])))}
-                    result={whatIf}
-                />
+                {/* What-If screening simulator moved to the Protection Workbench zone
+                    (research surface — demoted below the decision-grade evidence). */}
 
                 {/* A) Baseline */}
                 <NeonPanel title={hasExactProtection ? "A · Unprotected Baseline · Research Reference" : "A · Unprotected Baseline"} action={<ConfidenceTag level="exact" />}>
@@ -532,11 +552,13 @@ export default function ProtectionLab() {
                 </NeonPanel>
             </div>
 
-            {/* ── Phase 2: Visual Analytics ──────────────────────────────────────── */}
+            {/* ── ZONE B · Selected-mode deep dive ───────────────────────────────── */}
             <ProtectionSectionDivider
                 icon={<BarChart2 className="w-3.5 h-3.5" />}
-                label="Visual Analytics"
-                subLabel="equity impact, R distribution, drawdown, and OB risk profile"
+                label={selectedProtectionMode ? `Inspecting: ${prettyModeName(selectedProtectionMode)}` : "Visual Analytics"}
+                subLabel={selectedProtectionMode
+                    ? "Selected mode · equity impact, R distribution, drawdown, OB risk — click a row in A1 to change"
+                    : "equity impact, R distribution, drawdown, and OB risk profile"}
                 className="mt-4"
             />
             <ProtectionVisualAnalytics
@@ -549,13 +571,24 @@ export default function ProtectionLab() {
                 hasProtectedData={Object.keys(protectionTradesByMode).length > 0}
             />
 
-            {/* ── Phase 3: Power Tools ───────────────────────────────────────────── */}
+            {/* ── ZONE D · Research & workbench (demoted — not a decision surface) ── */}
             <ProtectionSectionDivider
                 icon={<Zap className="w-3.5 h-3.5" />}
-                label="Protection Workbench"
-                subLabel="paired trade audit, mode matrix, and research hypotheses"
+                label="Research & Workbench"
+                subLabel="what-if screening, paired trade audit, mode matrix, and research hypotheses"
                 className="mt-4"
             />
+            <div className="px-6 mb-4">
+                <WhatIfFilterSimulator
+                    filters={WHAT_IF_FILTERS}
+                    activeFilters={whatIfFilters}
+                    onToggle={(key) => setWhatIfFilters((prev) => ({ ...prev, [key]: !prev[key] }))}
+                    onClear={() => setWhatIfFilters({})}
+                    onPreset={(keys) => setWhatIfFilters(Object.fromEntries(keys.map((key) => [key, true])))}
+                    onRestoreFilters={(keys) => setWhatIfFilters(Object.fromEntries((keys || []).map((key) => [key, true])))}
+                    result={whatIf}
+                />
+            </div>
             <ProtectionPowerTools
                 baselineTrades={trades}
                 tradesByMode={protectionTradesByMode}
@@ -569,68 +602,208 @@ export default function ProtectionLab() {
     );
 }
 
-// ── TEMPORARY validation surface (Restructure Plan · Step 2) ─────────────────
-// Renders the data-derived confidence classification so the EXACT / ESTIMATE /
-// INSUFFICIENT split can be visually verified before the verdict-first UI is
-// built. Intentionally minimal and clearly labeled; to be removed/replaced by the
-// verdict hero + A1/A2/A3 zones in a later, separately-approved phase.
+// ── Verdict-first UI (Phase 2) ───────────────────────────────────────────────
+// Confidence chip tones (data-derived basis) + verdict tones. Both map to the
+// theme tokens used elsewhere; no hardcoded colours.
 const CONF_BASIS_TONE = { exact: "success", estimate: "warning", insufficient: "muted" };
+const VERDICT_TOKEN = {
+    success:   "--success",
+    warning:   "--warning",
+    danger:    "--danger",
+    secondary: "--accent-secondary",
+    muted:     "--text-2",
+};
+const BASIS_LABEL = { exact: "EXACT", estimate: "ESTIMATE", insufficient: "INSUFFICIENT" };
+
 function BasisPill({ basis }) {
-    return <Pill tone={CONF_BASIS_TONE[basis] || "muted"}>{String(basis || "—").toUpperCase()}</Pill>;
+    return <Pill tone={CONF_BASIS_TONE[basis] || "muted"}>{BASIS_LABEL[basis] || "—"}</Pill>;
 }
-function ConfidenceClassificationValidation({ confidence }) {
-    if (!confidence) return null;
-    const { pageBasis, exactModes = [], estimates = [] } = confidence;
+
+function ProtectionVerdictBadge({ verdict, lg = false }) {
+    if (!verdict) return null;
+    const tok = VERDICT_TOKEN[verdict.tone] || "--text-2";
     return (
-        <NeonPanel
-            className="mx-6 mb-4"
-            title="Confidence Classification · validation (temporary)"
-            collapsible
-            defaultCollapsed
-            action={<BasisPill basis={pageBasis} />}
+        <span
+            className={cn("inline-flex items-center font-ui font-semibold rounded-[2px] whitespace-nowrap",
+                lg ? "text-[14px] px-3 py-1" : "text-[12px] px-2.5 py-1")}
+            style={{ color: `hsl(var(${tok}))`, background: `hsl(var(${tok})/0.14)`, border: `1px solid hsl(var(${tok})/0.40)` }}
         >
-            <p className="mb-3 text-[11.5px] font-ui text-[hsl(var(--text-2))]">
-                Data-derived basis per protection approach (not a verdict). Exact = exporter backtest present ·
-                Estimate = directional only · Insufficient = required fields missing.
-            </p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                    <div className="mb-1.5 text-[10px] font-ui font-semibold uppercase tracking-[0.05em] text-[hsl(var(--text-2))]">
-                        Exact modes ({exactModes.length})
+            {verdict.label}
+        </span>
+    );
+}
+
+function fmtSignedR(v) {
+    if (v == null || !isFiniteNumber(v)) return "—";
+    const n = Number(v);
+    return `${n >= 0 ? "+" : ""}${n.toFixed(1)}R`;
+}
+
+// ── ZONE 0 · Verdict hero ─────────────────────────────────────────────────────
+function ProtectionHero({ pageBasis, verdicts }) {
+    const { best, needsDataRows = [] } = verdicts || {};
+
+    // Exact data present → recommend based on the best exact mode's verdict.
+    if (pageBasis === "exact" && best) {
+        const helping = best.verdict?.key === "helping";
+        const tok = helping ? "--success" : "--text-2";
+        const headline = helping ? `Use ${best.label}` : "Stay unprotected";
+        const sub = helping
+            ? `${best.label} improves results vs trading unprotected.`
+            : "No protection mode beats the unprotected baseline.";
+        const action = helping ? "Apply this protection to the strategy" : "Trade unprotected";
+        return (
+            <HeroFrame tok={tok} eyebrow="Protection verdict" basis="exact"
+                headline={headline} sub={sub} action={action}
+                metric={best.netVsBaseline} metricLabel="Net vs unprotected"
+                badge={best.verdict} />
+        );
+    }
+
+    // Estimate-only → directional, must be validated. Never a "use it".
+    if (pageBasis === "estimate") {
+        return (
+            <HeroFrame tok="--warning" eyebrow="Protection verdict" basis="estimate"
+                headline="Validate first"
+                sub="Only directional estimates are available (optimistic, unproven). No exact backtest yet."
+                action="Run an exact protection backtest before acting"
+                badge={{ label: "Promising (Estimate)", tone: "warning" }} />
+        );
+    }
+
+    // Missing data → cannot evaluate.
+    const missing = Array.from(new Set(needsDataRows.flatMap((r) => r.missing || []))).join(", ");
+    return (
+        <HeroFrame tok="--text-2" eyebrow="Protection verdict" basis="insufficient"
+            headline="Can't evaluate protection yet"
+            sub={missing ? `Required exporter fields missing: ${missing}.` : "Required exporter fields are missing."}
+            action="Export the required fields and re-run" />
+    );
+}
+
+function HeroFrame({ tok, eyebrow, basis, headline, sub, action, metric, metricLabel, badge }) {
+    return (
+        <div className="clip-bevel-sm border px-6 py-5" style={{ borderColor: `hsl(var(${tok})/0.50)`, background: `hsl(var(${tok})/0.07)` }}>
+            <div className="flex items-start justify-between gap-6 flex-wrap">
+                <div className="min-w-0">
+                    <div className="flex items-center gap-2 mb-2">
+                        <span className="text-[10.5px] font-ui font-semibold uppercase tracking-[0.08em] text-[hsl(var(--text-2))]">{eyebrow}</span>
+                        <BasisPill basis={basis} />
                     </div>
-                    {exactModes.length ? (
-                        <div className="space-y-1">
-                            {exactModes.map((m) => (
-                                <div key={m.key} className="flex items-center justify-between gap-2 text-[11.5px] font-ui text-[hsl(var(--text))]">
-                                    <span className="truncate">{m.label}</span>
-                                    <BasisPill basis={m.basis} />
-                                </div>
-                            ))}
-                        </div>
-                    ) : (
-                        <div className="text-[11px] font-ui text-[hsl(var(--text-2))]">No exporter-backed modes loaded.</div>
-                    )}
+                    <div className="flex items-center gap-3">
+                        <span className="w-1.5 h-9 rounded-full shrink-0" style={{ background: `hsl(var(${tok}))` }} />
+                        <span className="font-display font-semibold text-[28px] leading-none tracking-tight" style={{ color: `hsl(var(${tok}))` }}>{headline}</span>
+                    </div>
+                    <div className="mt-3 text-[13px] leading-snug text-[hsl(var(--text-2))]">{sub}</div>
+                    {badge && <div className="mt-2.5"><ProtectionVerdictBadge verdict={badge} /></div>}
                 </div>
-                <div>
-                    <div className="mb-1.5 text-[10px] font-ui font-semibold uppercase tracking-[0.05em] text-[hsl(var(--text-2))]">
-                        Estimate approaches
+                {metric != null && isFiniteNumber(metric) && (
+                    <div className="text-right shrink-0">
+                        <div className="font-num tabular-nums text-[40px] font-semibold leading-none" style={{ color: `hsl(var(${tok}))` }}>{fmtSignedR(metric)}</div>
+                        <div className="mt-1.5 text-[10.5px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--text-2))]">{metricLabel}</div>
                     </div>
-                    <div className="space-y-1">
-                        {estimates.map((e) => (
-                            <div key={e.key} className="flex items-center justify-between gap-2 text-[11.5px] font-ui text-[hsl(var(--text))]">
-                                <span className="truncate">
-                                    {e.label}
-                                    {e.basis === "insufficient" && e.missing?.length ? (
-                                        <span className="ml-1.5 text-[10px] text-[hsl(var(--text-2))]">· needs {e.missing.join(", ")}</span>
-                                    ) : null}
-                                </span>
-                                <BasisPill basis={e.basis} />
+                )}
+            </div>
+            <div className="mt-4 pt-3 flex items-center gap-2.5 border-t border-[hsl(var(--border-soft))]">
+                <span className="text-[10.5px] font-ui font-semibold uppercase tracking-[0.06em] text-[hsl(var(--text-2))] shrink-0">Do next</span>
+                <span className="inline-flex items-center gap-1.5 text-[13.5px] font-ui font-semibold text-[hsl(var(--text))]">
+                    <span style={{ color: `hsl(var(${tok}))` }}>→</span>{action}
+                </span>
+            </div>
+        </div>
+    );
+}
+
+// ── ZONE A · Ranked modes (A1 exact / A2 estimate / A3 needs-data) ────────────
+function ProtectionVerdictZones({ verdicts, selected, onSelect }) {
+    const { exact = [], baselineRow, estimateRows = [], needsDataRows = [] } = verdicts || {};
+    return (
+        <div className="space-y-4">
+            {/* A1 — Exact, ranked, recommendable */}
+            <NeonPanel title="A1 · Exact backtests — decision-grade" action={<Pill tone="success">{exact.length} MODES</Pill>}>
+                {exact.length ? (
+                    <div className="overflow-x-auto scrollbar-thin">
+                        <table className="w-full border-separate border-spacing-0">
+                            <thead>
+                                <tr>
+                                    {[["Mode", "left"], ["Verdict", "left"], ["Net vs Unprotected", "right"], ["Winners cut", "right"], ["Loss R saved", "right"], ["Trades", "right"], ["", "right"]].map(([h, a], i) => (
+                                        <th key={i} className={cn("text-[10.5px] font-ui font-semibold uppercase tracking-[0.05em] text-[hsl(var(--text-2))] px-3 py-2.5", a === "right" ? "text-right" : "text-left")}>{h}</th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {baselineRow && (
+                                    <tr className="border-t border-[hsl(var(--border-soft)/0.4)]">
+                                        <td className="px-3 py-3 text-[13px] font-ui text-[hsl(var(--accent-secondary))] whitespace-nowrap">Unprotected (reference)</td>
+                                        <td className="px-3 py-3 text-[11.5px] font-ui text-[hsl(var(--text-2))]">baseline</td>
+                                        <td className="px-3 py-3 text-right font-num tabular-nums text-[13px] text-[hsl(var(--text-2))]">0.0R</td>
+                                        <td className="px-3 py-3 text-right text-[hsl(var(--text-2))]">—</td>
+                                        <td className="px-3 py-3 text-right text-[hsl(var(--text-2))]">—</td>
+                                        <td className="px-3 py-3 text-right font-num tabular-nums text-[12px] text-[hsl(var(--text-2))]">{fmtCount(baselineRow.trades)}</td>
+                                        <td className="px-3 py-3" />
+                                    </tr>
+                                )}
+                                {exact.map((r) => {
+                                    const isSel = r.mode === selected;
+                                    const nvTok = Number(r.netVsBaseline) > 0 ? "--success" : Number(r.netVsBaseline) < 0 ? "--danger" : "--text-2";
+                                    return (
+                                        <tr key={r.mode} onClick={() => onSelect && onSelect(r.mode)}
+                                            className={cn("group cursor-pointer transition-colors border-t border-[hsl(var(--border-soft)/0.4)]",
+                                                isSel ? "bg-[hsl(var(--accent-primary)/0.12)]" : "hover:bg-[hsl(var(--panel-2)/0.6)]")}>
+                                            <td className="px-3 py-3.5 text-[13px] font-ui text-[hsl(var(--text))] whitespace-nowrap">{r.label}</td>
+                                            <td className="px-3 py-3.5"><ProtectionVerdictBadge verdict={r.verdict} /></td>
+                                            <td className="px-3 py-3.5 text-right font-num tabular-nums text-[15px] font-semibold" style={{ color: `hsl(var(${nvTok}))` }}>{fmtSignedR(r.netVsBaseline)}</td>
+                                            <td className="px-3 py-3.5 text-right font-num tabular-nums text-[12px] text-[hsl(var(--text-2))]">{fmtCount(r.winnersCut)}</td>
+                                            <td className="px-3 py-3.5 text-right font-num tabular-nums text-[12px] text-[hsl(var(--text-2))]">{r.loserRSaved == null || !isFiniteNumber(r.loserRSaved) ? "—" : fmtSignedR(r.loserRSaved)}</td>
+                                            <td className="px-3 py-3.5 text-right font-num tabular-nums text-[12px] text-[hsl(var(--text-2))]">{fmtCount(r.trades)}</td>
+                                            <td className="px-3 py-3.5 text-right">
+                                                <span className={cn("text-[13px]", isSel ? "text-[hsl(var(--accent-primary))]" : "text-[hsl(var(--text-3))] group-hover:text-[hsl(var(--text))]")}>›</span>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                ) : (
+                    <div className="py-4 text-[11.5px] font-ui text-[hsl(var(--text-2))]">No exporter-backed protection backtests loaded. Estimates and required data are shown below.</div>
+                )}
+            </NeonPanel>
+
+            {/* A2 — Estimates, separated and demoted, never ranked vs exact */}
+            {estimateRows.length > 0 && (
+                <NeonPanel title="A2 · Directional estimates — validate before acting" action={<Pill tone="warning">{estimateRows.length} APPROACHES</Pill>}>
+                    <p className="mb-3 text-[11.5px] font-ui text-[hsl(var(--text-2))]">
+                        Optimistic upper bounds (ignore winner cost). Not comparable to exact results — confirm with an exact backtest before acting.
+                    </p>
+                    <div className="space-y-1.5">
+                        {estimateRows.map((e) => (
+                            <div key={e.key} className="flex items-center justify-between gap-3 px-2 py-1.5 border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm">
+                                <span className="text-[12.5px] font-ui text-[hsl(var(--text))] truncate">{e.label}</span>
+                                <ProtectionVerdictBadge verdict={estimateVerdict()} />
                             </div>
                         ))}
                     </div>
-                </div>
-            </div>
-        </NeonPanel>
+                </NeonPanel>
+            )}
+
+            {/* A3 — Needs data, separated, unranked */}
+            {needsDataRows.length > 0 && (
+                <NeonPanel title="A3 · Needs data" action={<Pill tone="muted">{needsDataRows.length} BLOCKED</Pill>}>
+                    <div className="space-y-1.5">
+                        {needsDataRows.map((e) => (
+                            <div key={e.key} className="flex items-center justify-between gap-3 px-2 py-1.5 border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm">
+                                <span className="text-[12.5px] font-ui text-[hsl(var(--text))] truncate">
+                                    {e.label}
+                                    {e.missing?.length ? <span className="ml-1.5 text-[10px] text-[hsl(var(--text-2))]">· needs {e.missing.join(", ")}</span> : null}
+                                </span>
+                                <ProtectionVerdictBadge verdict={needsDataVerdict(e.missing)} />
+                            </div>
+                        ))}
+                    </div>
+                </NeonPanel>
+            )}
+        </div>
     );
 }
 

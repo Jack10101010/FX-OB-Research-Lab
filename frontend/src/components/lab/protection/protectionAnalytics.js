@@ -760,3 +760,46 @@ export function buildProtectionConfidence({ exactRows = [], dataQuality = null }
 
     return { pageBasis, exactModes, estimates, hasExact, anyEstimate };
 }
+
+// ── Verdict derivation (UI-layer decision support · Phase 2) ──────────────────
+// EXACT modes only. Uses Net-vs-Unprotected (R) EXCLUSIVELY.
+// Drawdown is DELIBERATELY EXCLUDED: the exporter drawdown sign is unverified
+// (PROTECTION-LAB-INTEGRITY-AUDIT-1), so it must never influence a verdict.
+// Estimate / missing-data verdicts are constants the UI applies to the confidence
+// layer's estimate / insufficient rows; they can never reach "Helping" and are
+// never ranked against exact rows.
+
+export const PROTECTION_NEUTRAL_BAND_R = 0.5; // |Net vs Unprotected| within this = "no meaningful change"
+
+export function deriveExactVerdict(row) {
+    if (!row || row.isBaseline) return null;
+    const nv = Number(row.netVsBaseline);
+    if (!_fin(nv)) {
+        return { key: "unknown", label: "Not evaluable", tone: "muted",
+                 reason: "No Net-vs-Unprotected figure", action: "—" };
+    }
+    const costKnown = _fin(row.winnersCut) || _fin(row.loserRSaved);
+    if (nv > PROTECTION_NEUTRAL_BAND_R) {
+        return { key: "helping", label: "Helping", tone: "success",
+                 reason: costKnown ? "Improves Net R vs unprotected"
+                                   : "Improves Net R vs unprotected (winner cost unknown)",
+                 action: "Candidate for use" };
+    }
+    if (nv < -PROTECTION_NEUTRAL_BAND_R) {
+        return { key: "hurting", label: "Hurting", tone: "danger",
+                 reason: "Lower Net R than unprotected", action: "Stay unprotected" };
+    }
+    return { key: "neutral", label: "Neutral", tone: "secondary",
+             reason: "No meaningful change vs unprotected", action: "Optional — no benefit" };
+}
+
+// Constant verdicts for non-exact rows (never "Helping", never ranked vs exact).
+export function estimateVerdict() {
+    return { key: "promising", label: "Promising (Estimate)", tone: "warning",
+             reason: "Directional estimate — optimistic, unproven", action: "Validate with exact backtest" };
+}
+export function needsDataVerdict(missing) {
+    return { key: "needs", label: "Needs Data", tone: "muted",
+             reason: missing && missing.length ? `Missing: ${missing.join(", ")}` : "Required fields missing",
+             action: "Export required fields" };
+}
