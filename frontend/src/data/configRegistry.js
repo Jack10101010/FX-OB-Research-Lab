@@ -413,6 +413,13 @@ export const CONFIG_REGISTRY = [
         inputType: "number", options: null, validation: { min: 0, max: 50, step: 0.1 }, subgroup: "TE Protection",
     },
     {
+        key: "triggeredEdgeFftMinObWidthPips", label: "FFT Min OB Width", group: "protection", tier: 3,
+        emitted: true, backendKey: "triggered_edge_fft_min_ob_width_pips", defaultValue: 0,
+        editable: true, masterControlsVisible: true, advancedMode: true,
+        inputType: "number", options: null, validation: { min: 0, max: 50, step: 0.1 }, subgroup: "TE Protection",
+        description: "Only apply First Failed Tag cancel when OB width is at least this many pips. 0 = apply to all OB widths.",
+    },
+    {
         key: "triggeredEdgeFftMoveAwayObMultiple", label: "FFT move-away OB multiple", group: "protection", tier: 3,
         emitted: true, backendKey: "triggered_edge_fft_move_away_ob_multiple", defaultValue: 0,
         editable: true, masterControlsVisible: true, advancedMode: true,

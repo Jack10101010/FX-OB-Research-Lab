@@ -107,6 +107,7 @@ export default function StrategyBuilder() {
         triggeredEdgeCancelOnFirstFailedTag: false,
         triggeredEdgeFftMoveAwayPips: 0,
         triggeredEdgeFftMoveAwayObMultiple: 0,
+        triggeredEdgeFftMinObWidthPips: 0,
         triggeredEdgeCancelRetracePips: 0,
         triggeredEdgeCancelRetraceObPct: 0,
         entryMode: "single",
@@ -1046,6 +1047,12 @@ export default function StrategyBuilder() {
                                                 hint="Threshold = OB height × multiple. The stricter of pips / multiple applies. 0 = disabled."
                                             >
                                                 <NeonInput type="number" min="0" step="0.05" value={cfg.triggeredEdgeFftMoveAwayObMultiple ?? 0} onChange={(e) => set("triggeredEdgeFftMoveAwayObMultiple")(Number(e.target.value))} />
+                                            </Field>
+                                            <Field
+                                                label={<LabelWithTooltip label="FFT Min OB Width (pips)" help={"Only apply First Failed Tag cancel when the order block is at least this wide. 0 = apply FFT to all OB widths. Examples: 0 = FFT can cancel all OBs · 10 = FFT only cancels OBs ≥10p · 12 = FFT only cancels OBs ≥12p."} />}
+                                                hint="0 = apply FFT to all OB widths · 10 = only OBs ≥10p · 12 = only OBs ≥12p."
+                                            >
+                                                <NeonInput type="number" min="0" max="50" step="0.1" value={cfg.triggeredEdgeFftMinObWidthPips ?? 0} onChange={(e) => set("triggeredEdgeFftMinObWidthPips")(Number(e.target.value))} />
                                             </Field>
                                         </div>
                                     </div>

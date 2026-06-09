@@ -18,6 +18,9 @@ import { ProtectionSectionDivider } from "@/components/lab/protection/Protection
 import { ProtectionVisualAnalytics } from "@/components/lab/protection/ProtectionVisualAnalytics";
 import { ProtectionPowerTools } from "@/components/lab/protection/ProtectionPowerTools";
 import { buildPairedTrades, calcEfficiencyRatio, calcRobustnessScore, buildDataQuality, buildProtectionConfidence, prettyModeName, deriveExactVerdict, estimateVerdict, needsDataVerdict } from "@/components/lab/protection/protectionAnalytics";
+// FFT-IA Phase 1 — dedicated FFT Protection tab (scenario-specific, additive).
+import { FftProtectionTab } from "@/components/lab/fft/FftProtectionTab";
+import { useSearchParams } from "react-router-dom";
 
 // ── Protection Lab V1 ────────────────────────────────────────────────
 // Read-only research surface for defensive-logic ideas derived from enriched
@@ -95,7 +98,11 @@ export default function ProtectionLab() {
     const baselineUniverse = useTradeUniverse(null, BASELINE_SCENARIO_OVERRIDE);
     const [whatIfFilters, setWhatIfFilters] = React.useState({});
     const [selectedProtectionMode, setSelectedProtectionMode] = React.useState(null);
-    const [protTab, setProtTab] = React.useState("overview"); // IA Phase 3: overview | deepdive | research
+    // IA Phase 3: overview | deepdive | research | fft (FFT-IA Phase 1).
+    // Deep-link support: /protection-lab?tab=fft opens the FFT Protection tab.
+    const [searchParams] = useSearchParams();
+    const initialProtTab = PROT_TAB_KEYS.includes(searchParams.get("tab")) ? searchParams.get("tab") : "overview";
+    const [protTab, setProtTab] = React.useState(initialProtTab);
     const activeRun = activeRunId ? runs?.[activeRunId] : null;
     const closeTimingTrades = React.useMemo(() => tradesForCloseBreachTiming(trades, activeRun), [trades, activeRun]);
     const p = React.useMemo(() => buildProtection(trades), [trades]);
@@ -625,6 +632,13 @@ export default function ProtectionLab() {
             />
 
             </>)}{/* ════════════════ /RESEARCH ════════════════ */}
+
+            {/* ════════════════ FFT PROTECTION (FFT-IA Phase 1) ════════════════ */}
+            {protTab === "fft" && (
+                <div className="px-6">
+                    <FftProtectionTab runId={activeRunId} />
+                </div>
+            )}
         </div>
     );
 }
@@ -651,7 +665,9 @@ const PROT_TABS = [
     { key: "overview", label: "Overview",  hint: "Decision" },
     { key: "deepdive", label: "Deep dive", hint: "Analysis" },
     { key: "research", label: "Research",  hint: "Experimentation" },
+    { key: "fft",      label: "FFT Protection", hint: "Cancel impact" },
 ];
+const PROT_TAB_KEYS = PROT_TABS.map((t) => t.key);
 function ProtTabBar({ tab, onChange }) {
     return (
         <div className="inline-flex items-center gap-1 p-1 clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.4)]">

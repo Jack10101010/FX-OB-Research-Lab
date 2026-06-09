@@ -446,6 +446,7 @@ export const LOAD_FIELD_LABELS = {
     triggeredEdgeCancelOnFirstFailedTag: "triggered edge first-failed-tag cancel",
     triggeredEdgeFftMoveAwayPips:      "FFT move-away pips",
     triggeredEdgeFftMoveAwayObMultiple: "FFT move-away OB multiple",
+    triggeredEdgeFftMinObWidthPips:    "FFT min OB width",
     entryMode:                         "entry mode",
     selectedEntryModel:                "selected entry model",
     singlePenetrationPct:              "single penetration threshold",
@@ -481,7 +482,7 @@ export function buildBacktesterConfig(cfg) {
         teThresholds, teEntryLevelPct, teSameCandleModes, teCandleDelays,
         teCancelOnRetrace, teCancelRetracePips, teCancelRetraceObPct,
         teCancelOnFirstFailedTag,
-        teFftMoveAwayPips, teFftMoveAwayObMultiple;
+        teFftMoveAwayPips, teFftMoveAwayObMultiple, teFftMinObWidthPips;
 
     const isSingle = cfg.entryMode === "single";
 
@@ -503,6 +504,7 @@ export function buildBacktesterConfig(cfg) {
             teCancelOnFirstFailedTag    = false;
             teFftMoveAwayPips           = 0;
             teFftMoveAwayObMultiple     = 0;
+            teFftMinObWidthPips         = 0;
         } else if (model === "triggered_edge") {
             const thr = Number(cfg.singleTriggeredEdgeThreshold ?? 25);
             entryModels                 = ["triggered_edge"];
@@ -521,6 +523,7 @@ export function buildBacktesterConfig(cfg) {
             teCancelOnFirstFailedTag    = Boolean(cfg.triggeredEdgeCancelOnFirstFailedTag);
             teFftMoveAwayPips           = teCancelOnFirstFailedTag ? Math.max(0, Number(cfg.triggeredEdgeFftMoveAwayPips) || 0) : 0;
             teFftMoveAwayObMultiple     = teCancelOnFirstFailedTag ? Math.max(0, Number(cfg.triggeredEdgeFftMoveAwayObMultiple) || 0) : 0;
+            teFftMinObWidthPips         = teCancelOnFirstFailedTag ? Math.max(0, Number(cfg.triggeredEdgeFftMinObWidthPips) || 0) : 0;
         } else {
             // baseline
             entryModels                 = ["baseline"];
@@ -537,6 +540,7 @@ export function buildBacktesterConfig(cfg) {
             teCancelOnFirstFailedTag    = false;
             teFftMoveAwayPips           = 0;
             teFftMoveAwayObMultiple     = 0;
+            teFftMinObWidthPips         = 0;
         }
     } else {
         // Research Export — multi-model behavior
@@ -563,6 +567,7 @@ export function buildBacktesterConfig(cfg) {
         teCancelOnFirstFailedTag   = teEnabled ? Boolean(cfg.triggeredEdgeCancelOnFirstFailedTag) : false;
         teFftMoveAwayPips          = teEnabled && teCancelOnFirstFailedTag ? Math.max(0, Number(cfg.triggeredEdgeFftMoveAwayPips) || 0) : 0;
         teFftMoveAwayObMultiple    = teEnabled && teCancelOnFirstFailedTag ? Math.max(0, Number(cfg.triggeredEdgeFftMoveAwayObMultiple) || 0) : 0;
+        teFftMinObWidthPips        = teEnabled && teCancelOnFirstFailedTag ? Math.max(0, Number(cfg.triggeredEdgeFftMinObWidthPips) || 0) : 0;
     }
 
     // ── Directional entry assignment ──────────────────────────────────────────
@@ -624,6 +629,7 @@ export function buildBacktesterConfig(cfg) {
         triggered_edge_cancel_on_first_failed_tag:  teCancelOnFirstFailedTag,
         triggered_edge_fft_move_away_pips:          teFftMoveAwayPips,
         triggered_edge_fft_move_away_ob_multiple:   teFftMoveAwayObMultiple,
+        triggered_edge_fft_min_ob_width_pips:       teFftMinObWidthPips,
         // ── Directional entry ─────────────────────────────────────────────────
         directional_entry_mode: cfg.directionalEntryMode || "symmetric",
         ...(directionalEntryConfig ? { directional_entry_config: directionalEntryConfig } : {}),
@@ -787,6 +793,7 @@ export function buildRunConfigLoadReport(current, run) {
     applyFirstPresent(patch, source, "triggeredEdgeCancelOnFirstFailedTag", ["triggered_edge_cancel_on_first_failed_tag",  "triggeredEdgeCancelOnFirstFailedTag"],  toBool);
     applyFirstPresent(patch, source, "triggeredEdgeFftMoveAwayPips",        ["triggered_edge_fft_move_away_pips",          "triggeredEdgeFftMoveAwayPips"],         toNumber);
     applyFirstPresent(patch, source, "triggeredEdgeFftMoveAwayObMultiple",  ["triggered_edge_fft_move_away_ob_multiple",   "triggeredEdgeFftMoveAwayObMultiple"],   toNumber);
+    applyFirstPresent(patch, source, "triggeredEdgeFftMinObWidthPips",      ["triggered_edge_fft_min_ob_width_pips",       "triggeredEdgeFftMinObWidthPips"],       toNumber);
 
     if ("entryResearchExports" in patch || "entryPenetrationThresholds" in patch) {
         patch.entryResearchExportMode = mapConfigEntryResearchExportMode(source.entry_models || source.entryModels, source);
