@@ -16,7 +16,7 @@
 
 import { rOf, isFiniteNumber } from "./failuresUtils";
 import { aggregateFailures } from "./failuresAggregation";
-import { FAILURE_DIMENSIONS, DIMENSION_BY_KEY, dimensionAvailable } from "./failuresDimensions";
+import { FAILURE_DIMENSIONS, DIMENSION_BY_KEY, dimensionAvailable, availableDimensions } from "./failuresDimensions";
 
 const numOrNull = (v) => {
     if (v === null || v === undefined || v === "") return null;
@@ -192,11 +192,16 @@ export function buildMfeDistribution(losers, { config } = {}) {
 // Per arm level, the losers that REACHED it (could have armed BE) and the loss-R
 // they represent. UPPER BOUND ONLY — see the integrity guardrail at the top.
 
-export function buildBeOpportunity(losers, levels, { config } = {}) {
+export function buildBeOpportunity(losers, levels, { config, mode: modeOverride } = {}) {
     const enriched = enrich(losers, config);
     const withMfe = enriched.filter((e) => e.mfeR != null);
     const pctEligible = withMfe.filter((e) => e.targetRR != null);
-    const mode = decideMode(withMfe, pctEligible);
+    // Auto-decide pct vs raw, but let the caller force a framing (V3 made raw-R the
+    // primary language for Distance to Stop). "none" (no MFE) always wins.
+    const auto = decideMode(withMfe, pctEligible);
+    const mode = auto === "none"
+        ? "none"
+        : (modeOverride === "raw" || modeOverride === "pct" ? modeOverride : auto);
 
     const base = { mode, sampleFloor: SAMPLE_FLOOR, upperBound: true };
     if (mode === "none") return { ...base, rows: [], consideredN: 0, totalLossR: 0 };
@@ -357,4 +362,58 @@ export function buildPairDrivers(losers, { minSample = DRILL_SAMPLE_FLOOR, topN 
     }
     out.sort((a, b) => b.lossR - a.lossR);
     return { totalLossR: round1(totalLossR), minSample, pairs: out.slice(0, topN) };
+}
+
+// ── Failure Explorer (V4 Phase 2) ──────────────────────────────────────────────
+// A *controlled* surface over the shared engine: pick 1–2 dimensions + a ranking
+// metric + a sample floor. This is NOT a new aggregator — it's a thin config of
+// aggregateFailures, capped at two dimensions (no N-way / waterfall mining).
+//
+// Run over a winners-INCLUSIVE population (all trades) so trade-share, loss-rate
+// and lift are genuine ("New York is 20% of trades but 40% of loss-R → lift 2.0×").
+// Only dimensions that the run actually carries are offered (availableDimensions),
+// so the controls never present an all-Unknown column. Requested dimension keys
+// fall back to the first available one rather than rendering an empty table.
+
+export const EXPLORER_METRICS = [
+    { key: "lift",       label: "Lift" },
+    { key: "lossR",      label: "Loss-R" },
+    { key: "lossRate",   label: "Loss rate" },
+    { key: "tradeShare", label: "Trade share" },
+];
+export const EXPLORER_FLOORS = [4, 8, 12, 20];
+
+export function buildExplorer(trades, { dimA = "session", dimB = null, sampleFloor = DRILL_SAMPLE_FLOOR, metric = "lift" } = {}) {
+    const list = Array.isArray(trades) ? trades : [];
+    const available = availableDimensions(list);
+    const availKeys = new Set(available.map((d) => d.key));
+
+    // Resolve A (fallback to first available), then B (≠ A, available, optional).
+    const aKey = availKeys.has(dimA) ? dimA : (available[0]?.key ?? null);
+    const bKey = dimB && dimB !== aKey && availKeys.has(dimB) ? dimB : null;
+
+    const emptyTotals = { trades: list.length, lossR: 0, baselineLossRate: 0 };
+    if (!aKey) {
+        return { available, dimA: null, dimB: null, metric, sampleFloor, rows: [], totals: emptyTotals };
+    }
+
+    const { cells, totals } = aggregateFailures(list, {
+        dimA: aKey, dimB: bKey, sampleFloor, baseline: list, requireKnown: true,
+    });
+
+    const metricVal = (c) => (
+        metric === "lossR" ? c.lossR
+        : metric === "lossRate" ? c.lossRate
+        : metric === "tradeShare" ? c.tradeSharePct
+        : c.lift
+    );
+    // Keep low-sample cells last (never a "strong finding"), then rank by metric,
+    // tie-break by raw loss-R.
+    const rows = [...cells].sort((x, y) =>
+        (Number(y.rankable) - Number(x.rankable)) ||
+        (metricVal(y) - metricVal(x)) ||
+        (y.lossR - x.lossR),
+    );
+
+    return { available, dimA: aKey, dimB: bKey, metric, sampleFloor, rows, totals };
 }

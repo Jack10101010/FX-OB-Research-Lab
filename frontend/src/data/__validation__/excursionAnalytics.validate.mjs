@@ -59,6 +59,7 @@ const {
     getMfeR, getTargetRR, mfePctOfTarget, bucketMfePct, bucketMfeRaw,
     buildMfeDistribution, buildBeOpportunity,
     buildRawRDistribution, buildBucketDrilldown, buildFailureDrivers, buildPairDrivers,
+    buildExplorer,
 } = exc;
 
 let failures = 0;
@@ -202,6 +203,50 @@ ok(pd.pairs.some((p) => p.pairLabel === "Structure × Direction"), "includes Str
 ok(pd.pairs.every((p, i, a) => i === 0 || a[i - 1].lossR >= p.lossR), "pairs sorted by loss-R desc");
 const pdFloor = buildPairDrivers(v3, { minSample: 4, topN: 10 });
 ok(pdFloor.pairs.every((p) => p.count >= 4), "pair sample floor enforced");
+
+// ── V4 Phase 2: forced raw-R BE table ──────────────────────────────────────────
+// Same `losers` (mfeR 0.0, 0.1, 0.4, 1.0, 1.9; RR=2 ⇒ pct-eligible). With mode:"raw"
+// forced, the BE table must speak R, not % of TP, and stay an upper bound.
+console.log("V4 buildBeOpportunity (forced raw mode)");
+const beRawForced = buildBeOpportunity(losers, [0.25, 0.5, 0.75, 1, 1.5, 2], { config: cfg, mode: "raw" });
+const rlvl = (L) => beRawForced.rows.find((r) => r.level === L);
+ok(beRawForced.mode === "raw", "mode forced to raw even though target RR is available");
+ok(rlvl(0.25).label === "+0.25R", "raw labels expressed in R, not % of TP");
+ok(rlvl(0.25).reached === 3, "≥0.25R reached by 3 (0.4, 1.0, 1.9)");
+ok(rlvl(1).reached === 2, "≥1R reached by 2 (1.0, 1.9)");
+ok(rlvl(2).reached === 0, "≥2R reached by 0 (no loser hit 2R)");
+ok(rlvl(0.25).savableLossRUpperBound === 4, "≥0.25R savable upper-bound loss-R = 2+1+1 = 4");
+ok(beRawForced.upperBound === true, "forced-raw BE still flagged upper bound");
+ok(buildBeOpportunity([{ r: -1 }], [0.25], { config: cfg, mode: "raw" }).mode === "none", "no MFE → none wins over forced raw");
+
+// ── V4 Phase 2: Failure Explorer (shared engine, winners-inclusive) ─────────────
+// Mixed population so loss-rate / lift are real. session stays Unknown (stub) and
+// must auto-hide; direction/structure are real accessors.
+console.log("V4 buildExplorer (controlled, all-trades population)");
+const exTrades = [
+    ...Array.from({ length: 5 },  () => ({ r: -2, direction: "short", structureTag: "choch", severity: 7 })), // 5 short losers
+    ...Array.from({ length: 5 },  () => ({ r: -1, direction: "long",  structureTag: "bos",   severity: 2 })), // 5 long losers
+    ...Array.from({ length: 10 }, () => ({ r: 1,  direction: "long",  structureTag: "bos",   severity: 1 })), // 10 long winners
+];
+// 20 trades; totalLossR = 5*2 + 5*1 = 15; baseline loss rate = 10/20 = 50%.
+const ex = buildExplorer(exTrades, { dimA: "direction", metric: "lift", sampleFloor: 8 });
+ok(ex.dimA === "direction" && ex.dimB === null, "explorer resolves Dimension A, no B by default");
+ok(ex.available.some((d) => d.key === "direction") && !ex.available.some((d) => d.key === "session"),
+    "available dims include direction, exclude all-Unknown session");
+const exShort = ex.rows.find((c) => c.keyA === "Short");
+const exLong = ex.rows.find((c) => c.keyA === "Long");
+ok(exShort.count === 5 && exShort.lossR === 10, "Short cell: 5 trades, 10 loss-R");
+ok(exLong.count === 15 && Math.abs(exLong.lossRate - 33.3) <= 0.1, "Long: 15 trades, loss rate ~33.3% (winners present ⇒ real rate)");
+ok(Math.abs(exShort.lift - 2.67) <= 0.05, `Short lift ~2.67 (got ${exShort.lift})`);
+ok(exShort.lowSample === true && exLong.lowSample === false, "Short (n=5) low-sample at floor 8; Long (n=15) not");
+ok(ex.rows[0].keyA === "Long", "rankable cell sorted above low-sample Short");
+// Fallback: requesting an unavailable dim resolves to the first available one.
+const exFallback = buildExplorer(exTrades, { dimA: "session", metric: "lift" });
+ok(exFallback.dimA != null && exFallback.dimA !== "session", "unavailable Dimension A falls back to first available");
+// Pair (cap 2 dims) + metric sort.
+const exPair = buildExplorer(exTrades, { dimA: "direction", dimB: "structure", sampleFloor: 1, metric: "lossR" });
+ok(exPair.dimB === "structure" && exPair.rows.every((c) => "keyB" in c), "pair explorer carries Dimension B on every row");
+ok(exPair.rows.every((c, i, a) => i === 0 || a[i - 1].lossR >= c.lossR || c.lowSample), "rows ranked by chosen metric (loss-R) among rankable");
 
 console.log(`\n${failures === 0 ? "ALL PASS" : failures + " FAILURE(S)"}`);
 process.exit(failures === 0 ? 0 : 1);

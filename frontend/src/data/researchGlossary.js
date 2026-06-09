@@ -394,6 +394,12 @@ export const GLOSSARY = {
         definition: "Losers that reached 1R or more in favour before failing.",
         whyItMatters: "These are the strongest break-even / partial candidates — they moved a full risk distance your way first.",
     },
+    be_opportunity: {
+        term: "Break-even opportunity",
+        friendlyName: "Break-even opportunity (upper bound)",
+        definition: "Per arm level, the losers that reached it in your favour — trades that could have armed a break-even stop there.",
+        whyItMatters: "Points to which BE levels are worth testing. It's an optimistic upper bound (peak MFE only): it can't confirm BE would have triggered, nor how many winners the rule would cut. Validate with an exact BE backtest before acting.",
+    },
     contribution_pct: {
         term: "Contribution %",
         friendlyName: "Loss-R contribution %",
