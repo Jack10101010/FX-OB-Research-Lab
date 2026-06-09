@@ -353,7 +353,7 @@ export default function ProtectionLab() {
                             ["Unknown Invalidation State", String(p.breachUnknown)],
                         ].map(([k, v]) => (
                             <React.Fragment key={k}>
-                                <div className="text-muted-lab uppercase tracking-wider text-[10px]">{k}</div>
+                                <div className="text-[hsl(var(--text-2))] uppercase tracking-wider text-[10.5px]">{k}</div>
                                 <div className="text-right text-white font-num">{v}</div>
                             </React.Fragment>
                         ))}
@@ -906,8 +906,8 @@ function Desc({ icon: Icon, children }) {
 }
 
 function Note({ tone = "muted", children }) {
-    const color = tone === "warning" ? "text-[hsl(var(--warning))]" : "text-muted-lab";
-    return <div className={`mt-2 text-[10.5px] font-ui leading-relaxed ${color}`}>{children}</div>;
+    const color = tone === "warning" ? "text-[hsl(var(--warning))]" : "text-[hsl(var(--text-2))]";
+    return <div className={`mt-2 text-[11.5px] font-ui leading-relaxed ${color}`}>{children}</div>;
 }
 
 function FutureCard({ icon: Icon, title, body, status }) {

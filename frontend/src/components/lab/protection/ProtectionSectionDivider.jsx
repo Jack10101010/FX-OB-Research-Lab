@@ -33,25 +33,27 @@ export function ProtectionSectionDivider({
         >
             {/* Background bleed so content behind shows blurred under the label */}
             <div className="absolute inset-0 -mx-6 bg-[hsl(var(--bg)/0.88)] backdrop-blur-sm pointer-events-none" />
+            {/* Subtle cyan/teal-tinted band + bottom hairline to separate page zones */}
+            <div className="absolute inset-0 -mx-6 bg-gradient-to-r from-[hsl(var(--accent-secondary)/0.08)] via-[hsl(var(--accent-secondary)/0.02)] to-transparent border-b border-[hsl(var(--accent-secondary)/0.15)] pointer-events-none" />
 
-            <div className="relative flex items-center gap-3 py-2.5">
+            <div className="relative flex items-center gap-3 py-3">
                 {/* Left accent line */}
                 <div className="shrink-0 w-1 h-5 rounded-sm bg-gradient-to-b from-[hsl(var(--accent-primary))] to-[hsl(var(--accent-secondary)/0.6)]" />
 
                 {/* Icon */}
                 {icon && (
-                    <span className="shrink-0 text-[hsl(var(--accent-primary))] opacity-80">
+                    <span className="shrink-0 text-[hsl(var(--accent-primary))]">
                         {icon}
                     </span>
                 )}
 
                 {/* Label group */}
-                <div className="flex flex-wrap items-baseline gap-2 min-w-0">
-                    <span className="text-[11px] font-ui uppercase tracking-[0.14em] text-[hsl(var(--text-1))] font-semibold">
+                <div className="flex flex-wrap items-baseline gap-2.5 min-w-0">
+                    <span className="text-[12px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--text))] font-semibold">
                         {label}
                     </span>
                     {subLabel && (
-                        <span className="text-[10px] font-ui text-[hsl(var(--text-3))] tracking-[0.1em]">
+                        <span className="text-[11px] font-ui text-[hsl(var(--text-2))] tracking-[0.02em]">
                             {subLabel}
                         </span>
                     )}
@@ -59,7 +61,7 @@ export function ProtectionSectionDivider({
                 </div>
 
                 {/* Full-width hairline after label group */}
-                <div className="flex-1 h-px bg-gradient-to-r from-[hsl(var(--border-soft))] to-transparent" />
+                <div className="flex-1 h-px bg-gradient-to-r from-[hsl(var(--accent-secondary)/0.25)] to-transparent" />
             </div>
         </div>
     );

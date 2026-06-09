@@ -151,9 +151,13 @@ export function ProtectionDataQualityPanel({ trades }) {
 
     if (!quality) return null;
 
-    // Group fields
+    // Group fields. buildDataQuality returns { n, fields:[{key,present,pct(0–100),status}], goodCount };
+    // index it by key and convert pct (0–100) → fraction so the panel's getStatus thresholds apply.
+    const byKey = {};
+    (quality.fields || []).forEach((f) => { byKey[f.key] = f; });
     const rows = Object.entries(FIELD_META).map(([key, meta]) => {
-        const pct = quality[key] ?? 0;
+        const f = byKey[key];
+        const pct = f && Number.isFinite(Number(f.pct)) ? Number(f.pct) / 100 : 0;
         const status = getStatus(pct);
         return { key, ...meta, pct, status };
     });
@@ -183,38 +187,42 @@ export function ProtectionDataQualityPanel({ trades }) {
         >
             <div className="px-5 pb-5 pt-1 space-y-4">
                 {/* Summary row */}
-                <div className="flex flex-wrap items-center gap-2 pt-1">
-                    <span className="text-[11.5px] text-[hsl(var(--text-3))]">
+                <div className="flex flex-wrap items-center gap-2.5 pt-1">
+                    <span className="text-[12px] text-[hsl(var(--text-2))]">
                         <span className="font-num tabular-nums text-[hsl(var(--text-1))]">{trades.length}</span> trades assessed
                     </span>
                     {Object.entries(counts).filter(([, n]) => n > 0).map(([status, n]) => (
-                        <span key={status} className={cn("text-[11px] font-medium", STATUS_META[status].color)}>
+                        <span key={status} className={cn("text-[11.5px] font-medium", STATUS_META[status].color)}>
                             <span className="font-num tabular-nums">{n}</span> {STATUS_META[status].label.toLowerCase()}
                         </span>
                     ))}
                 </div>
 
-                {/* Critical fields first */}
-                <div>
-                    <div className="mb-2 text-[11.5px] font-semibold text-[hsl(var(--accent-primary))]">
-                        Required protection fields
+                {/* Two columns: required (exporter-critical) vs supporting research fields.
+                    Side-by-side on laptop+, stacked on narrow. */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-6 gap-y-4">
+                    {/* Column 1 — required protection fields */}
+                    <div>
+                        <div className="mb-2 text-[12px] font-semibold text-[hsl(var(--accent-primary))]">
+                            Required protection fields
+                        </div>
+                        <div className="space-y-1.5">
+                            {criticalFields.map(row => (
+                                <FieldRow key={row.key} row={row} />
+                            ))}
+                        </div>
                     </div>
-                    <div className="space-y-1.5">
-                        {criticalFields.map(row => (
-                            <FieldRow key={row.key} row={row} />
-                        ))}
-                    </div>
-                </div>
 
-                {/* Non-critical fields */}
-                <div>
-                    <div className="mb-2 text-[11.5px] font-semibold text-[hsl(var(--accent-primary))]">
-                        Supporting research fields
-                    </div>
-                    <div className="space-y-1.5">
-                        {rows.filter(r => !r.critical).map(row => (
-                            <FieldRow key={row.key} row={row} />
-                        ))}
+                    {/* Column 2 — supporting research fields */}
+                    <div>
+                        <div className="mb-2 text-[12px] font-semibold text-[hsl(var(--accent-primary))]">
+                            Supporting research fields
+                        </div>
+                        <div className="space-y-1.5">
+                            {rows.filter(r => !r.critical).map(row => (
+                                <FieldRow key={row.key} row={row} />
+                            ))}
+                        </div>
                     </div>
                 </div>
 
@@ -236,12 +244,12 @@ export function ProtectionDataQualityPanel({ trades }) {
 
 function FieldRow({ row }) {
     return (
-        <div className="grid grid-cols-1 items-center gap-2 border-b border-[hsl(var(--border-soft)/0.25)] py-2.5 last:border-0 md:grid-cols-[minmax(0,1fr)_160px_auto] md:gap-3">
+        <div className="grid grid-cols-1 items-center gap-2 border-b border-[hsl(var(--border-soft)/0.25)] py-2.5 last:border-0 md:grid-cols-[minmax(0,1fr)_120px_auto] md:gap-3">
             <div className="min-w-0">
-                <div className="text-[12px] font-medium text-[hsl(var(--text-1))]">
+                <div className="text-[12.5px] font-medium text-[hsl(var(--text-1))]">
                     {row.label}
                 </div>
-                <div className="mt-0.5 text-[11px] leading-snug text-[hsl(var(--text-3))]">
+                <div className="mt-0.5 text-[11px] leading-snug text-[hsl(var(--text-2))]">
                     {row.description}
                 </div>
             </div>
