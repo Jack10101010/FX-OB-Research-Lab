@@ -179,6 +179,7 @@ export function MasterControlsDrawer() {
         previewLens, applyLocalRescoreLens, exitPreviewLens,
         localFilterBundle, clearLocalFilterBundle, applyLocalFilterLens,
         localFftBundle, clearFftPreview, applyFftPreviewLens,
+        localRrBundle, rrPreviewUnavailable, clearRrPreview, applyRrPreviewLens,
     } = useMasterControls();
     const { activeRunId } = useDataset();
 
@@ -242,6 +243,20 @@ export function MasterControlsDrawer() {
         previewLens?.active
         && previewLens.mode === "fft_swap"
         && previewLens.sourceRunId === activeRunId
+    );
+
+    // Phase 11C — stop-anchored RR preview. Shows a local block when the ONLY dirty
+    // field is `rr`; the block is "available" (temp bundle built) or "unavailable"
+    // (run predates the Phase 11A excursion export).
+    const rrOnly = dirtyFields instanceof Set && dirtyFields.has("rr") && dirtyFieldList.length === 1;
+    const rrLensActive = !!(
+        previewLens?.active
+        && previewLens.mode === "rr_rescore"
+        && previewLens.sourceRunId === activeRunId
+    );
+    const rrAfterMetrics = useMemo(
+        () => (localRrBundle ? extractPreviewMetrics(localRrBundle) : null),
+        [localRrBundle],
     );
 
     return (
@@ -647,6 +662,90 @@ export function MasterControlsDrawer() {
                                     {fftLensActive
                                         ? "The page is viewing temporary FFT-OFF data — not saved. Triggered-edge views only."
                                         : "Not saved · Not applied to page yet"}
+                                </p>
+                            </div>
+                        )}
+
+                        {/* RR preview — Phase 11C (stop-anchored). Re-targets every trade to a
+                            new RR using the backend's mfeR / rIfNoTarget excursion fields. */}
+                        {rrOnly && localRrBundle && (
+                            <div className={`mt-2 rounded border px-3 py-2 ${
+                                rrLensActive
+                                    ? "border-[hsl(var(--warning)/0.5)] bg-[hsl(var(--warning)/0.10)]"
+                                    : "border-[hsl(var(--warning)/0.28)] bg-[hsl(var(--warning)/0.05)]"
+                            }`}>
+                                <div className="flex items-center justify-between gap-2">
+                                    <span className="text-[10px] font-semibold uppercase tracking-widest text-[hsl(var(--warning))]">
+                                        {rrLensActive ? "Applied to page preview" : "Temporary RR bundle ready"}
+                                    </span>
+                                    <div className="flex items-center gap-1.5">
+                                        {rrLensActive ? (
+                                            <button
+                                                type="button"
+                                                onClick={exitPreviewLens}
+                                                className="text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--warning)/0.45)] text-[hsl(var(--warning))] hover:bg-[hsl(var(--warning)/0.15)] transition-colors"
+                                            >
+                                                Exit page preview
+                                            </button>
+                                        ) : (
+                                            <>
+                                                <button
+                                                    type="button"
+                                                    onClick={applyRrPreviewLens}
+                                                    className="text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.12)] text-[hsl(var(--warning))] font-medium hover:bg-[hsl(var(--warning)/0.2)] transition-colors"
+                                                >
+                                                    Apply to page
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={clearRrPreview}
+                                                    className="text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--border-soft))] text-muted-lab hover:text-white transition-colors"
+                                                >
+                                                    Clear
+                                                </button>
+                                            </>
+                                        )}
+                                    </div>
+                                </div>
+                                <p className="mt-1 text-[10px] font-num text-[hsl(var(--text-1))]">
+                                    RR {fmtCfgValue(activeConfig?.rr)} <span className="text-muted-lab">→</span> RR {fmtCfgValue(effectiveConfig?.rr)}
+                                </p>
+                                <p className="mt-0.5 text-[9px] font-num tabular-nums text-muted-lab leading-snug">
+                                    Trades {fmtPreviewInt(activeMetrics?.trades)}
+                                    <span className="text-muted-lab"> → </span>
+                                    {fmtPreviewInt(rrAfterMetrics?.trades)}
+                                    <span className="mx-1 text-[hsl(var(--border-mid))]">·</span>
+                                    Net R {fmtPreviewR(activeMetrics?.netR)}
+                                    <span className="text-muted-lab"> → </span>
+                                    {fmtPreviewR(rrAfterMetrics?.netR)}
+                                </p>
+                                <p className="mt-0.5 text-[9px] text-muted-lab leading-snug">
+                                    Model: Stop-anchored
+                                    {localRrBundle?.meta?.rescoreScope === "partial" ? " · partial (some trades lack excursion data)" : ""}
+                                </p>
+                                <p className="mt-0.5 text-[9px] text-[hsl(var(--warning)/0.85)] leading-snug">
+                                    {localRrBundle?.meta?.warning}
+                                </p>
+                                <p className="mt-0.5 text-[9px] text-muted-lab/70 leading-snug">
+                                    {rrLensActive
+                                        ? "The page is viewing temporary RR-re-targeted data — not saved."
+                                        : "Not saved · Not applied to page yet"}
+                                </p>
+                            </div>
+                        )}
+
+                        {/* RR preview unavailable — the run predates the Phase 11A excursion export. */}
+                        {rrOnly && !localRrBundle && rrPreviewUnavailable && (
+                            <div className="mt-2 rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel)/0.4)] px-3 py-2">
+                                <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-lab">
+                                    RR preview unavailable
+                                </span>
+                                <p className="mt-1 text-[9px] text-muted-lab leading-snug">
+                                    This run has no stop-anchored excursion fields (mfeR / rIfNoTarget). Re-run/export
+                                    with the Phase 11A backtester, then re-import the bundle.
+                                </p>
+                                <p className="mt-0.5 text-[9px] text-muted-lab/70 leading-snug">
+                                    Backend Run Preview is still available below.
                                 </p>
                             </div>
                         )}

@@ -23,9 +23,12 @@ import { ingestRunBundle } from "@/data/importer";
 import { isCostOnlyDirty, rescoreCostsForBundle, buildRescoredBundle } from "./costRescore";
 import { isFilterOnlyDirty, buildTradePredicate, buildFilteredBundle } from "./tradeFilter";
 import { buildFftPreviewBundle } from "./controlSwap";
+import { canRescoreRr, rescoreRrForBundle, buildRrPreviewBundle } from "./rrRescore";
 
 // The single config key that drives the FFT preview lens (Phase 10B).
 const FFT_DRAFT_KEY = "triggeredEdgeCancelOnFirstFailedTag";
+// The single config key that drives the RR preview lens (Phase 11C).
+const RR_DRAFT_KEY = "rr";
 
 // Signature of a cost-only rescore (run id + cost values). Used so a manually-cleared
 // temporary bundle isn't immediately rebuilt until the cost config or run changes.
@@ -64,6 +67,15 @@ function fftSignature(runId, cfg) {
     return JSON.stringify({
         runId: runId || null,
         [FFT_DRAFT_KEY]: cfg?.[FFT_DRAFT_KEY] ?? null,
+    });
+}
+
+// Signature of an RR-only change (run id + the RR multiple). Used so a manually-cleared
+// temporary RR bundle isn't rebuilt until the RR value or run changes (Phase 11C).
+function rrSignature(runId, cfg) {
+    return JSON.stringify({
+        runId: runId || null,
+        [RR_DRAFT_KEY]: cfg?.[RR_DRAFT_KEY] ?? null,
     });
 }
 
@@ -136,6 +148,11 @@ const MasterControlsContext = createContext({
     localFftBundle:          null,
     clearFftPreview:         () => {},
     applyFftPreviewLens:     () => {},
+    // Temporary RR preview bundle — Phase 11C (stop-anchored RR rescore)
+    localRrBundle:           null,
+    rrPreviewUnavailable:    false,
+    clearRrPreview:          () => {},
+    applyRrPreviewLens:      () => {},
 });
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
@@ -187,6 +204,15 @@ export function MasterControlsProvider({ children }) {
     const [localFftBundle, setLocalFftBundle] = useState(null);
     const fftSuppressRef = useRef("");
 
+    // ── Phase 11C — temporary RR preview bundle ─────────────────────────────
+    // A bundle-shaped object that re-targets every trade to a new RR multiple using
+    // the backend's stop-anchored excursion fields. Held in context ONLY — never
+    // stored / persisted. `rrPreviewUnavailable` is true when RR is being edited but
+    // the run lacks the required fields (old bundles), so the drawer can explain.
+    const [localRrBundle, setLocalRrBundle] = useState(null);
+    const [rrPreviewUnavailable, setRrPreviewUnavailable] = useState(false);
+    const rrSuppressRef = useRef("");
+
     // Reset draft AND preview whenever the active run changes
     useEffect(() => {
         setDraftConfigState(null);
@@ -198,6 +224,9 @@ export function MasterControlsProvider({ children }) {
         filterSuppressRef.current = "";
         setLocalFftBundle(null);
         fftSuppressRef.current = "";
+        setLocalRrBundle(null);
+        setRrPreviewUnavailable(false);
+        rrSuppressRef.current = "";
     }, [activeRunId]);
 
     // ── activeConfig — derived from the active run bundle ───────────────────
@@ -321,6 +350,9 @@ export function MasterControlsProvider({ children }) {
         filterSuppressRef.current = "";
         setLocalFftBundle(null);
         fftSuppressRef.current = "";
+        setLocalRrBundle(null);
+        setRrPreviewUnavailable(false);
+        rrSuppressRef.current = "";
     }, []);
 
     // ── Preview actions — Phase 4A ────────────────────────────────────────────
@@ -376,6 +408,8 @@ export function MasterControlsProvider({ children }) {
         setLocalRescoreBundle(null);
         setLocalFilterBundle(null);
         setLocalFftBundle(null);
+        setLocalRrBundle(null);
+        setRrPreviewUnavailable(false);
     }, []);
 
     /**
@@ -406,6 +440,15 @@ export function MasterControlsProvider({ children }) {
     const clearFftPreview = useCallback(() => {
         fftSuppressRef.current = fftSignature(activeRunId, effectiveConfig);
         setLocalFftBundle(null);
+    }, [activeRunId, effectiveConfig]);
+
+    /**
+     * Manually dismiss the temporary RR preview bundle (drawer "Clear" button).
+     * Suppresses the auto-build effect for this exact RR until it or the run changes.
+     */
+    const clearRrPreview = useCallback(() => {
+        rrSuppressRef.current = rrSignature(activeRunId, effectiveConfig);
+        setLocalRrBundle(null);
     }, [activeRunId, effectiveConfig]);
 
     /**
@@ -451,6 +494,8 @@ export function MasterControlsProvider({ children }) {
         setLocalRescoreBundle(null);
         setLocalFilterBundle(null);
         setLocalFftBundle(null);
+        setLocalRrBundle(null);
+        setRrPreviewUnavailable(false);
     }, [preview.status, preview.job]);
 
     // ── Polling effect — drives "queued"/"running" → "completed"/"failed" ────
@@ -659,6 +704,47 @@ export function MasterControlsProvider({ children }) {
         }));
     }, [activeRunId, dirtyFieldList, effectiveConfig]); // eslint-disable-line react-hooks/exhaustive-deps
 
+    // ── Phase 11C build effect — keep localRrBundle in sync with the RR target ───
+    // Builds the stop-anchored RR preview when the ONLY dirty field is `rr` AND the run
+    // carries the excursion fields. When `rr` is dirty but the fields are absent (old
+    // bundles), it sets `rrPreviewUnavailable` so the drawer can explain instead of
+    // silently doing nothing. Builds from the RAW run bundle (lens-immune). Sole writer
+    // of localRrBundle (plus the explicit resets above). No store writes, no persistence.
+    useEffect(() => {
+        const rrOnly = dirtyFieldList.length === 1 && dirtyFields.has(RR_DRAFT_KEY);
+        if (!rrOnly || !effectiveConfig || !activeRunId) {
+            rrSuppressRef.current = "";
+            setLocalRrBundle(null);
+            setRrPreviewUnavailable(false);
+            return;
+        }
+        const sourceBundle = getRawRunData(activeRunId);
+        if (!sourceBundle) {
+            setLocalRrBundle(null);
+            setRrPreviewUnavailable(false);
+            return;
+        }
+        if (!canRescoreRr(sourceBundle)) {
+            // RR edited but this run predates the Phase 11A export → unavailable.
+            setLocalRrBundle(null);
+            setRrPreviewUnavailable(true);
+            return;
+        }
+        setRrPreviewUnavailable(false);
+        if (rrSuppressRef.current === rrSignature(activeRunId, effectiveConfig)) return;
+
+        const rrResult = rescoreRrForBundle(sourceBundle, { rr: effectiveConfig[RR_DRAFT_KEY] });
+        if (!rrResult.ok) {
+            setLocalRrBundle(null);
+            return;
+        }
+        setLocalRrBundle(buildRrPreviewBundle(sourceBundle, rrResult, {
+            rr: effectiveConfig[RR_DRAFT_KEY],
+            dirtyFields: dirtyFieldList,
+            rerunTier: highestRerunTier,
+        }));
+    }, [activeRunId, dirtyFieldList, effectiveConfig, highestRerunTier]); // eslint-disable-line react-hooks/exhaustive-deps
+
     // ── Phase 8B — apply the temporary bundle to the whole app via the store lens ─
     // `previewLens` is read live from the store. The context re-renders on every store
     // notify() (it subscribes through useDataset above), so this read stays fresh.
@@ -766,6 +852,37 @@ export function MasterControlsProvider({ children }) {
         }
     }, [localFftBundle, activeRunId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+    // ── Phase 11C — apply the temporary RR preview bundle via the same store lens ─
+    /** Apply the temporary RR-re-targeted bundle as a read-only Preview Lens. */
+    const applyRrPreviewLens = useCallback(() => {
+        if (!localRrBundle || !activeRunId) return;
+        setPreviewLens({
+            sourceRunId: activeRunId,
+            bundle: localRrBundle,
+            mode: "rr_rescore",
+            label: `RR ${effectiveConfig?.[RR_DRAFT_KEY] ?? ""} Preview`.trim(),
+        });
+    }, [localRrBundle, activeRunId, effectiveConfig]);
+
+    // Keep OUR RR lens in sync with localRrBundle, mirroring the cost/filter/FFT lenses.
+    // Only manages the "rr_rescore" lens — never touches a lens of another mode.
+    useEffect(() => {
+        const lens = getPreviewLens();
+        if (!lens || lens.mode !== "rr_rescore") return;
+        if (!localRrBundle || !activeRunId || lens.sourceRunId !== activeRunId) {
+            clearPreviewLens();
+            return;
+        }
+        if (lens.bundle !== localRrBundle) {
+            setPreviewLens({
+                sourceRunId: activeRunId,
+                bundle: localRrBundle,
+                mode: "rr_rescore",
+                label: `RR ${effectiveConfig?.[RR_DRAFT_KEY] ?? ""} Preview`.trim(),
+            });
+        }
+    }, [localRrBundle, activeRunId]); // eslint-disable-line react-hooks/exhaustive-deps
+
     // ── Context value ────────────────────────────────────────────────────────
 
     const value = useMemo(() => ({
@@ -815,6 +932,11 @@ export function MasterControlsProvider({ children }) {
         localFftBundle,
         clearFftPreview,
         applyFftPreviewLens,
+        // RR preview lens — Phase 11C
+        localRrBundle,
+        rrPreviewUnavailable,
+        clearRrPreview,
+        applyRrPreviewLens,
     }), [
         isOpen,
         openMasterControls,
@@ -851,6 +973,10 @@ export function MasterControlsProvider({ children }) {
         localFftBundle,
         clearFftPreview,
         applyFftPreviewLens,
+        localRrBundle,
+        rrPreviewUnavailable,
+        clearRrPreview,
+        applyRrPreviewLens,
     ]);
 
     return (
