@@ -16,11 +16,12 @@ import { Info, AlertTriangle } from "lucide-react";
 import { TermTip } from "@/components/lab/TermTip";
 import { isModuleAvailable } from "../shared/failuresDataQuality";
 import {
-    buildRawRDistribution, buildBucketDrilldown,
+    buildRawRDistribution, buildBucketDrilldown, losersInRawBucket,
     buildFailureDrivers, buildPairDrivers,
-    buildBeOpportunity, buildBeExclusiveRanges, buildExplorer,
-    EXPLORER_METRICS, EXPLORER_FLOORS,
+    buildBeOpportunity, buildBeExclusiveRanges,
+    buildLoserMfeReachTable, buildMfeByDimension, buildDistanceInsights,
 } from "../shared/excursionAnalytics";
+import { FailureExplorer, LiftCell } from "./FailureExplorer";
 
 // Arm levels (R) tested by the Break-even Opportunity table. 0.25–1R always shown;
 // 1.5R / 2R only when at least one loser reached them ("if useful").
@@ -33,15 +34,13 @@ function Contribution({ pct }) {
     return <span className="font-num tabular-nums text-[hsl(var(--text-2))]">{pct}%</span>;
 }
 
-// Lift = loss-R share ÷ trade share. >1 ⇒ disproportionate (a real driver).
-function LiftCell({ lift }) {
-    const color = lift >= 1.5 ? "hsl(var(--danger))"
-        : lift >= 1.15 ? "hsl(var(--warning))"
-        : "hsl(var(--text-2))";
-    return <span className="w-12 text-right font-num tabular-nums" style={{ color, fontWeight: lift >= 1.15 ? 600 : 400 }}>{lift}×</span>;
+// Compact lift value (shares the legend colours of the imported LiftCell).
+function liftColor(lift) {
+    return lift >= 1.5 ? "hsl(var(--danger))" : lift >= 1.15 ? "hsl(var(--warning))" : "hsl(var(--text-2))";
 }
 
-// One clickable bucket bar.
+// One clickable bucket bar. Now carries a lift cell (PHASE E) — additive; click /
+// selection behaviour is unchanged.
 function BucketBar({ b, maxLossR, selected, onSelect }) {
     const w = maxLossR > 0 ? Math.min(100, (b.lossR / maxLossR) * 100) : 0;
     const color = b.flag === "instant" ? "hsl(var(--danger))"
@@ -61,10 +60,89 @@ function BucketBar({ b, maxLossR, selected, onSelect }) {
             <span className="w-8 text-right text-[11.5px] font-num tabular-nums text-white">{b.count}</span>
             <span className="w-12 text-right text-[11px] font-num tabular-nums text-[hsl(var(--text-2))]">{b.lossR}R</span>
             <span className="w-12 text-right text-[11px] font-num tabular-nums text-[hsl(var(--text-2))]">{b.contributionPct}%</span>
+            <span className="w-12 text-right text-[11px] font-num tabular-nums" style={{ color: liftColor(b.lift ?? 0), fontWeight: (b.lift ?? 0) >= 1.15 ? 600 : 400 }}>{b.lift ?? 0}×</span>
             {b.flag
                 ? <Pill tone={FLAG_TONE[b.flag]}>{b.flag === "instant" ? "instant" : "almost"}</Pill>
                 : <span className="w-[52px]" />}
         </button>
+    );
+}
+
+// ── Distance-to-Stop insights (Command Center) — data-driven, no hardcoded text ──
+const INSIGHT_DOT = {
+    contribution: "hsl(var(--danger))",
+    bucket_driver: "hsl(var(--danger))",
+    reach: "hsl(var(--accent-secondary))",
+    lift: "hsl(var(--warning))",
+    overrep: "hsl(var(--warning))",
+    mfe: "hsl(var(--success))",
+};
+function InsightsCard({ insights }) {
+    if (!insights || !insights.length) return null;
+    return (
+        <NeonPanel
+            title={<TermTip termKey="distance_before_stop">Distance to Stop insights</TermTip>}
+            tone="primary"
+            action={<Pill tone="muted">{insights.length} findings · from this run's data</Pill>}
+        >
+            <ul className="p-3 space-y-1.5">
+                {insights.map((it) => (
+                    <li key={it.id} className="flex items-start gap-2.5 text-[12px] font-ui text-[hsl(var(--text))] leading-relaxed">
+                        <span className="w-1.5 h-1.5 rounded-full shrink-0 mt-1.5" style={{ background: INSIGHT_DOT[it.kind] ?? "hsl(var(--text-2))" }} />
+                        <span>{it.text}</span>
+                    </li>
+                ))}
+            </ul>
+            <p className="px-3 pb-3 text-[10px] font-ui text-[hsl(var(--text-3))]">
+                Generated from computed metrics (contribution, lift, reach) — no estimates, no break-even claim.
+            </p>
+        </NeonPanel>
+    );
+}
+
+// ── MFE-by-dimension outcome panel (Structure×MFE / Session×MFE) ────────────────
+function MfeOutcomePanel({ data, title, question }) {
+    if (!data || !data.available || !data.rows.length) return null;
+    const maxLossR = Math.max(...data.rows.map((r) => r.lossR), 1);
+    return (
+        <NeonPanel
+            title={title}
+            action={<Pill tone="muted">avg <TermTip termKey="mfe">MFE</TermTip> +{data.avgMfe}R · {data.eligible} losers</Pill>}
+        >
+            <p className="px-3 pt-3 text-[10.5px] font-ui text-[hsl(var(--text-2))] leading-relaxed">{question} Ranked by <TermTip termKey="contribution_pct">contribution</TermTip>; % columns are that group's losers reaching each level in favour (peak <TermTip termKey="mfe">MFE</TermTip>).</p>
+            <div className="p-3 overflow-x-auto">
+                <table className="w-full text-[11.5px] font-ui border-collapse">
+                    <thead>
+                        <tr className="text-[9.5px] uppercase tracking-[0.05em] text-[hsl(var(--text-2))] border-b border-[hsl(var(--border-soft))]">
+                            <th className="text-left font-medium py-1.5 pr-2">{data.dimLabel}</th>
+                            <th className="text-right font-medium py-1.5 px-2">Count</th>
+                            <th className="text-right font-medium py-1.5 px-2"><TermTip termKey="loss_r_contribution">Loss-R</TermTip></th>
+                            <th className="text-right font-medium py-1.5 px-2"><TermTip termKey="contribution_pct">Contrib</TermTip></th>
+                            <th className="text-right font-medium py-1.5 px-2">Avg MFE</th>
+                            {data.reachLevels.map((L) => (
+                                <th key={L} className="text-right font-medium py-1.5 px-2">≥{L}R</th>
+                            ))}
+                            <th className="text-right font-medium py-1.5 pl-2"><TermTip termKey="lift">Lift</TermTip></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {data.rows.map((r) => (
+                            <tr key={r.value} className={cn("border-b border-[hsl(var(--border-soft)/0.5)]", r.lowSample && "opacity-50")}>
+                                <td className="text-left py-1.5 pr-2 text-[hsl(var(--text))] truncate max-w-[150px]">{r.value}{r.lowSample && <span className="ml-1.5 text-[9px] uppercase tracking-wider text-[hsl(var(--warning))]">low n</span>}</td>
+                                <td className="text-right py-1.5 px-2 font-num tabular-nums text-white">{r.count}</td>
+                                <td className="text-right py-1.5 px-2 font-num tabular-nums text-[hsl(var(--text-2))]">{r.lossR}R</td>
+                                <td className="text-right py-1.5 px-2 font-num tabular-nums text-[hsl(var(--text))]">{r.contributionPct}%</td>
+                                <td className="text-right py-1.5 px-2 font-num tabular-nums text-[hsl(var(--accent-secondary))]">+{r.avgMfe}R</td>
+                                {data.reachLevels.map((L) => (
+                                    <td key={L} className="text-right py-1.5 px-2 font-num tabular-nums text-[hsl(var(--text-2))]">{r.reach[L]}%</td>
+                                ))}
+                                <td className="text-right py-1.5 pl-2"><LiftCell lift={r.lift} /></td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </NeonPanel>
     );
 }
 
@@ -88,6 +166,50 @@ function DrillSection({ section }) {
                 ))}
             </div>
         </div>
+    );
+}
+
+// ── Loser MFE reach table (realized losses — how far losers got) ───────────────
+// Cumulative count of losing trades that reached ≥ each R level in favour before
+// failing. Describes realized losses (no break-even claim — the BE panel owns that).
+function ReachTable({ reach }) {
+    if (!reach || !reach.rows.length) return null;
+    const maxReached = Math.max(...reach.rows.map((r) => r.reachedCount), 1);
+    return (
+        <NeonPanel
+            title={<TermTip termKey="mfe_reach">How many losers reached profit before failing</TermTip>}
+            action={<Pill tone="muted">{reach.eligible} losers w/ MFE</Pill>}
+        >
+            <div className="p-3 space-y-1">
+                <p className="px-2 text-[10.5px] font-ui text-[hsl(var(--text-2))] leading-relaxed">
+                    Losing trades that reached <span className="text-[hsl(var(--text))]">at least</span> each level in favour
+                    (peak <TermTip termKey="mfe">MFE</TermTip>) before stopping out. These are
+                    <span className="text-[hsl(var(--text))]"> realized losses</span> — it describes how far losers travelled, not a break-even claim.
+                </p>
+                <div className="flex items-center gap-3 px-2 pt-1 text-[9.5px] font-ui uppercase tracking-[0.05em] text-[hsl(var(--text-2))]">
+                    <span className="w-16">Reached ≥</span>
+                    <span className="flex-1" />
+                    <span className="w-20 text-right">Losers</span>
+                    <span className="w-16 text-right">% losers</span>
+                    <span className="w-16 text-right"><TermTip termKey="loss_r_contribution">Loss-R</TermTip></span>
+                    <span className="w-16 text-right"><TermTip termKey="contribution_pct">% loss-R</TermTip></span>
+                    <span className="w-16 text-right">Sample</span>
+                </div>
+                {reach.rows.map((r) => (
+                    <div key={r.levelR} className={cn("flex items-center gap-3 px-2 py-1.5 text-[11.5px] font-ui", r.lowSample && "opacity-55")}>
+                        <span className="w-16 shrink-0 text-[hsl(var(--text))] font-num tabular-nums">{r.label}</span>
+                        <div className="flex-1 h-1.5 bg-[hsl(var(--panel-2))] rounded-full overflow-hidden">
+                            <div className="h-full rounded-full bg-[hsl(var(--accent-secondary)/0.7)]" style={{ width: `${Math.min(100, (r.reachedCount / maxReached) * 100)}%` }} />
+                        </div>
+                        <span className="w-20 text-right font-num tabular-nums text-white">{r.reachedCount}</span>
+                        <span className="w-16 text-right font-num tabular-nums text-[hsl(var(--text-2))]">{r.reachedPct}%</span>
+                        <span className="w-16 text-right font-num tabular-nums text-[hsl(var(--text))]">{r.lossR}R</span>
+                        <span className="w-16 text-right font-num tabular-nums text-[hsl(var(--text-2))]">{r.contributionPct}%</span>
+                        <span className="w-16 text-right">{r.lowSample ? <Pill tone="warning">low n</Pill> : <Pill tone="muted">ok</Pill>}</span>
+                    </div>
+                ))}
+            </div>
+        </NeonPanel>
     );
 }
 
@@ -213,125 +335,12 @@ function BeOpportunityTable({ be, ranges }) {
     );
 }
 
-// ── Failure Explorer V1 controls + table (shared engine) ───────────────────────
-function ExplorerSelect({ label, value, onChange, options, includeNone = false }) {
-    return (
-        <label className="flex flex-col gap-1">
-            <span className="text-[9.5px] font-ui uppercase tracking-[0.05em] text-[hsl(var(--text-2))]">{label}</span>
-            <select
-                value={value}
-                onChange={(e) => onChange(e.target.value)}
-                className="bg-[hsl(var(--panel-2))] border border-[hsl(var(--border-soft))] text-[hsl(var(--text))] text-[11.5px] font-ui rounded px-2 py-1.5 clip-bevel-sm focus:outline-none focus:border-[hsl(var(--accent-primary)/0.6)]"
-            >
-                {includeNone && <option value="">None</option>}
-                {options.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
-            </select>
-        </label>
-    );
-}
-
-function FailureExplorer({ trades }) {
-    const [dimA, setDimA] = useState("session");
-    const [dimB, setDimB] = useState("");
-    const [metric, setMetric] = useState("lift");
-    const [floor, setFloor] = useState(8);
-
-    const exp = useMemo(
-        () => buildExplorer(trades, { dimA, dimB: dimB || null, sampleFloor: floor, metric }),
-        [trades, dimA, dimB, floor, metric],
-    );
-
-    if (!exp.available.length) {
-        return (
-            <NeonPanel title="Failure Explorer" action={<Pill tone="muted">controlled · max 2 dimensions</Pill>}>
-                <div className="p-4 text-[11.5px] font-ui text-[hsl(var(--text-2))]">No categorical dimensions are available in this run to explore.</div>
-            </NeonPanel>
-        );
-    }
-
-    const dimBOpts = exp.available.filter((d) => d.key !== exp.dimA);
-    const hasB = !!exp.dimB;
-    const aLabel = exp.available.find((d) => d.key === exp.dimA)?.label ?? "Value A";
-    const bLabel = exp.available.find((d) => d.key === exp.dimB)?.label ?? "Value B";
-
-    return (
-        <NeonPanel title="Failure Explorer" action={<Pill tone="muted">controlled · max 2 dimensions</Pill>}>
-            <div className="p-3 space-y-3">
-                <div className="flex flex-wrap items-end gap-3">
-                    <ExplorerSelect label="Dimension A" value={exp.dimA ?? ""} onChange={setDimA} options={exp.available} />
-                    <ExplorerSelect label="Dimension B" value={exp.dimB ?? ""} onChange={setDimB} options={dimBOpts} includeNone />
-                    <ExplorerSelect label="Rank by" value={metric} onChange={setMetric} options={EXPLORER_METRICS} />
-                    <div className="flex flex-col gap-1">
-                        <span className="text-[9.5px] font-ui uppercase tracking-[0.05em] text-[hsl(var(--text-2))]">Sample floor</span>
-                        <div className="flex items-center gap-1">
-                            {EXPLORER_FLOORS.map((f) => (
-                                <button key={f} type="button" onClick={() => setFloor(f)}
-                                    className={cn("px-2 py-1.5 text-[11px] font-num tabular-nums clip-bevel-sm border transition-colors",
-                                        f === floor
-                                            ? "border-[hsl(var(--accent-primary)/0.6)] bg-[hsl(var(--accent-primary)/0.12)] text-[hsl(var(--text))]"
-                                            : "border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))] hover:bg-[hsl(var(--panel-2)/0.5)]")}>
-                                    ≥{f}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-                </div>
-
-                <p className="text-[10.5px] font-ui text-[hsl(var(--text-2))] leading-relaxed">
-                    Across <span className="text-[hsl(var(--text))]">all trades</span> in the run (winners + losers), independent of the cohort filter — so trade share and loss rate are real.
-                    {" "}<TermTip termKey="lift">Lift</TermTip> = loss-R share ÷ trade share. Example: if New York is 20% of trades but 40% of loss-R, lift = 2.0×.
-                    {" "}Low-sample rows (under the floor) are greyed and are not strong findings.
-                </p>
-
-                {exp.rows.length ? (
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-[11.5px] font-ui border-collapse">
-                            <thead>
-                                <tr className="text-[9.5px] uppercase tracking-[0.05em] text-[hsl(var(--text-2))] border-b border-[hsl(var(--border-soft))]">
-                                    <th className="text-left font-medium py-1.5 pr-2">{aLabel}</th>
-                                    {hasB && <th className="text-left font-medium py-1.5 pr-2">{bLabel}</th>}
-                                    <th className="text-right font-medium py-1.5 px-2">Trades</th>
-                                    <th className="text-right font-medium py-1.5 px-2"><TermTip termKey="loss_r_contribution">Loss-R</TermTip></th>
-                                    <th className="text-right font-medium py-1.5 px-2"><TermTip termKey="contribution_pct">Contrib</TermTip></th>
-                                    <th className="text-right font-medium py-1.5 px-2">Trade %</th>
-                                    <th className="text-right font-medium py-1.5 px-2"><TermTip termKey="lift">Lift</TermTip></th>
-                                    <th className="text-right font-medium py-1.5 px-2">Loss rate</th>
-                                    <th className="text-right font-medium py-1.5 px-2">Avg loss</th>
-                                    <th className="text-right font-medium py-1.5 pl-2">Sample</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {exp.rows.map((c) => (
-                                    <tr key={hasB ? `${c.keyA}·${c.keyB}` : c.keyA}
-                                        className={cn("border-b border-[hsl(var(--border-soft)/0.5)]", c.lowSample && "opacity-50")}>
-                                        <td className="text-left py-1.5 pr-2 text-[hsl(var(--text))] truncate max-w-[160px]">{c.keyA}</td>
-                                        {hasB && <td className="text-left py-1.5 pr-2 text-[hsl(var(--text))] truncate max-w-[140px]">{c.keyB}</td>}
-                                        <td className="text-right py-1.5 px-2 font-num tabular-nums text-white">{c.count}</td>
-                                        <td className="text-right py-1.5 px-2 font-num tabular-nums text-[hsl(var(--text-2))]">{c.lossR}R</td>
-                                        <td className="text-right py-1.5 px-2 font-num tabular-nums text-[hsl(var(--text))]">{c.contributionPct}%</td>
-                                        <td className="text-right py-1.5 px-2 font-num tabular-nums text-[hsl(var(--text-2))]">{c.tradeSharePct}%</td>
-                                        <td className="text-right py-1.5 px-2"><LiftCell lift={c.lift} /></td>
-                                        <td className="text-right py-1.5 px-2 font-num tabular-nums text-[hsl(var(--text-2))]">{c.lossRate}%</td>
-                                        <td className="text-right py-1.5 px-2 font-num tabular-nums text-[hsl(var(--text-2))]">{c.avgLossR}R</td>
-                                        <td className="text-right py-1.5 pl-2">{c.lowSample ? <Pill tone="warning">low n</Pill> : <Pill tone="muted">ok</Pill>}</td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                ) : (
-                    <div className="p-2 text-[11.5px] font-ui text-[hsl(var(--text-2))]">No cells for this selection.</div>
-                )}
-            </div>
-        </NeonPanel>
-    );
-}
-
 export function ExcursionAnalysis({ losers = [], allLosers = [], allTrades = [], config = {} }) {
     const source = losers.length ? losers : allLosers;
     // Explorer runs over a winners-inclusive population so loss-rate / lift are real.
     const explorerSource = allTrades.length ? allTrades : source;
     const available = useMemo(() => isModuleAvailable("excursion", source), [source]);
+    const reach = useMemo(() => buildLoserMfeReachTable(source), [source]);
     const dist = useMemo(() => buildRawRDistribution(source), [source]);
     const be = useMemo(() => buildBeOpportunity(source, BE_LEVELS, { config, mode: "raw" }), [source, config]);
     const beRanges = useMemo(() => buildBeExclusiveRanges(source, { config }), [source, config]);
@@ -350,6 +359,28 @@ export function ExcursionAnalysis({ losers = [], allLosers = [], allTrades = [],
         [source, activeBucket],
     );
     const activeBucketDef = dist.buckets?.find((b) => b.key === activeBucket) || null;
+
+    // Insight synthesis (Command Center) — bucket-aware so the headline tracks the
+    // selected bucket. MFE-by-dimension outcomes for Structure / Session panels.
+    const insights = useMemo(
+        () => buildDistanceInsights(source, { config, activeBucketKey: activeBucket }),
+        [source, config, activeBucket],
+    );
+    const mfeByStructure = useMemo(() => buildMfeByDimension(source, "structure"), [source]);
+    const mfeBySession = useMemo(() => buildMfeByDimension(source, "session"), [source]);
+
+    // Bucket object handed to the Explorer so it can scope to "what caused THIS bucket".
+    const explorerBucket = useMemo(() => {
+        if (!activeBucket || !activeBucketDef || !drill) return null;
+        return {
+            key: activeBucket,
+            label: activeBucketDef.label,
+            trades: drill.trades,
+            lossR: drill.lossR,
+            contributionPct: drill.contributionPct,
+            losers: losersInRawBucket(source, activeBucket),
+        };
+    }, [activeBucket, activeBucketDef, drill, source]);
 
     // ── Gated empty state ──────────────────────────────────────────────────────
     if (!available || dist.coverage.withMfe === 0) {
@@ -386,6 +417,12 @@ export function ExcursionAnalysis({ losers = [], allLosers = [], allTrades = [],
                 </p>
             </div>
 
+            {/* ── Insight synthesis (Command Center) ────────────────────────── */}
+            <InsightsCard insights={insights.insights} />
+
+            {/* ── Loser MFE reach table (realized losses) ───────────────────── */}
+            <ReachTable reach={reach} />
+
             {/* ── Bucket distribution (clickable) ───────────────────────────── */}
             <NeonPanel
                 title={<TermTip termKey="distance_before_stop">How far losers moved in favour</TermTip>}
@@ -398,6 +435,7 @@ export function ExcursionAnalysis({ losers = [], allLosers = [], allTrades = [],
                         <span className="w-8 text-right">n</span>
                         <span className="w-12 text-right"><TermTip termKey="loss_r_contribution">Loss-R</TermTip></span>
                         <span className="w-12 text-right"><TermTip termKey="contribution_pct">Contrib</TermTip></span>
+                        <span className="w-12 text-right"><TermTip termKey="lift">Lift</TermTip></span>
                         <span className="w-[52px]" />
                     </div>
                     {dist.buckets.map((b) => (
@@ -437,8 +475,20 @@ export function ExcursionAnalysis({ losers = [], allLosers = [], allTrades = [],
                 </NeonPanel>
             )}
 
-            {/* ── Failure Explorer (controlled, shared engine) ──────────────── */}
-            <FailureExplorer trades={explorerSource} />
+            {/* ── Failure Explorer (controlled, shared engine; bucket-aware) ── */}
+            <FailureExplorer allTrades={explorerSource} allLosers={source} bucket={explorerBucket} />
+
+            {/* ── Structure × MFE / Session × MFE outcomes ──────────────────── */}
+            <MfeOutcomePanel
+                data={mfeByStructure}
+                title={<TermTip termKey="distance_before_stop">Structure vs MFE outcome</TermTip>}
+                question="Which structures tend to move far before failing?"
+            />
+            <MfeOutcomePanel
+                data={mfeBySession}
+                title={<TermTip termKey="distance_before_stop">Session vs MFE outcome</TermTip>}
+                question="Which sessions produce losers that nearly work?"
+            />
 
             {/* ── Top failure drivers (single factor, all losers) ───────────── */}
             <NeonPanel

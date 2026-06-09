@@ -394,11 +394,23 @@ export const GLOSSARY = {
         definition: "Losers that reached 1R or more in favour before failing.",
         whyItMatters: "These are the strongest break-even / partial candidates — they moved a full risk distance your way first.",
     },
+    mfe_reach: {
+        term: "MFE reach",
+        friendlyName: "How far losers reached before failing",
+        definition: "The count of losing trades that reached at least a given R level in your favour (peak MFE) before stopping out.",
+        whyItMatters: "Tells you how many losses were 'good trades that failed later' versus instant failures — the realized picture, with no break-even assumption attached.",
+    },
     be_opportunity: {
         term: "Break-even opportunity",
         friendlyName: "Break-even opportunity (upper bound)",
         definition: "Per arm level, the losers that reached it in your favour — trades that could have armed a break-even stop there.",
         whyItMatters: "Points to which BE levels are worth testing. It's an optimistic upper bound (peak MFE only): it can't confirm BE would have triggered, nor how many winners the rule would cut. Validate with an exact BE backtest before acting.",
+    },
+    be_opportunity_upper_bound: {
+        term: "Upper bound",
+        friendlyName: "Why break-even figures are an upper bound",
+        definition: "Break-even reach counts use peak MFE only — they show a trade could have armed BE, not that BE would have held.",
+        whyItMatters: "MFE doesn't record whether price retraced to entry after arming, nor the winners a BE rule would cut. Treat 'savable R' as a ceiling and validate with an exact BE backtest.",
     },
     contribution_pct: {
         term: "Contribution %",

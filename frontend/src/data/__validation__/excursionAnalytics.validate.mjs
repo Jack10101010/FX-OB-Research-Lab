@@ -59,8 +59,8 @@ const {
     getMfeR, getTargetRR, mfePctOfTarget, bucketMfePct, bucketMfeRaw,
     buildMfeDistribution, buildBeOpportunity,
     buildBeExclusiveRanges, bucketBeExclusive,
-    buildRawRDistribution, buildBucketDrilldown, buildFailureDrivers, buildPairDrivers,
-    buildExplorer,
+    buildRawRDistribution, buildBucketDrilldown, losersInRawBucket, buildFailureDrivers, buildPairDrivers,
+    buildExplorer, buildLoserMfeReachTable, buildMfeByDimension, buildDistanceInsights,
 } = exc;
 
 let failures = 0;
@@ -283,6 +283,112 @@ ok(exFallback.dimA != null && exFallback.dimA !== "session", "unavailable Dimens
 const exPair = buildExplorer(exTrades, { dimA: "direction", dimB: "structure", sampleFloor: 1, metric: "lossR" });
 ok(exPair.dimB === "structure" && exPair.rows.every((c) => "keyB" in c), "pair explorer carries Dimension B on every row");
 ok(exPair.rows.every((c, i, a) => i === 0 || a[i - 1].lossR >= c.lossR || c.lowSample), "rows ranked by chosen metric (loss-R) among rankable");
+
+// ── V2 Phase 1: Loser MFE reach table (cumulative ≥ level, realized framing) ────
+console.log("buildLoserMfeReachTable");
+const reachLosers = [
+    { r: -1, mfeR: 0.1 },   // reaches no level (< 0.25)
+    { r: -1, mfeR: 0.3 },   // ≥0.25
+    { r: -2, mfeR: 0.6 },   // ≥0.25, ≥0.5  (big damage: -2R)
+    { r: -1, mfeR: 1.2 },   // ≥0.25, 0.5, 1
+    { r: -1, mfeR: 2.5 },   // ≥0.25, 0.5, 1, 2
+    { r: -1, mfeR: 3.4 },   // ≥0.25, 0.5, 1, 2, 3
+];
+const reachTbl = buildLoserMfeReachTable(reachLosers);
+const rL = (L) => reachTbl.rows.find((r) => r.levelR === L);
+ok(reachTbl.rows.length === 5, "reach: 5 default levels (0.25/0.5/1/2/3)");
+ok(reachTbl.eligible === 6 && reachTbl.coverage.total === 6, "reach: 6 eligible MFE losers");
+ok(rL(0.25).reachedCount === 5, "1. reach ≥0.25R → 5 losers");
+ok(rL(0.5).reachedCount === 4, "1. reach ≥0.5R → 4");
+ok(rL(1).reachedCount === 3, "1. reach ≥1R → 3");
+ok(rL(2).reachedCount === 2, "1. reach ≥2R → 2");
+ok(rL(3).reachedCount === 1, "1. reach ≥3R → 1");
+ok(reachTbl.rows.every((r, i, a) => i === 0 || a[i - 1].reachedCount >= r.reachedCount), "reach counts non-increasing by level (cumulative)");
+ok(Math.abs(rL(0.25).reachedPct - 83.3) <= 0.1, `reach ≥0.25R reachedPct ~83.3 (got ${rL(0.25).reachedPct})`);
+// 4. contributionPct: reached-≥0.25 loss-R = 1+2+1+1+1 = 6 over total eligible loss-R 7.
+ok(rL(0.25).lossR === 6 && rL(1).lossR === 3, "reach loss-R sums (≥0.25R=6, ≥1R=3)");
+ok(Math.abs(rL(0.25).contributionPct - 85.7) <= 0.2, `4. reach ≥0.25R contributionPct ~85.7 (got ${rL(0.25).contributionPct})`);
+ok(Math.abs(rL(1).contributionPct - 42.9) <= 0.2, `4. reach ≥1R contributionPct ~42.9 (got ${rL(1).contributionPct})`);
+// custom levels honoured
+const reachCustom = buildLoserMfeReachTable(reachLosers, [1]);
+ok(reachCustom.rows.length === 1 && reachCustom.rows[0].reachedCount === 3, "reach: custom levels honoured");
+// 5. cross-check — reach count matches BE raw "reached" at the same level (same definition)
+const beReachCheck = buildBeOpportunity(reachLosers, [0.25, 1], { config: {}, mode: "raw" });
+ok(beReachCheck.rows.find((r) => r.level === 0.25).reached === rL(0.25).reachedCount, "5. reach count matches BE raw reached at +0.25R");
+ok(beReachCheck.rows.find((r) => r.level === 1).reached === rL(1).reachedCount, "5. reach count matches BE raw reached at +1R");
+
+// 2 & 3. graceful degrade — no MFE / empty input must not crash
+console.log("reach graceful degrade");
+const reachNone = buildLoserMfeReachTable([{ r: -1 }, { r: -2 }]);
+ok(reachNone.eligible === 0 && reachNone.rows.length === 5, "2. reach no-MFE: eligible 0, still 5 rows");
+ok(reachNone.rows.every((r) => r.reachedCount === 0 && r.reachedPct === 0 && r.contributionPct === 0), "2. reach no-MFE: all rows zeroed (no crash)");
+const reachEmpty = buildLoserMfeReachTable([]);
+ok(reachEmpty.eligible === 0 && reachEmpty.coverage.total === 0 && reachEmpty.rows.length === 5, "3. reach empty list: eligible 0, total 0, 5 zeroed rows");
+
+// 6. low-sample flag (SAMPLE_FLOOR = 10)
+console.log("reach low-sample flags");
+const reachBig = buildLoserMfeReachTable([
+    ...Array.from({ length: 12 }, () => ({ r: -1, mfeR: 0.3 })), // reach +0.25R only
+    ...Array.from({ length: 3 },  () => ({ r: -1, mfeR: 3.5 })), // reach every level
+]);
+const rbL = (L) => reachBig.rows.find((r) => r.levelR === L);
+ok(rbL(0.25).reachedCount === 15 && rbL(0.25).lowSample === false, "6. reach ≥0.25R reached by 15 → not low-sample");
+ok(rbL(0.5).reachedCount === 3 && rbL(0.5).lowSample === true, "6. reach ≥0.5R reached by 3 → low-sample");
+ok(rbL(3).reachedCount === 3 && rbL(3).lowSample === true, "6. reach ≥3R reached by 3 → low-sample");
+
+// ── V4 Phase 2: lift on raw-R buckets (PHASE E) ─────────────────────────────────
+console.log("V4 raw-R bucket lift (PHASE E)");
+const rawDistLift = buildRawRDistribution(v3);
+ok(rawDistLift.buckets.every((b) => "lift" in b && "tradeSharePct" in b), "every raw bucket carries lift + tradeSharePct");
+ok(rawDistLift.buckets.every((b) => b.tradeSharePct === 0 || Math.abs(b.lift - Number((b.contributionPct / b.tradeSharePct).toFixed(2))) <= 0.001),
+    "bucket lift == loss-R share ÷ trade share (failuresAggregation methodology)");
+const b051 = rawDistLift.buckets.find((b) => b.key === "05_1");
+ok(b051 && b051.lift > 1, "0.5–1R bucket lift > 1 (its losses are bigger than the typical loser)");
+
+// ── V4 Phase 2: Structure × MFE outcome (PHASE B) ───────────────────────────────
+console.log("V4 buildMfeByDimension (structure × MFE)");
+const mfeTrades = [
+    { r: -2, structureTag: "choch", mfeR: 0.3 },
+    { r: -3, structureTag: "choch", mfeR: 0.8 },
+    { r: -1, structureTag: "choch", mfeR: 1.2 },
+    { r: -1, structureTag: "choch", mfeR: 0.1 },
+    { r: -1, structureTag: "bos",   mfeR: 1.5 },
+    { r: -2, structureTag: "bos",   mfeR: 2.4 },
+    { r: -1, structureTag: "bos",   mfeR: 0.7 },
+];
+const md = buildMfeByDimension(mfeTrades, "structure", { sampleFloor: 1 });
+ok(md.available === true && md.rows.length === 2, "structure MFE-by-dim available with 2 rows");
+ok(md.rows[0].value === "CHoCH" && md.rows[0].lossR === 7, "ranked by contribution: CHoCH first (7R)");
+const mdCh = md.rows.find((r) => r.value === "CHoCH");
+const mdBo = md.rows.find((r) => r.value === "BOS");
+ok(mdCh.count === 4 && mdBo.count === 3, "counts: CHoCH 4, BOS 3");
+ok(mdCh.avgMfe === 0.6, `CHoCH avg MFE 0.6 (got ${mdCh.avgMfe})`);
+ok(Math.abs(mdBo.avgMfe - 1.53) <= 0.01, `BOS avg MFE ~1.53 (got ${mdBo.avgMfe})`);
+ok(mdCh.reach[0.5] === 50 && mdCh.reach[1] === 25, "CHoCH reach ≥0.5R=50%, ≥1R=25%");
+ok(mdBo.reach[1] === 66.7 && mdBo.reach[2] === 33.3, "BOS reach ≥1R=66.7%, ≥2R=33.3%");
+ok(md.reachLevels.length === 4, "4 reach levels (0.5 / 1 / 1.5 / 2)");
+ok(buildMfeByDimension(mfeTrades, "session").available === false, "session × MFE unavailable (session stubbed Unknown)");
+ok(buildMfeByDimension([], "structure").available === false && buildMfeByDimension([], "structure").rows.length === 0, "empty input → unavailable, no crash");
+
+// ── V4 Phase 2: bucket → Explorer wiring + all-loser fallback (PHASE A) ──────────
+console.log("V4 bucket → Explorer wiring (PHASE A)");
+const inBucket051 = losersInRawBucket(v3, "05_1");
+ok(inBucket051.length === 2 && inBucket051.every((t) => bucketMfeRaw(getMfeR(t)) === "05_1"), "losersInRawBucket returns only that bucket's losers");
+const expBucket = buildExplorer(inBucket051, { dimA: "structure", sampleFloor: 1 });
+const expAll = buildExplorer(v3, { dimA: "structure", sampleFloor: 1 });
+ok(expBucket.totals.trades === 2, "explorer scoped to selected bucket sees 2 trades");
+ok(expAll.totals.trades === 7, "explorer all-losers fallback sees all 7 trades");
+
+// ── V4 Phase 2: insight synthesis (PHASE D) ─────────────────────────────────────
+console.log("V4 buildDistanceInsights (data-driven, prioritised)");
+const ins = buildDistanceInsights(mfeTrades, { activeBucketKey: "05_1" });
+ok(Array.isArray(ins.insights) && ins.insights.length >= 1 && ins.insights.length <= 8, "produces 1..8 insights");
+ok(ins.insights.every((i) => typeof i.text === "string" && i.text.length > 0), "every insight has computed text (no empty)");
+ok(ins.insights.every((i, idx, a) => idx === 0 || a[idx - 1].tier >= i.tier), "insights sorted by priority tier (contribution before lift/over-rep/MFE)");
+ok(/\d/.test(ins.insights[0].text), "top insight contains a computed number (data-driven)");
+ok(ins.insights.some((i) => i.kind === "contribution"), "includes a contribution insight");
+ok(ins.insights.some((i) => i.kind === "bucket_driver"), "includes a within-bucket driver insight when a bucket is active");
+ok(buildDistanceInsights([], {}).insights.length === 0, "no insights on empty input (never fabricates)");
 
 console.log(`\n${failures === 0 ? "ALL PASS" : failures + " FAILURE(S)"}`);
 process.exit(failures === 0 ? 0 : 1);

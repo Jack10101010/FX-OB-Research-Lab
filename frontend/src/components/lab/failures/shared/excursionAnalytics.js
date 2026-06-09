@@ -16,7 +16,7 @@
 
 import { rOf, isFiniteNumber } from "./failuresUtils";
 import { aggregateFailures } from "./failuresAggregation";
-import { FAILURE_DIMENSIONS, DIMENSION_BY_KEY, dimensionAvailable, availableDimensions } from "./failuresDimensions";
+import { FAILURE_DIMENSIONS, DIMENSION_BY_KEY, dimensionAvailable, availableDimensions, resolveDimension } from "./failuresDimensions";
 
 const numOrNull = (v) => {
     if (v === null || v === undefined || v === "") return null;
@@ -24,6 +24,7 @@ const numOrNull = (v) => {
     return Number.isFinite(n) ? n : null;
 };
 const round1 = (v) => Number(Number(v).toFixed(1));
+const round2 = (v) => Number(Number(v).toFixed(2));
 
 // "Never moved" threshold in R — favourable excursion at/under this counts as zero.
 export const EPS_R = 0.02;
@@ -298,6 +299,45 @@ export const DRILL_SAMPLE_FLOOR = 8; // min trades in a cell before it ranks
 const lossRof = (t) => Math.abs(rOf(t));
 const sumLossR = (list) => list.reduce((s, t) => s + lossRof(t), 0);
 
+// ── Loser MFE reach table (cumulative ≥ level, realized-loss framing) ──────────
+// "How many losing trades reached +0.25 / +0.5 / +1 / +2 / +3 R in favour before
+// stopping out?" This DESCRIBES realized losses (how far losers travelled) and makes
+// NO break-even claim — buildBeOpportunity owns the optimistic upper-bound savable
+// framing. `eligible` = losers carrying an mfeR value; reachedPct is over eligible;
+// lossR is the absolute loss-R of the reached trades; contributionPct is their share
+// of total eligible loss-R. Counts are cumulative, so they're non-increasing as the
+// level rises. Safe on empty / MFE-less input (eligible 0 → zeroed rows).
+export const MFE_REACH_LEVELS = [0.25, 0.5, 1, 2, 3];
+
+export function buildLoserMfeReachTable(losses, levels = MFE_REACH_LEVELS) {
+    const list = Array.isArray(losses) ? losses : [];
+    const total = list.length;
+    const withMfe = list.filter((t) => getMfeR(t) != null);
+    const eligible = withMfe.length;
+    const totalLossR = sumLossR(withMfe);
+    const lvls = Array.isArray(levels) && levels.length ? levels : MFE_REACH_LEVELS;
+    const rows = lvls.map((L) => {
+        const reached = withMfe.filter((t) => getMfeR(t) >= L);
+        const lossR = round1(sumLossR(reached));
+        return {
+            levelR: L,
+            label: `+${L}R`,
+            reachedCount: reached.length,
+            reachedPct: eligible ? round1((reached.length / eligible) * 100) : 0,
+            lossR,
+            contributionPct: totalLossR > 0 ? round1((lossR / totalLossR) * 100) : 0,
+            lowSample: reached.length < SAMPLE_FLOOR,
+        };
+    });
+    return {
+        rows,
+        eligible,
+        coverage: { total, eligible, pct: total ? round1((eligible / total) * 100) : 0 },
+        totalLossR: round1(totalLossR),
+        sampleFloor: SAMPLE_FLOOR,
+    };
+}
+
 // ── Raw-R primary distribution (always raw; ignores targetRR) ──────────────────
 export function buildRawRDistribution(losers) {
     const list = Array.isArray(losers) ? losers : [];
@@ -312,12 +352,21 @@ export function buildRawRDistribution(losers) {
     }
     const buckets = MFE_RAW_BUCKETS.map((b) => {
         const c = counts[b.key];
+        const tradeSharePct = withMfe.length ? round1((c.count / withMfe.length) * 100) : 0;
+        const contributionPct = totalLossR > 0 ? round1((c.lossR / totalLossR) * 100) : 0;
+        // Lift (same methodology as failuresAggregation): loss-R share ÷ trade share.
+        // 1.00× = a bucket loses exactly its share of trades; >1 = disproportionately
+        // damaging (the bucket's average loss is bigger than the typical loser).
+        // Additive field — the clickable chart ignores it, so behaviour is unchanged.
+        const lift = tradeSharePct > 0 ? round2(contributionPct / tradeSharePct) : 0;
         return {
             key: b.key, label: b.label, flag: b.flag ?? null,
             count: c.count,
             lossPct: withMfe.length ? round1((c.count / withMfe.length) * 100) : 0,
+            tradeSharePct,
             lossR: round1(c.lossR),
-            contributionPct: totalLossR > 0 ? round1((c.lossR / totalLossR) * 100) : 0,
+            contributionPct,
+            lift,
         };
     });
     return {
@@ -470,4 +519,128 @@ export function buildExplorer(trades, { dimA = "session", dimB = null, sampleFlo
     );
 
     return { available, dimA: aKey, dimB: bKey, metric, sampleFloor, rows, totals };
+}
+
+// ── MFE-by-dimension outcome (V4 Phase 2) ──────────────────────────────────────
+// "Which <structures | sessions> tend to move far before failing?" For each value
+// of a dimension, the shared engine supplies count / loss-R / contribution / lift,
+// and we enrich with MFE-specific stats (avg MFE, % of that value's losers reaching
+// each arm level). MFE-only realized-loss framing — NO break-even claim, no winner
+// cost. Ranked by contribution (loss-R) first. Reused for Structure×MFE & Session×MFE
+// (and any future dimension) — it is NOT a second aggregator: aggregateFailures does
+// the grouping; this only attaches per-group MFE reach percentages.
+export const MFE_DIM_REACH_LEVELS = [0.5, 1, 1.5, 2];
+
+export function buildMfeByDimension(losers, dimKey, { sampleFloor = DRILL_SAMPLE_FLOOR, reachLevels = MFE_DIM_REACH_LEVELS } = {}) {
+    const dim = resolveDimension(dimKey);
+    const list = (Array.isArray(losers) ? losers : []).filter((t) => getMfeR(t) != null);
+    const lvls = Array.isArray(reachLevels) && reachLevels.length ? reachLevels : MFE_DIM_REACH_LEVELS;
+    if (!dim || !list.length || !dimensionAvailable(dim, list)) {
+        return { dimKey: dim?.key ?? null, dimLabel: dim?.label ?? null, reachLevels: lvls, rows: [], available: false, eligible: list.length, totalLossR: 0, avgMfe: null };
+    }
+
+    const totalLossR = sumLossR(list);
+    const overallAvgMfe = round2(list.reduce((s, t) => s + getMfeR(t), 0) / list.length);
+
+    // value → member losers (single pass)
+    const membersByValue = new Map();
+    for (const t of list) {
+        const v = dim.accessor(t);
+        if (v == null) continue;
+        const k = String(v);
+        if (!membersByValue.has(k)) membersByValue.set(k, []);
+        membersByValue.get(k).push(t);
+    }
+
+    const { cells } = aggregateFailures(list, { dimA: dim, sampleFloor, requireKnown: true });
+    const rows = cells.map((c) => {
+        const members = membersByValue.get(c.keyA) || [];
+        const mfes = members.map((t) => getMfeR(t)).filter((m) => isFiniteNumber(m));
+        const avgMfe = mfes.length ? round2(mfes.reduce((s, m) => s + m, 0) / mfes.length) : null;
+        const reach = {};
+        for (const L of lvls) reach[L] = mfes.length ? round1((mfes.filter((m) => m >= L).length / mfes.length) * 100) : 0;
+        return {
+            value: c.keyA, count: c.count, lossR: c.lossR,
+            contributionPct: c.contributionPct, lift: c.lift,
+            avgMfe, reach, lowSample: c.lowSample, rankable: c.rankable,
+        };
+    });
+    rows.sort((a, b) => b.lossR - a.lossR); // contribution-first
+    return { dimKey: dim.key, dimLabel: dim.label, reachLevels: lvls, rows, available: true, eligible: list.length, totalLossR: round1(totalLossR), avgMfe: overallAvgMfe };
+}
+
+// ── Distance-to-Stop insight synthesis (V4 Phase 2 — Command Center) ────────────
+// Pure, data-driven findings. Every statement is filled from computed metrics —
+// no hardcoded findings, no AI, no speculative language. Priority mirrors research
+// value: contribution > over-representation (lift) > unusually-large MFE. Returns
+// 0..maxInsights; we never fabricate to hit a minimum. MFE-only / realized losses.
+const INSIGHT_TIER = { contribution: 100, bucket_driver: 95, reach: 85, lift: 70, overrep: 55, mfe: 40 };
+
+export function buildDistanceInsights(losers, { config = {}, activeBucketKey = null, maxInsights = 6 } = {}) {
+    const list = (Array.isArray(losers) ? losers : []).filter((t) => getMfeR(t) != null);
+    if (!list.length) return { insights: [], eligible: 0 };
+
+    const out = [];
+    const push = (kind, text, weight) => out.push({ kind, tier: INSIGHT_TIER[kind] ?? 0, weight: Number(weight) || 0, text });
+
+    const dist = buildRawRDistribution(list);
+    const reach = buildLoserMfeReachTable(list);
+    const drivers = buildFailureDrivers(list, { minSample: DRILL_SAMPLE_FLOOR, topN: 20 });
+    const struct = buildMfeByDimension(list, "structure");
+
+    // 1. contribution — the bucket carrying the most loss-R
+    const topBucket = [...dist.buckets].filter((b) => b.count > 0).sort((a, b) => b.contributionPct - a.contributionPct)[0];
+    if (topBucket && topBucket.contributionPct > 0) {
+        const phrase = topBucket.key === "never" ? "never moved in favour"
+            : topBucket.key === "lt025" ? "moved less than +0.25R"
+            : `reached ${topBucket.label}`;
+        push("contribution", `${topBucket.contributionPct}% of loss-R comes from losers that ${phrase} before failing.`, topBucket.contributionPct);
+    }
+
+    // 2. reach — how many losers got into profit at all / to +1R
+    const r025 = reach.rows.find((r) => r.levelR === 0.25);
+    if (r025 && r025.reachedPct > 0) push("reach", `${r025.reachedPct}% of losers reached at least +0.25R before failing.`, r025.reachedPct);
+    const r1 = reach.rows.find((r) => r.levelR === 1);
+    if (r1 && r1.reachedCount >= SAMPLE_FLOOR && r1.reachedPct > 0) push("reach", `${r1.reachedPct}% of losers reached at least +1R before failing.`, r1.reachedPct * 0.9);
+
+    // 3. bucket_driver — within the selected bucket, the top structure / session
+    if (activeBucketKey) {
+        const bdef = MFE_RAW_BUCKETS.find((b) => b.key === activeBucketKey);
+        const drill = buildBucketDrilldown(list, activeBucketKey);
+        for (const secKey of ["structure", "session"]) {
+            const top = drill.sections.find((s) => s.key === secKey)?.rows?.[0];
+            if (bdef && top && top.contributionPct > 0) {
+                push("bucket_driver", `${top.value} contributes ${top.contributionPct}% of loss-R inside the ${bdef.label} bucket.`, top.contributionPct);
+            }
+        }
+    }
+
+    // 4. lift — most over-represented single factor
+    const topLift = [...drivers.drivers].filter((d) => d.lift >= 1.15).sort((a, b) => b.lift - a.lift)[0];
+    if (topLift) push("lift", `${topLift.value} carries ${topLift.lift}× its share of losses — disproportionate damage.`, (topLift.lift - 1) * 100);
+
+    // 5. overrep — structure reach gap at +1R (e.g. BOS vs CHoCH)
+    if (struct.available && struct.rows.length >= 2) {
+        const ranked = struct.rows.filter((r) => !r.lowSample);
+        if (ranked.length >= 2) {
+            const byReach1 = [...ranked].sort((a, b) => (b.reach[1] ?? 0) - (a.reach[1] ?? 0));
+            const hi = byReach1[0], lo = byReach1[byReach1.length - 1];
+            if (hi && lo && hi.value !== lo.value && (lo.reach[1] ?? 0) > 0) {
+                const ratio = round1((hi.reach[1] ?? 0) / (lo.reach[1] ?? 0));
+                if (ratio >= 1.3) push("overrep", `${hi.value} losers reach +1R ${ratio}× as often as ${lo.value} losers.`, ratio);
+            }
+        }
+    }
+
+    // 6. mfe — the value whose losers travel unusually far
+    if (struct.available && struct.avgMfe != null) {
+        const cand = struct.rows
+            .filter((r) => !r.lowSample && r.avgMfe != null && r.avgMfe >= struct.avgMfe * 1.3)
+            .sort((a, b) => b.avgMfe - a.avgMfe)[0];
+        if (cand) push("mfe", `${cand.value} losers travel furthest before failing — avg +${cand.avgMfe}R vs +${struct.avgMfe}R overall.`, cand.avgMfe);
+    }
+
+    out.sort((a, b) => (b.tier - a.tier) || (b.weight - a.weight));
+    const insights = out.slice(0, Math.max(0, maxInsights)).map((x, i) => ({ id: `${x.kind}-${i}`, ...x }));
+    return { insights, eligible: list.length };
 }
