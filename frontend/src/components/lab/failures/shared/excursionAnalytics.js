@@ -229,6 +229,60 @@ export function buildBeOpportunity(losers, levels, { config, mode: modeOverride 
     return { ...base, rows, consideredN: considered.length, totalLossR: round1(totalLossR) };
 }
 
+// ── Exclusive arm-level ranges (companion view to buildBeOpportunity) ───────────
+// buildBeOpportunity is CUMULATIVE (reached ≥ level). This is the EXCLUSIVE
+// partition: each MFE-carrying loser lands in exactly one band by its peak MFE, so
+// the table answers "where did losers top out before failing?".
+//
+// Boundaries are aligned to the BE arm levels (0.25 / 0.5 / 1 / 1.5 / 2R) and split
+// 1–2R into 1–1.5R / 1.5–2R. This is DISTINCT from MFE_RAW_BUCKETS (the bucket-chart
+// bands, 6 of them) — that set must not change, so we keep a separate band list here
+// rather than mutating the chart's. Lower edge inclusive, upper edge exclusive;
+// "never" is mfeR ≤ EPS_R. Still an UPPER-BOUND framing (peak MFE only).
+export const BE_EXCLUSIVE_BANDS = [
+    { key: "never",  label: "Never moved", flag: "instant", test: (m) => m <= EPS_R },
+    { key: "0_025",  label: "0–0.25R",     flag: "instant", test: (m) => m > EPS_R && m < 0.25 },
+    { key: "025_05", label: "0.25–0.5R",   flag: null,      test: (m) => m >= 0.25 && m < 0.5 },
+    { key: "05_1",   label: "0.5–1R",      flag: null,      test: (m) => m >= 0.5  && m < 1 },
+    { key: "1_15",   label: "1–1.5R",      flag: "almost",  test: (m) => m >= 1    && m < 1.5 },
+    { key: "15_2",   label: "1.5–2R",      flag: "almost",  test: (m) => m >= 1.5  && m < 2 },
+    { key: "2plus",  label: "2R+",         flag: "almost",  test: (m) => m >= 2 },
+];
+
+// mfeR → exactly one BE_EXCLUSIVE_BANDS key (null when MFE absent/non-finite).
+export function bucketBeExclusive(mfeR) {
+    if (!isFiniteNumber(mfeR)) return null;
+    for (const b of BE_EXCLUSIVE_BANDS) if (b.test(mfeR)) return b.key;
+    return null; // unreachable for finite mfeR, but keeps the contract explicit
+}
+
+export function buildBeExclusiveRanges(losers, { config } = {}) {
+    const enriched = enrich(losers, config);
+    const withMfe = enriched.filter((e) => e.mfeR != null);
+    const base = { mode: "raw", upperBound: true };
+    if (!withMfe.length) return { ...base, mode: "none", rows: [], consideredN: 0, totalLossR: 0 };
+
+    const totalLossR = withMfe.reduce((s, e) => s + e.lossR, 0);
+    const counts = Object.fromEntries(BE_EXCLUSIVE_BANDS.map((b) => [b.key, { count: 0, lossR: 0 }]));
+    for (const e of withMfe) {
+        const k = bucketBeExclusive(e.mfeR);
+        if (k == null) continue; // defensive; finite mfeR always matches a band
+        counts[k].count += 1;
+        counts[k].lossR += e.lossR;
+    }
+    const rows = BE_EXCLUSIVE_BANDS.map((b) => {
+        const c = counts[b.key];
+        return {
+            key: b.key, label: b.label, flag: b.flag ?? null,
+            trades: c.count,
+            pctOfLosers: withMfe.length ? round1((c.count / withMfe.length) * 100) : 0,
+            lossR: round1(c.lossR),
+            contributionPct: totalLossR > 0 ? round1((c.lossR / totalLossR) * 100) : 0,
+        };
+    });
+    return { ...base, rows, consideredN: withMfe.length, totalLossR: round1(totalLossR) };
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // V3 — Raw-R primary distribution + drilldown / failure-driver / pair-driver engine
 // All ranked by DAMAGE (loss-R contribution), never by loss rate. Upper-bound note

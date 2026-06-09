@@ -58,6 +58,7 @@ const exc = loadCjs(`${BASE}/excursionAnalytics.js`, (spec) => {
 const {
     getMfeR, getTargetRR, mfePctOfTarget, bucketMfePct, bucketMfeRaw,
     buildMfeDistribution, buildBeOpportunity,
+    buildBeExclusiveRanges, bucketBeExclusive,
     buildRawRDistribution, buildBucketDrilldown, buildFailureDrivers, buildPairDrivers,
     buildExplorer,
 } = exc;
@@ -218,6 +219,41 @@ ok(rlvl(2).reached === 0, "≥2R reached by 0 (no loser hit 2R)");
 ok(rlvl(0.25).savableLossRUpperBound === 4, "≥0.25R savable upper-bound loss-R = 2+1+1 = 4");
 ok(beRawForced.upperBound === true, "forced-raw BE still flagged upper bound");
 ok(buildBeOpportunity([{ r: -1 }], [0.25], { config: cfg, mode: "raw" }).mode === "none", "no MFE → none wins over forced raw");
+// cumulative stays cumulative: reached counts never increase as the level rises.
+ok(beRawForced.rows.every((r, i, a) => i === 0 || a[i - 1].reached >= r.reached), "cumulative reached is non-increasing by level (stays cumulative)");
+
+// ── V4: BE exclusive ranges (companion view to the cumulative table) ────────────
+// Same `losers` (mfeR 0.0, 0.1, 0.4, 1.0, 1.9; loss-R 1,1,2,1,1 ⇒ total 6).
+console.log("V4 buildBeExclusiveRanges (mutually exclusive + exhaustive)");
+const exr = buildBeExclusiveRanges(losers, { config: cfg });
+const band = (k) => exr.rows.find((r) => r.key === k);
+ok(exr.mode === "raw" && exr.upperBound === true, "exclusive ranges still flagged upper bound");
+ok(exr.rows.length === 7, "7 exclusive bands (never … 2R+)");
+ok(exr.consideredN === 5, "considers all 5 MFE losers");
+// EXHAUSTIVE + MUTUALLY EXCLUSIVE: every MFE loser lands in exactly one band.
+const sumTrades = exr.rows.reduce((s, r) => s + r.trades, 0);
+ok(sumTrades === exr.consideredN, `band trades sum to consideredN (${sumTrades} === ${exr.consideredN})`);
+ok(band("never").trades === 1, "never: mfeR 0.0 (1)");
+ok(band("0_025").trades === 1, "0–0.25R: mfeR 0.1 (1)");
+ok(band("025_05").trades === 1 && band("025_05").lossR === 2, "0.25–0.5R: mfeR 0.4 → the -2R loser");
+ok(band("05_1").trades === 0, "0.5–1R: empty (no loser in [0.5,1))");
+ok(band("1_15").trades === 1, "1–1.5R: mfeR 1.0");
+ok(band("15_2").trades === 1, "1.5–2R: mfeR 1.9");
+ok(band("2plus").trades === 0, "2R+: empty (no loser ≥ 2R)");
+const exrContrib = exr.rows.reduce((s, r) => s + r.contributionPct, 0);
+ok(Math.abs(exrContrib - 100) <= 0.5, `exclusive contribution % sums to ~100 (got ${exrContrib})`);
+
+console.log("V4 bucketBeExclusive boundary handling (lower edge inclusive)");
+ok(bucketBeExclusive(0) === "never", "0R → never");
+ok(bucketBeExclusive(0.02) === "never", "EPS_R (0.02) → never (≤ EPS inclusive)");
+ok(bucketBeExclusive(0.0201) === "0_025", "just above EPS_R → 0–0.25R");
+ok(bucketBeExclusive(0.25) === "025_05", "0.25R lower edge → 0.25–0.5R");
+ok(bucketBeExclusive(0.5) === "05_1", "0.5R lower edge → 0.5–1R");
+ok(bucketBeExclusive(1) === "1_15", "1R lower edge → 1–1.5R");
+ok(bucketBeExclusive(1.5) === "15_2", "1.5R lower edge → 1.5–2R");
+ok(bucketBeExclusive(2) === "2plus", "2R lower edge → 2R+");
+ok(bucketBeExclusive(null) === null && bucketBeExclusive(undefined) === null, "non-finite mfeR → null (no band)");
+ok(buildBeExclusiveRanges([{ r: -1 }], { config: cfg }).mode === "none", "exclusive ranges → none without MFE");
 
 // ── V4 Phase 2: Failure Explorer (shared engine, winners-inclusive) ─────────────
 // Mixed population so loss-rate / lift are real. session stays Unknown (stub) and

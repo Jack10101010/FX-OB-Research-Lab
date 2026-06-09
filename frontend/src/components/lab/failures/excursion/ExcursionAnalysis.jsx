@@ -18,7 +18,7 @@ import { isModuleAvailable } from "../shared/failuresDataQuality";
 import {
     buildRawRDistribution, buildBucketDrilldown,
     buildFailureDrivers, buildPairDrivers,
-    buildBeOpportunity, buildExplorer,
+    buildBeOpportunity, buildBeExclusiveRanges, buildExplorer,
     EXPLORER_METRICS, EXPLORER_FLOORS,
 } from "../shared/excursionAnalytics";
 
@@ -92,11 +92,36 @@ function DrillSection({ section }) {
 }
 
 // ── Break-even opportunity by arm level (OPTIMISTIC UPPER BOUND) ───────────────
-function BeOpportunityTable({ be }) {
+const BAND_COLOR = (flag) => (
+    flag === "instant" ? "hsl(var(--danger)/0.7)"
+    : flag === "almost" ? "hsl(var(--success)/0.7)"
+    : "hsl(var(--accent-secondary)/0.7)"
+);
+
+function BeTab({ active, disabled, onClick, children }) {
+    return (
+        <button type="button" onClick={onClick} disabled={disabled}
+            className={cn(
+                "px-2.5 py-1 text-[11px] font-ui clip-bevel-sm border transition-colors",
+                disabled ? "opacity-40 cursor-not-allowed border-[hsl(var(--border-soft))] text-[hsl(var(--text-3))]"
+                    : active ? "border-[hsl(var(--accent-primary)/0.6)] bg-[hsl(var(--accent-primary)/0.12)] text-[hsl(var(--text))]"
+                    : "border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))] hover:bg-[hsl(var(--panel-2)/0.5)]",
+            )}>
+            {children}
+        </button>
+    );
+}
+
+function BeOpportunityTable({ be, ranges }) {
+    const [view, setView] = useState("cumulative");
     if (!be || !be.rows.length) return null;
-    // 0.25–1R always; 1.5R / 2R only when someone reached them ("if useful").
-    const rows = be.rows.filter((r) => BE_CORE_LEVELS.has(r.level) || r.reached > 0);
-    const maxReached = rows[0]?.reached || 1;
+    // Cumulative: 0.25–1R always; 1.5R / 2R only when someone reached them.
+    const cumRows = be.rows.filter((r) => BE_CORE_LEVELS.has(r.level) || r.reached > 0);
+    const maxReached = cumRows[0]?.reached || 1;
+    const hasRanges = !!(ranges && ranges.rows && ranges.rows.length);
+    const maxTrades = hasRanges ? Math.max(...ranges.rows.map((r) => r.trades), 1) : 1;
+    const showExclusive = view === "exclusive" && hasRanges;
+
     return (
         <NeonPanel
             title={<TermTip termKey="be_opportunity">Break-even opportunity by arm level</TermTip>}
@@ -112,33 +137,78 @@ function BeOpportunityTable({ be }) {
                     </p>
                 </div>
             </div>
-            <div className="p-3 space-y-1">
-                <div className="flex items-center gap-3 px-2 text-[9.5px] font-ui uppercase tracking-[0.05em] text-[hsl(var(--text-2))]">
-                    <span className="w-16">Arm level</span>
-                    <span className="flex-1" />
-                    <span className="w-14 text-right">Reached</span>
-                    <span className="w-16 text-right">% losers</span>
-                    <span className="w-24 text-right">Savable R*</span>
-                    <span className="w-16 text-right">% loss-R</span>
-                    <span className="w-16 text-right">Sample</span>
-                </div>
-                {rows.map((r) => (
-                    <div key={r.level} className={cn("flex items-center gap-3 px-2 py-1.5 text-[11.5px] font-ui", r.lowSample && "opacity-55")}>
-                        <span className="w-16 shrink-0 text-[hsl(var(--text))] font-num tabular-nums">{r.label}</span>
-                        <div className="flex-1 h-1.5 bg-[hsl(var(--panel-2))] rounded-full overflow-hidden">
-                            <div className="h-full rounded-full bg-[hsl(var(--accent-secondary)/0.7)]" style={{ width: `${Math.min(100, (r.reached / maxReached) * 100)}%` }} />
-                        </div>
-                        <span className="w-14 text-right font-num tabular-nums text-white">{r.reached}</span>
-                        <span className="w-16 text-right font-num tabular-nums text-[hsl(var(--text-2))]">{r.reachedPct}%</span>
-                        <span className="w-24 text-right font-num tabular-nums text-[hsl(var(--text))]">≤ {r.savableLossRUpperBound}R</span>
-                        <span className="w-16 text-right font-num tabular-nums text-[hsl(var(--text-2))]">{r.contributionPct}%</span>
-                        <span className="w-16 text-right">{r.lowSample ? <Pill tone="warning">low n</Pill> : <Pill tone="muted">ok</Pill>}</span>
-                    </div>
-                ))}
-                <p className="px-2 pt-1 text-[10px] font-ui text-[hsl(var(--text-3))]">
-                    * potentially savable loss-R — <span className="text-[hsl(var(--text-2))]">upper bound</span>, not realized BE profit.
-                </p>
+
+            {/* view tabs */}
+            <div className="px-3 pt-3 flex items-center gap-1.5">
+                <BeTab active={!showExclusive} onClick={() => setView("cumulative")}>Cumulative reach</BeTab>
+                <BeTab active={showExclusive} disabled={!hasRanges} onClick={() => setView("exclusive")}>Exclusive ranges</BeTab>
             </div>
+
+            {!showExclusive ? (
+                /* ── Cumulative reach (≥ level) ── */
+                <div className="p-3 space-y-1">
+                    <p className="px-2 text-[10.5px] font-ui text-[hsl(var(--text-2))]">
+                        Counts losing trades that reached <span className="text-[hsl(var(--text))]">at least</span> each arm level before stopping out.
+                    </p>
+                    <div className="flex items-center gap-3 px-2 pt-1 text-[9.5px] font-ui uppercase tracking-[0.05em] text-[hsl(var(--text-2))]">
+                        <span className="w-16">Arm level</span>
+                        <span className="flex-1" />
+                        <span className="w-28 text-right">Reached ≥ Level</span>
+                        <span className="w-16 text-right">% losers</span>
+                        <span className="w-24 text-right">Savable R*</span>
+                        <span className="w-16 text-right">% loss-R</span>
+                        <span className="w-16 text-right">Sample</span>
+                    </div>
+                    {cumRows.map((r) => (
+                        <div key={r.level} className={cn("flex items-center gap-3 px-2 py-1.5 text-[11.5px] font-ui", r.lowSample && "opacity-55")}>
+                            <span className="w-16 shrink-0 text-[hsl(var(--text))] font-num tabular-nums">{r.label}</span>
+                            <div className="flex-1 h-1.5 bg-[hsl(var(--panel-2))] rounded-full overflow-hidden">
+                                <div className="h-full rounded-full bg-[hsl(var(--accent-secondary)/0.7)]" style={{ width: `${Math.min(100, (r.reached / maxReached) * 100)}%` }} />
+                            </div>
+                            <span className="w-28 text-right font-num tabular-nums text-white">{r.reached}</span>
+                            <span className="w-16 text-right font-num tabular-nums text-[hsl(var(--text-2))]">{r.reachedPct}%</span>
+                            <span className="w-24 text-right font-num tabular-nums text-[hsl(var(--text))]">≤ {r.savableLossRUpperBound}R</span>
+                            <span className="w-16 text-right font-num tabular-nums text-[hsl(var(--text-2))]">{r.contributionPct}%</span>
+                            <span className="w-16 text-right">{r.lowSample ? <Pill tone="warning">low n</Pill> : <Pill tone="muted">ok</Pill>}</span>
+                        </div>
+                    ))}
+                    <p className="px-2 pt-1 text-[10px] font-ui text-[hsl(var(--text-3))]">
+                        * potentially savable loss-R — <span className="text-[hsl(var(--text-2))]">upper bound</span>, not realized BE profit.
+                    </p>
+                </div>
+            ) : (
+                /* ── Exclusive ranges (each loser counted once) ── */
+                <div className="p-3 space-y-1">
+                    <p className="px-2 text-[10.5px] font-ui text-[hsl(var(--text-2))]">
+                        Where losers <span className="text-[hsl(var(--text))]">topped out</span> before failing — each trade counted once, by its peak <TermTip termKey="mfe">MFE</TermTip>.
+                    </p>
+                    <div className="flex items-center gap-3 px-2 pt-1 text-[9.5px] font-ui uppercase tracking-[0.05em] text-[hsl(var(--text-2))]">
+                        <span className="w-24"><TermTip termKey="raw_r_bucket">Range</TermTip></span>
+                        <span className="flex-1" />
+                        <span className="w-16 text-right">Trades</span>
+                        <span className="w-16 text-right">% losers</span>
+                        <span className="w-16 text-right"><TermTip termKey="loss_r_contribution">Loss-R</TermTip></span>
+                        <span className="w-16 text-right"><TermTip termKey="contribution_pct">% loss-R</TermTip></span>
+                    </div>
+                    {ranges.rows.map((r) => (
+                        <div key={r.key} className="flex items-center gap-3 px-2 py-1.5 text-[11.5px] font-ui">
+                            <span className="w-24 shrink-0 text-[hsl(var(--text))] font-num tabular-nums">{r.label}</span>
+                            <div className="flex-1 h-1.5 bg-[hsl(var(--panel-2))] rounded-full overflow-hidden">
+                                <div className="h-full rounded-full" style={{ width: `${Math.min(100, (r.trades / maxTrades) * 100)}%`, background: BAND_COLOR(r.flag) }} />
+                            </div>
+                            <span className="w-16 text-right font-num tabular-nums text-white">{r.trades}</span>
+                            <span className="w-16 text-right font-num tabular-nums text-[hsl(var(--text-2))]">{r.pctOfLosers}%</span>
+                            <span className="w-16 text-right font-num tabular-nums text-[hsl(var(--text))]">{r.lossR}R</span>
+                            <span className="w-16 text-right font-num tabular-nums text-[hsl(var(--text-2))]">{r.contributionPct}%</span>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {/* future note — clear but light */}
+            <p className="px-3 pb-3 text-[10px] font-ui text-[hsl(var(--text-3))] leading-relaxed">
+                Actual BE results require a BE replay/backtest — MFE doesn't tell us whether price returned to entry after arming.
+            </p>
         </NeonPanel>
     );
 }
@@ -264,6 +334,7 @@ export function ExcursionAnalysis({ losers = [], allLosers = [], allTrades = [],
     const available = useMemo(() => isModuleAvailable("excursion", source), [source]);
     const dist = useMemo(() => buildRawRDistribution(source), [source]);
     const be = useMemo(() => buildBeOpportunity(source, BE_LEVELS, { config, mode: "raw" }), [source, config]);
+    const beRanges = useMemo(() => buildBeExclusiveRanges(source, { config }), [source, config]);
     const drivers = useMemo(() => buildFailureDrivers(source), [source]);
     const pairs = useMemo(() => buildPairDrivers(source), [source]);
 
@@ -341,7 +412,7 @@ export function ExcursionAnalysis({ losers = [], allLosers = [], allTrades = [],
             </NeonPanel>
 
             {/* ── Break-even opportunity by arm level (upper bound) ─────────── */}
-            <BeOpportunityTable be={be} />
+            <BeOpportunityTable be={be} ranges={beRanges} />
 
             {/* ── Selected-bucket drilldown ─────────────────────────────────── */}
             {drill && activeBucketDef && (
