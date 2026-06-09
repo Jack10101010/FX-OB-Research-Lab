@@ -2574,9 +2574,18 @@ export default function RunDetail() {
                             )}
                         </div>
                         {hasPaired && (
-                            <div className="px-6 -mt-0.5 mb-1.5 text-[8.5px] font-ui text-muted-lab opacity-55">
-                                FFT Cancels = known paired outcomes + unknown/low-confidence outcomes.
+                            <div className="px-6 mb-2 flex items-start gap-2 text-[10px] font-ui text-[hsl(var(--text-1))] leading-snug">
+                                <span className="text-[hsl(var(--accent-primary))] shrink-0">ⓘ</span>
+                                <span>
+                                    <span className="font-semibold">FFT activity and FFT impact are different.</span>{" "}
+                                    FFT cancelled the setups before trigger. The R impact comes from the FFT-OFF control —
+                                    what would have happened if those setups had been allowed to trade.
+                                </span>
                             </div>
+                        )}
+                        {/* Group A — FFT Activity: what FFT did (cancels + move-away) */}
+                        {hasPaired && (
+                            <div className="px-6 mb-0.5 text-[8.5px] font-ui uppercase tracking-[0.12em] text-[hsl(var(--text-2))]">FFT activity · what FFT did</div>
                         )}
                         <div className="kpi-strip">
                             <FftKpi hint={FFT_TIPS.cancels}>
@@ -2592,6 +2601,27 @@ export default function RunDetail() {
                                     infoLabel="Click for cancelled-OB rows"
                                 />
                             </FftKpi>
+                            {fft.hasMoveAwayData && (
+                                <FftKpi hint={FFT_TIPS.moveAway}>
+                                    <MetricChip
+                                        size="compact"
+                                        label="Avg Move-Away"
+                                        value={`${fmtFftPips(fft.avgMoveAwayAtCancel)} pips`}
+                                        sub="past OB edge at cancel"
+                                        tone="muted"
+                                        icon={Target}
+                                    />
+                                </FftKpi>
+                            )}
+                        </div>
+                        {hasPaired && (
+                            <div className="px-6 mt-0.5 mb-2 text-[8.5px] font-ui text-muted-lab opacity-70 leading-snug">These are setups FFT cancelled before trigger. This is what FFT did.</div>
+                        )}
+                        {/* Group B — FFT-OFF counterfactual: what the same setups did in the control */}
+                        {hasPaired && (
+                            <div className="px-6 mb-0.5 text-[8.5px] font-ui uppercase tracking-[0.12em] text-[hsl(var(--text-2))]">FFT-OFF counterfactual · what the control did</div>
+                        )}
+                        <div className="kpi-strip">
                             {hasPaired ? (
                                 <>
                                     <FftKpi hint={FFT_TIPS.winsRemoved}>
@@ -2599,7 +2629,7 @@ export default function RunDetail() {
                                             size="compact"
                                             label="Cost: Winners Removed"
                                             value={String(paired.confirmedWinsRemoved)}
-                                            sub="confirmed · paired OFF"
+                                            sub="counterfactual · FFT-OFF control"
                                             tone="danger"
                                             icon={AlertTriangle}
                                             onClick={() => setFftDrill((d) => (d === "winsRemoved" ? null : "winsRemoved"))}
@@ -2612,7 +2642,7 @@ export default function RunDetail() {
                                             size="compact"
                                             label="Benefit: Losses Avoided"
                                             value={String(paired.confirmedLossesAvoided)}
-                                            sub="confirmed · paired OFF"
+                                            sub="counterfactual · FFT-OFF control"
                                             tone="success"
                                             icon={TrendingUp}
                                             onClick={() => setFftDrill((d) => (d === "lossesAvoided" ? null : "lossesAvoided"))}
@@ -2701,19 +2731,13 @@ export default function RunDetail() {
                                     </FftKpi>
                                 </>
                             )}
-                            {fft.hasMoveAwayData && (
-                                <FftKpi hint={FFT_TIPS.moveAway}>
-                                    <MetricChip
-                                        size="compact"
-                                        label="Avg Move-Away"
-                                        value={`${fmtFftPips(fft.avgMoveAwayAtCancel)} pips`}
-                                        sub="past OB edge at cancel"
-                                        tone="muted"
-                                        icon={Target}
-                                    />
-                                </FftKpi>
-                            )}
                         </div>
+                        {hasPaired && (
+                            <div className="px-6 mt-0.5 mb-1 text-[8.5px] font-ui text-muted-lab opacity-70 leading-snug">
+                                These are what the same cancelled setups did in the FFT-OFF control — this depends on the entry model / arm mode.
+                                Same and Next can have identical FFT cancel counts but different impact because their FFT-OFF controls fill / invalidate differently after trigger.
+                            </div>
+                        )}
                         {fftDrill && (
                             <FftDrilldown
                                 which={fftDrill}

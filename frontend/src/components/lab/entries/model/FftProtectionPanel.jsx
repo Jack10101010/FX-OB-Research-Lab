@@ -389,13 +389,13 @@ function PairedSummarySection({ pairedStats }) {
                     <StatTile
                         label="Losses avoided"
                         value={String(confirmedLossesAvoided)}
-                        sub={`+${benefitR.toFixed(2)}R saved · benefit`}
+                        sub={`+${benefitR.toFixed(2)}R · FFT-OFF counterfactual`}
                         tone={confirmedLossesAvoided > 0 ? "success" : "muted"}
                     />
                     <StatTile
                         label="Winners removed"
                         value={String(confirmedWinsRemoved)}
-                        sub={`${costR.toFixed(2)}R given up · cost`}
+                        sub={`${costR.toFixed(2)}R · FFT-OFF counterfactual`}
                         tone={confirmedWinsRemoved > 0 ? "danger" : "muted"}
                     />
                 </div>

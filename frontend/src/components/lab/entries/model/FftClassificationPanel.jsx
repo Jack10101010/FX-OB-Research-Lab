@@ -288,6 +288,11 @@ function PairedView({ paired }) {
                 {" "}Coverage reflects how many cancels have a trustworthy control outcome — it does <span className="text-[hsl(var(--text))]">not</span> mean matching failed.
             </p>
 
+            <p className="text-[9px] font-ui text-[hsl(var(--text-2))] opacity-90 leading-snug mb-2">
+                Buckets use <span className="text-[hsl(var(--text))]">FFT-OFF control outcomes</span>. A bucket can look better or worse because the
+                entry model / arm mode produced different counterfactual fills — not because FFT cancelled different OBs.
+            </p>
+
             <div className="overflow-x-auto">
                 <div className="min-w-[500px]">
                     <PairedHeaderRow />
