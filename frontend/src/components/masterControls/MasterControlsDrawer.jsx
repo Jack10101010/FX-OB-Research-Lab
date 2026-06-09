@@ -163,6 +163,47 @@ const RERUN_TIER_TONE = {
     full_backtest:    { box: "border-[hsl(38_85%_55%/0.35)] bg-[hsl(38_85%_55%/0.08)]",     text: "text-[hsl(38_85%_55%)]" },
 };
 
+// ─── Preview-lens action buttons — Phase 12C-1 ───────────────────────────────
+// Stable button identity: the primary button is ONE node whose label + handler
+// switch on `lensActive` (Apply ↔ Exit), rather than conditionally swapping two
+// different nodes at the same position. This removes the remount window that caused
+// the intermittent "needs a second click" issue. The Clear button is secondary and
+// only present when not active.
+const LENS_ACTION_TONES = {
+    cyan: {
+        apply: "border-[hsl(196_80%_55%/0.4)] bg-[hsl(196_80%_55%/0.12)] text-[hsl(196_80%_65%)] font-medium hover:bg-[hsl(196_80%_55%/0.2)]",
+        exit:  "border-[hsl(196_80%_55%/0.4)] text-[hsl(196_80%_65%)] hover:bg-[hsl(196_80%_55%/0.15)]",
+    },
+    warning: {
+        apply: "border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.12)] text-[hsl(var(--warning))] font-medium hover:bg-[hsl(var(--warning)/0.2)]",
+        exit:  "border-[hsl(var(--warning)/0.45)] text-[hsl(var(--warning))] hover:bg-[hsl(var(--warning)/0.15)]",
+    },
+};
+
+function LensActionButtons({ lensActive, onApply, onExit, onClear, tone = "warning" }) {
+    const t = LENS_ACTION_TONES[tone] || LENS_ACTION_TONES.warning;
+    return (
+        <div className="flex items-center gap-1.5">
+            <button
+                type="button"
+                onClick={lensActive ? onExit : onApply}
+                className={`text-[9px] px-1.5 py-0.5 rounded border transition-colors ${lensActive ? t.exit : t.apply}`}
+            >
+                {lensActive ? "Exit page preview" : "Apply to page"}
+            </button>
+            {!lensActive && (
+                <button
+                    type="button"
+                    onClick={onClear}
+                    className="text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--border-soft))] text-muted-lab hover:text-white transition-colors"
+                >
+                    Clear
+                </button>
+            )}
+        </div>
+    );
+}
+
 // ─── Drawer ──────────────────────────────────────────────────────────────────
 
 export function MasterControlsDrawer() {
@@ -178,7 +219,7 @@ export function MasterControlsDrawer() {
         localRescoreBundle, clearLocalRescoreBundle,
         previewLens, applyLocalRescoreLens, exitPreviewLens,
         localFilterBundle, clearLocalFilterBundle, applyLocalFilterLens,
-        localFftBundle, clearFftPreview, applyFftPreviewLens,
+        localFftBundle, fftPreviewUnavailable, clearFftPreview, applyFftPreviewLens,
         localRrBundle, rrPreviewUnavailable, clearRrPreview, applyRrPreviewLens,
         composedPreviewResult, localComposedBundle, clearComposedPreview, applyComposedPreviewLens,
     } = useMasterControls();
@@ -240,6 +281,7 @@ export function MasterControlsDrawer() {
     // Phase 10B — instant FFT ON/OFF preview (control-trade swap). Shows a local block
     // when the FFT toggle is dirty and an FFT-OFF swap bundle is available for this run.
     const fftDirty = dirtyFields instanceof Set && dirtyFields.has("triggeredEdgeCancelOnFirstFailedTag");
+    const fftOnly = fftDirty && dirtyFieldList.length === 1;
     const fftLensActive = !!(
         previewLens?.active
         && previewLens.mode === "fft_swap"
@@ -519,34 +561,13 @@ export function MasterControlsDrawer() {
                                     <span className="text-[10px] font-semibold uppercase tracking-widest text-[hsl(196_80%_65%)]">
                                         {lensActive ? "Applied to page preview" : "Temporary rescored bundle ready"}
                                     </span>
-                                    <div className="flex items-center gap-1.5">
-                                        {lensActive ? (
-                                            <button
-                                                type="button"
-                                                onClick={exitPreviewLens}
-                                                className="text-[9px] px-1.5 py-0.5 rounded border border-[hsl(196_80%_55%/0.4)] text-[hsl(196_80%_65%)] hover:bg-[hsl(196_80%_55%/0.15)] transition-colors"
-                                            >
-                                                Exit page preview
-                                            </button>
-                                        ) : (
-                                            <>
-                                                <button
-                                                    type="button"
-                                                    onClick={applyLocalRescoreLens}
-                                                    className="text-[9px] px-1.5 py-0.5 rounded border border-[hsl(196_80%_55%/0.4)] bg-[hsl(196_80%_55%/0.12)] text-[hsl(196_80%_65%)] font-medium hover:bg-[hsl(196_80%_55%/0.2)] transition-colors"
-                                                >
-                                                    Apply to page
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={clearLocalRescoreBundle}
-                                                    className="text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--border-soft))] text-muted-lab hover:text-white transition-colors"
-                                                >
-                                                    Clear
-                                                </button>
-                                            </>
-                                        )}
-                                    </div>
+                                    <LensActionButtons
+                                        lensActive={lensActive}
+                                        onApply={applyLocalRescoreLens}
+                                        onExit={exitPreviewLens}
+                                        onClear={clearLocalRescoreBundle}
+                                        tone="cyan"
+                                    />
                                 </div>
                                 <p className="mt-1 text-[9px] text-muted-lab leading-snug">
                                     {localRescoreBundle?.meta?.rescoreScope === "all_trade_sets"
@@ -574,34 +595,13 @@ export function MasterControlsDrawer() {
                                     <span className="text-[10px] font-semibold uppercase tracking-widest text-[hsl(var(--warning))]">
                                         {filterLensActive ? "Applied to page preview" : "Temporary filter bundle ready"}
                                     </span>
-                                    <div className="flex items-center gap-1.5">
-                                        {filterLensActive ? (
-                                            <button
-                                                type="button"
-                                                onClick={exitPreviewLens}
-                                                className="text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--warning)/0.45)] text-[hsl(var(--warning))] hover:bg-[hsl(var(--warning)/0.15)] transition-colors"
-                                            >
-                                                Exit page preview
-                                            </button>
-                                        ) : (
-                                            <>
-                                                <button
-                                                    type="button"
-                                                    onClick={applyLocalFilterLens}
-                                                    className="text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.12)] text-[hsl(var(--warning))] font-medium hover:bg-[hsl(var(--warning)/0.2)] transition-colors"
-                                                >
-                                                    Apply to page
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={clearLocalFilterBundle}
-                                                    className="text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--border-soft))] text-muted-lab hover:text-white transition-colors"
-                                                >
-                                                    Clear
-                                                </button>
-                                            </>
-                                        )}
-                                    </div>
+                                    <LensActionButtons
+                                        lensActive={filterLensActive}
+                                        onApply={applyLocalFilterLens}
+                                        onExit={exitPreviewLens}
+                                        onClear={clearLocalFilterBundle}
+                                        tone="warning"
+                                    />
                                 </div>
                                 <p className="mt-1 text-[10px] font-num tabular-nums text-[hsl(var(--text-1))]">
                                     {fmtPreviewInt(localFilterBundle?.meta?.beforeCount)}
@@ -632,34 +632,13 @@ export function MasterControlsDrawer() {
                                     <span className="text-[10px] font-semibold uppercase tracking-widest text-[hsl(var(--warning))]">
                                         {fftLensActive ? "Applied to page preview" : "Temporary FFT bundle ready"}
                                     </span>
-                                    <div className="flex items-center gap-1.5">
-                                        {fftLensActive ? (
-                                            <button
-                                                type="button"
-                                                onClick={exitPreviewLens}
-                                                className="text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--warning)/0.45)] text-[hsl(var(--warning))] hover:bg-[hsl(var(--warning)/0.15)] transition-colors"
-                                            >
-                                                Exit page preview
-                                            </button>
-                                        ) : (
-                                            <>
-                                                <button
-                                                    type="button"
-                                                    onClick={applyFftPreviewLens}
-                                                    className="text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.12)] text-[hsl(var(--warning))] font-medium hover:bg-[hsl(var(--warning)/0.2)] transition-colors"
-                                                >
-                                                    Apply to page
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={clearFftPreview}
-                                                    className="text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--border-soft))] text-muted-lab hover:text-white transition-colors"
-                                                >
-                                                    Clear
-                                                </button>
-                                            </>
-                                        )}
-                                    </div>
+                                    <LensActionButtons
+                                        lensActive={fftLensActive}
+                                        onApply={applyFftPreviewLens}
+                                        onExit={exitPreviewLens}
+                                        onClear={clearFftPreview}
+                                        tone="warning"
+                                    />
                                 </div>
                                 <p className="mt-1 text-[10px] font-num text-[hsl(var(--text-1))]">
                                     FFT ON <span className="text-muted-lab">→</span> FFT OFF
@@ -687,34 +666,13 @@ export function MasterControlsDrawer() {
                                     <span className="text-[10px] font-semibold uppercase tracking-widest text-[hsl(var(--warning))]">
                                         {rrLensActive ? "Applied to page preview" : "Temporary RR bundle ready"}
                                     </span>
-                                    <div className="flex items-center gap-1.5">
-                                        {rrLensActive ? (
-                                            <button
-                                                type="button"
-                                                onClick={exitPreviewLens}
-                                                className="text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--warning)/0.45)] text-[hsl(var(--warning))] hover:bg-[hsl(var(--warning)/0.15)] transition-colors"
-                                            >
-                                                Exit page preview
-                                            </button>
-                                        ) : (
-                                            <>
-                                                <button
-                                                    type="button"
-                                                    onClick={applyRrPreviewLens}
-                                                    className="text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.12)] text-[hsl(var(--warning))] font-medium hover:bg-[hsl(var(--warning)/0.2)] transition-colors"
-                                                >
-                                                    Apply to page
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={clearRrPreview}
-                                                    className="text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--border-soft))] text-muted-lab hover:text-white transition-colors"
-                                                >
-                                                    Clear
-                                                </button>
-                                            </>
-                                        )}
-                                    </div>
+                                    <LensActionButtons
+                                        lensActive={rrLensActive}
+                                        onApply={applyRrPreviewLens}
+                                        onExit={exitPreviewLens}
+                                        onClear={clearRrPreview}
+                                        tone="warning"
+                                    />
                                 </div>
                                 <p className="mt-1 text-[10px] font-num text-[hsl(var(--text-1))]">
                                     RR {fmtCfgValue(activeConfig?.rr)} <span className="text-muted-lab">→</span> RR {fmtCfgValue(effectiveConfig?.rr)}
@@ -750,8 +708,26 @@ export function MasterControlsDrawer() {
                                     RR preview unavailable
                                 </span>
                                 <p className="mt-1 text-[9px] text-muted-lab leading-snug">
-                                    This run has no stop-anchored excursion fields (mfeR / rIfNoTarget). Re-run/export
-                                    with the Phase 11A backtester, then re-import the bundle.
+                                    RR unavailable: this run has no stop-anchored excursion fields (mfeR / rIfNoTarget).
+                                    Re-run/export with the Phase 11A backtester, then re-import the bundle.
+                                </p>
+                                <p className="mt-0.5 text-[9px] text-muted-lab/70 leading-snug">
+                                    Backend Run Preview is still available below.
+                                </p>
+                            </div>
+                        )}
+
+                        {/* FFT preview unavailable — Phase 12C-1. The FFT toggle is the sole dirty
+                            field but no ON→OFF control swap is possible (already OFF, OFF→ON, or no
+                            paired controls). Previously this rendered nothing (silent); now explained. */}
+                        {fftOnly && !localFftBundle && fftPreviewUnavailable && (
+                            <div className="mt-2 rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel)/0.4)] px-3 py-2">
+                                <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-lab">
+                                    FFT preview unavailable
+                                </span>
+                                <p className="mt-1 text-[9px] text-muted-lab leading-snug">
+                                    FFT unavailable: this run has no paired FFT-OFF control trades. FFT preview is only
+                                    available for FFT ON → FFT OFF runs with exported controls.
                                 </p>
                                 <p className="mt-0.5 text-[9px] text-muted-lab/70 leading-snug">
                                     Backend Run Preview is still available below.
@@ -1474,7 +1450,7 @@ function CostRescorePanel({ data }) {
                     Cost rescore (instant)
                 </span>
                 <p className="mt-1.5 text-[10px] text-[hsl(38_85%_55%)] leading-snug">
-                    Exact cost rescore unavailable for this run. Use Run Preview.
+                    Cost unavailable: exact cost rescore isn&apos;t possible for this run. Use Run Preview.
                 </p>
             </div>
         );
@@ -1582,36 +1558,25 @@ function ComposedPreviewBlock({ result, bundle, lensActive, activeMetrics, onApp
                 <span className="text-[10px] font-semibold uppercase tracking-widest text-[hsl(var(--warning))]">
                     {lensActive ? "Applied to page preview" : hasBundle ? "Composed preview ready" : "Composed preview"}
                 </span>
-                <div className="flex items-center gap-1.5">
-                    {lensActive ? (
+                {hasBundle ? (
+                    <LensActionButtons
+                        lensActive={lensActive}
+                        onApply={onApply}
+                        onExit={onExit}
+                        onClear={onClear}
+                        tone="warning"
+                    />
+                ) : (
+                    <div className="flex items-center gap-1.5">
                         <button
                             type="button"
-                            onClick={onExit}
-                            className="text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--warning)/0.45)] text-[hsl(var(--warning))] hover:bg-[hsl(var(--warning)/0.15)] transition-colors"
+                            onClick={onClear}
+                            className="text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--border-soft))] text-muted-lab hover:text-white transition-colors"
                         >
-                            Exit page preview
+                            Clear
                         </button>
-                    ) : (
-                        <>
-                            {hasBundle && (
-                                <button
-                                    type="button"
-                                    onClick={onApply}
-                                    className="text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.12)] text-[hsl(var(--warning))] font-medium hover:bg-[hsl(var(--warning)/0.2)] transition-colors"
-                                >
-                                    Apply to page
-                                </button>
-                            )}
-                            <button
-                                type="button"
-                                onClick={onClear}
-                                className="text-[9px] px-1.5 py-0.5 rounded border border-[hsl(var(--border-soft))] text-muted-lab hover:text-white transition-colors"
-                            >
-                                Clear
-                            </button>
-                        </>
-                    )}
-                </div>
+                    </div>
+                )}
             </div>
 
             {/* Per-stage chips in canonical order */}

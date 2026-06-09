@@ -123,13 +123,42 @@ function composedSignature(runId, cfg) {
     });
 }
 
-// Human label from the stages that actually applied, e.g. "Filter + Cost Preview".
-const COMPOSED_STAGE_LABEL = { fft: "FFT", filter: "Filter", rr: "RR", cost: "Cost" };
-function composedLabelFor(appliedStages) {
-    const parts = (Array.isArray(appliedStages) ? appliedStages : [])
-        .map((s) => COMPOSED_STAGE_LABEL[s])
-        .filter(Boolean);
-    return parts.length ? `${parts.join(" + ")} Preview` : "Composed Preview";
+// ── Unified preview-lens banner labels (Phase 12C-1) ─────────────────────────
+// Single lenses use the bare stage name ("Cost", "Filter", "FFT OFF", "RR {value}").
+// Composed lenses ALWAYS start with "Composed · " and never collapse to a single
+// stage name, so the banner can never be confused with a single lens. Requested
+// stages that did NOT apply (unavailable or no-op/skipped) are appended as "(… n/a)".
+const COMPOSED_ORDER = ["fft", "filter", "rr", "cost"];
+const COMPOSED_STAGE_BARE = { fft: "FFT", filter: "Filter", rr: "RR", cost: "Cost" };
+
+/** Applied-stage display name, in canonical order (RR carries its target value). */
+function composedStageAppliedName(stage, stages) {
+    switch (stage) {
+        case "fft":    return "FFT OFF";
+        case "filter": return "Filter";
+        case "rr":     return `RR ${stages?.rr?.rr ?? ""}`.trim();
+        case "cost":   return "Cost";
+        default:       return stage;
+    }
+}
+
+/**
+ * Build the composed banner label from a composePreviewBundle result, e.g.
+ *   "Composed · Filter + Cost"
+ *   "Composed · Filter (RR n/a)"
+ *   "Composed · FFT OFF + Filter + RR 5 + Cost"
+ */
+function composedLabelFromResult(result) {
+    if (!result) return "Composed";
+    const stages = result.stages || {};
+    const applied = COMPOSED_ORDER.filter((s) => (result.appliedStages || []).includes(s));
+    const notApplied = COMPOSED_ORDER.filter((s) =>
+        (result.unavailableStages || []).includes(s) || (result.skippedStages || []).includes(s));
+    const body = applied.map((s) => composedStageAppliedName(s, stages)).join(" + ") || "—";
+    const na = notApplied.length
+        ? ` (${notApplied.map((s) => `${COMPOSED_STAGE_BARE[s] || s} n/a`).join(", ")})`
+        : "";
+    return `Composed · ${body}${na}`;
 }
 
 // ─── Preview state ────────────────────────────────────────────────────────────
@@ -199,6 +228,7 @@ const MasterControlsContext = createContext({
     applyLocalFilterLens:    () => {},
     // Temporary FFT ON/OFF preview bundle — Phase 10B (control-trade universe swap)
     localFftBundle:          null,
+    fftPreviewUnavailable:   false,
     clearFftPreview:         () => {},
     applyFftPreviewLens:     () => {},
     // Temporary RR preview bundle — Phase 11C (stop-anchored RR rescore)
@@ -259,7 +289,11 @@ export function MasterControlsProvider({ children }) {
     // ── Phase 10B — temporary FFT ON/OFF preview bundle ─────────────────────
     // A bundle-shaped object that swaps the triggered-edge scenarios for their
     // FFT-OFF control counterparts. Held in context ONLY — never stored / persisted.
+    // `fftPreviewUnavailable` (Phase 12C-1) is true when the FFT toggle is the sole
+    // dirty field but no ON→OFF control swap is possible, so the drawer can explain
+    // instead of silently rendering nothing.
     const [localFftBundle, setLocalFftBundle] = useState(null);
+    const [fftPreviewUnavailable, setFftPreviewUnavailable] = useState(false);
     const fftSuppressRef = useRef("");
 
     // ── Phase 11C — temporary RR preview bundle ─────────────────────────────
@@ -288,6 +322,7 @@ export function MasterControlsProvider({ children }) {
         setLocalFilterBundle(null);
         filterSuppressRef.current = "";
         setLocalFftBundle(null);
+        setFftPreviewUnavailable(false);
         fftSuppressRef.current = "";
         setLocalRrBundle(null);
         setRrPreviewUnavailable(false);
@@ -416,6 +451,7 @@ export function MasterControlsProvider({ children }) {
         setLocalFilterBundle(null);
         filterSuppressRef.current = "";
         setLocalFftBundle(null);
+        setFftPreviewUnavailable(false);
         fftSuppressRef.current = "";
         setLocalRrBundle(null);
         setRrPreviewUnavailable(false);
@@ -477,6 +513,7 @@ export function MasterControlsProvider({ children }) {
         setLocalRescoreBundle(null);
         setLocalFilterBundle(null);
         setLocalFftBundle(null);
+        setFftPreviewUnavailable(false);
         setLocalRrBundle(null);
         setRrPreviewUnavailable(false);
         setComposedPreviewResult(null);
@@ -510,6 +547,7 @@ export function MasterControlsProvider({ children }) {
     const clearFftPreview = useCallback(() => {
         fftSuppressRef.current = fftSignature(activeRunId, effectiveConfig);
         setLocalFftBundle(null);
+        setFftPreviewUnavailable(false);
     }, [activeRunId, effectiveConfig]);
 
     /**
@@ -574,6 +612,7 @@ export function MasterControlsProvider({ children }) {
         setLocalRescoreBundle(null);
         setLocalFilterBundle(null);
         setLocalFftBundle(null);
+        setFftPreviewUnavailable(false);
         setLocalRrBundle(null);
         setRrPreviewUnavailable(false);
         setComposedPreviewResult(null);
@@ -713,7 +752,10 @@ export function MasterControlsProvider({ children }) {
             slippage: effectiveConfig.slippage,
             commission: effectiveConfig.commission,
         };
-        const sourceBundle = getRunData(activeRunId);
+        // Phase 12C-1: compose from the RAW persisted run (lens-immune), matching the
+        // filter / FFT / RR / composed builders. Cost rescore is gross-anchored so this
+        // is behaviour-preserving; it just removes the getRunData divergence.
+        const sourceBundle = getRawRunData(activeRunId);
         const result = sourceBundle ? rescoreCostsForBundle(sourceBundle, costs) : null;
         if (!result || !result.ok || !result.exact) {
             setLocalRescoreBundle(null);
@@ -770,19 +812,30 @@ export function MasterControlsProvider({ children }) {
         if (!fftOnly || !effectiveConfig || !activeRunId) {
             fftSuppressRef.current = "";
             setLocalFftBundle(null);
+            setFftPreviewUnavailable(false);
             return;
         }
-        // Respect a manual dismissal of this exact FFT toggle.
-        if (fftSuppressRef.current === fftSignature(activeRunId, effectiveConfig)) return;
-
         const sourceBundle = getRawRunData(activeRunId);
         if (!sourceBundle) {
             setLocalFftBundle(null);
+            setFftPreviewUnavailable(false);
             return;
         }
-        setLocalFftBundle(buildFftPreviewBundle(sourceBundle, {
+        // buildFftPreviewBundle returns null for no-op / unavailable (already OFF, OFF→ON,
+        // no controls, no covered scenario). Phase 12C-1: surface that as an explicit
+        // "unavailable" state instead of silently rendering nothing.
+        const bundle = buildFftPreviewBundle(sourceBundle, {
             fftEnabled: Boolean(effectiveConfig[FFT_DRAFT_KEY]),
-        }));
+        });
+        if (!bundle) {
+            setLocalFftBundle(null);
+            setFftPreviewUnavailable(true);
+            return;
+        }
+        setFftPreviewUnavailable(false);
+        // Respect a manual dismissal of this exact FFT toggle.
+        if (fftSuppressRef.current === fftSignature(activeRunId, effectiveConfig)) return;
+        setLocalFftBundle(bundle);
     }, [activeRunId, dirtyFieldList, effectiveConfig]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // ── Phase 11C build effect — keep localRrBundle in sync with the RR target ───
@@ -885,7 +938,7 @@ export function MasterControlsProvider({ children }) {
             sourceRunId: activeRunId,
             bundle: localRescoreBundle,
             mode: "local_rescore",
-            label: "Cost rescore preview",
+            label: "Cost",
         });
     }, [localRescoreBundle, activeRunId]);
 
@@ -909,7 +962,7 @@ export function MasterControlsProvider({ children }) {
                 sourceRunId: activeRunId,
                 bundle: localRescoreBundle,
                 mode: "local_rescore",
-                label: "Cost rescore preview",
+                label: "Cost",
             });
         }
     }, [localRescoreBundle, activeRunId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -922,7 +975,7 @@ export function MasterControlsProvider({ children }) {
             sourceRunId: activeRunId,
             bundle: localFilterBundle,
             mode: "instant_filter",
-            label: "Filter preview",
+            label: "Filter",
         });
     }, [localFilterBundle, activeRunId]);
 
@@ -942,7 +995,7 @@ export function MasterControlsProvider({ children }) {
                 sourceRunId: activeRunId,
                 bundle: localFilterBundle,
                 mode: "instant_filter",
-                label: "Filter preview",
+                label: "Filter",
             });
         }
     }, [localFilterBundle, activeRunId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -955,7 +1008,7 @@ export function MasterControlsProvider({ children }) {
             sourceRunId: activeRunId,
             bundle: localFftBundle,
             mode: "fft_swap",
-            label: "FFT OFF Preview",
+            label: "FFT OFF",
         });
     }, [localFftBundle, activeRunId]);
 
@@ -975,7 +1028,7 @@ export function MasterControlsProvider({ children }) {
                 sourceRunId: activeRunId,
                 bundle: localFftBundle,
                 mode: "fft_swap",
-                label: "FFT OFF Preview",
+                label: "FFT OFF",
             });
         }
     }, [localFftBundle, activeRunId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -988,7 +1041,7 @@ export function MasterControlsProvider({ children }) {
             sourceRunId: activeRunId,
             bundle: localRrBundle,
             mode: "rr_rescore",
-            label: `RR ${effectiveConfig?.[RR_DRAFT_KEY] ?? ""} Preview`.trim(),
+            label: `RR ${effectiveConfig?.[RR_DRAFT_KEY] ?? ""}`.trim(),
         });
     }, [localRrBundle, activeRunId, effectiveConfig]);
 
@@ -1006,7 +1059,7 @@ export function MasterControlsProvider({ children }) {
                 sourceRunId: activeRunId,
                 bundle: localRrBundle,
                 mode: "rr_rescore",
-                label: `RR ${effectiveConfig?.[RR_DRAFT_KEY] ?? ""} Preview`.trim(),
+                label: `RR ${effectiveConfig?.[RR_DRAFT_KEY] ?? ""}`.trim(),
             });
         }
     }, [localRrBundle, activeRunId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1020,7 +1073,7 @@ export function MasterControlsProvider({ children }) {
         [composedPreviewResult],
     );
     const composedLabel = useMemo(
-        () => composedLabelFor(composedPreviewResult?.appliedStages),
+        () => composedLabelFromResult(composedPreviewResult),
         [composedPreviewResult],
     );
 
@@ -1103,6 +1156,7 @@ export function MasterControlsProvider({ children }) {
         applyLocalFilterLens,
         // FFT preview lens — Phase 10B
         localFftBundle,
+        fftPreviewUnavailable,
         clearFftPreview,
         applyFftPreviewLens,
         // RR preview lens — Phase 11C
@@ -1149,6 +1203,7 @@ export function MasterControlsProvider({ children }) {
         clearLocalFilterBundle,
         applyLocalFilterLens,
         localFftBundle,
+        fftPreviewUnavailable,
         clearFftPreview,
         applyFftPreviewLens,
         localRrBundle,
