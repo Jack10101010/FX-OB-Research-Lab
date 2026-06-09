@@ -14,11 +14,9 @@
 // object carries `upperBound: true`; callers MUST label these figures accordingly
 // ("upper bound", "potentially savable", "validate with exact BE backtest").
 
-import {
-    rOf, isFiniteNumber, sessionOf, directionOf, structureOf,
-    obWidthOf, entryHour, entryWeekday, WEEKDAYS,
-} from "./failuresUtils";
-import { archetypeLabel } from "./failuresRegistry";
+import { rOf, isFiniteNumber } from "./failuresUtils";
+import { aggregateFailures } from "./failuresAggregation";
+import { FAILURE_DIMENSIONS, DIMENSION_BY_KEY, dimensionAvailable } from "./failuresDimensions";
 
 const numOrNull = (v) => {
     if (v === null || v === undefined || v === "") return null;
@@ -234,39 +232,9 @@ export function buildBeOpportunity(losers, levels, { config } = {}) {
 
 export const DRILL_SAMPLE_FLOOR = 8; // min trades in a cell before it ranks
 
-const cap = (s) => (s ? String(s).charAt(0).toUpperCase() + String(s).slice(1) : s);
-const hourLabel = (h) => (h == null ? "Unknown" : `${String(h).padStart(2, "0")}:00 UTC`);
-const weekdayLabel = (d) => (d == null || d < 0 ? "Unknown" : (Array.isArray(WEEKDAYS) ? (WEEKDAYS[d] ?? `D${d}`) : `D${d}`));
-function obWidthBucket(t) {
-    const w = obWidthOf(t);
-    if (!isFiniteNumber(w)) return "Unknown";
-    if (w <= 3) return "0–3 pips";
-    if (w <= 6) return "3–6 pips";
-    if (w <= 10) return "6–10 pips";
-    if (w <= 15) return "10–15 pips";
-    return ">15 pips";
-}
-function structureLabel(t) {
-    const s = structureOf(t);
-    return s === "choch" ? "CHoCH" : s === "bos" ? "BOS" : "Unknown";
-}
-
-// Drilldown / driver dimensions. `of` returns a display value; "" or "Unknown"
-// means no signal for that trade. Dimensions whose values are entirely empty
-// (e.g. FFT when not exported) are auto-hidden by the aggregators below.
-export const DRILL_DIMENSIONS = [
-    { key: "session",    label: "Session",     of: (t) => sessionOf(t.entry) || "Unknown" },
-    { key: "direction",  label: "Direction",   of: (t) => cap(directionOf(t)) || "Unknown" },
-    { key: "structure",  label: "Structure",   of: (t) => structureLabel(t) },
-    { key: "hour",       label: "Hour (UTC)",  of: (t) => hourLabel(entryHour(t)) },
-    { key: "weekday",    label: "Weekday",     of: (t) => weekdayLabel(entryWeekday(t)) },
-    { key: "archetype",  label: "Archetype",   of: (t) => archetypeLabel(t.archetype) },
-    { key: "obwidth",    label: "OB Width",    of: (t) => obWidthBucket(t) },
-    { key: "ghost",      label: "Ghost",       of: (t) => t?.ghost_outcome || t?.ghostOutcome || "" },
-    { key: "entryModel", label: "Entry Model", of: (t) => t?.entry_model_key || t?.entryModelKey || "" },
-    { key: "fft",        label: "FFT",         of: (t) => t?.first_failed_tag || t?.firstFailedTag || "" },
-];
-const DIM_BY_KEY = Object.fromEntries(DRILL_DIMENSIONS.map((d) => [d.key, d]));
+// Dimension registry + aggregation now live in failuresDimensions.js /
+// failuresAggregation.js (V4 shared engine). The builders below are thin
+// configurations of that engine.
 
 const lossRof = (t) => Math.abs(rOf(t));
 const sumLossR = (list) => list.reduce((s, t) => s + lossRof(t), 0);
@@ -308,38 +276,25 @@ export function losersInRawBucket(losers, bucketKey) {
         .filter((t) => getMfeR(t) != null && bucketMfeRaw(getMfeR(t)) === bucketKey);
 }
 
-// Aggregate a trade list by one dimension → ranked rows (by loss-R). Returns null
-// if the dimension carries no real signal (all empty / Unknown).
-function aggregateByDim(trades, dim, topN) {
-    const map = {};
-    let knownAny = false;
-    for (const t of trades) {
-        const raw = dim.of(t);
-        const v = (raw == null || raw === "") ? "Unknown" : String(raw);
-        if (v !== "Unknown") knownAny = true;
-        if (!map[v]) map[v] = { value: v, count: 0, lossR: 0 };
-        map[v].count += 1;
-        map[v].lossR += lossRof(t);
-    }
-    if (!knownAny) return null;
-    const totalLossR = sumLossR(trades);
-    const rows = Object.values(map)
-        .map((r) => ({
-            value: r.value, count: r.count, lossR: round1(r.lossR),
-            contributionPct: totalLossR > 0 ? round1((r.lossR / totalLossR) * 100) : 0,
-        }))
-        .sort((a, b) => b.lossR - a.lossR)
-        .slice(0, topN);
-    return { key: dim.key, label: dim.label, rows };
-}
-
 // ── Bucket drilldown — ranked contributors within a selected raw-R bucket ──────
-export function buildBucketDrilldown(losers, bucketKey, { topN = 6, dims = DRILL_DIMENSIONS } = {}) {
+// Thin config of the shared engine: pre-filter to the bucket, aggregate per
+// available dimension. Within-bucket contribution; Unknown dropped; lift exposed.
+export function buildBucketDrilldown(losers, bucketKey, { topN = 6, dims = FAILURE_DIMENSIONS } = {}) {
     const withMfe = (Array.isArray(losers) ? losers : []).filter((t) => getMfeR(t) != null);
     const inBucket = withMfe.filter((t) => bucketMfeRaw(getMfeR(t)) === bucketKey);
     const allLossR = sumLossR(withMfe);
     const bucketLossR = sumLossR(inBucket);
-    const sections = dims.map((d) => aggregateByDim(inBucket, d, topN)).filter(Boolean);
+    const sections = [];
+    for (const dim of dims) {
+        if (!dimensionAvailable(dim, inBucket)) continue;
+        const { cells } = aggregateFailures(inBucket, { dimA: dim, sampleFloor: 1, requireKnown: true, topN });
+        if (!cells.length) continue;
+        sections.push({
+            key: dim.key,
+            label: dim.label,
+            rows: cells.map((c) => ({ value: c.keyA, count: c.count, lossR: c.lossR, contributionPct: c.contributionPct, lift: c.lift })),
+        });
+    }
     return {
         bucketKey,
         trades: inBucket.length,
@@ -350,24 +305,26 @@ export function buildBucketDrilldown(losers, bucketKey, { topN = 6, dims = DRILL
 }
 
 // ── Failure drivers — top single-factor contributors across ALL losers ─────────
-export function buildFailureDrivers(losers, { minSample = DRILL_SAMPLE_FLOOR, topN = 8, dims = DRILL_DIMENSIONS } = {}) {
+// Ranks by loss-R but now carries `lift` so a surface can tell volume from a true
+// (disproportionate) driver.
+export function buildFailureDrivers(losers, { minSample = DRILL_SAMPLE_FLOOR, topN = 8, dims = FAILURE_DIMENSIONS } = {}) {
     const list = Array.isArray(losers) ? losers : [];
     const totalLossR = sumLossR(list);
-    const cells = [];
+    const out = [];
     for (const dim of dims) {
-        const agg = aggregateByDim(list, dim, Infinity);
-        if (!agg) continue;
-        for (const r of agg.rows) {
-            if (r.value === "Unknown" || r.count < minSample) continue;
-            cells.push({
-                dimKey: dim.key, dimLabel: dim.label, value: r.value,
-                count: r.count, lossR: r.lossR,
-                contributionPct: totalLossR > 0 ? round1((r.lossR / totalLossR) * 100) : 0,
+        if (!dimensionAvailable(dim, list)) continue;
+        const { cells } = aggregateFailures(list, { dimA: dim, sampleFloor: minSample, requireKnown: true });
+        for (const c of cells) {
+            if (!c.rankable) continue;
+            out.push({
+                dimKey: dim.key, dimLabel: dim.label, value: c.keyA,
+                count: c.count, lossR: c.lossR, contributionPct: c.contributionPct,
+                lift: c.lift, lossRateLift: c.lossRateLift,
             });
         }
     }
-    cells.sort((a, b) => b.lossR - a.lossR);
-    return { totalLossR: round1(totalLossR), minSample, drivers: cells.slice(0, topN) };
+    out.sort((a, b) => b.lossR - a.lossR);
+    return { totalLossR: round1(totalLossR), minSample, drivers: out.slice(0, topN) };
 }
 
 // ── Curated pair drivers (NO free-form combination mining) ─────────────────────
@@ -384,27 +341,17 @@ export function buildPairDrivers(losers, { minSample = DRILL_SAMPLE_FLOOR, topN 
     const totalLossR = sumLossR(list);
     const out = [];
     for (const [aKey, bKey] of pairs) {
-        const dimA = DIM_BY_KEY[aKey];
-        const dimB = DIM_BY_KEY[bKey];
-        if (!dimA || !dimB) continue;
-        const map = {};
-        for (const t of list) {
-            const va = dimA.of(t);
-            const vb = dimB.of(t);
-            if (!va || va === "Unknown" || !vb || vb === "Unknown") continue; // both must be known
-            const key = `${va} · ${vb}`;
-            if (!map[key]) map[key] = { valueLabel: key, count: 0, lossR: 0 };
-            map[key].count += 1;
-            map[key].lossR += lossRof(t);
-        }
-        for (const cell of Object.values(map)) {
-            if (cell.count < minSample) continue;
+        const A = DIMENSION_BY_KEY[aKey];
+        const B = DIMENSION_BY_KEY[bKey];
+        if (!A || !B) continue;
+        if (!dimensionAvailable(A, list) || !dimensionAvailable(B, list)) continue;
+        const { cells } = aggregateFailures(list, { dimA: A, dimB: B, sampleFloor: minSample, requireKnown: true });
+        for (const c of cells) {
+            if (!c.rankable) continue;
             out.push({
-                pairLabel: `${dimA.label} × ${dimB.label}`,
-                valueLabel: cell.valueLabel,
-                count: cell.count,
-                lossR: round1(cell.lossR),
-                contributionPct: totalLossR > 0 ? round1((cell.lossR / totalLossR) * 100) : 0,
+                pairLabel: `${A.label} × ${B.label}`,
+                valueLabel: `${c.keyA} · ${c.keyB}`,
+                count: c.count, lossR: c.lossR, contributionPct: c.contributionPct, lift: c.lift,
             });
         }
     }

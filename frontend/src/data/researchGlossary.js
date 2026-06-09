@@ -406,6 +406,17 @@ export const GLOSSARY = {
         definition: "Total R lost by the trades in a group (sum of their negative R).",
         whyItMatters: "The absolute size of the damage a session, structure, or setup is causing.",
     },
+    lift: {
+        term: "Lift",
+        friendlyName: "Lift (over-representation)",
+        definition: "A group's share of loss-R ÷ its share of trades. 1.0× is exactly its fair share.",
+        whyItMatters: "Above 1.0× means the group loses disproportionately — a real driver, not just a high-volume bucket.",
+        interpretation: [
+            "Above 1.0× — disproportionate damage (a driver)",
+            "≈ 1.0× — average; loses in line with its volume",
+            "Below 1.0× — under-represented in losses",
+        ],
+    },
 
     // ── OB Retest Lab (Phase C education layer; additive, no logic) ──────────────
     retest_survival: {

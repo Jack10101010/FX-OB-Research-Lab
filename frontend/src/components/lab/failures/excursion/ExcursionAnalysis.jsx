@@ -26,6 +26,14 @@ function Contribution({ pct }) {
     return <span className="font-num tabular-nums text-[hsl(var(--text-2))]">{pct}%</span>;
 }
 
+// Lift = loss-R share ÷ trade share. >1 ⇒ disproportionate (a real driver).
+function LiftCell({ lift }) {
+    const color = lift >= 1.5 ? "hsl(var(--danger))"
+        : lift >= 1.15 ? "hsl(var(--warning))"
+        : "hsl(var(--text-2))";
+    return <span className="w-12 text-right font-num tabular-nums" style={{ color, fontWeight: lift >= 1.15 ? 600 : 400 }}>{lift}×</span>;
+}
+
 // One clickable bucket bar.
 function BucketBar({ b, maxLossR, selected, onSelect }) {
     const w = maxLossR > 0 ? Math.min(100, (b.lossR / maxLossR) * 100) : 0;
@@ -182,8 +190,16 @@ export function ExcursionAnalysis({ losers = [], allLosers = [], config = {} }) 
             {/* ── Top failure drivers (single factor, all losers) ───────────── */}
             <NeonPanel
                 title="Top failure drivers"
-                action={<Pill tone="muted">ranked by loss-R · min {drivers.minSample} trades</Pill>}
+                action={
+                    <span className="flex items-center gap-2 text-[10.5px] font-ui text-[hsl(var(--text-2))]">
+                        <TermTip termKey="lift">×</TermTip> = lift · ranked by loss-R · min {drivers.minSample} trades
+                    </span>
+                }
             >
+                <p className="px-3 pt-3 text-[10.5px] font-ui text-[hsl(var(--text-2))]">
+                    Columns: count · loss-R · contribution % · <TermTip termKey="lift">lift</TermTip>.
+                    Lift &gt; 1× = the factor loses <span className="text-[hsl(var(--text))]">more than its share</span> of trades (a real driver, not just high volume).
+                </p>
                 {drivers.drivers.length ? (
                     <div className="p-3 space-y-1.5">
                         {drivers.drivers.map((d, i) => {
@@ -199,6 +215,7 @@ export function ExcursionAnalysis({ losers = [], allLosers = [], config = {} }) 
                                     <span className="w-8 text-right font-num tabular-nums text-white">{d.count}</span>
                                     <span className="w-12 text-right font-num tabular-nums text-[hsl(var(--text-2))]">{d.lossR}R</span>
                                     <span className="w-12 text-right font-num tabular-nums font-semibold text-[hsl(var(--text))]">{d.contributionPct}%</span>
+                                    <LiftCell lift={d.lift} />
                                 </div>
                             );
                         })}
@@ -226,6 +243,7 @@ export function ExcursionAnalysis({ losers = [], allLosers = [], config = {} }) 
                                 <span className="w-8 text-right font-num tabular-nums text-white">{p.count}</span>
                                 <span className="w-12 text-right font-num tabular-nums text-[hsl(var(--text-2))]">{p.lossR}R</span>
                                 <span className="w-12 text-right font-num tabular-nums font-semibold text-[hsl(var(--text))]">{p.contributionPct}%</span>
+                                <LiftCell lift={p.lift} />
                             </div>
                         ))}
                     </div>

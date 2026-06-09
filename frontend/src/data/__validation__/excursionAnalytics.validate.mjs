@@ -36,7 +36,20 @@ const entryFormattersShim = {
 const utils = loadCjs(`${BASE}/failuresUtils.js`, () => entryFormattersShim);
 // failuresRegistry (for archetypeLabel) re-exports sampleConfidence from entryRegistry — stub it.
 const registry = loadCjs(`${BASE}/failuresRegistry.js`, () => ({ sampleConfidence: () => ({ label: "N/A", tone: "muted" }) }));
+// V4: excursionAnalytics now delegates to the shared dimension registry + engine.
+const dimensions = loadCjs(`${BASE}/failuresDimensions.js`, (spec) => {
+    if (spec.includes("failuresUtils")) return utils;
+    if (spec.includes("failuresRegistry")) return registry;
+    return {};
+});
+const aggregation = loadCjs(`${BASE}/failuresAggregation.js`, (spec) => {
+    if (spec.includes("failuresDimensions")) return dimensions;
+    if (spec.includes("failuresUtils")) return utils;
+    return {};
+});
 const exc = loadCjs(`${BASE}/excursionAnalytics.js`, (spec) => {
+    if (spec.includes("failuresDimensions")) return dimensions;
+    if (spec.includes("failuresAggregation")) return aggregation;
     if (spec.includes("failuresUtils")) return utils;
     if (spec.includes("failuresRegistry")) return registry;
     return {};
