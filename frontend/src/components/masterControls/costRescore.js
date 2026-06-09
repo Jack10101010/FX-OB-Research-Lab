@@ -62,7 +62,7 @@ function pickTrades(bundle) {
 }
 
 /** Old config cost settings from the bundle's raw config.json. */
-function readOldCosts(bundle) {
+export function readOldCosts(bundle) {
     const cfg = bundle?.config && typeof bundle.config === "object" ? bundle.config : {};
     return {
         spread:     pickNum(cfg, "spread_pips", "spreadPips", "spread"),
@@ -72,7 +72,7 @@ function readOldCosts(bundle) {
 }
 
 /** Pip size from config/summary, or null (no silent default). */
-function readPipSize(bundle) {
+export function readPipSize(bundle) {
     const cfg = bundle?.config && typeof bundle.config === "object" ? bundle.config : {};
     const sm = bundle?.summary && typeof bundle.summary === "object" ? bundle.summary : {};
     const fromCfg = pickNum(cfg, "pip_size", "pipSize", "pip", "pip_value", "pipValue");
