@@ -14,9 +14,10 @@ Branch: `codex-dev`. Theme: dark "neon lab" (do not change without request).
 
 ## Current major workstream
 
-**Failures Lab V4 — final integration cleanup, then pause.** (These docs previously still
-named Classification Tab V2 as active; that was stale and is corrected — Classification is
-paused with Phase 2 shipped.)
+**Failures Lab V5 — decision layer.** V4 cleanup + V5 Phase 1 (Filter Discovery) shipped.
+V5 Phase 2 (confirmed false losers, frontend) + Phase 2B (Overview IA) built and validated;
+Phase 2B commit pending. Live data path waits on the Lux-OB-Backtester post-stop export.
+(Classification Tab V2 is paused with Phase 2 shipped.)
 
 Parallel state: **Master Controls is strong/stable** (composed preview lens, instant cost
 rescore, promotion flow all shipped). OB-Retest and Protection/BE-Replay have active
@@ -24,6 +25,15 @@ uncommitted work owned by other streams.
 
 ## Completed
 
+- **Failures Lab V5 Phase 2 + 2B (frontend)** — `buildConfirmedFalseLosers` classifies losers
+  confirmed/candidate/genuine (reached ≥1R or hit original TP / ≥0.5R / never) with cohort
+  breakdowns + horizon; importer maps the 5 `post_stop_*` fields dual-keyed; field-gated with a
+  candidates fallback (`failuresFalseLosers.validate.mjs` 30/30). **Phase 2B IA:** Confirmed False
+  Losers moved Views & Export → **Overview**; new **Global Failure Explorer** (whole-run, valid-
+  universe gated) on Overview; Distance-to-Stop explorer relabelled **MFE Bucket Explorer** (logic
+  unchanged via parametrised `FailureExplorer`); Views & Export trimmed to exports + saved views +
+  a pointer. No Protection Lab / OB-Retest / Master Controls / `roadmapStore` / `SectionRoadmap`
+  changes. Analytics + validate committed on host; the 5 Phase 2B UI files are commit-pending.
 - **Fill-state taxonomy** — canonical states: `occupied_at_arm`, `vacant_at_arm` (parent),
   `aae`, `vacant_no_aae`, `unknown_at_arm`. `deriveFillState()` is authoritative;
   `obOccupiedAtArm` decides the parent, `armedAfterObExit` only subdivides Vacant.

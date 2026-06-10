@@ -7,7 +7,8 @@
 ## Focus
 
 **Failures Lab V5 — decision layer.** Phase 1 shipped; Phase 2 (confirmed false losers)
-is audited and waiting on a backend export.
+frontend built + validated; Phase 2B (Overview IA) built + validated, commit pending.
+Backend export still needed to populate the live data path.
 
 ## Where we are
 
@@ -36,12 +37,35 @@ is audited and waiting on a backend export.
     BE/trail would have held. One export serves false-loser confirmation, exact BE-replay
     validation, and trailing-stop research.
 
-## Frontend alignment (done this session, commit pending)
+## V5 Phase 2 — confirmed false losers (frontend) — BUILT + VALIDATED
 
-Canonical name **`post_stop_mfe_r`** adopted (was planned as `post_stop_continuation_r`):
-`failuresDataQuality.js` FIELD_DEPS now aliases `postStopMfeR` / `post_stop_mfe_r` /
-legacy `post_stop_continuation_r` (entry key unchanged — banner impact map keys on it);
-user-facing copy updated in `ViewManager.jsx` + `failuresAnalytics.js` candidate note.
+- Canonical `post_stop_mfe_r` adopted; `failuresDataQuality.js` FIELD_DEPS aliases
+  `postStopMfeR` / `post_stop_mfe_r` / legacy `post_stop_continuation_r`.
+- `importer.js` maps the 5 fields dual-keyed (`numOrNull`/`boolOrNull`; absent → null/"").
+- `failuresAnalytics.buildConfirmedFalseLosers` classifies losers
+  **confirmed / candidate / genuine** (reached ≥1R or hit original TP / ≥0.5R / never),
+  with cohort breakdowns (session, direction, structure, archetype), horizon + model.
+  `failuresFalseLosers.validate.mjs` 30/30 PASS. Analytics + validate committed on host;
+  `importer.js` change rides in the shared dirty file.
+
+## V5 Phase 2B — Overview IA — BUILT + VALIDATED, COMMIT PENDING
+
+Move false-loser research onto the Overview decision surface. Five UI files:
+
+- `overview/ConfirmedFalseLosersPanel.jsx` (new) — confirmed/candidate/genuine tiles +
+  cohort breakdowns + candidates fallback, extracted out of `ViewManager`.
+- `overview/FailuresOverview.jsx` — renders that panel after the Command Center, plus a
+  bucket-less **Global Failure Explorer** (whole-run, valid-universe gated via
+  `isPerformanceTrade`).
+- `excursion/FailureExplorer.jsx` — parametrised `title`/`prefsKey`/`roadmapKey`/`intro`
+  so one component serves both explorers without sharing persisted UI state.
+- `excursion/ExcursionAnalysis.jsx` — Distance-to-Stop instance relabelled **MFE Bucket
+  Explorer** (bucket-scoped logic unchanged).
+- `workspace/ViewManager.jsx` — Views & Export trimmed to CSV export + saved views + a
+  lightweight pointer to Overview.
+
+No Protection Lab / OB-Retest / Master Controls / `roadmapStore.js` / `SectionRoadmap.jsx`
+changes (Overview explorer passes `roadmapKey={null}`). Scoped commit = these 5 files only.
 
 ## Blockers / open questions
 
@@ -51,9 +75,9 @@ user-facing copy updated in `ViewManager.jsx` + `failuresAnalytics.js` candidate
 - Parallel streams active on this branch: OB-Retest (v2.1 committed), Protection/BE-Replay
   (`ProtectionLab.jsx` dirty — do not stage), Hypothesis Lab fixes landing from host.
 
-## Definition of done (Phase 2, frontend half)
+## Remaining
 
-Importer maps the 5 fields (dual-keyed, `numOrNull`); `buildConfirmedFalseLosers` classifies
-losers (confirmed via post-stop reach vs genuine) with horizon shown; surfaced in Distance
-to Stop + the Views & Export False Loser panel upgraded from "candidates only"; gated on
-field presence (old bundles unchanged); validation script; docs synced.
+Frontend (Phase 2 + 2B) is built, validated, and field-gated; with no export present it
+shows the candidates fallback. To light up the live path: ship the **Lux-OB-Backtester
+post-stop export** (separate repo) and re-import a run carrying the 5 fields. Then commit
+the Phase 2B 5-file scope on the host and sync docs.
