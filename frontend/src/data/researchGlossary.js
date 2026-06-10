@@ -476,6 +476,18 @@ export const GLOSSARY = {
             "Negative (green) — loses less often than baseline",
         ],
     },
+    penetration: {
+        term: "OB Penetration",
+        friendlyName: "Order-block penetration",
+        definition: "How deeply price pushed into / through the order block before the trade failed, as a % of the OB (≥100% = price fully breached the block). Falls back to fill penetration % when OB penetration isn't exported.",
+        whyItMatters: "Separates shallow rejections from deep structural breaks: deep-breach losers (>110%) are genuine invalidations, while shallow-fill losers may be stop-raid / timing failures worth a different fix.",
+    },
+    loss_rate_lift: {
+        term: "Loss-rate lift",
+        friendlyName: "Loss-rate lift vs baseline",
+        definition: "A cohort's loss rate ÷ the baseline loss rate. 1.0× is exactly the baseline; 2.0× means it loses twice as often as the run overall.",
+        whyItMatters: "A multiplier view of Δ-vs-baseline — only meaningful when the population includes winners. Above ~1.3× flags a genuinely failure-prone cohort, not just a high-volume one.",
+    },
     backtest_action: {
         term: "Backtest action",
         friendlyName: "Backtest suggestion",

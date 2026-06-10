@@ -21,7 +21,7 @@ import { NeonPanel } from "@/components/lab/NeonPanel";
 import { Pill } from "@/components/lab/DataTable";
 import { cn } from "@/lib/utils";
 import { TermTip } from "@/components/lab/TermTip";
-import { buildExplorer, buildBucketExplorerRows, pickWorstSetupRow, EXPLORER_METRICS, EXPLORER_FLOORS, isHighlightCell } from "../shared/excursionAnalytics";
+import { buildExplorer, buildBucketExplorerRows, buildRefinedBucketRows, availableRefineDimensions, pickWorstSetupRow, EXPLORER_METRICS, EXPLORER_FLOORS, isHighlightCell } from "../shared/excursionAnalytics";
 import { SectionRoadmap } from "@/components/lab/roadmap/SectionRoadmap";
 
 // Lift = loss-R share ÷ trade share. >1 ⇒ disproportionate (a real driver).
@@ -110,13 +110,16 @@ export function FailureExplorer({ allTrades = [], allLosers = [], bucket = null 
     });
     const [bucketSort, setBucketSort] = useState(() => pick(initialPrefs.bucketSort, SORT_VALUES, "lossRate"));
     const [showOverall, setShowOverall] = useState(() => (typeof initialPrefs.showOverall === "boolean" ? initialPrefs.showOverall : true));
+    // Refine-by-one-dimension: last refine dim persists; expanded row is per-session only.
+    const [refineDim, setRefineDim] = useState(() => (typeof initialPrefs.refineDim === "string" ? initialPrefs.refineDim : "direction"));
+    const [expandedId, setExpandedId] = useState(null);
 
-    // Persist UI state (per-browser). Never persists data rows or selections.
+    // Persist UI state (per-browser). Never persists data rows or the expanded row.
     useEffect(() => {
         try {
-            localStorage.setItem(EXPLORER_PREFS_KEY, JSON.stringify({ scope, dimA, dimB, metric, floor, advCols, bucketSort, showOverall }));
+            localStorage.setItem(EXPLORER_PREFS_KEY, JSON.stringify({ scope, dimA, dimB, metric, floor, advCols, bucketSort, showOverall, refineDim }));
         } catch { /* storage unavailable — ignore */ }
-    }, [scope, dimA, dimB, metric, floor, advCols, bucketSort, showOverall]);
+    }, [scope, dimA, dimB, metric, floor, advCols, bucketSort, showOverall, refineDim]);
 
     // Effective scope: "bucket" only applies when a bucket is selected.
     const effScope = (scope === "bucket" && !bucket) ? "alltrades" : scope;
@@ -161,6 +164,39 @@ export function FailureExplorer({ allTrades = [], allLosers = [], bucket = null 
     }, [inBucketMode, bexp, bucketSort]);
     const worstRow = useMemo(() => (inBucketMode ? pickWorstSetupRow(bexp?.rows || []) : null), [inBucketMode, bexp]);
     const worstId = worstRow ? (worstRow.keyB != null ? `${worstRow.keyA}·${worstRow.keyB}` : worstRow.keyA) : null;
+
+    // ── Refine-by-one-dimension (controlled; bucket mode only) ───────────────────
+    // Refine options = dims available in the run, minus the ones the main table uses.
+    const refineOptions = useMemo(
+        () => (inBucketMode ? availableRefineDimensions(allTrades, [result?.dimA, result?.dimB]) : []),
+        [inBucketMode, allTrades, result],
+    );
+    const effRefine = useMemo(() => {
+        if (!refineOptions.length) return null;
+        return (refineOptions.find((d) => d.key === refineDim)
+            || refineOptions.find((d) => d.key === "direction")
+            || refineOptions[0]).key;
+    }, [refineOptions, refineDim]);
+    // Collapse the expanded row whenever the bucket or the main dimensions change.
+    useEffect(() => { setExpandedId(null); }, [bucket?.key, result?.dimA, result?.dimB]);
+    const expandedRow = useMemo(
+        () => bucketRows.find((r) => (r.keyB != null ? `${r.keyA}·${r.keyB}` : r.keyA) === expandedId) || null,
+        [bucketRows, expandedId],
+    );
+    const refined = useMemo(() => {
+        if (!inBucketMode || !expandedRow || !effRefine) return null;
+        return buildRefinedBucketRows({
+            bucketKey: bucket.key,
+            bucketLosers: bucket.losers ?? [],
+            allTrades,
+            dimA: result.dimA,
+            dimB: result.dimB,
+            keyA: expandedRow.keyA,
+            keyB: expandedRow.keyB ?? null,
+            refineDim: effRefine,
+            sampleFloor: floor,
+        });
+    }, [inBucketMode, expandedRow, effRefine, bucket, allTrades, result, floor]);
 
     if (!result.available.length && !bucket) {
         return (
@@ -282,6 +318,34 @@ export function FailureExplorer({ allTrades = [], allLosers = [], bucket = null 
                         ];
                         const advOn = ADV.filter((a) => advCols[a.key]);
                         const overallSpan = 8 + advOn.length; // Losses,Wins,Total,LossRate,+R,−R,NetR,PF + advanced
+                        const colCount = 1 + 5 + (showOverall ? overallSpan : 0); // Setup + bucket(5) + overall
+
+                        // Shared data cells (bucket group + overall group) — reused by the
+                        // main rows AND the refined sub-rows so columns always align.
+                        const renderBucketCells = (c) => {
+                            const bWins = c.bucketWinsKnown ? c.bucketWins : "—";
+                            const bTotal = c.bucketWinsKnown ? c.bucketTotal : "—";
+                            return (
+                                <>
+                                    <td className="text-right py-2 px-2 font-num tabular-nums text-[hsl(var(--text))] border-l border-[hsl(var(--border-soft)/0.5)]">{bTotal}</td>
+                                    <td className="text-right py-2 px-2 font-num tabular-nums text-[hsl(var(--danger))]">{c.bucketLosses}</td>
+                                    <td className="text-right py-2 px-2 font-num tabular-nums text-[hsl(var(--success))]">{bWins}</td>
+                                    <td className="text-right py-2 px-2 font-num tabular-nums text-[hsl(var(--danger))]">{fmtLossR(c.bucketLossR)}</td>
+                                    <td className="text-right py-2 px-2 font-num tabular-nums">{c.bucketNetR == null ? <span className="text-[hsl(var(--text-3))]">—</span> : netNode(c.bucketNetR)}</td>
+                                    {showOverall && <>
+                                        <td className="text-right py-2 px-2 font-num tabular-nums text-white border-l border-[hsl(var(--border-soft)/0.5)]">{c.fullTotal}</td>
+                                        <td className="text-right py-2 px-2 font-num tabular-nums text-[hsl(var(--danger))]">{c.fullLosses}</td>
+                                        <td className="text-right py-2 px-2 font-num tabular-nums text-[hsl(var(--success))]">{c.fullWins}</td>
+                                        <td className="text-right py-2 px-2 font-num tabular-nums text-[hsl(var(--success))]">+{c.fullPosR}R</td>
+                                        <td className="text-right py-2 px-2 font-num tabular-nums text-[hsl(var(--danger))]">{fmtLossR(c.fullNegR)}</td>
+                                        <td className="text-right py-2 px-2 font-num tabular-nums">{netNode(c.fullNetR)}</td>
+                                        <td className="text-right py-2 px-2 font-num tabular-nums font-semibold" style={{ color: lossRateColor(c.fullLossRate) }}>{c.fullLossRate}%</td>
+                                        <td className="text-right py-2 px-2 font-num tabular-nums">{pfNode(c.fullProfitFactor, c.fullPosR)}</td>
+                                        {advOn.map((a) => a.cell(c))}
+                                    </>}
+                                </>
+                            );
+                        };
 
                         return (
                             <>
@@ -355,35 +419,53 @@ export function FailureExplorer({ allTrades = [], allLosers = [], bucket = null 
                                                 const id = c.keyB != null ? `${c.keyA}·${c.keyB}` : c.keyA;
                                                 const setup = c.keyB != null ? `${c.keyA} + ${c.keyB}` : c.keyA;
                                                 const isWorst = id === worstId;
-                                                const bWins = c.bucketWinsKnown ? c.bucketWins : "—";
-                                                const bTotal = c.bucketWinsKnown ? c.bucketTotal : "—";
+                                                const expanded = expandedId === id;
+                                                const canRefine = refineOptions.length > 0;
                                                 return (
-                                                    <tr key={id}
-                                                        className={cn(
-                                                            "group border-b border-[hsl(var(--border-soft)/0.5)] transition-colors",
-                                                            c.lowSample && "opacity-60",
-                                                            isWorst ? "bg-[hsl(var(--danger)/0.08)] hover:bg-[hsl(var(--danger)/0.16)]" : "hover:bg-[hsl(var(--panel-2)/0.5)]",
-                                                        )}>
-                                                        <td className={cn(setupCell, "text-[hsl(var(--text))] truncate max-w-[190px]")}>{setup}</td>
-                                                        {/* Bucket group */}
-                                                        <td className="text-right py-2 px-2 font-num tabular-nums text-[hsl(var(--text))] border-l border-[hsl(var(--border-soft)/0.5)]">{bTotal}</td>
-                                                        <td className="text-right py-2 px-2 font-num tabular-nums text-[hsl(var(--danger))]">{c.bucketLosses}</td>
-                                                        <td className="text-right py-2 px-2 font-num tabular-nums text-[hsl(var(--success))]">{bWins}</td>
-                                                        <td className="text-right py-2 px-2 font-num tabular-nums text-[hsl(var(--danger))]">{fmtLossR(c.bucketLossR)}</td>
-                                                        <td className="text-right py-2 px-2 font-num tabular-nums">{c.bucketNetR == null ? <span className="text-[hsl(var(--text-3))]">—</span> : netNode(c.bucketNetR)}</td>
-                                                        {/* Overall group */}
-                                                        {showOverall && <>
-                                                            <td className="text-right py-2 px-2 font-num tabular-nums text-white border-l border-[hsl(var(--border-soft)/0.5)]">{c.fullTotal}</td>
-                                                            <td className="text-right py-2 px-2 font-num tabular-nums text-[hsl(var(--danger))]">{c.fullLosses}</td>
-                                                            <td className="text-right py-2 px-2 font-num tabular-nums text-[hsl(var(--success))]">{c.fullWins}</td>
-                                                            <td className="text-right py-2 px-2 font-num tabular-nums text-[hsl(var(--success))]">+{c.fullPosR}R</td>
-                                                            <td className="text-right py-2 px-2 font-num tabular-nums text-[hsl(var(--danger))]">{fmtLossR(c.fullNegR)}</td>
-                                                            <td className="text-right py-2 px-2 font-num tabular-nums">{netNode(c.fullNetR)}</td>
-                                                            <td className="text-right py-2 px-2 font-num tabular-nums font-semibold" style={{ color: lossRateColor(c.fullLossRate) }}>{c.fullLossRate}%</td>
-                                                            <td className="text-right py-2 px-2 font-num tabular-nums">{pfNode(c.fullProfitFactor, c.fullPosR)}</td>
-                                                            {advOn.map((a) => a.cell(c))}
-                                                        </>}
-                                                    </tr>
+                                                    <React.Fragment key={id}>
+                                                        <tr
+                                                            onClick={canRefine ? () => setExpandedId(expanded ? null : id) : undefined}
+                                                            className={cn(
+                                                                "group border-b border-[hsl(var(--border-soft)/0.5)] transition-colors",
+                                                                canRefine && "cursor-pointer",
+                                                                expanded ? "bg-[hsl(var(--accent-primary)/0.10)]"
+                                                                    : isWorst ? "bg-[hsl(var(--danger)/0.08)] hover:bg-[hsl(var(--danger)/0.16)]" : "hover:bg-[hsl(var(--panel-2)/0.5)]",
+                                                            )}>
+                                                            <td className={cn(setupCell, "text-[hsl(var(--text))]", expanded && "bg-[hsl(var(--accent-primary)/0.10)]")}>
+                                                                <span className="inline-flex items-center gap-1.5">
+                                                                    {canRefine && <span className={cn("text-[9px] text-[hsl(var(--text-3))] transition-transform", expanded && "rotate-90 inline-block")}>▸</span>}
+                                                                    <span className="truncate max-w-[160px]">{setup}</span>
+                                                                </span>
+                                                            </td>
+                                                            {renderBucketCells(c)}
+                                                        </tr>
+
+                                                        {expanded && (
+                                                            <tr className="bg-[hsl(var(--panel-2)/0.3)] border-b border-[hsl(var(--border-soft)/0.5)]">
+                                                                <td colSpan={colCount} className="py-2 px-3 sticky left-0 bg-[hsl(var(--panel-2)/0.3)]">
+                                                                    <span className="inline-flex items-center gap-2 text-[10.5px] font-ui text-[hsl(var(--text-2))]">
+                                                                        Refining <span className="text-[hsl(var(--text))]">{setup}</span> · Refine by
+                                                                        <select value={effRefine ?? ""} onChange={(e) => setRefineDim(e.target.value)}
+                                                                            className="appearance-none [color-scheme:dark] bg-[hsl(var(--panel-2))] border border-[hsl(var(--border-soft))] text-[hsl(var(--text))] text-[10.5px] font-ui rounded px-1.5 pr-6 py-1 clip-bevel-sm focus:outline-none">
+                                                                            {refineOptions.map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}
+                                                                        </select>
+                                                                    </span>
+                                                                </td>
+                                                            </tr>
+                                                        )}
+                                                        {expanded && refined && (refined.rows.length ? refined.rows.map((rc) => (
+                                                            <tr key={`${id}::${rc.keyA}`} className="border-b border-[hsl(var(--border-soft)/0.4)] bg-[hsl(var(--accent-primary)/0.13)] hover:bg-[hsl(var(--accent-primary)/0.2)] transition-colors">
+                                                                <td className={cn(setupCell, "text-[hsl(var(--accent-primary))] !bg-[hsl(var(--panel-2))] border-l-2 border-[hsl(var(--accent-primary))]")}>
+                                                                    <span className="pl-3 inline-block truncate max-w-[150px]">↳ {rc.keyA}</span>
+                                                                </td>
+                                                                {renderBucketCells(rc)}
+                                                            </tr>
+                                                        )) : (
+                                                            <tr className="border-b border-[hsl(var(--border-soft)/0.4)] bg-[hsl(var(--panel-2)/0.18)]">
+                                                                <td colSpan={colCount} className="py-2 px-3 pl-7 text-[10.5px] font-ui text-[hsl(var(--text-3))] italic sticky left-0 bg-[hsl(var(--panel-2)/0.18)]">No trades match this refinement.</td>
+                                                            </tr>
+                                                        ))}
+                                                    </React.Fragment>
                                                 );
                                             })}
                                         </tbody>
@@ -442,7 +524,6 @@ export function FailureExplorer({ allTrades = [], allLosers = [], bucket = null 
                                         <tr key={hasB ? `${c.keyA}·${c.keyB}` : c.keyA}
                                             className={cn(
                                                 "border-b border-[hsl(var(--border-soft)/0.5)] transition-colors",
-                                                c.lowSample && "opacity-50",
                                                 hot ? "bg-[hsl(var(--danger)/0.08)] hover:bg-[hsl(var(--danger)/0.16)]" : "hover:bg-[hsl(var(--panel-2)/0.5)]",
                                             )}>
                                             <td className="text-left py-1.5 pr-2 text-[hsl(var(--text))] truncate max-w-[160px]">

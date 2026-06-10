@@ -42,6 +42,20 @@ function obWidthBucket(t) {
     if (w <= 15) return "10–15 pips";
     return ">15 pips";
 }
+// How deeply price penetrated / breached the order block before the trade failed.
+// Prefers max OB penetration % (maxObPenetrationPct / max_ob_penetration_pct), falls
+// back to fill penetration %. null when neither is present → dropped as Unknown, and
+// dimensionAvailable hides the whole dimension for runs that never export it.
+function penetrationBucket(t) {
+    const raw = t?.maxObPenetrationPct ?? t?.max_ob_penetration_pct
+        ?? t?.fillPenetrationPct ?? t?.fill_penetration_pct;
+    if (!isFiniteNumber(raw)) return null;
+    const pct = Number(raw);
+    if (pct < 50) return "Shallow <50%";
+    if (pct < 100) return "Mid 50–100%";
+    if (pct <= 110) return "Full breach 100–110%";
+    return "Deep breach >110%";
+}
 function severityBucket(t) {
     const v = t?.severity;
     if (!isFiniteNumber(v)) return null;
@@ -63,6 +77,8 @@ export const FAILURE_DIMENSIONS = [
     { key: "archetype",  label: "Archetype",   tier: 0, accessor: (t) => (t?.archetype ? archetypeLabel(t.archetype) : null) },
     { key: "severity",   label: "Severity",    tier: 0, accessor: severityBucket, numeric: true },
     { key: "obwidth",    label: "OB Width",    tier: 0, accessor: obWidthBucket, numeric: true },
+    { key: "penetration", label: "OB Penetration", tier: 0, numeric: true, accessor: penetrationBucket,
+      description: "How deeply price penetrated / breached the order block before the trade failed (max OB penetration %, fill % fallback)." },
     { key: "entryModel", label: "Entry Model", tier: 1, accessor: (t) => (t?.entry_model_key || t?.entryModelKey) || null },
     { key: "ghost",      label: "Ghost",       tier: 1, accessor: (t) => (t?.ghost_outcome || t?.ghostOutcome) || null },
     { key: "fft",        label: "FFT",         tier: 2, accessor: (t) => (t?.first_failed_tag || t?.firstFailedTag) || null },

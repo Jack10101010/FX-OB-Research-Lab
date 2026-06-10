@@ -66,9 +66,9 @@ const {
     buildMfeDistribution, buildBeOpportunity,
     buildBeExclusiveRanges, bucketBeExclusive,
     buildRawRDistribution, buildBucketDrilldown, losersInRawBucket, buildFailureDrivers, buildPairDrivers,
-    buildExplorer, buildBucketExplorerRows, bucketRowAction, pickWorstSetupRow, buildLoserMfeReachTable, buildMfeByDimension, buildDistanceInsights,
+    buildExplorer, buildBucketExplorerRows, buildRefinedBucketRows, availableRefineDimensions, bucketRowAction, pickWorstSetupRow, buildLoserMfeReachTable, buildMfeByDimension, buildDistanceInsights,
     isHighlightCell, EXPLORER_LIFT_HIGHLIGHT,
-    getMaeR, bucketMaeDepth, buildWinnerMaeDistribution, getMaeForStopPressure,
+    getMaeR, bucketMaeDepth, buildWinnerMaeDistribution, getMaeForStopPressure, buildMaeByDimension,
 } = exc;
 
 let failures = 0;
@@ -715,6 +715,107 @@ ok(dts.items.some((i) => i.label === "Setup: Max Loss Streak" && i.status === "i
 ok(dts.items.some((i) => i.label === "FTMO-style failure probability" && i.status === "idea"), "FTMO funded-survival item present as idea");
 ok(ROADMAP_STATUSES.length === 4, "four roadmap columns (idea / planned / in_progress / complete)");
 ok(getRoadmap("unknown-section").items.length === 0, "unknown section → empty roadmap (no crash)");
+
+// ── V2 Phase 3A: action verdict (bucketRowAction) + penetration dimension ───────
+console.log("bucketRowAction verdicts");
+ok(bucketRowAction(null).key === "insufficient", "null row → insufficient");
+ok(bucketRowAction({ fullTotal: 5, fullLossRate: 90, fullLosers: 5, bucketLossR: 3 }, { sampleFloor: 8 }).key === "insufficient", "total < floor → insufficient");
+ok(bucketRowAction({ fullTotal: 30, fullLossRate: 70, fullLosers: 20, bucketLossR: 5 }).key === "test_disable", "≥65% + losers≥floor + ≥1R damage → test_disable");
+ok(bucketRowAction({ fullTotal: 30, fullLossRate: 58, fullLosers: 17, bucketLossR: 3 }).key === "watchlist", "55–65% + ≥1R → watchlist");
+ok(bucketRowAction({ fullTotal: 30, fullLossRate: 40, fullLosers: 12, bucketLossR: 3 }).key === "normal", "<55% → probably normal");
+ok(bucketRowAction({ fullTotal: 30, fullLossRate: 70, fullLosers: 20, bucketLossR: 0.5 }).key === "normal", "high loss rate but <1R damage → normal (damage floor)");
+ok(bucketRowAction({ fullTotal: 30, fullLossRate: 70, fullLosers: 5, bucketLossR: 5 }, { sampleFloor: 8 }).key === "watchlist", "≥65% but losers<floor → watchlist, not disable");
+
+console.log("penetration dimension");
+const penDim = dimensions.DIMENSION_BY_KEY.penetration;
+ok(!!penDim && penDim.label === "OB Penetration", "penetration dimension registered (label 'OB Penetration')");
+const pb = (t) => penDim.accessor(t);
+ok(pb({ maxObPenetrationPct: 30 }) === "Shallow <50%", "30% → Shallow <50%");
+ok(pb({ maxObPenetrationPct: 50 }) === "Mid 50–100%", "50% lower edge → Mid 50–100%");
+ok(pb({ max_ob_penetration_pct: 75 }) === "Mid 50–100%", "snake key 75% → Mid 50–100%");
+ok(pb({ maxObPenetrationPct: 100 }) === "Full breach 100–110%", "100% → Full breach 100–110%");
+ok(pb({ maxObPenetrationPct: 110 }) === "Full breach 100–110%", "110% upper edge → Full breach");
+ok(pb({ maxObPenetrationPct: 111 }) === "Deep breach >110%", "111% → Deep breach >110%");
+ok(pb({ fill_penetration_pct: 40 }) === "Shallow <50%", "fallback to fill_penetration_pct");
+ok(pb({}) === null, "missing penetration → null (Unknown / dropped)");
+const penLosers = [
+    ...Array.from({ length: 5 }, () => ({ r: -1, maxObPenetrationPct: 130 })), // Deep breach
+    ...Array.from({ length: 3 }, () => ({ r: -2, maxObPenetrationPct: 40 })),  // Shallow
+];
+const penAgg = aggregation.aggregateFailures(penLosers, { dimA: "penetration", sampleFloor: 1, requireKnown: true });
+const penDeep = penAgg.cells.find((c) => c.keyA === "Deep breach >110%");
+const penShallow = penAgg.cells.find((c) => c.keyA === "Shallow <50%");
+ok(penDeep && penDeep.count === 5 && penDeep.lossR === 5, "penetration aggregates via shared engine: Deep breach 5 trades / 5R");
+ok(penShallow && penShallow.count === 3 && penShallow.lossR === 6, "Shallow 3 trades / 6R (the -2R losers)");
+
+// ── REFINE BY ONE DIMENSION (controlled row refinement) ─────────────────────────
+// Main table = Direction × Structure; click Long×CHoCH; refine by Severity. Session
+// is stubbed Unknown in the harness, so we model the cell with direction/structure
+// (real accessors) and refine by severity (also real).
+console.log("Refine selected bucket row by one dimension");
+const refTrades = [
+    { direction: "long",  structureTag: "choch", severity: 6, r: -1, mfeR: 0.7 }, // High, in-band loss
+    { direction: "long",  structureTag: "choch", severity: 6, r: -1, mfeR: 0.7 }, // High, in-band loss
+    { direction: "long",  structureTag: "choch", severity: 6, r: 1,  mfeR: 0.7 }, // High, in-band win
+    { direction: "long",  structureTag: "choch", severity: 1, r: -1, mfeR: 0.7 }, // Low, in-band loss
+    { direction: "long",  structureTag: "choch", severity: 1, r: 1,  mfeR: 2.5 }, // Low, out-of-band win
+    { direction: "short", structureTag: "bos",   severity: 6, r: -1, mfeR: 0.7 }, // other cell (must be excluded)
+];
+const refLosers = refTrades.filter((t) => t.r < 0);
+const ref = buildRefinedBucketRows({ bucketKey: "05_1", bucketLosers: refLosers, allTrades: refTrades, dimA: "direction", dimB: "structure", keyA: "Long", keyB: "CHoCH", refineDim: "severity", sampleFloor: 1 });
+ok(ref.rows.length === 2, "1+2. refine Long×CHoCH by Severity → 2 severity rows (filtered to that cell)");
+const hi = ref.rows.find((r) => /High/.test(r.keyA));
+const lo = ref.rows.find((r) => /Low/.test(r.keyA));
+ok(hi && hi.fullTotal === 3 && hi.fullLosers === 2 && hi.fullWins === 1, "4. High cell overall from valid universe: 3 total / 2L / 1W");
+ok(hi.bucketLosses === 2 && hi.bucketNetR === -1, "3. High bucket-specific: 2 in-band losses, Net R +1 − 2 = -1");
+ok(lo && lo.fullTotal === 2, "Low cell: 2 total (1 in-band loss + 1 out-of-band win)");
+ok(ref.rows.every((r) => r.keyB == null), "6. refined rows use exactly ONE dimension (no 2nd key)");
+ok(ref.rows.every((r) => r.fullTotal <= 3), "1. no leakage from the Short×BOS cell (filter by clicked Dim A/B)");
+const refEmpty = buildRefinedBucketRows({ bucketKey: "05_1", bucketLosers: refLosers, allTrades: refTrades, dimA: "direction", dimB: "structure", keyA: "Nope", keyB: "CHoCH", refineDim: "severity", sampleFloor: 1 });
+ok(refEmpty.rows.length === 0, "7. non-matching cell → empty refined rows (handled cleanly)");
+
+console.log("Refine dimension options exclude used dims");
+const refOpts = availableRefineDimensions(refTrades, ["direction", "structure"]);
+ok(refOpts.every((d) => d.key !== "direction" && d.key !== "structure"), "5. used dimensions (Direction/Structure) excluded from refine options");
+ok(refOpts.some((d) => d.key === "severity"), "5. severity offered as a refine option");
+
+// ── V2 Phase 3B: MAE by dimension ───────────────────────────────────────────────
+console.log("buildMaeByDimension");
+const maeDimWinners = [
+    { r: 2, structureTag: "choch", maeRToOriginalExit: -0.9 }, // near-stop (075_1)
+    { r: 2, structureTag: "choch", maeRToOriginalExit: -1.2 }, // ≤ -1R anomaly (le_1)
+    { r: 2, structureTag: "choch", maeR: -0.3 },                // legacy fallback, shallow
+    { r: 1, structureTag: "bos",   maeRToOriginalExit: -0.2 },
+    { r: 1, structureTag: "bos",   maeRToOriginalExit: -0.4 },
+    { r: 1, structureTag: "bos" },                              // no MAE → excluded
+    { r: 1, maeRToOriginalExit: -0.5 },                         // no structure → Unknown (dropped from rows)
+];
+const maeDimSnap = JSON.stringify(maeDimWinners);
+const maeStruct = buildMaeByDimension(maeDimWinners, "structure");
+const mdr = (k) => maeStruct.rows.find((r) => r.key === k);
+ok(maeStruct.available === true, "9. structure dimension available");
+ok(maeStruct.rows.length === 2, "1+2. grouped into CHoCH + BOS (2 rows)");
+ok(maeStruct.rows[0].key === "CHoCH", "11. sort: highest near-stop% first (CHoCH)");
+ok(mdr("CHoCH").eligible === 3 && mdr("CHoCH").totalWinners === 3, "CHoCH 3 winners");
+ok(mdr("CHoCH").avgMaeR === -0.8, "3. CHoCH avg MAE -0.8R");
+ok(mdr("CHoCH").nearStopCount === 2 && mdr("CHoCH").nearStopPct === 66.7, "4. CHoCH near-stop 2/3 = 66.7%");
+ok(mdr("CHoCH").anomalyCount === 1 && mdr("CHoCH").anomalyPct === 33.3, "5. CHoCH ≤-1R 1/3 = 33.3%");
+ok(mdr("CHoCH").avgWinR === 2 && mdr("CHoCH").totalWinR === 6, "CHoCH avg/total Win R (2 / 6R)");
+ok(mdr("CHoCH").fallbackCount === 1 && mdr("CHoCH").fallbackPct === 33.3, "6. CHoCH fallback 1/3 (the legacy -0.3)");
+ok(mdr("CHoCH").lowSample === true, "7. CHoCH lowSample (3 < floor 8)");
+ok(mdr("BOS").eligible === 2 && mdr("BOS").totalWinners === 3 && mdr("BOS").avgMaeR === -0.3, "BOS: 2 eligible of 3, avg -0.3R");
+ok(mdr("BOS").nearStopPct === 0, "BOS no near-stop winners");
+const rowEligibleSum = maeStruct.rows.reduce((s, r) => s + r.eligible, 0);
+ok(maeStruct.eligible === 6 && rowEligibleSum === 5, "8. no-structure winner excluded from rows (5) but counted in eligible (6)");
+ok(maeStruct.source === "mixed" && maeStruct.fallbackCount === 1 && maeStruct.fallbackPct === 16.7, "6. top-level mixed, fallback 1/6 = 16.7%");
+ok(maeStruct.avgMaeR === -0.58, "top-level avg MAE -0.58R");
+ok(/Some trades use legacy/.test(maeStruct.warning), "mixed → soft fallback warning");
+ok(JSON.stringify(maeDimWinners) === maeDimSnap, "10. source winners array not mutated");
+
+console.log("MAE by dimension — gating");
+ok(buildMaeByDimension(maeDimWinners, "session").available === false, "9. unavailable dim (session stubbed Unknown) → available:false");
+ok(buildMaeByDimension([{ r: 2, structureTag: "choch" }], "structure").available === false, "9. no winners with MAE → available:false");
+ok(buildMaeByDimension([], "structure").available === false && buildMaeByDimension([], "structure").rows.length === 0, "empty winners → available:false, no rows");
 
 console.log(`\n${failures === 0 ? "ALL PASS" : failures + " FAILURE(S)"}`);
 process.exit(failures === 0 ? 0 : 1);
