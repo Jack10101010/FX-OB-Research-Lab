@@ -6,7 +6,7 @@
 import React, { useMemo } from "react";
 import { getRunDisplayName, useDataset } from "@/data/store";
 import { useTradeUniverse } from "@/data/useTradeUniverse";
-import { TradeUniverseBadge } from "@/components/lab/TradeUniverseBadge";
+import ResearchResultViewBanner from "@/components/lab/ResearchResultViewBanner";
 import { LabRunHero } from "@/components/lab/LabRunHero";
 import { RunConfigStrip } from "@/components/lab/RunConfigStrip";
 import { WorkspaceTabBar } from "../entries/shared/WorkspaceTabBar";
@@ -160,13 +160,12 @@ export function FailuresWorkspace() {
 
             <RunConfigStrip run={activeRun} dense />
 
-            {/* Universe / source badge — shared component used across labs.
-                Placement and copy preserved from the Phase 2B local version.
-                Warning filtering happens inside the component (Phase 2G). */}
-            <TradeUniverseBadge
-                universe={universe}
-                className="px-6 mt-2 mb-2"
-            />
+            {/* RESEARCH-RESULT-VIEW-BANNER Phase 5: read-only RunDetail-style banner.
+                Hero (LabRunHero) above carries run identity; same universe the failures
+                analytics use; Arm C0/C1 warning shown once (right panel). Not interactive. */}
+            <div className="px-6 mt-2 mb-2">
+                <ResearchResultViewBanner universe={universe} />
+            </div>
 
             {/* Tab rail */}
             <WorkspaceTabBar

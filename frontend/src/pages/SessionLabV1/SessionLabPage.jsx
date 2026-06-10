@@ -9,10 +9,10 @@ import ImpactOnRun from "./components/ImpactOnRun";
 import HelpLegend from "./components/HelpLegend";
 import SessionSettingsModal from "./components/SessionSettingsModal";
 import { SESSION_LIST } from "./mockData";
-import { useDataset } from "../../data/store";
+import { useDataset, getRunDisplayName } from "../../data/store";
 import { useTradeUniverse } from "../../data/useTradeUniverse";
 import { derivePrimaryResultView } from "../../data/tradeUniverse";
-import { TradeUniverseBadge } from "../../components/lab/TradeUniverseBadge";
+import ResearchResultViewBanner from "../../components/lab/ResearchResultViewBanner";
 import {
   buildDefaultSessionRules,
   applySessionRules,
@@ -311,10 +311,21 @@ export default function SessionLabPage() {
           )}
         </div>
 
-        {/* RESEARCH-CONTEXT-BANNER Phase B: read-only context strip for the EXACT
-            universe these analytics use. Shown only for a real run (mock mode keeps
-            the data-mode badge above). Not an interactive Result View switcher. */}
-        {hasRealData && <TradeUniverseBadge universe={universe} />}
+        {/* RESEARCH-RESULT-VIEW-BANNER Phase 3: read-only RunDetail-style banner for the
+            EXACT universe these analytics use. Shown only for a real run (mock mode keeps
+            the data-mode badge above). Hero-less page → showRunIdentity. Not interactive. */}
+        {hasRealData && (
+          <ResearchResultViewBanner
+            universe={universe}
+            showRunIdentity
+            run={{
+              id: runId,
+              name: getRunDisplayName(bundle),
+              symbol: bundle?.summary?.symbol,
+              timeframe: bundle?.summary?.detectionTf ?? bundle?.summary?.detection_tf ?? bundle?.config?.detection_timeframe,
+            }}
+          />
+        )}
 
         <RunImpactSummary
           previewMode={previewMode}

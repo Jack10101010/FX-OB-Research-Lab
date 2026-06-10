@@ -5,13 +5,17 @@
  * Reuses the Phase-1 primitives so it looks exactly like RunDetail's header band:
  *   • ResearchBannerShell      → the wide bordered premium shell + 2-col grid
  *   • CurrentResultViewPanel   → the dominant right "Current Result View" panel
- *   • TradeUniverseBadge       → the compact inner data strip (Universe / Result
- *                                View / Position Variant / Source / Rows + warnings)
+ *
+ * Left = a clean static breakdown (Model / Threshold / Fill Mode / Position Variant /
+ * Source / Rows + optional run identity). It does NOT embed the narrow
+ * TradeUniverseBadge — that caused a cluttered look and a DUPLICATE Arm C0/C1 warning
+ * (once on the left via the badge, once on the right via the panel). Warnings now
+ * render ONCE, only in the right-side CurrentResultViewPanel.
  *
  * Everything is derived from the resolved `universe` (single source of truth). This
  * is intentionally read-only: no interactive switching, no Master Controls Preview
  * Lens. The Arm C0/C1 double-count + FILL_MODE_COERCED warnings flow through the
- * CurrentResultViewPanel and the embedded TradeUniverseBadge unchanged.
+ * CurrentResultViewPanel only.
  *
  * Terminology is locked: the lens is "Result View"; axis-1 is "Position Variant".
  *
@@ -29,7 +33,6 @@
 
 import React from "react";
 import { Pill } from "@/components/lab/DataTable";
-import { TradeUniverseBadge } from "@/components/lab/TradeUniverseBadge";
 import { ResearchBannerShell } from "@/components/lab/researchBanner/ResearchBannerShell";
 import { CurrentResultViewPanel } from "@/components/lab/researchBanner/CurrentResultViewPanel";
 
@@ -131,7 +134,7 @@ export default function ResearchResultViewBanner({
                     </Field>
                 )}
             </div>
-            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-[hsl(var(--border-soft)/0.25)]">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 pt-2 border-t border-[hsl(var(--border-soft)/0.25)]">
                 <Field label="Position Variant">
                     <Pill tone="muted">{universe.variant || "Primary"}</Pill>
                 </Field>
@@ -140,12 +143,20 @@ export default function ResearchResultViewBanner({
                         <Pill tone="muted">{run.basisLabel}</Pill>
                     </Field>
                 )}
+                <Field label="Rows">
+                    <span className="text-[11px] font-num tabular-nums font-semibold text-[hsl(var(--text-2))]">{tradeCount}</span>
+                </Field>
+                {!compact && (
+                    <Field label="Source">
+                        <span
+                            className="text-[10.5px] font-code text-[hsl(var(--text-2)/0.7)] truncate max-w-[280px]"
+                            title={universe.sourceFile || universe.sourceKey || "—"}
+                        >
+                            {universe.sourceFile || universe.sourceKey || "—"}
+                        </span>
+                    </Field>
+                )}
             </div>
-            {!compact && (
-                <div className="mt-2.5">
-                    <TradeUniverseBadge universe={universe} compact />
-                </div>
-            )}
         </div>
     );
 

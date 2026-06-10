@@ -7,7 +7,7 @@ import { CandleChart } from "@/components/lab/CandleChart";
 import { getRunDisplayName, rehydrateRunCandles, useDataset } from "@/data/store";
 import { setSelectedTradeVariant } from "@/data/store";
 import { useTradeUniverse } from "@/data/useTradeUniverse";
-import { TradeUniverseBadge } from "@/components/lab/TradeUniverseBadge";
+import ResearchResultViewBanner from "@/components/lab/ResearchResultViewBanner";
 import { deriveOBRightTime } from "@/data/obLifecycle";
 import { Search, AlertTriangle } from "lucide-react";
 import { ActiveRunContext } from "@/components/lab/ActiveRunContext";
@@ -174,17 +174,24 @@ export default function TradeInspector() {
                 actions={<VariantSelector variants={AVAILABLE_TRADE_VARIANTS} value={ACTIVE_TRADE_VARIANT} />}
             />
 
-            {/* Universe / source badge — shared component. Tells the user
-                exactly which trade universe powers the list + chart + details
-                below. Without this, a user inspecting a single OB could not
-                tell whether they were looking at the baseline outcome or the
-                triggered-edge scenario outcome. Placement preserved from the
-                Phase 2D local version. Warnings filtered inside the badge. */}
+            {/* RESEARCH-RESULT-VIEW-BANNER Phase 3: read-only RunDetail-style banner.
+                Tells the user exactly which run / Result View / Position Variant /
+                source / rows power the list + chart + details below (hero-less page →
+                showRunIdentity). Same universe object the analytics use; warnings
+                (incl. Arm C0/C1) flow through. Read-only — no switching. */}
             {activeRunId && (
-                <TradeUniverseBadge
-                    universe={universe}
-                    className="px-6 mt-2 mb-3"
-                />
+                <div className="px-6 mt-2 mb-3">
+                    <ResearchResultViewBanner
+                        universe={universe}
+                        showRunIdentity
+                        run={{
+                            id: activeRunId,
+                            name: runLabel,
+                            symbol: bundle?.summary?.symbol,
+                            timeframe: bundle?.summary?.detectionTf ?? bundle?.summary?.detection_tf ?? bundle?.config?.detection_timeframe,
+                        }}
+                    />
+                </div>
             )}
 
             {!hasCandles && (

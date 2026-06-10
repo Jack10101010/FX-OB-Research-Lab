@@ -7,7 +7,7 @@ import { LabRunHero } from "@/components/lab/LabRunHero";
 import { RunConfigStrip } from "@/components/lab/RunConfigStrip";
 import { useDataset } from "@/data/store";
 import { useTradeUniverse } from "@/data/useTradeUniverse";
-import { TradeUniverseBadge } from "@/components/lab/TradeUniverseBadge";
+import ResearchResultViewBanner from "@/components/lab/ResearchResultViewBanner";
 // Phase RB-5 — overlap breakdown tables route through the shared canonical
 // bucket table (frozen RB-3.2 contract). Other NewsLab surfaces are unchanged.
 import { useResultsLens } from "@/data/useResultsLens";
@@ -263,11 +263,13 @@ export default function NewsLab() {
 
             {/* Universe / source badge — shared component. Placement preserved.
                 Warnings filtered inside the component (Phase 2G). */}
+            {/* RESEARCH-RESULT-VIEW-BANNER Phase 4: read-only RunDetail-style banner.
+                Hero page → run identity stays in LabRunHero. Same universe the page
+                uses; Arm C0/C1 warning shown once (right panel). */}
             {activeRunId && (
-                <TradeUniverseBadge
-                    universe={universe}
-                    className="px-6 mt-2 mb-3"
-                />
+                <div className="px-6 mt-2 mb-3">
+                    <ResearchResultViewBanner universe={universe} />
+                </div>
             )}
             <RunConfigStrip run={activeRun} />
 

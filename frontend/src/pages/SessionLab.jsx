@@ -13,12 +13,12 @@
 
 import React, { useMemo } from "react";
 import { Clock } from "lucide-react";
-import { useDataset } from "@/data/store";
+import { useDataset, getRunDisplayName } from "@/data/store";
 import { useTradeUniverse } from "@/data/useTradeUniverse";
 import { derivePrimaryResultView } from "@/data/tradeUniverse";
 import { ImportZone } from "@/components/lab/ImportZone";
 import { PageHeader } from "@/components/lab/AppShell";
-import { TradeUniverseBadge } from "@/components/lab/TradeUniverseBadge";
+import ResearchResultViewBanner from "@/components/lab/ResearchResultViewBanner";
 import { SessionLabWorkspace } from "@/components/lab/session/SessionLabWorkspace";
 
 export default function SessionLab() {
@@ -55,11 +55,21 @@ export default function SessionLab() {
                 title="Session Lab"
                 subtitle="Session-first edge analysis — discover which sessions deserve capital."
             />
-            {/* RESEARCH-CONTEXT-BANNER Phase B: read-only context strip for the EXACT
-                universe these analytics use (locally-derived primaryScenario, not the
-                global scenario). Surfaces Universe / Result View / Position Variant /
-                Source / Rows + the Arm C0/C1 double-count warning. Not interactive. */}
-            <TradeUniverseBadge universe={universe} />
+            {/* RESEARCH-RESULT-VIEW-BANNER Phase 3: read-only RunDetail-style banner for
+                the EXACT universe these analytics use (locally-derived primaryScenario,
+                not the global scenario). Hero-less page → showRunIdentity. Surfaces the
+                Result View breakdown + Current Result View + Position Variant / Source /
+                Rows + the Arm C0/C1 double-count warning. Not interactive. */}
+            <ResearchResultViewBanner
+                universe={universe}
+                showRunIdentity
+                run={{
+                    id: runId,
+                    name: getRunDisplayName(bundle),
+                    symbol: bundle?.summary?.symbol,
+                    timeframe: bundle?.summary?.detectionTf ?? bundle?.summary?.detection_tf ?? bundle?.config?.detection_timeframe,
+                }}
+            />
             <SessionLabWorkspace trades={trades} bundle={bundle} />
         </div>
     );

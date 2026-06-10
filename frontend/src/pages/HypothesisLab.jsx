@@ -6,7 +6,7 @@ import { ColoredR, Pill } from "@/components/lab/DataTable";
 import { HeroBadge } from "@/components/lab/controls";
 import { useDataset } from "@/data/store";
 import { useRunVariant } from "@/data/useRunVariant";
-import { TradeUniverseBadge } from "@/components/lab/TradeUniverseBadge";
+import ResearchResultViewBanner from "@/components/lab/ResearchResultViewBanner";
 // Canonical KPI primitives — the SAME helpers Run Detail uses for its win-rate /
 // expectancy / Net R strip (verbatim copies live in fftDisplay). Importing them
 // here guarantees Hypothesis Lab's stats reconcile with Run Detail for the same
@@ -263,11 +263,13 @@ export default function HypothesisLab() {
                 universe powers the simulator below. Hidden when no run is
                 loaded. Placement and spacing preserved from the Phase 2C
                 local version. Warning filtering is internal to the badge. */}
+            {/* RESEARCH-RESULT-VIEW-BANNER Phase 4: read-only RunDetail-style banner.
+                Hero page → run identity stays in LabRunHero (showRunIdentity omitted).
+                Same universe the simulator uses; Arm C0/C1 warning shown once (right). */}
             {activeRunId && (
-                <TradeUniverseBadge
-                    universe={universe}
-                    className="px-6 mt-3 mb-2"
-                />
+                <div className="px-6 mt-3 mb-2">
+                    <ResearchResultViewBanner universe={universe} />
+                </div>
             )}
 
             {/* Baseline KPIs */}
