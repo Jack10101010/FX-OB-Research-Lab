@@ -939,7 +939,7 @@ export function computeFalseLosserCandidates(losers) {
             signals,
             // Explicit uncertainty: we cannot confirm false losers without post-stop data
             confirmed: false,
-            note: "Candidate only — confirmation requires post-stop continuation data (MAE/MFE/post_stop_continuation_r)",
+            note: "Candidate only — confirmation requires post-stop continuation data (MAE/MFE/post_stop_mfe_r)",
             _trade: t,
         });
     }

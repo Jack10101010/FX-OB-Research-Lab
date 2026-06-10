@@ -217,7 +217,7 @@ export function ViewManager({ losers = [], allLosers = [], filters = {} }) {
                             Definitive detection requires post-stop continuation data
                             (<code className="text-[hsl(var(--accent-secondary))]">mae</code>,{" "}
                             <code className="text-[hsl(var(--accent-secondary))]">mfe</code>,{" "}
-                            <code className="text-[hsl(var(--accent-secondary))]">post_stop_continuation_r</code>).
+                            <code className="text-[hsl(var(--accent-secondary))]">post_stop_mfe_r</code>).
                             These trades have signals consistent with false losers using currently-available fields only.
                         </p>
                     </div>

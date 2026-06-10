@@ -10,8 +10,18 @@ Groomed by ChatGPT. Priority: P1 (next up) · P2 (soon) · P3 (later).
 
 ## P1
 
-- **Next-focus decision after Failures Lab pause** — Master Controls vs Protection Lab
-  (Session Lab has no momentum). Failures Lab V4 cleanup is in `ROADMAP.md`, not here.
+- **Confirmed false losers — backend export** *(Owner: Codex/backtester chat · repo:
+  Lux-OB-Backtester · audit complete 2026-06-10)* — additive post-pass in
+  `enrich_trades_with_stop_anchored_excursions`: `post_stop_mfe_r` (from original entry,
+  after the stop candle), `post_stop_reached_original_tp`, `post_stop_bars_to_1r`,
+  `post_stop_lookahead_bars` (default horizon 50 bars, configurable), `post_stop_model`.
+  LOSS rows only; winners/unfilled blank; no live-sim changes. Validation per the audit's
+  test plan (bullish/bearish recovery, never-recovers, horizon cutoff, end-of-data, no
+  mutation of existing fields).
+- **Confirmed false losers — frontend follow-up** *(Owner: Claude · blocked on the export
+  above)* — importer dual-key map (5 fields) → `buildConfirmedFalseLosers` →
+  Distance-to-Stop surface + upgrade the Views & Export False Loser panel from
+  "candidates only". FIELD_DEPS aliases already pre-wired (`post_stop_mfe_r` canonical).
 - **Distance importer mapping** — map `price_distance_from_ob_at_arm_pips` in `importer.js`
   (Codex). Unblocks the distance breakdown.
 

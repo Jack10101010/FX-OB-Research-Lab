@@ -2,50 +2,58 @@
 
 > The single active focus. Update this first when focus changes. Source for `/status`.
 
-*Last updated: 2026-06-10.*
+*Last updated: 2026-06-10 (PM).*
 
 ## Focus
 
-**Failures Lab V4 → final integration cleanup (then pause).**
-
-> Note: this file previously still described Classification Tab V2 Phase 2 as active —
-> that was stale. Classification Phase 2 (engine + UI) shipped and is **paused**; its
-> remaining polish items live in `BACKLOG.md` / `ROADMAP.md`.
+**Failures Lab V5 — decision layer.** Phase 1 shipped; Phase 2 (confirmed false losers)
+is audited and waiting on a backend export.
 
 ## Where we are
 
-Failures Lab V4 is **feature-complete** per `FAILURES-LAB-V4-ARCHITECTURE-AUDIT-1.md`
-(which explicitly recommended against the remaining flashy items). Main completed surface
-is the **Distance to Stop (Excursion) tab**:
+- **V4 final integration cleanup — committed** (`371a60d` code, `542ad8c` docs). Excursion
+  tab wired, roadmap deps tracked, MFE/MAE alias detection, text-diffable separator,
+  verdict chips surfaced.
+- **V5 Phase 1 — Filter Discovery simulator — committed** (`a980e8b`).
+  `shared/filterSimulator.js` (truth layer: actual trade removal → recompute Net R/WR/PF;
+  no lift/share estimates) + `discovery/FilterDiscovery.jsx` tab (quick cards + sortable
+  table ranked by Net R improvement, Strong Disable / Test Disable / Watchlist / Neutral)
+  + `filterSimulator.validate.mjs` (all 8 spec cases + thresholds + discovery, ALL PASS).
+  Execution-path audit confirmed pure trade-removal simulation end to end.
+- **V5 Phase 2 — confirmed false losers — BACKTESTER AUDIT COMPLETE** (run in the
+  Lux-OB-Backtester chat, 2026-06-10). Conclusions adopted here:
+  - No existing export answers post-stop continuation (`mfe_r`/`mae_r`/`r_if_no_target`/
+    `mae_r_to_original_exit` all bounded by first stop touch; `ghost_*` = cancelled OBs).
+  - **Agreed schema (5 core fields, loser-only):** `post_stop_mfe_r` (headline — max
+    favorable R after the stop candle, from ORIGINAL entry),
+    `post_stop_reached_original_tp`, `post_stop_bars_to_1r`,
+    `post_stop_lookahead_bars`, `post_stop_model`.
+  - **Horizon:** finite, single, configurable — default **50 bars**; end-of-data lookahead
+    rejected (overstates false losers). Multi-horizon `_NN` suffixes are a Tier-2 extension.
+  - **Implementation:** additive post-pass inside `enrich_trades_with_stop_anchored_excursions`
+    (reuses candle arrays + `exit_candle_index`); no live-sim changes; LOSS rows only.
+  - **Caveat:** `post_stop_mfe_r` is a peak ("reached"), not a path — it cannot prove a
+    BE/trail would have held. One export serves false-loser confirmation, exact BE-replay
+    validation, and trailing-stop research.
 
-- **Loser MFE Reach** table (how far losers travelled before failing).
-- **BE Opportunity** by arm level (cumulative + exclusive ranges; optimistic-upper-bound framing).
-- **Winner MAE / Stop Pressure** (to-original-exit with stop-anchored fallback + provenance warnings).
-- **MAE by Dimension** (Structure × MAE / Session × MAE, winner-based).
-- **MFE by Dimension** (Structure × MFE / Session × MFE).
-- **Penetration dimension** in the failures dimension registry.
-- **Failure Explorer** (3 scopes, 2-dim cap, refine-by-dimension, persisted prefs) with
-  **verdict action chips** (Test disable / Watchlist via `bucketRowAction`).
-- Insights command center, raw-R bucket drilldown, drivers + curated pairs, shared
-  aggregation engine (`failuresAggregation.js`), data-quality alias detection.
+## Frontend alignment (done this session, commit pending)
 
-**This cleanup phase (implemented, commit pending — host commits):**
-1. Excursion tab **wiring** (tab key + workspace render) — was uncommitted; HEAD had the tab unreachable.
-2. Untracked deps **`SectionRoadmap.jsx` / `roadmapStore.js`** added (committed `FailureExplorer` imports them — HEAD didn't build standalone).
-3. **MFE/MAE alias detection** (`maeR`/`mae_r`/`mae`, `mfeR`/`mfe_r`/`mfe`, `maeRToOriginalExit`/`mae_r_to_original_exit`, `rIfNoTarget`/`r_if_no_target`) — kills false "missing field" banner warnings.
-4. **Binary-diff fix** — literal NUL separator in `failuresAggregation.js` replaced with the `\u001F` escape (no behaviour change; git now diffs the file as text after commit).
-5. **Verdict chips surfaced** in the Explorer bucket table (Action column; engine was already validated, UI was missing).
+Canonical name **`post_stop_mfe_r`** adopted (was planned as `post_stop_continuation_r`):
+`failuresDataQuality.js` FIELD_DEPS now aliases `postStopMfeR` / `post_stop_mfe_r` /
+legacy `post_stop_continuation_r` (entry key unchanged — banner impact map keys on it);
+user-facing copy updated in `ViewManager.jsx` + `failuresAnalytics.js` candidate note.
 
 ## Blockers / open questions
 
-- None for the cleanup itself. BE replay / winner-cost modelling stays future work
-  (see roadmap seeds in `roadmapStore.js` and the BE-REPLAY-* audits).
-- Parallel dirty files from **OB-Retest** (`obRetest.js`) and **Protection/BE-Replay**
-  (`ProtectionLab.jsx`, `beReplay.js`, `BreakevenTab.jsx`) belong to other streams — do not stage with this one.
+- **Phase 2 implementation is blocked on the Lux-OB-Backtester export** (separate repo,
+  not connected to this session). After it ships: importer dual-key map → confirmed
+  false-loser builder + surface (prompt drafted, see BACKLOG).
+- Parallel streams active on this branch: OB-Retest (v2.1 committed), Protection/BE-Replay
+  (`ProtectionLab.jsx` dirty — do not stage), Hypothesis Lab fixes landing from host.
 
-## Definition of done (cleanup)
+## Definition of done (Phase 2, frontend half)
 
-Excursion tab reachable from HEAD; fresh checkout builds; no false MFE/MAE warnings;
-verdict chips render; aggregation file diffs as text; docs synced; scoped commits handed
-to the user. **Then pause Failures Lab** and pivot (Master Controls / Protection next-focus
-decision).
+Importer maps the 5 fields (dual-keyed, `numOrNull`); `buildConfirmedFalseLosers` classifies
+losers (confirmed via post-stop reach vs genuine) with horizon shown; surfaced in Distance
+to Stop + the Views & Export False Loser panel upgraded from "candidates only"; gated on
+field presence (old bundles unchanged); validation script; docs synced.

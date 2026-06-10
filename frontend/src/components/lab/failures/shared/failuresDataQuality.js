@@ -29,7 +29,11 @@ export const FIELD_DEPS = {
     // Counterfactual R if no target had capped the trade (BE-replay prerequisite).
     r_if_no_target:{ tier: 1, label: "R if no target",   modules: ["be_replay"], keys: ["rIfNoTarget", "r_if_no_target"] },
     minutes_to_exit:         { tier: 1, label: "Trade duration (min)", modules: ["archetypes_full"] },
-    post_stop_continuation_r:{ tier: 1, label: "Post-stop continuation (R)", modules: ["false_losers"] },
+    // Canonical export name is post_stop_mfe_r (V5 Phase 2 backtester audit, 2026-06-10):
+    // max favorable R AFTER the stop candle, from original entry, over a finite horizon
+    // (post_stop_lookahead_bars). The legacy planning name post_stop_continuation_r is
+    // kept as the entry key (the banner's impact map is keyed on it) and as an alias.
+    post_stop_continuation_r:{ tier: 1, label: "Post-stop MFE (R)", modules: ["false_losers"], keys: ["postStopMfeR", "post_stop_mfe_r", "post_stop_continuation_r"] },
 
     // Tier 2+
     htf_context:   { tier: 2, label: "HTF Context",     modules: ["prefailure"] },
