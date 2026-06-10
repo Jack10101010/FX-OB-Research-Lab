@@ -475,6 +475,11 @@ function indexEntryToRun(entry) {
         equityCurveByVariant: {},
         protectionResults: { summary: {}, tradesByMode: {}, equityCurveByMode: {}, sourceFiles: [], tradesOmittedForStorage: true },
         entryResults: { summary: {}, tradesByMode: {}, equityCurveByMode: {}, sourceFiles: [], tradesOmittedForStorage: true },
+        // BE Exact Replay (BE-FRONTEND-INTEGRATION). Index-only stub defaults so
+        // consumers never crash before full data loads; old runs have no BE data.
+        beResults: {},
+        beTradesByMode: {},
+        beSourceFiles: [],
         newsEvents: [],
         orderBlocks: [],
         candles: null,

@@ -42,6 +42,18 @@ function pick(row, ...names) {
 }
 
 const cap = (s) => (s == null ? "" : String(s).charAt(0).toUpperCase() + String(s).slice(1).toLowerCase());
+
+// Outcome display label. Title-cases free-text outcomes via cap() (preserving the
+// legacy "Win"/"Loss" convention used across the app), but keeps canonical
+// multi-token backend outcomes verbatim so they are not mangled — e.g.
+// cap("BE_EXIT") === "Be_exit" would silently break === checks and the central
+// classifier's raw-token matching. Only BE_EXIT is special-cased here; every
+// other outcome continues through cap() exactly as before (no regression).
+const CANONICAL_OUTCOME_LABELS = new Set(["BE_EXIT"]);
+const outcomeLabel = (s) => {
+    const norm = String(s ?? "").trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+    return CANONICAL_OUTCOME_LABELS.has(norm) ? norm : cap(s);
+};
 const isNum = (v) => v != null && isFinite(Number(v));
 const numOrNull = (v) => (isNum(v) ? Number(v) : null);
 const boolOrNull = (v) => {
@@ -381,11 +393,18 @@ export function parseTradesCSV(text) {
         const direction = directionText.startsWith("bear") || directionText.startsWith("s") || directionText === "sell"
             ? "Short"
             : "Long";
-        const outcomeRaw = pick(r, "outcome", "result");
+        const outcomeRawValue = pick(r, "outcome", "result");
         const grossR = numOrNull(pick(r, "gross_r", "grossR"));
         const netR = numOrNull(pick(r, "net_r", "netR"));
         const rVal = netR ?? Number(pick(r, "pnl_r", "r", "r_result", "rresult") ?? 0);
-        const outcome = outcomeRaw ? cap(outcomeRaw) : (rVal >= 0 ? "Win" : "Loss");
+        // Display label. cap() Title-cases free-text outcomes (preserving the
+        // legacy "Win"/"Loss" convention), but canonical multi-token backend
+        // outcomes (e.g. BE_EXIT) must NOT be mangled into "Be_exit" — keep them
+        // verbatim so direct === checks and the central classifier agree.
+        const outcome = outcomeRawValue ? outcomeLabel(outcomeRawValue) : (rVal >= 0 ? "Win" : "Loss");
+        // Raw backend outcome string, preserved untouched for the classifier and
+        // any consumer that needs the authoritative value (e.g. "BE_EXIT").
+        const outcomeRaw = outcomeRawValue == null ? "" : String(outcomeRawValue);
         const structRaw = pick(r, "structure_tag", "structure", "structure_type", "type") || "BOS";
         const rawObId = pick(r, "ob_id", "order_block_id");
         const rawTradeId = pick(r, "trade_id", "id", "trade_index");
@@ -462,6 +481,38 @@ export function parseTradesCSV(text) {
             postStopModel:                String(pick(r, "post_stop_model", "postStopModel") || ""),
             post_stop_model:              String(pick(r, "post_stop_model", "postStopModel") || ""),
             outcome,
+            // Authoritative backend outcome string, never Title-cased. "BE_EXIT"
+            // survives here so the central classifier and direct consumers agree.
+            outcomeRaw,
+            // ── Break-even (BE) Exact Replay fields (backend Phase 2) ──────────
+            // Present only on trades_*__be_*.csv rows; null/"" on all other
+            // bundles and rows (old bundles load unchanged). Dual-keyed
+            // (snake_case + camelCase). Booleans via boolOrNull, numbers via
+            // numOrNull so "True"/"1"/"" parse cleanly.
+            be_scenario_key:       String(pick(r, "be_scenario_key", "beScenarioKey") || ""),
+            beScenarioKey:         String(pick(r, "be_scenario_key", "beScenarioKey") || ""),
+            be_arm_level_r:        numOrNull(pick(r, "be_arm_level_r", "beArmLevelR")),
+            beArmLevelR:           numOrNull(pick(r, "be_arm_level_r", "beArmLevelR")),
+            be_trigger_basis:      String(pick(r, "be_trigger_basis", "beTriggerBasis") || ""),
+            beTriggerBasis:        String(pick(r, "be_trigger_basis", "beTriggerBasis") || ""),
+            be_armed:              boolOrNull(pick(r, "be_armed", "beArmed")),
+            beArmed:               boolOrNull(pick(r, "be_armed", "beArmed")),
+            be_arm_candle_index:   numOrNull(pick(r, "be_arm_candle_index", "beArmCandleIndex")),
+            beArmCandleIndex:      numOrNull(pick(r, "be_arm_candle_index", "beArmCandleIndex")),
+            be_arm_time:           String(pick(r, "be_arm_time", "beArmTime") || ""),
+            beArmTime:             String(pick(r, "be_arm_time", "beArmTime") || ""),
+            be_triggered:          boolOrNull(pick(r, "be_triggered", "beTriggered")),
+            beTriggered:           boolOrNull(pick(r, "be_triggered", "beTriggered")),
+            be_exit_reason:        String(pick(r, "be_exit_reason", "beExitReason") || ""),
+            beExitReason:          String(pick(r, "be_exit_reason", "beExitReason") || ""),
+            be_exit_r:             numOrNull(pick(r, "be_exit_r", "beExitR")),
+            beExitR:               numOrNull(pick(r, "be_exit_r", "beExitR")),
+            be_exit_price:         numOrNull(pick(r, "be_exit_price", "beExitPrice")),
+            beExitPrice:           numOrNull(pick(r, "be_exit_price", "beExitPrice")),
+            be_exit_time:          String(pick(r, "be_exit_time", "beExitTime") || ""),
+            beExitTime:            String(pick(r, "be_exit_time", "beExitTime") || ""),
+            be_exit_candle_index:  numOrNull(pick(r, "be_exit_candle_index", "beExitCandleIndex")),
+            beExitCandleIndex:     numOrNull(pick(r, "be_exit_candle_index", "beExitCandleIndex")),
             obWidth:        Number(pick(r, "ob_width", "obwidth") ?? 0),
             reverseConflict: Boolean(pick(r, "reverse_conflict", "reverse_cancel")),
             fill_candle_open: numOrNull(pick(r, "fill_candle_open")),
@@ -845,6 +896,32 @@ function entryTradeFileInfo(name) {
     };
 }
 
+// ─────────────────────── Break-even (BE) Exact Replay file parser ───────────────────────
+// Matches backend BE Exact Replay output (BE-FRONTEND-INTEGRATION Phase B):
+//   trades_{execution_mode}__be_{trigger}_{arm}R.csv
+// Examples:
+//   trades_single_position__be_wick_0p50R.csv  → wick trigger, arm 0.5R
+//   trades_single_position__be_close_1p00R.csv → close trigger, arm 1.0R
+//   trades_allow_multi_position__be_wick_0p75R.csv
+// The scenario key (e.g. "be_wick_0p50R") is preserved in the backend's canonical
+// form so it matches the summary.json `be_results[execution_mode]` keys 1:1.
+// MUST be detected BEFORE protectedTradeFileInfo, whose `(.+)` suffix would
+// otherwise swallow BE files into protectionTradesByMode (Phase 0 audit risk #1).
+export function beTradeFileInfo(name) {
+    const file = String(name || "").split(/[\\/]/).pop();
+    const m = file.match(
+        /^trades_(single_position|allow_multi_position|one_per_direction)__(be_(wick|close)_(\d+)p(\d+)R?)\.csv$/i
+    );
+    if (!m) return null;
+    const armLevelR = Number(`${parseInt(m[4], 10)}.${m[5]}`);
+    return {
+        executionMode: m[1].toLowerCase(),
+        scenarioKey: m[2],                 // canonical backend form, e.g. "be_wick_0p50R"
+        triggerBasis: m[3].toLowerCase(),  // "wick" | "close"
+        armLevelR: Number.isFinite(armLevelR) ? armLevelR : null,
+    };
+}
+
 // ─────────────────────── Control file parser ───────────────────────
 // Matches auto-paired FFT-OFF control output (AUTO-PAIR-CONTROL-RUNS):
 //   trades_{execution_mode}__{scenario_key}__control.csv
@@ -927,7 +1004,7 @@ function newsDateRange(events) {
     return `${new Date(sorted[0] * 1000).toISOString().slice(0, 10)} → ${new Date(sorted[sorted.length - 1] * 1000).toISOString().slice(0, 10)}`;
 }
 
-function detectFileKind(name) {
+export function detectFileKind(name) {
     const n = name.toLowerCase();
     if (n.endsWith(".json")) {
         if (n.includes("config")) return "config";
@@ -942,6 +1019,10 @@ function detectFileKind(name) {
         // silently overwrite the real entry/variant trades for that key.
         if (controlTradeFileInfo(name))                      return "trades_control";
         if (n.includes("candle"))                            return "candles";
+        // BE Exact Replay files MUST be matched before the generic protected
+        // catch-all below — their suffix (be_wick_0p50R) would otherwise be
+        // swallowed into protectionTradesByMode (Phase 0 audit risk #1).
+        if (beTradeFileInfo(name))                            return "trades_be";
         if (entryTradeFileInfo(name))                         return "trades_entry";
         if (directionalTradeFileInfo(name))                   return "trades_directional";
         if (protectedTradeFileInfo(name))                     return "trades_protected";
@@ -1046,6 +1127,10 @@ export async function ingestRunBundle(fileList) {
         controlSourceFiles: [],
         protectionTradesByMode: {},
         protectionSourceFiles: [],
+        // BE Exact Replay (BE-FRONTEND-INTEGRATION). Nested by execution mode →
+        // scenario key, kept entirely separate from protection.
+        beTradesByMode: {},
+        beSourceFiles: [],
         directionalTradesByScenario: {},
         directionalScenarioMeta: {},
         directionalSourceFiles: [],
@@ -1133,6 +1218,26 @@ export async function ingestRunBundle(fileList) {
                     collected.protectionTradesByMode[mode] = t;
                     collected.protectionSourceFiles.push({ name: f.name, kind, mode, baseVariant: info.baseVariant, rows: t.length });
                     collected.recognized.push({ name: f.name, kind, mode, baseVariant: info.baseVariant, rows: t.length });
+                    break;
+                }
+                case "trades_be": {
+                    // BE Exact Replay scenario trades. Routed into a nested
+                    // beTradesByMode[executionMode][scenarioKey] map — NEVER into
+                    // primary trades or protectionTradesByMode.
+                    const info = beTradeFileInfo(f.name);
+                    const parsed = parseCSV(text);
+                    validateCsvHeaders(kind, f.name, parsed.headers, collected.validationErrors, collected.validationWarnings);
+                    const t = parseTradesCSV(text);
+                    const em = info.executionMode;
+                    if (!collected.beTradesByMode[em]) collected.beTradesByMode[em] = {};
+                    collected.beTradesByMode[em][info.scenarioKey] = t;
+                    collected.beSourceFiles.push({
+                        name: f.name, kind, executionMode: em, scenarioKey: info.scenarioKey,
+                        triggerBasis: info.triggerBasis, armLevelR: info.armLevelR, rows: t.length,
+                    });
+                    collected.recognized.push({
+                        name: f.name, kind, executionMode: em, scenarioKey: info.scenarioKey, rows: t.length,
+                    });
                     break;
                 }
                 case "trades_entry": {
@@ -1251,6 +1356,9 @@ export async function ingestRunBundle(fileList) {
             equityCurveByVariant: {},
             protectionResults: { summary: {}, tradesByMode: {}, equityCurveByMode: {}, sourceFiles: [], tradesOmittedForStorage: false },
             entryResults: { summary: {}, tradesByMode: {}, equityCurveByMode: {}, sourceFiles: [], tradesOmittedForStorage: false },
+            beResults: {},
+            beTradesByMode: {},
+            beSourceFiles: [],
             newsEvents: collected.newsEvents,
             newsSourceFiles: collected.newsSourceFiles,
             sourceFiles,
@@ -1325,6 +1433,20 @@ export async function ingestRunBundle(fileList) {
     );
     const protectionTradesByMode = Object.fromEntries(
         Object.entries(collected.protectionTradesByMode).map(([mode, trades]) => [mode, enrichTradesWithOrderBlocks(trades, obLookup, pipSize)]),
+    );
+    // BE Exact Replay trades — nested executionMode → scenarioKey, enriched
+    // identically to protection/entry trades so downstream consumers see the
+    // same OB-derived fields. Kept entirely separate from protectionTradesByMode.
+    const beTradesByMode = Object.fromEntries(
+        Object.entries(collected.beTradesByMode).map(([executionMode, byScenario]) => [
+            executionMode,
+            Object.fromEntries(
+                Object.entries(byScenario).map(([scenarioKey, trades]) => [
+                    scenarioKey,
+                    enrichTradesWithOrderBlocks(trades, obLookup, pipSize),
+                ]),
+            ),
+        ]),
     );
     const entryTradesByMode = Object.fromEntries(
         Object.entries(collected.entryTradesByMode).map(([mode, trades]) => [mode, enrichTradesWithOrderBlocks(trades, obLookup, pipSize)]),
@@ -1482,6 +1604,15 @@ export async function ingestRunBundle(fileList) {
             sourceFiles: collected.entrySourceFiles,
             tradesOmittedForStorage: false,
         },
+        // ── BE Exact Replay (BE-FRONTEND-INTEGRATION) ─────────────────────────
+        // Two top-level keys mirroring protectionResults/protectionTradesByMode
+        // but kept SEPARATE from protection. Both nested by executionMode →
+        // scenarioKey. beResults carries the backend summary.json `be_results`
+        // verbatim (raw fields preserved); beTradesByMode carries the per-scenario
+        // enriched trade rows. Old bundles → {} for both.
+        beResults: sm.be_results || {},
+        beTradesByMode,
+        beSourceFiles: collected.beSourceFiles,
         directionalResults: {
             tradesByScenario: directionalTradesByScenario,
             equityCurveByScenario: directionalEquityCurveByScenario,

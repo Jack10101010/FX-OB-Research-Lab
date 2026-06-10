@@ -20,6 +20,8 @@ import { ProtectionPowerTools } from "@/components/lab/protection/ProtectionPowe
 import { buildPairedTrades, calcEfficiencyRatio, calcRobustnessScore, buildDataQuality, buildProtectionConfidence, prettyModeName, deriveExactVerdict, estimateVerdict, needsDataVerdict } from "@/components/lab/protection/protectionAnalytics";
 // FFT-IA Phase 1 — dedicated FFT Protection tab (scenario-specific, additive).
 import { FftProtectionTab } from "@/components/lab/fft/FftProtectionTab";
+// BE-Replay Phase 2 — Break-even candle-walk replay tab.
+import { BreakevenTab } from "@/components/lab/protection/BreakevenTab";
 import { useSearchParams } from "react-router-dom";
 
 // ── Protection Lab V1 ────────────────────────────────────────────────
@@ -86,8 +88,9 @@ const PROTECTION_BACKLOG = [
 ];
 
 export default function ProtectionLab() {
-    const { ACTIVE_PROJECT, ACTIVE_RUN, TRADES, ACTIVE_TRADE_VARIANT, activeRunId, runs } = useDataset();
+    const { ACTIVE_PROJECT, ACTIVE_RUN, TRADES, ACTIVE_TRADE_VARIANT, activeRunId, runs, CANDLES } = useDataset();
     const trades = React.useMemo(() => (Array.isArray(TRADES) ? TRADES : EMPTY_TRADES), [TRADES]);
+    const candles = React.useMemo(() => (Array.isArray(CANDLES) ? CANDLES : []), [CANDLES]);
     // Phase 3B-2 — Protection Lab is intentionally baseline-only. We resolve
     // the baseline universe via useTradeUniverse with an explicit override so
     // the TradeUniverseBadge shows the unprotected reference source even when
@@ -639,6 +642,21 @@ export default function ProtectionLab() {
                     <FftProtectionTab runId={activeRunId} />
                 </div>
             )}
+
+            {/* ════════════════ BREAK-EVEN REPLAY (BE-Replay Phase 2) ════════════════ */}
+            {protTab === "breakeven" && (
+                <div className="px-6">
+                    <BreakevenTab
+                        trades={trades}
+                        candles={candles}
+                        activeRun={activeRun}
+                        activeRunId={activeRunId}
+                        beResults={activeRun?.beResults}
+                        beTradesByMode={activeRun?.beTradesByMode}
+                        executionMode={activeRun?.primaryVariant}
+                    />
+                </div>
+            )}
         </div>
     );
 }
@@ -662,10 +680,11 @@ function BasisPill({ basis }) {
 
 // ── Internal tab bar (IA Phase 3) ─────────────────────────────────────────────
 const PROT_TABS = [
-    { key: "overview", label: "Overview",  hint: "Decision" },
-    { key: "deepdive", label: "Deep dive", hint: "Analysis" },
-    { key: "research", label: "Research",  hint: "Experimentation" },
-    { key: "fft",      label: "FFT Protection", hint: "Cancel impact" },
+    { key: "overview",   label: "Overview",        hint: "Decision" },
+    { key: "deepdive",   label: "Deep dive",        hint: "Analysis" },
+    { key: "research",   label: "Research",         hint: "Experimentation" },
+    { key: "fft",        label: "FFT Protection",   hint: "Cancel impact" },
+    { key: "breakeven",  label: "Break-even",       hint: "Candle replay" },
 ];
 const PROT_TAB_KEYS = PROT_TABS.map((t) => t.key);
 function ProtTabBar({ tab, onChange }) {

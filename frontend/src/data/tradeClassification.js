@@ -122,6 +122,15 @@ function numericR(trade) {
     return null;
 }
 
+/** Break-even exit R for a BE_EXIT row (be_exit_r / beExitR). null when absent. */
+function beExitR(trade) {
+    if (!trade) return null;
+    const candidate = trade.be_exit_r ?? trade.beExitR;
+    if (candidate == null || candidate === "") return null;
+    const n = typeof candidate === "number" ? candidate : Number(candidate);
+    return Number.isFinite(n) ? n : null;
+}
+
 function hasRealEntry(trade) {
     return Boolean(
         trade?.entry
@@ -206,6 +215,19 @@ export function classifyTrade(trade, options = {}) {
     if (normOutcome === "PROTECTION_EXIT") {
         if (r == null || Math.abs(r) <= epsilon) return "BREAKEVEN";
         return r > 0 ? "WIN" : "LOSS";
+    }
+
+    // BE_EXIT is a real fill from a Break-even Exact Replay scenario pass. It is
+    // categorized by its realized R: positive → WIN, negative → LOSS, flat →
+    // BREAKEVEN. The break-even exit R lives in be_exit_r; fall back to the
+    // row's generic R. This is the single, central place BE_EXIT is handled —
+    // every win/loss/flat surface inherits it via classifyTrade. (With the
+    // default zero buffer a BE stop exits at ~0R, so most BE_EXIT rows are
+    // BREAKEVEN; a buffer or armed-not-triggered winner can land WIN/LOSS.)
+    if (normOutcome === "BE_EXIT") {
+        const beR = beExitR(trade) ?? r;
+        if (beR == null || Math.abs(beR) <= epsilon) return "BREAKEVEN";
+        return beR > 0 ? "WIN" : "LOSS";
     }
 
     // 5. No explicit outcome — fall back to R sign if we have a real entry.
@@ -644,6 +666,7 @@ export const _internal = {
     normalizeOutcome,
     asTruthyFlag,
     numericR,
+    beExitR,
     hasRealEntry,
     isNewsFlattenOutcome,
     directionBucket,
