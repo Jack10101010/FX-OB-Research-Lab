@@ -7,6 +7,11 @@ import { HeroBadge } from "@/components/lab/controls";
 import { useDataset } from "@/data/store";
 import { useRunVariant } from "@/data/useRunVariant";
 import { TradeUniverseBadge } from "@/components/lab/TradeUniverseBadge";
+// Canonical KPI primitives — the SAME helpers Run Detail uses for its win-rate /
+// expectancy / Net R strip (verbatim copies live in fftDisplay). Importing them
+// here guarantees Hypothesis Lab's stats reconcile with Run Detail for the same
+// Result View instead of dividing wins by the whole universe.
+import { isValidExecutedTrade, tradeResultSign, numericTradeR } from "@/components/lab/fft/fftDisplay";
 import {
     FlaskConical, TrendingUp, TrendingDown, Target, AlertTriangle,
     ChevronDown, ChevronUp, Copy, Check,
@@ -714,17 +719,29 @@ function DeltaVal({ value, isBaseline, suffix }) {
 
 function computeStats(trades) {
     const list = Array.isArray(trades) ? trades : [];
-    const wins   = list.filter((t) => rOf(t) > 0).length;
-    const losses = list.filter((t) => rOf(t) < 0).length;
-    const netR   = list.reduce((s, t) => s + rOf(t), 0);
+    // Mirror Run Detail's canonical KPI math so the two pages agree for the same
+    // Result View (was: wins / list.length, i.e. dividing by EVERY universe row —
+    // unfilled / cancelled / invalid / flat included — which produced e.g. 6/35 =
+    // 17.1% instead of 6/13 = 46.2%).
+    //   • gate to valid performance trades (isValidExecutedTrade = isPerformanceTrade)
+    //   • classify via the shared isWin/isLoss (tradeResultSign), not a raw r-sign
+    //   • Win Rate denominator = DECIDED trades (wins + losses)
+    //   • Expectancy / Net R = over valid performance trades (matches Run Detail)
+    const valid    = list.filter(isValidExecutedTrade);
+    const wins     = valid.filter((t) => tradeResultSign(t) > 0).length;
+    const losses   = valid.filter((t) => tradeResultSign(t) < 0).length;
+    const decided  = wins + losses;
+    const netR     = valid.reduce((s, t) => s + (numericTradeR(t) ?? 0), 0);
     return {
+        // `trades` intentionally stays the full active-universe row count — it backs
+        // the "Baseline Trades" card and the simulator's removed/Trades columns.
         trades:     list.length,
         wins,
         losses,
-        winRate:    list.length ? (wins / list.length) * 100 : 0,
+        winRate:    decided > 0 ? (wins / decided) * 100 : 0,
         netR:       round2(netR),
-        expectancy: list.length ? netR / list.length : 0,
-        maxDD:      calcMaxDD(list),
+        expectancy: valid.length ? netR / valid.length : 0,
+        maxDD:      calcMaxDD(valid),
     };
 }
 
