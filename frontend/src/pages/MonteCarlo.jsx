@@ -4,11 +4,14 @@ import { NeonPanel } from "@/components/lab/NeonPanel";
 import { MetricChip } from "@/components/lab/MetricChip";
 import { Field, NeonInput, NeonToggle, NeonButton, Segment } from "@/components/lab/controls";
 import { useDataset } from "@/data/store";
+import ResearchContextBanner from "@/components/lab/ResearchContextBanner";
+import { buildBannerRunIdentity } from "@/components/lab/researchBanner/bannerRun";
 import { Activity, TrendingDown, AlertTriangle, ShieldCheck, Dices, Play } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, AreaChart, Area, Line, LineChart, ComposedChart } from "recharts";
 
 export default function MonteCarlo() {
-    const { MC_DRAWDOWN_DIST, MC_EQUITY_BANDS } = useDataset();
+    const { MC_DRAWDOWN_DIST, MC_EQUITY_BANDS, activeRunId, runs } = useDataset();
+    const activeRun = activeRunId ? runs?.[activeRunId] : null;
     const [sims, setSims] = useState(1000);
     const [randTrade, setRandTrade] = useState(true);
     const [randSpread, setRandSpread] = useState(true);
@@ -22,6 +25,17 @@ export default function MonteCarlo() {
                 description="Stress-test the validated run by randomising trade order, spread, and slippage. Placeholder mock until engine integration."
                 actions={<NeonButton icon={Play} tone="primary">Run Simulation</NeonButton>}
             />
+
+            {/* RESEARCH context banner — Monte Carlo resamples the active validated run.
+                Truthful: no "Current Result View"; simulation stats are pending. */}
+            <div className="px-6 mt-2 mb-3">
+                <ResearchContextBanner
+                    run={activeRun ? buildBannerRunIdentity(activeRun) : null}
+                    scopeTitle="Monte Carlo"
+                    scopeSummary="Run-level resampling · risk simulation"
+                    facts={[{ label: "Simulation", value: "Pending — engine not wired" }]}
+                />
+            </div>
 
             <div className="px-6 mb-4">
                 <div className="flex items-center gap-2 border border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.07)] clip-bevel-sm px-3 py-2">

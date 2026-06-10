@@ -9,7 +9,7 @@ import { getRunDisplayName, compactTimeframe, useDataset, addProjectFinding, get
 import { useTradeUniverse } from "@/data/useTradeUniverse";
 import { collectAllEntryKeys, buildAvailableOptions } from "@/data/tradeUniverse";
 import { formatDirectionalScenarioLabel } from "@/components/lab/entries/analytics/entryFormatters";
-import { TradeUniverseBadge } from "@/components/lab/TradeUniverseBadge";
+import ResearchContextBanner from "@/components/lab/ResearchContextBanner";
 // RB-8d: canonical Results Basis summaries replace the deprecated lib/metrics.
 import { toCanonicalSummaryRow, maxDrawdownFromCurve } from "@/data/resultsBasis";
 import { useResultsLens } from "@/data/useResultsLens";
@@ -550,13 +550,28 @@ export default function ComparisonLab() {
                 }
             />
 
-            {/* 3C — universe badge + scenario selector. In baseline mode the badge
-                mirrors the active run's baseline (unchanged from 3B-3). In scenario
-                mode it shows the first slot's resolved universe. Analytics are now
-                fully scenario-aware via slotUniverses (equity, monthly, WR, PF, DD,
-                Net R, Trades). obStats / deltaRows are not present on this page. */}
+            {/* RESEARCH context banner — multi-run page. Truthful: it does NOT claim a
+                single "Current Result View" (the old narrow badge showed only the first
+                slot's universe, which misleads on a multi-run comparison). Shows the run
+                count + project + basis + the reference universe as facts instead. */}
             <div className="px-6 mt-2 mb-3 flex flex-col gap-1.5">
-                <TradeUniverseBadge universe={isScenarioMode ? slotUniverses[0] : baselineUniverse} />
+                {(() => {
+                    const refUniverse = isScenarioMode ? slotUniverses[0] : baselineUniverse;
+                    return (
+                        <ResearchContextBanner
+                            showRunIdentity={false}
+                            scopeTitle="Run Comparison"
+                            scopeSummary={`Comparing ${runs.length} run${runs.length === 1 ? "" : "s"} — Run A is the baseline`}
+                            facts={[
+                                { label: "Project", value: ACTIVE_PROJECT?.name || ACTIVE_PROJECT?.title },
+                                { label: "Runs", value: runs.length },
+                                { label: "Baseline", value: "Run A" },
+                                { label: "Basis", value: "Raw R" },
+                                { label: "Reference", value: refUniverse?.label },
+                            ]}
+                        />
+                    );
+                })()}
                 <div className="flex flex-wrap items-center gap-2">
                     <span className="text-[9px] font-ui uppercase tracking-widest text-[hsl(var(--text-muted))]">Compare Basis</span>
                     <Pill tone="muted">Raw R</Pill>

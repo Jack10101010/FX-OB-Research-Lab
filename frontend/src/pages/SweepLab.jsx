@@ -5,6 +5,7 @@ import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
 import { Segment, NeonSelect, Field } from "@/components/lab/controls";
 import { MetricChip } from "@/components/lab/MetricChip";
 import { useDataset } from "@/data/store";
+import ResearchContextBanner from "@/components/lab/ResearchContextBanner";
 import { Trophy, AlertTriangle, Skull } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from "recharts";
 
@@ -32,16 +33,20 @@ export default function SweepLab() {
                 description="Explore the response surface of each strategy parameter. Identify stable, robust, and high-Net-R configurations."
             />
 
-            {/* Scope disclaimer — Sweep Lab varies strategy parameters across
-                re-runs and reads its own sweep outputs (SWEEP_*). It is a
-                different axis from the Trade Universe and is NOT governed by
-                the active Strategy Map universe selection. */}
+            {/* RESEARCH context banner — Sweep Lab varies strategy parameters across
+                re-runs and reads its own sweep outputs (SWEEP_*). Truthful: it is a
+                different axis from the Trade Universe (not universe-governed), so it
+                shows no run identity and no "Current Result View". */}
             <div className="px-6 mb-3">
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border border-[hsl(var(--border-soft)/0.7)] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm px-3 py-1.5 text-[11px]">
-                    <span className="font-ui uppercase tracking-wider text-muted-lab">Scope</span>
-                    <Pill tone="muted">Parameter sweep</Pill>
-                    <span className="text-[hsl(var(--text-2))]">Reads sweep outputs — not governed by the active Trade Universe.</span>
-                </div>
+                <ResearchContextBanner
+                    showRunIdentity={false}
+                    scopeTitle="Parameter Sweep"
+                    scopeSummary="Sweep outputs · parameter research"
+                    facts={[
+                        { label: "Source", value: "Sweep outputs (SWEEP_*)" },
+                        { label: "Universe", value: "Not governed" },
+                    ]}
+                />
             </div>
 
             <div className="px-6 mb-4">

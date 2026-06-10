@@ -4,6 +4,7 @@ import { LabRunHero } from "@/components/lab/LabRunHero";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { MetricChip } from "@/components/lab/MetricChip";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
+import ResearchContextBanner from "@/components/lab/ResearchContextBanner";
 import { Segment, NeonButton } from "@/components/lab/controls";
 import { useDataset } from "@/data/store";
 import { CalendarRange, Hash, Target, TrendingUp, AlertTriangle, Activity, ShieldCheck } from "lucide-react";
@@ -143,15 +144,21 @@ export default function WalkForwardLab() {
                 actions={browseAction}
             />
 
-            {/* Scope disclaimer — Walk-Forward operates at the run/fold level:
-                each fold is a whole imported run using its primary variant. It
-                is NOT governed by the active Strategy Map universe selection. */}
+            {/* RESEARCH context banner — Walk-Forward operates at the run/fold level:
+                each fold is a whole imported run using its primary variant. Truthful:
+                multi-run, not universe-governed → no single run identity, no Current
+                Result View; shows the fold count instead. */}
             <div className="px-6 mb-3">
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border border-[hsl(var(--border-soft)/0.7)] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm px-3 py-1.5 text-[11px]">
-                    <span className="font-ui uppercase tracking-wider text-muted-lab">Scope</span>
-                    <Pill tone="muted">Run-level folds</Pill>
-                    <span className="text-[hsl(var(--text-2))]">Folds use each run's primary variant — not governed by the active Trade Universe.</span>
-                </div>
+                <ResearchContextBanner
+                    showRunIdentity={false}
+                    scopeTitle="Walk-Forward Validation"
+                    scopeSummary="Sequential out-of-sample folds"
+                    facts={[
+                        { label: "Folds", value: count },
+                        { label: "Source", value: "Imported runs · primary variant" },
+                        { label: "Universe", value: "Not governed" },
+                    ]}
+                />
             </div>
 
             {/* KPI row */}
