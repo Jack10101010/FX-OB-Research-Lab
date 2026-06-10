@@ -9,7 +9,7 @@ import { NeonButton, NeonInput, NeonSelect, FilterToggle } from "@/components/la
 import { RunConfigStrip } from "@/components/lab/RunConfigStrip";
 import { TradeSanityCard } from "@/components/lab/TradeSanityCard";
 import { compactTimeframe, formatRunDateRange, getRunDisplayName, reloadFullRunFromSidecar, updateRunBundle, useDataset } from "@/data/store";
-import { setActiveRunId, setSelectedTradeVariant, setScenario, setFocusedFftEvent } from "@/data/store";
+import { setActiveRunId, setSelectedTradeVariant, setFocusedFftEvent } from "@/data/store";
 import { getNextStep, resolveRunReference, summarizeRunForDelta, buildRunDelta } from "@/data/projectWorkflow";
 import { ResearchStrip } from "@/components/lab/ResearchStrip";
 import { useResultsLens } from "@/data/useResultsLens";
@@ -42,8 +42,11 @@ import { TradeSanityStrip } from "@/components/lab/TradeSanityStrip";
 import { useFftAnalysis } from "@/data/useFftAnalysis";
 import { FftOverviewCard } from "@/components/lab/fft/FftOverviewCard";
 // RW-2: scenario-aware result-view selector (display-only; analytics wired in RW-3).
-import { useTradeUniverse } from "@/data/useTradeUniverse";
-import { buildAvailableOptions, collectAllEntryKeys, entryTradesByMode, buildCanonicalKey, derivePrimaryResultView } from "@/data/tradeUniverse";
+// RUN-VARIANT-HEADER Phase 1/2: store scenario is the single source of truth for
+// the Result View; the header is an extracted, controlled component.
+import { useRunVariant } from "@/data/useRunVariant";
+import ResearchRunHeader from "@/components/lab/ResearchRunHeader";
+import { buildAvailableOptions, collectAllEntryKeys, entryTradesByMode, buildCanonicalKey } from "@/data/tradeUniverse";
 // RW-4A: directional scenario label formatter
 import { formatDirectionalScenarioLabel } from "@/components/lab/entries/analytics/entryFormatters";
 // Phase 2A/2C: Trade Classification ledger column + filters
@@ -250,7 +253,7 @@ function FundingPhaseCard({ title, phase, currency }) {
 
 
 export default function RunDetail() {
-    const { ACTIVE_RUN, TRADES, RUNS, PROJECTS, getRunData, ACTIVE_TRADE_VARIANT, AVAILABLE_TRADE_VARIANTS, SCENARIO } = useDataset();
+    const { ACTIVE_RUN, TRADES, RUNS, PROJECTS, getRunData, ACTIVE_TRADE_VARIANT, AVAILABLE_TRADE_VARIANTS } = useDataset();
     // RB-8b: basis + account config consumed through the canonical lens hook.
     const lens = useResultsLens();
     const params = useParams();
@@ -261,38 +264,18 @@ export default function RunDetail() {
     const runData = getRunData(runId);
 
     // ── Result View state ────────────────────────────────────────────────────
-    // Isolated from the global SCENARIO so a stale Strategy Map selection for
-    // a different run never corrupts Run Workspace. Bootstraps from the global
-    // scenario only when it explicitly targets this run.
+    // RUN-VARIANT-HEADER Phase 1: the canonical store `scenario` is the single
+    // source of truth. `useRunVariant` resolves the effective Result View from
+    // the scenario when it targets this run (run-scoped, so a stale selection for
+    // a different run never leaks in), and otherwise falls back to the
+    // config-intent-aware `derivePrimaryResultView` — so a triggered-edge /
+    // penetration run still opens on its real variant, not a misleading Baseline.
+    // `setResultView` writes through `setScenario`, so a lens change now PERSISTS
+    // and PROPAGATES instead of being trapped in component state.
     //
-    // Priority: A. explicit global SCENARIO for this run
-    //           B. derivePrimaryResultView (config-intent aware)
-    //           C. baseline fallback
-    function getInitialResultView(bundle) {
-        return derivePrimaryResultView(bundle) ?? {
-            family: "baseline",
-            threshold: null,
-            fillMode: null,
-            directionalStorageKey: null,
-        };
-    }
-    const [resultView, setResultView] = React.useState(() => {
-        if (SCENARIO?.runId === runId && SCENARIO?.family && SCENARIO.family !== "baseline") {
-            return { family: SCENARIO.family, threshold: SCENARIO.threshold, fillMode: SCENARIO.fillMode };
-        }
-        return getInitialResultView(runData);
-    });
-    // Reset to primary result view whenever the user switches to a different run.
-    React.useEffect(() => {
-        if (SCENARIO?.runId === runId && SCENARIO?.family && SCENARIO.family !== "baseline") {
-            setResultView({ family: SCENARIO.family, threshold: SCENARIO.threshold, fillMode: SCENARIO.fillMode });
-        } else {
-            setResultView(getInitialResultView(runData));
-        }
-    }, [runId]); // eslint-disable-line react-hooks/exhaustive-deps
-    // Resolve the selected universe. Drives selector labels, metadata, warnings,
-    // and — via displayTrades — all analytics sections (KPIs, equity, ledger).
-    const universe = useTradeUniverse(runId, resultView);
+    // `universe` drives selector labels, metadata, warnings, and — via
+    // displayTrades — all analytics sections (KPIs, equity, ledger).
+    const { resultView, setResultView, universe } = useRunVariant(runId);
     // FFT-IA Phase 2 — shared FFT analysis feeding the compact overview card below.
     const fftOverview = useFftAnalysis(runId, resultView);
     // Build the flat list of selectable Result View options for this bundle.
@@ -1538,402 +1521,24 @@ export default function RunDetail() {
                 className="mx-6 mb-3 preview-surface"
             />
 
-            {/* RW-13: Entry Model Card — controls left, current view right */}
-            <div className="px-6 mb-2">
-                {scopeChip.isIndexOnly ? (
-                    <div className="flex items-center gap-1.5 px-1 py-0.5">
-                        <ScopeRow label="Status"><Pill tone="warning">Index-only metadata</Pill></ScopeRow>
-                    </div>
-                ) : (
-                    <>
-                        {(() => {
-                            // ── Derived selection state ───────────────────────────────────────
-                            const selModel     = (!resultView?.family || resultView.family === "baseline") ? "baseline" : resultView.family;
-                            const selThreshold = resultView?.threshold ?? null;
-                            const selFillMode  = resultView?.fillMode  ?? null;
-
-                            const availFamilies = new Set(resultViewOptions.map((o) => o.family));
-
-                            const ALL_HINT_THRESHOLDS = [10, 25, 50, 75];
-                            const modelThresholds = [...new Set([
-                                ...resultViewOptions
-                                    .filter((o) => o.family === selModel)
-                                    .map((o) => o.threshold)
-                                    .filter((t) => t != null),
-                                ...ALL_HINT_THRESHOLDS,
-                            ])].sort((a, b) => a - b);
-                            const availModelThresholds = new Set(
-                                resultViewOptions
-                                    .filter((o) => o.family === selModel)
-                                    .map((o) => o.threshold),
-                            );
-
-                            const availFillModes = new Set(
-                                resultViewOptions
-                                    .filter((o) => o.family === selModel && o.threshold === selThreshold)
-                                    .map((o) => o.fillMode),
-                            );
-
-                            const pickFillMode = (family, threshold, preferFm) => {
-                                const opts = resultViewOptions
-                                    .filter((o) => o.family === family && o.threshold === threshold)
-                                    .map((o) => o.fillMode);
-                                if (opts.includes(preferFm)) return preferFm;
-                                if (opts.includes(null))    return null;
-                                if (opts.includes("same"))  return "same";
-                                if (opts.includes("next"))  return "next";
-                                return null;
-                            };
-                            const pickThreshold = (family, preferThresh) => {
-                                const opts = resultViewOptions
-                                    .filter((o) => o.family === family)
-                                    .map((o) => o.threshold)
-                                    .filter((t) => t != null)
-                                    .sort((a, b) => a - b);
-                                if (opts.includes(preferThresh)) return preferThresh;
-                                return opts[0] ?? null;
-                            };
-
-                            const ENTRY_MODELS = [
-                                { key: "baseline",       label: "Baseline" },
-                                { key: "penetration",    label: "Penetration" },
-                                { key: "triggered_edge", label: "Triggered Edge" },
-                            ];
-                            const FILL_MODE_SLOTS = [
-                                { fillMode: null,   label: "Both" },
-                                { fillMode: "same", label: "Same candle" },
-                                { fillMode: "next", label: "Next candle" },
-                                { fillMode: "d2",   label: "Delay +2" },
-                                { fillMode: "d3",   label: "Delay +3" },
-                            ];
-
-                            const showThresholdRow = selModel !== "baseline";
-                            const showFillModeRow  = selModel === "triggered_edge" && selThreshold != null; // RW-11A: penetration has no fill mode
-
-                            const btnActive = "bg-[hsl(var(--accent-primary)/0.15)] border-[hsl(var(--accent-primary)/0.55)] text-[hsl(var(--accent-primary))]";
-                            const btnIdle   = "bg-transparent border-[hsl(var(--border-soft))] text-[hsl(var(--text-muted))] hover:border-[hsl(var(--accent-primary)/0.4)] hover:text-[hsl(var(--text-base))]";
-                            const btnDim    = "border-[hsl(var(--border-soft)/0.3)] text-[hsl(var(--text-muted)/0.35)] cursor-default";
-                            const btnBase   = "px-2.5 py-[3px] text-[11px] font-ui tracking-[0.02em] border clip-bevel-sm transition-colors select-none whitespace-nowrap";
-                            const btnSm     = "px-2 py-[2px] text-[11px] font-ui tracking-[0.02em] border clip-bevel-sm transition-colors select-none whitespace-nowrap";
-
-                            // ── Summary vars ─────────────────────────────────────────────────
-                            const identityLabel = !isScenarioView
-                                ? (activeResultViewOption?.label || "Baseline Reference")
-                                : (activeResultViewOption?.label || universe?.label || String(resultView?.family || ""));
-                            const modelChipLabel = !isScenarioView ? "Baseline"
-                                : resultView?.family === "directional" ? "Directional"
-                                : resultView?.family === "penetration" ? "Penetration"
-                                : resultView?.family === "triggered_edge" ? "Triggered Edge"
-                                : String(resultView?.family || "").replace(/_/g, " ").replace(/\w/g, (c) => c.toUpperCase());
-                            const modeChipLabel = !isScenarioView ? "Standard edge"
-                                : resultView?.fillMode === "same" ? "Same candle"
-                                : resultView?.fillMode === "next" ? "Next candle"
-                                : resultView?.fillMode === "d2"   ? "Delay +2"
-                                : resultView?.fillMode === "d3"   ? "Delay +3"
-                                : "Both";
-                            const analyticsChipLabel = !isScenarioView ? "Baseline trades"
-                                : isDirectionalView ? (hasSelectedUniverseTrades ? "Backend · Split-pass" : "Baseline fallback")
-                                : hasSelectedUniverseTrades ? "Scenario trades"
-                                : "Baseline fallback";
-                            const isUnavailable = isScenarioView && !hasSelectedUniverseTrades;
-
-                            // ── RW-13: prominent current view string ──────────────────────────
-                            const currentViewDisplay = (() => {
-                                if (!isScenarioView) return "Baseline Reference";
-                                const fam = resultView?.family;
-                                const thr = resultView?.threshold;
-                                if (fam === "directional") {
-                                    const sk = resultView?.directionalStorageKey || "";
-                                    const scenarioId = sk.replace(/^[^_]+__/, "");
-                                    return formatDirectionalScenarioLabel(scenarioId) || identityLabel;
-                                }
-                                if (fam === "penetration") return thr != null ? `Penetration ${thr}%` : "Penetration";
-                                if (fam === "triggered_edge") {
-                                    const base = thr != null ? `Triggered Edge ${thr}%` : "Triggered Edge";
-                                    const mode = selFillMode === "same" ? " · Same Candle"
-                                               : selFillMode === "next" ? " · Next Candle"
-                                               : selFillMode === "d2"   ? " · Delay +2"
-                                               : selFillMode === "d3"   ? " · Delay +3"
-                                               : " · Both";
-                                    return base + mode;
-                                }
-                                return identityLabel;
-                            })();
-
-                            return (
-                                <div className={[
-                                    "clip-bevel-sm border mb-2 preview-surface",
-                                    isScenarioView
-                                        ? hasSelectedUniverseTrades
-                                            ? "border-[hsl(var(--accent-primary)/0.45)] bg-[hsl(var(--accent-primary)/0.05)]"
-                                            : "border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.05)]"
-                                        : "border-[hsl(var(--border-soft)/0.5)] bg-[hsl(var(--panel-2)/0.2)]",
-                                ].join(" ")}>
-                                    <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] divide-y xl:divide-y-0 xl:divide-x divide-[hsl(var(--border-soft)/0.3)]">
-
-                                        {/* Left col: Entry Model controls + scope row */}
-                                        <div className="px-4 py-3">
-                                            <div className="text-[10px] font-semibold font-ui uppercase tracking-[0.1em] text-[hsl(var(--text-2))] mb-2">
-                                                Entry Model
-                                            </div>
-                                            {/* Row A — Model selector */}
-                                            <div className="flex flex-wrap items-center gap-2 mb-2">
-                                                {ENTRY_MODELS.map(({ key, label }) => {
-                                                    const isAvail  = availFamilies.has(key);
-                                                    const isActive = selModel === key;
-                                                    return isAvail ? (
-                                                        <button
-                                                            key={key}
-                                                            type="button"
-                                                            onClick={() => {
-                                                                if (key === "baseline") {
-                                                                    setResultView({ family: "baseline", threshold: null, fillMode: null });
-                                                                } else {
-                                                                    const t  = pickThreshold(key, selThreshold);
-                                                                    const fm = pickFillMode(key, t, selFillMode);
-                                                                    setResultView({ family: key, threshold: t, fillMode: fm });
-                                                                }
-                                                            }}
-                                                            className={[btnBase, isActive ? btnActive : btnIdle].join(" ")}
-                                                        >
-                                                            {label}
-                                                        </button>
-                                                    ) : (
-                                                        <span
-                                                            key={key}
-                                                            className={[btnBase, btnDim].join(" ")}
-                                                            title="No data for this entry model in this run."
-                                                        >
-                                                            {label}
-                                                        </span>
-                                                    );
-                                                })}
-                                            </div>
-                                            {/* Row B — Threshold (only for non-baseline models) */}
-                                            {showThresholdRow && (
-                                                <div className="flex flex-wrap items-center gap-2 mb-2 pl-3 border-l border-[hsl(var(--border-soft)/0.3)]">
-                                                    <span className="text-[9.5px] font-ui uppercase tracking-[0.07em] text-[hsl(var(--text-2)/0.65)] shrink-0 mr-0.5">Threshold</span>
-                                                    {modelThresholds.map((t) => {
-                                                        const isAvail  = availModelThresholds.has(t);
-                                                        const isActive = selThreshold === t;
-                                                        return isAvail ? (
-                                                            <button
-                                                                key={t}
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    const fm = pickFillMode(selModel, t, selFillMode);
-                                                                    setResultView({ family: selModel, threshold: t, fillMode: fm });
-                                                                }}
-                                                                className={[btnSm, isActive ? btnActive : btnIdle].join(" ")}
-                                                            >
-                                                                {t}%
-                                                            </button>
-                                                        ) : (
-                                                            <span
-                                                                key={t}
-                                                                className={[btnSm, btnDim].join(" ")}
-                                                                title="No data for this threshold in this run."
-                                                            >
-                                                                {t}%
-                                                            </span>
-                                                        );
-                                                    })}
-                                                </div>
-                                            )}
-                                            {/* Row C — Fill Mode (only once model + threshold selected) */}
-                                            {showFillModeRow && (
-                                                <div className="flex flex-wrap items-center gap-2 pl-3 border-l border-[hsl(var(--border-soft)/0.3)]">
-                                                    <span className="text-[9.5px] font-ui uppercase tracking-[0.07em] text-[hsl(var(--text-2)/0.65)] shrink-0 mr-0.5">Fill Mode</span>
-                                                    {FILL_MODE_SLOTS.map(({ fillMode: fm, label }) => {
-                                                        const isAvail  = availFillModes.has(fm);
-                                                        const isActive = selFillMode === fm;
-                                                        return isAvail ? (
-                                                            <button
-                                                                key={label}
-                                                                type="button"
-                                                                onClick={() => setResultView({
-                                                                    family: selModel,
-                                                                    threshold: selThreshold,
-                                                                    fillMode: fm,
-                                                                })}
-                                                                className={[btnSm, isActive ? btnActive : btnIdle].join(" ")}
-                                                            >
-                                                                {label}
-                                                            </button>
-                                                        ) : (
-                                                            <span
-                                                                key={label}
-                                                                className={[btnSm, btnDim].join(" ")}
-                                                                title="No data for this fill mode in this run."
-                                                            >
-                                                                {label}
-                                                            </span>
-                                                        );
-                                                    })}
-                                                </div>
-                                            )}
-                                            {/* RW-4A: Directional Backend Scenarios */}
-                                            {(() => {
-                                                const dirOpts = resultViewOptions.filter((o) => o.family === "directional");
-                                                if (!dirOpts.length) return null;
-                                                return (
-                                                    <div className="mt-2 pt-2 border-t border-[hsl(var(--border-soft)/0.2)]">
-                                                        <span className="text-[9.5px] font-ui uppercase tracking-[0.07em] text-[hsl(var(--text-2)/0.65)] block mb-1.5">Directional Scenarios</span>
-                                                        <div className="flex flex-wrap items-center gap-2">
-                                                            {dirOpts.map((opt) => {
-                                                                const isActive = isDirectionalView && directionalStorageKey === opt.directionalStorageKey;
-                                                                return (
-                                                                    <button
-                                                                        key={opt.key}
-                                                                        type="button"
-                                                                        onClick={() => setResultView({
-                                                                            family: "directional",
-                                                                            directionalStorageKey: opt.directionalStorageKey,
-                                                                            threshold: null,
-                                                                            fillMode: null,
-                                                                        })}
-                                                                        className={[btnBase, isActive ? btnActive : btnIdle].join(" ")}
-                                                                        title={opt.executionMode ? `Execution: ${opt.executionMode.replace(/_/g, " ")}` : undefined}
-                                                                    >
-                                                                        {opt.label}
-                                                                    </button>
-                                                                );
-                                                            })}
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })()}
-                                            {/* Scope chips */}
-                                            <div className="flex flex-wrap items-center gap-2 mt-2.5 pt-2 border-t border-[hsl(var(--border-soft)/0.25)]">
-                                                <ScopeRow label="Variant">
-                                                    <Pill tone="muted">{scopeChip.variantLabel || "Primary"}</Pill>
-                                                </ScopeRow>
-                                                <ScopeRow label="Basis">
-                                                    <Pill tone="muted">{scopeChip.globalBasisLabel}</Pill>
-                                                </ScopeRow>
-                                                <ScopeRow label="Account">
-                                                    <Pill tone={scopeChip.accountSimulation ? "secondary" : "muted"}>
-                                                        {scopeChip.accountSimulation ? "Sim" : "R"}
-                                                    </Pill>
-                                                    {scopeChip.accountViewSub && (
-                                                        <span className="text-[9.5px] text-muted-lab opacity-70">{scopeChip.accountViewSub}</span>
-                                                    )}
-                                                </ScopeRow>
-                                                {/* Dev parity audit — baseline path only, hidden in production */}
-                                                {process.env.NODE_ENV !== "production" && !isScenarioView && baselineParityAudit && (
-                                                    <span className={[
-                                                        "text-[9.5px] font-ui ml-2",
-                                                        baselineParityAudit.match
-                                                            ? "text-[hsl(var(--text-muted))] opacity-60"
-                                                            : "text-[hsl(var(--warning))]",
-                                                    ].join(" ")}>
-                                                        Parity: {baselineParityAudit.match ? "✓" : "⚠"}
-                                                        {" "}legacy {baselineParityAudit.legacyCount} / universe {baselineParityAudit.universeCount}
-                                                    </span>
-                                                )}
-                                            </div>
-                                        </div>
-
-                                        {/* Right col: Current Result View — dominant element */}
-                                        <div className="px-3 py-2">
-                                            <div className="text-[10px] font-semibold font-ui uppercase tracking-[0.1em] text-[hsl(var(--text-2))] mb-1">
-                                                Current Result View
-                                            </div>
-                                            {/* Dominant view label */}
-                                            <div className={[
-                                                "font-ui font-bold leading-tight mb-2",
-                                                isUnavailable
-                                                    ? "text-[hsl(var(--warning))] text-[20px]"
-                                                    : isScenarioView
-                                                        ? "text-[hsl(var(--accent-primary))] text-[20px]"
-                                                        : "text-white text-[20px]",
-                                            ].join(" ")}>
-                                                {currentViewDisplay}
-                                            </div>
-                                            {/* Inline stats row */}
-                                            <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 mb-1.5">
-                                                <div className="flex items-baseline gap-1.5">
-                                                    <span className="text-[9.5px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--text-2)/0.55)]">Trades</span>
-                                                    <span className="text-[13px] font-num tabular-nums font-semibold text-[hsl(var(--text-2))]">
-                                                        {isScenarioView && hasSelectedUniverseTrades
-                                                            ? selectedUniverseTrades.length
-                                                            : Array.isArray(legacyTradesForRun) ? legacyTradesForRun.length : 0}
-                                                    </span>
-                                                </div>
-                                                <div className="flex items-baseline gap-1.5">
-                                                    <span className="text-[9.5px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--text-2)/0.55)]">Analytics</span>
-                                                    <span className={[
-                                                        "text-[12px] font-semibold",
-                                                        !isScenarioView
-                                                            ? "text-[hsl(var(--text-2))]"
-                                                            : hasSelectedUniverseTrades
-                                                                ? "text-[hsl(var(--accent-secondary))]"
-                                                                : "text-[hsl(var(--warning))]",
-                                                    ].join(" ")}>{analyticsChipLabel}</span>
-                                                </div>
-                                                <div className="flex items-baseline gap-1.5">
-                                                    <span className="text-[9.5px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--text-2)/0.55)]">Status</span>
-                                                    <span className={[
-                                                        "text-[12px] font-semibold",
-                                                        isUnavailable ? "text-[hsl(var(--warning))]" : "text-[hsl(var(--text-2))]",
-                                                    ].join(" ")}>
-                                                        {isUnavailable ? "Unavailable" : "Available"}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                            {/* Scenario baseline count / directional source info */}
-                                            {isScenarioView && hasSelectedUniverseTrades && (
-                                                <div className="text-[10px] text-[hsl(var(--text-2)/0.55)]">
-                                                    {isDirectionalView ? (
-                                                        <>
-                                                            <span className="text-[hsl(var(--text-2))]">Backend · Split-pass</span>
-                                                            {activeResultViewOption?.executionMode && (
-                                                                <span className="ml-1.5 opacity-55">· {activeResultViewOption.executionMode.replace(/_/g, " ")}</span>
-                                                            )}
-                                                        </>
-                                                    ) : (
-                                                        <>
-                                                            Baseline: <span className="tabular-nums text-[hsl(var(--text-2))]">{Array.isArray(legacyTradesForRun) ? legacyTradesForRun.length : 0}</span>
-                                                            {activeResultViewOption?.fromCombinedPool && (
-                                                                <span className="ml-1.5 opacity-55">split from combined pool</span>
-                                                            )}
-                                                        </>
-                                                    )}
-                                                </div>
-                                            )}
-                                            {/* Warnings (entry model scenarios only; directional bypasses universe) */}
-                                            {isScenarioView && !isDirectionalView && (() => {
-                                                const warnings = (universe?.warnings || []).filter(
-                                                    (w) => w?.code === "FILL_MODE_COERCED" || w?.code === "BOTH_UNAVAILABLE_NO_COMBINED",
-                                                );
-                                                return warnings.length > 0 ? (
-                                                    <div className="mt-1.5 flex flex-col gap-1">
-                                                        {warnings.map((w) => (
-                                                            <span
-                                                                key={w.code}
-                                                                className={[
-                                                                    "px-1.5 py-0.5 text-[9.5px] border clip-bevel-sm",
-                                                                    w.code === "FILL_MODE_COERCED"
-                                                                        ? "border-[hsl(var(--accent-secondary)/0.45)] text-[hsl(var(--accent-secondary))]"
-                                                                        : "border-[hsl(var(--warning)/0.45)] text-[hsl(var(--warning))]",
-                                                                ].join(" ")}
-                                                                title={w.code}
-                                                            >
-                                                                {w.message}
-                                                            </span>
-                                                        ))}
-                                                    </div>
-                                                ) : null;
-                                            })()}
-                                        </div>
-
-                                    </div>
-                                </div>
-                            );
-                        })()}
-                    </>
-                )}
-            </div>
+            {/* RW-13 → RUN-VARIANT-HEADER Phase 2: Result View header, extracted into a
+                reusable controlled component. The store scenario is the single source of
+                truth (via useRunVariant); onResultViewChange persists + propagates the lens. */}
+            <ResearchRunHeader
+                resultView={resultView}
+                onResultViewChange={setResultView}
+                resultViewOptions={resultViewOptions}
+                activeResultViewOption={activeResultViewOption}
+                universe={universe}
+                isScenarioView={isScenarioView}
+                isDirectionalView={isDirectionalView}
+                directionalStorageKey={directionalStorageKey}
+                hasSelectedUniverseTrades={hasSelectedUniverseTrades}
+                selectedTradeCount={selectedUniverseTrades.length}
+                legacyTradeCount={Array.isArray(legacyTradesForRun) ? legacyTradesForRun.length : 0}
+                scopeChip={scopeChip}
+                baselineParityAudit={baselineParityAudit}
+            />
 
             {isIndexOnlyRun && (
                 <div className="px-6 mb-4">
@@ -4037,18 +3642,7 @@ function variantLabel(v) {
     }[v] || v || "N/A";
 }
 
-// Small label+value cell used inside the scope chip strip. Keeps the strip
-// readable when several labelled facts sit next to each other.
-function ScopeRow({ label, children }) {
-    return (
-        <span className="inline-flex items-center gap-1.5">
-            <span className="text-[9.5px] font-ui uppercase tracking-[0.08em] text-muted-lab">
-                {label}
-            </span>
-            {children}
-        </span>
-    );
-}
+// (ScopeRow moved into components/lab/ResearchRunHeader.jsx — RUN-VARIANT-HEADER Phase 2.)
 
 function normalizeTimestamp(value) {
     if (value == null || value === "") return null;

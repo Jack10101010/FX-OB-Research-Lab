@@ -125,10 +125,11 @@ function loadPersistedProjects() {
 // activeRunId / selectedTradeVariant fields which remain fully backward-compat.
 const DEFAULT_SCENARIO = {
     runId: null,            // string | null  — which run bundle
-    family: null,           // 'baseline' | 'triggered_edge' | 'penetration' | null
+    family: null,           // 'baseline' | 'triggered_edge' | 'penetration' | 'directional' | null
     positionVariant: null,  // 'single_position' | 'one_per_direction' | 'allow_multi_position' | null
     threshold: null,        // number | null  — e.g. 5, 10, 25 (penetration %)
     fillMode: null,         // 'same' | 'next' | 'both' | null  (triggered_edge only; null = both)
+    directionalStorageKey: null, // string | null  — directional backend scenario key (family === 'directional')
 };
 
 function loadPersistedScenario(fallbackRunId) {
@@ -141,6 +142,7 @@ function loadPersistedScenario(fallbackRunId) {
                 positionVariant: typeof saved.positionVariant === "string" ? saved.positionVariant : null,
                 threshold: typeof saved.threshold === "number" ? saved.threshold : null,
                 fillMode: typeof saved.fillMode === "string" ? saved.fillMode : null,
+                directionalStorageKey: typeof saved.directionalStorageKey === "string" ? saved.directionalStorageKey : null,
             };
         }
     } catch { /* fall through */ }
