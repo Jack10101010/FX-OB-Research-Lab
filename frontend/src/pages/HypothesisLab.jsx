@@ -5,7 +5,7 @@ import { MetricChip } from "@/components/lab/MetricChip";
 import { ColoredR, Pill } from "@/components/lab/DataTable";
 import { HeroBadge } from "@/components/lab/controls";
 import { useDataset } from "@/data/store";
-import { useTradeUniverse } from "@/data/useTradeUniverse";
+import { useRunVariant } from "@/data/useRunVariant";
 import { TradeUniverseBadge } from "@/components/lab/TradeUniverseBadge";
 import {
     FlaskConical, TrendingUp, TrendingDown, Target, AlertTriangle,
@@ -91,7 +91,7 @@ const PRESETS = [
 
 export default function HypothesisLab() {
     // Phase 2C — trade source now comes from the canonical store-level
-    // resolver via useTradeUniverse(). When the user picks a scenario in
+    // resolver (Phase 3: via useRunVariant). When the user picks a scenario in
     // Strategy Map (e.g. Triggered Edge 25% · Next), every chart and
     // simulation in Hypothesis Lab re-evaluates against that scenario's
     // trades. Previously this page silently consumed baseline TRADES and so
@@ -101,8 +101,15 @@ export default function HypothesisLab() {
     // runs) still come from useDataset because they're metadata, not trade
     // data — entry/protection result rows are built from the run bundle's
     // own summary blocks regardless of scenario, and that's correct.
-    const universe = useTradeUniverse();
     const { ACTIVE_RUN, ACTIVE_TRADE_VARIANT, activeRunId, runs } = useDataset();
+    // RUN-VARIANT-HEADER Phase 3: resolve the Result View through useRunVariant so a
+    // cold-load triggered-edge / penetration run defaults to its config-intent-aware
+    // primary Result View (via derivePrimaryResultView) instead of silently falling
+    // back to Baseline. Read-only here — Hypothesis Lab never calls setResultView; it
+    // consumes the canonical store scenario and reflects selections made on Run Detail
+    // / Strategy Map. The in-page simulator selectors (selectedEntry/selectedProtection)
+    // are a separate axis and are intentionally left defaulting to "baseline".
+    const { universe } = useRunVariant(activeRunId);
     const trades = universe.trades;
     const activeRun = activeRunId ? runs?.[activeRunId] : null;
     // Phase 2G — TradeUniverseBadge now filters universe.warnings internally
