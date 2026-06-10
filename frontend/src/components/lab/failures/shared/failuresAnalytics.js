@@ -1108,6 +1108,193 @@ export function buildArchetypeRadarData(losers) {
     }));
 }
 
+// ── Section 11 — Phase 2 Confirmed False Losers (post-stop continuation) ──────
+//
+// Backend V5 Phase 2 export (LOSS rows only) adds, from the ORIGINAL entry over a
+// finite horizon AFTER the stop candle:
+//   post_stop_mfe_r              — max favorable R reached (the headline)
+//   post_stop_reached_original_tp — did price reach the original target?
+//   post_stop_bars_to_1r         — bars from stop to first +1R (null if never)
+//   post_stop_lookahead_bars     — the horizon used (default 50)
+//   post_stop_model              — provenance label
+//
+// CRITICAL framing: post_stop_mfe_r is a PEAK ("reached"), not a path. It cannot
+// prove a breakeven or trailing stop would have held. All copy says "reached",
+// never "would have profited". Conclusions must always cite the horizon.
+
+export const FALSE_LOSER_CONFIRM_R   = 1.0; // reached ≥ +1R post-stop → confirmed
+export const FALSE_LOSER_CANDIDATE_R = 0.5; // reached ≥ +0.5R but < confirm → candidate
+
+// Dual-key readers: snake_case (CSV import), camelCase alias, legacy planning name.
+function postStopMfeROf(t) {
+    const v = Number(t?.postStopMfeR ?? t?.post_stop_mfe_r ?? t?.post_stop_continuation_r);
+    return Number.isFinite(v) ? v : null;
+}
+function reachedOriginalTpOf(t) {
+    const v = t?.postStopReachedOriginalTp ?? t?.post_stop_reached_original_tp;
+    if (v == null) return null;
+    return v === true || v === 1 || String(v).toLowerCase() === "true";
+}
+function postStopBarsTo1ROf(t) {
+    const v = Number(t?.postStopBarsTo1R ?? t?.post_stop_bars_to_1r);
+    return Number.isFinite(v) ? v : null;
+}
+function postStopLookaheadOf(t) {
+    const v = Number(t?.postStopLookaheadBars ?? t?.post_stop_lookahead_bars);
+    return Number.isFinite(v) ? v : null;
+}
+function postStopModelOf(t) {
+    const v = t?.postStopModel ?? t?.post_stop_model;
+    return v ? String(v) : null;
+}
+
+/**
+ * hasPostStopData(losers) → boolean
+ * True when post-stop continuation export is present on this loser set (gate for the
+ * confirmed-false-loser workflow vs the legacy candidates-only heuristic). Keys on the
+ * headline post_stop_mfe_r, which the backend populates for every LOSS row.
+ */
+export function hasPostStopData(losers, sampleSize = 20) {
+    if (!Array.isArray(losers) || !losers.length) return false;
+    const sample = losers.slice(0, sampleSize);
+    const found  = sample.filter(t => postStopMfeROf(t) != null).length;
+    return found / sample.length >= 0.5;
+}
+
+function classifyFalseLoser(t, confirmR, candidateR) {
+    const mfe       = postStopMfeROf(t);
+    const reachedTp = reachedOriginalTpOf(t);
+    if (mfe == null && reachedTp == null) return "nodata";
+    if (reachedTp === true || (mfe != null && mfe >= confirmR)) return "confirmed";
+    if (mfe != null && mfe >= candidateR) return "candidate";
+    return "genuine";
+}
+
+function _falseLoserCohort(rows, keyFn) {
+    const map = {};
+    for (const r of rows) {
+        const k = keyFn(r) ?? "Unknown";
+        if (!map[k]) map[k] = { key: k, total: 0, confirmed: 0, candidate: 0, genuine: 0, _mfeSum: 0, _mfeN: 0 };
+        const b = map[k];
+        b.total++;
+        b[r.class]++;
+        if (r.postStopMfeR != null) { b._mfeSum += r.postStopMfeR; b._mfeN++; }
+    }
+    return Object.values(map)
+        .map(b => ({
+            key:             b.key,
+            total:           b.total,
+            confirmed:       b.confirmed,
+            candidate:       b.candidate,
+            genuine:         b.genuine,
+            confirmedPct:    b.total ? round1((b.confirmed / b.total) * 100) : 0,
+            avgPostStopMfeR: b._mfeN ? round2(b._mfeSum / b._mfeN) : null,
+        }))
+        .sort((a, b) => b.confirmed - a.confirmed || b.total - a.total);
+}
+
+function _mode(arr) {
+    if (!arr.length) return null;
+    const counts = {};
+    for (const v of arr) counts[v] = (counts[v] || 0) + 1;
+    return Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+}
+
+/**
+ * buildConfirmedFalseLosers(losers, opts) → FalseLoserReport
+ * Classifies every loser into confirmed / candidate / genuine using post-stop
+ * continuation data, with cohort breakdowns by session / direction / structure /
+ * archetype. Gated: when the export is absent, returns { available: false } so the
+ * UI falls back to the legacy candidates-only heuristic.
+ *
+ *   confirmed — reached ≥ confirmR (default +1R) OR reached the original target
+ *   candidate — reached ≥ candidateR (default +0.5R) but below confirm
+ *   genuine   — never reached candidateR (a real loss)
+ *
+ * "reached" = peak excursion, NOT a realized/path-dependent outcome.
+ */
+export function buildConfirmedFalseLosers(losers, opts = {}) {
+    const confirmR   = opts.confirmR   ?? FALSE_LOSER_CONFIRM_R;
+    const candidateR = opts.candidateR ?? FALSE_LOSER_CANDIDATE_R;
+
+    const base = {
+        available: false,
+        horizon:   null,
+        model:     null,
+        confirmR, candidateR,
+        counts:    { total: 0, confirmed: 0, candidate: 0, genuine: 0, noData: 0 },
+        rates:     { confirmedPct: null, candidatePct: null, genuinePct: null },
+        confirmed: [], candidate: [], genuine: [],
+        cohorts:   { session: [], direction: [], structure: [], archetype: [] },
+        reachedR:  0,
+    };
+
+    if (!Array.isArray(losers) || !losers.length) return base;
+    if (!hasPostStopData(losers)) {
+        return { ...base, counts: { ...base.counts, total: losers.length, noData: losers.length } };
+    }
+
+    const rows = losers.map(t => ({
+        id:                t?.id ?? t?.trade_id ?? null,
+        entry:             t?.entry ?? t?.fill_time ?? null,
+        direction:         directionOf(t),
+        session:           t?.session || sessionOf(t?.entry) || "Unknown",
+        structure:         structureOf(t),
+        archetype:         t?.archetype ?? "standard_loss",
+        severity:          t?.severity ?? null,
+        r:                 rOf(t),
+        postStopMfeR:      postStopMfeROf(t),
+        reachedOriginalTp: reachedOriginalTpOf(t),
+        barsTo1R:          postStopBarsTo1ROf(t),
+        class:             classifyFalseLoser(t, confirmR, candidateR),
+        _trade:            t,
+    }));
+
+    const confirmed  = rows.filter(r => r.class === "confirmed");
+    const candidate  = rows.filter(r => r.class === "candidate");
+    const genuine    = rows.filter(r => r.class === "genuine");
+    const noData     = rows.filter(r => r.class === "nodata");
+    const classified = rows.filter(r => r.class !== "nodata");
+    const denom      = classified.length;
+
+    const horizon = _mode(losers.map(postStopLookaheadOf).filter(v => v != null).map(Number));
+    const model   = _mode(losers.map(postStopModelOf).filter(Boolean));
+
+    // Peak R "reached" across confirmed losers — informational, NOT realized P&L.
+    const reachedR = round2(confirmed.reduce((s, r) => s + (r.postStopMfeR ?? 0), 0));
+
+    const byMfeDesc = (a, b) => (b.postStopMfeR ?? -Infinity) - (a.postStopMfeR ?? -Infinity);
+
+    return {
+        available: true,
+        horizon:   horizon != null ? Number(horizon) : null,
+        model,
+        confirmR, candidateR,
+        counts: {
+            total:     losers.length,
+            confirmed: confirmed.length,
+            candidate: candidate.length,
+            genuine:   genuine.length,
+            noData:    noData.length,
+        },
+        rates: {
+            confirmedPct: denom ? round1((confirmed.length / denom) * 100) : null,
+            candidatePct: denom ? round1((candidate.length / denom) * 100) : null,
+            genuinePct:   denom ? round1((genuine.length   / denom) * 100) : null,
+        },
+        confirmed: confirmed.sort(byMfeDesc),
+        candidate: candidate.sort(byMfeDesc),
+        genuine:   genuine.sort((a, b) => a.r - b.r),
+        cohorts: {
+            session:   _falseLoserCohort(classified, r => r.session),
+            direction: _falseLoserCohort(classified, r => r.direction),
+            structure: _falseLoserCohort(classified, r => r.structure),
+            archetype: _falseLoserCohort(classified, r => r.archetype),
+        },
+        reachedR,
+    };
+}
+
 /**
  * buildTradeDotStrip(trades)
  * Returns a compact array for the W/L streak dot strip SVG.

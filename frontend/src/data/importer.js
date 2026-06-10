@@ -445,6 +445,22 @@ export function parseTradesCSV(text) {
             r_if_no_target: numOrNull(pick(r, "r_if_no_target", "rIfNoTarget")),
             rIfNoTargetModel: String(pick(r, "r_if_no_target_model", "rIfNoTargetModel") || ""),
             r_if_no_target_model: String(pick(r, "r_if_no_target_model", "rIfNoTargetModel") || ""),
+            // Post-stop continuation (backend V5 Phase 2; LOSS rows only). Max favorable R
+            // AFTER the stop candle, measured from the ORIGINAL entry, over a finite horizon
+            // (post_stop_lookahead_bars; default 50). Powers Confirmed False Loser detection.
+            // A peak ("reached"), NOT a path — cannot prove a BE/trail would have held.
+            // Absent on pre-V5 bundles → null/"" (no throw); non-LOSS rows blank by design.
+            // Dual-keyed (camelCase + snake_case) + legacy planning alias post_stop_continuation_r.
+            postStopMfeR:                 numOrNull(pick(r, "post_stop_mfe_r", "postStopMfeR", "post_stop_continuation_r")),
+            post_stop_mfe_r:              numOrNull(pick(r, "post_stop_mfe_r", "postStopMfeR", "post_stop_continuation_r")),
+            postStopReachedOriginalTp:    boolOrNull(pick(r, "post_stop_reached_original_tp", "postStopReachedOriginalTp")),
+            post_stop_reached_original_tp: boolOrNull(pick(r, "post_stop_reached_original_tp", "postStopReachedOriginalTp")),
+            postStopBarsTo1R:             numOrNull(pick(r, "post_stop_bars_to_1r", "postStopBarsTo1R")),
+            post_stop_bars_to_1r:         numOrNull(pick(r, "post_stop_bars_to_1r", "postStopBarsTo1R")),
+            postStopLookaheadBars:        numOrNull(pick(r, "post_stop_lookahead_bars", "postStopLookaheadBars")),
+            post_stop_lookahead_bars:     numOrNull(pick(r, "post_stop_lookahead_bars", "postStopLookaheadBars")),
+            postStopModel:                String(pick(r, "post_stop_model", "postStopModel") || ""),
+            post_stop_model:              String(pick(r, "post_stop_model", "postStopModel") || ""),
             outcome,
             obWidth:        Number(pick(r, "ob_width", "obwidth") ?? 0),
             reverseConflict: Boolean(pick(r, "reverse_conflict", "reverse_cancel")),
