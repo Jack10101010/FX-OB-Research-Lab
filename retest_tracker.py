@@ -72,6 +72,9 @@ DEFAULT_RETEST_CONFIG = {
     "count_first_touch_as_retest": False,
     "pip_size": 0.0001,
     "max_retests_per_ob": 50,             # safety cap against pathological grinds
+    # v2.1 — confirmation timeframe (minutes) for kill confirmation. Tied to the
+    # run's detection timeframe in production; never hardcoded internally.
+    "confirm_timeframe_minutes": 15,
 }
 
 # Canonical column order for ob_retests.csv (OB-RETEST-3 §5).
@@ -95,6 +98,9 @@ OB_RETEST_SUMMARY_COLUMNS = [
     "max_reaction_pips_any_retest", "time_to_invalidation_minutes",
     "invalidated_at_time", "invalidated_at_candle_index",
     "invalidation_mode", "invalidated_after_retest_index",
+    # v2.1 additive (OB-RETEST-V2.1). "kill_margin_pips" is the v2.1 header fingerprint.
+    "kill_margin_pips", "kill_confirmed_tf", "reheld_after_kill",
+    "mfe_before_death_pips", "mfe_after_r1_pips", "mfe_after_r2_pips", "mfe_after_r3_pips",
 ]
 
 ENGINE_VERSION = 2
@@ -281,6 +287,7 @@ def compute_ob_retests(order_blocks, candles, trades=None, config=None):
     failure_threshold = cfg.get("failure_threshold", "close_beyond_ob")
     max_retests = int(cfg.get("max_retests_per_ob", 50))
     N = max(1, int(cfg.get("reaction_window_candles", 10)))
+    confirm_tf_sec = (_f(cfg.get("confirm_timeframe_minutes")) or 15) * 60  # v2.1 confirm-TF bucket
 
     rows, times = _build_candle_columns(candles)
     n = len(rows)
@@ -315,6 +322,14 @@ def compute_ob_retests(order_blocks, candles, trades=None, config=None):
             "invalidated_at_candle_index": None,
             "invalidation_mode": None,
             "invalidated_after_retest_index": None,
+            # v2.1 — death-definition refinement + MFE family (OB-RETEST-V2.1).
+            "kill_margin_pips": None,
+            "kill_confirmed_tf": None,
+            "reheld_after_kill": None,
+            "mfe_before_death_pips": None,
+            "mfe_after_r1_pips": None,
+            "mfe_after_r2_pips": None,
+            "mfe_after_r3_pips": None,
         }
 
         top_raw = _f(_get(ob, "top", "high"))
@@ -381,6 +396,62 @@ def compute_ob_retests(order_blocks, candles, trades=None, config=None):
                 round((times[idx] - first_touch_time) / 60.0) if first_touch_time is not None else None
             )
 
+        # v2.1 — retest entry candle indices (R1/R2/R3 anchors for MFE).
+        retest_entry_idx = []
+
+        def _max_fav_over(a, b):
+            if a is None or b is None or a > b:
+                return None
+            m = 0.0
+            for idx in range(a, b + 1):
+                m = max(m, favorable_pips(idx))
+            return _round2(m)
+
+        def _confirm_breach(close_val):
+            return (close_val < bot - buf_price) if is_bull else (close_val > top + buf_price)
+
+        def finalize_v21():
+            # Compute kill margin, confirmation-TF, re-held, and the MFE family once
+            # the OB has terminated. Called at every TOUCHED-OB exit point. Mirrors
+            # obRetest.js finalizeV21.
+            if first_touch_index < 0:
+                return  # never touched → all v2.1 fields stay None
+            kill_idx = rec["invalidated_at_candle_index"]
+            end_idx = kill_idx if kill_idx is not None else n - 1  # alive/censored → data end
+            rec["mfe_before_death_pips"] = _max_fav_over(first_touch_index, end_idx)
+            rec["mfe_after_r1_pips"] = _max_fav_over(retest_entry_idx[0], end_idx) if len(retest_entry_idx) >= 1 else None
+            rec["mfe_after_r2_pips"] = _max_fav_over(retest_entry_idx[1], end_idx) if len(retest_entry_idx) >= 2 else None
+            rec["mfe_after_r3_pips"] = _max_fav_over(retest_entry_idx[2], end_idx) if len(retest_entry_idx) >= 3 else None
+            if kill_idx is None:
+                return  # alive/censored → kill-specific fields stay None
+            # Kill margin: pips beyond the distal edge (close for close-beyond mode,
+            # low/high for wick-beyond mode).
+            if breach_mode == "wick_breach":
+                rec["kill_margin_pips"] = _round2(
+                    (bot - rows[kill_idx][3]) / pip if is_bull else (rows[kill_idx][2] - top) / pip
+                )
+            else:
+                rec["kill_margin_pips"] = _round2(
+                    (bot - rows[kill_idx][4]) / pip if is_bull else (rows[kill_idx][4] - top) / pip
+                )
+            # Confirmation timeframe: bucket the kill candle, take the bucket's last
+            # available close (partial final bucket handled deterministically), apply
+            # the close-beyond predicate.
+            kill_time = times[kill_idx]
+            bucket_end = (int(kill_time // confirm_tf_sec) + 1) * confirm_tf_sec
+            last_in_bucket = bisect.bisect_left(times, bucket_end) - 1
+            rec["kill_confirmed_tf"] = _confirm_breach(rows[last_in_bucket][4]) if last_in_bucket >= 0 else None
+            # Re-held: close back inside the OB within 60 minutes of the kill?
+            reheld = False
+            reheld_deadline = kill_time + 60 * 60
+            idx2 = kill_idx + 1
+            while idx2 < n and times[idx2] <= reheld_deadline:
+                if closes_inside(idx2):
+                    reheld = True
+                    break
+                idx2 += 1
+            rec["reheld_after_kill"] = reheld
+
         i = start
         while i < n:
             if intersects(i):
@@ -397,6 +468,7 @@ def compute_ob_retests(order_blocks, candles, trades=None, config=None):
             per_ob[ob_id] = rec
             continue
         if rec["invalidated_on_retest_index"] == 0:
+            finalize_v21()
             per_ob[ob_id] = rec
             continue
 
@@ -535,6 +607,7 @@ def compute_ob_retests(order_blocks, candles, trades=None, config=None):
                     round((retest_time - first_touch_time) / 60.0) if first_touch_time is not None else None
                 ),
             })
+            retest_entry_idx.append(retest_index)  # v2.1 MFE anchor (R1/R2/R3 = [0]/[1]/[2])
 
             if outcome == "failed":
                 terminated = True
@@ -553,6 +626,7 @@ def compute_ob_retests(order_blocks, candles, trades=None, config=None):
             rec["final_outcome"] = "capped" if rec["retest_count"] >= max_retests else "alive_at_data_end"
 
         rec["max_reaction_pips_any_retest"] = _round2(rec["max_reaction_pips_any_retest"])
+        finalize_v21()
         per_ob[ob_id] = rec
 
     summary = _build_summary(events, per_ob, len(order_blocks or []))
@@ -562,6 +636,7 @@ def compute_ob_retests(order_blocks, candles, trades=None, config=None):
         "config": cfg,
         "data_basis": "backend_postprocess",
         "engine_version": ENGINE_VERSION,
+        "schema_version": "2.1",
         "semantics": "continuous_invalidation",
     }
     return {"events": events, "per_ob": per_ob, "summary": summary, "meta": meta}
@@ -635,6 +710,19 @@ def _build_summary(events, per_ob, obs_total):
                 and r.get("time_to_invalidation_minutes") is not None
             ]),
         }
+        # v2.1 — death-definition aggregates. None (not 0) when the rows carry no
+        # v2.1 fields (e.g. v2 artifacts) so consumers can hide them.
+        confirm_known = [r for r in terminal_rows if r.get("kill_confirmed_tf") in (True, False)]
+        reheld_known = [r for r in terminal_rows if r.get("reheld_after_kill") in (True, False)]
+        ob_level["kill_confirmed_share"] = (
+            sum(1 for r in confirm_known if r["kill_confirmed_tf"] is True) / len(confirm_known)
+            if confirm_known else None
+        )
+        ob_level["reheld_after_kill_share"] = (
+            sum(1 for r in reheld_known if r["reheld_after_kill"] is True) / len(reheld_known)
+            if reheld_known else None
+        )
+        ob_level["median_kill_margin_pips"] = _median([r.get("kill_margin_pips") for r in terminal_rows])
 
     return {
         "obs_total": obs_total,
@@ -685,6 +773,16 @@ def summary_fields(result):
         "retest_delayed_failure_count": ob.get("delayed_failure_count", 0),
         "retest_delayed_failure_share": round(ob.get("delayed_failure_share", 0.0), 4),
         "retest_median_time_to_invalidation_minutes": ob.get("median_time_to_invalidation_minutes"),
+        # v2.1 — death-definition refinement (schema bump; engine semantics unchanged).
+        "retest_schema_version": "2.1",
+        "retest_confirm_timeframe_minutes": (result.get("meta", {}).get("config", {}) or {}).get("confirm_timeframe_minutes"),
+        "retest_kill_confirmed_share": (
+            round(ob["kill_confirmed_share"], 4) if ob.get("kill_confirmed_share") is not None else None
+        ),
+        "retest_reheld_after_kill_share": (
+            round(ob["reheld_after_kill_share"], 4) if ob.get("reheld_after_kill_share") is not None else None
+        ),
+        "retest_median_kill_margin_pips": ob.get("median_kill_margin_pips"),
     }
 
 

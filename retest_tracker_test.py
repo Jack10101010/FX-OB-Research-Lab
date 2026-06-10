@@ -432,6 +432,171 @@ with tempfile.TemporaryDirectory() as d:
     check("ob_retests.csv event columns UNCHANGED (no invalidation columns)",
           "invalidation_mode" not in header1 and "final_outcome" not in header1)
 
+# ════════════════════════════════════════════════════════════════════════════════
+# ENGINE v2.1 — KILL MARGIN · CONFIRM-TF · RE-HELD · MFE FAMILY
+# (fixtures mirror obRetest.logictest.cjs V21-*)
+# ════════════════════════════════════════════════════════════════════════════════
+
+# ── Test V21-A: canonical combined fixture (JS↔Python parity fixture) ──────────────
+print("\nTest V21-A — combined: margin, unconfirmed kill, re-held, MFE family")
+c = [
+    mk(0, 1.1000, 1.1005, 1.0995, 1.1002),   # ft               fav 5
+    mk(1, 1.1006, 1.1010, 1.1003, 1.1008),   # leave -> armed   fav 10
+    mk(2, 1.1001, 1.1004, 1.0996, 1.1001),   # R1 entry         fav 4
+    mk(3, 1.1004, 1.1009, 1.1001, 1.1007),   # window           fav 9
+    mk(4, 1.1008, 1.1012, 1.1005, 1.1009),   # window end -> survived  fav 12
+    mk(5, 1.0992, 1.0993, 1.0980, 1.0985),   # INSIDE close-breach -> KILL (margin 5.0)
+    mk(6, 1.0986, 1.0998, 1.0984, 1.0993),   # close inside -> re-held
+    mk(7, 1.0994, 1.1025, 1.0992, 1.0996),   # post-death +25p spike — ignored
+]
+for i in range(8, 15):
+    c.append(mk(i, 1.0994, 1.0997, 1.0992, 1.0995))  # 15m bucket closes inside
+rA21 = run(bull_ob(), c, config={"reaction_window_candles": 2})
+pA21 = rA21["per_ob"]["1"]
+check("1 survived event, between-window kill",
+      rA21["summary"]["total_retests"] == 1 and pA21["final_outcome"] == "invalidated_between_windows")
+check("kill_margin_pips 5 (bull close-beyond)", pA21["kill_margin_pips"] == 5, str(pA21["kill_margin_pips"]))
+check("kill_confirmed_tf False (bucket closes back inside)", pA21["kill_confirmed_tf"] is False, str(pA21["kill_confirmed_tf"]))
+check("reheld_after_kill True", pA21["reheld_after_kill"] is True)
+check("mfe_before_death_pips 12 (post-death spike ignored)", pA21["mfe_before_death_pips"] == 12, str(pA21["mfe_before_death_pips"]))
+check("mfe_after_r1_pips 12", pA21["mfe_after_r1_pips"] == 12)
+check("missing R2/R3 anchors -> None", pA21["mfe_after_r2_pips"] is None and pA21["mfe_after_r3_pips"] is None)
+check("meta schema_version 2.1, engine_version 2",
+      rA21["meta"]["schema_version"] == "2.1" and rA21["meta"]["engine_version"] == 2)
+olA21 = rA21["summary"]["ob_level"]
+check("ob_level confirmed share 0.0, reheld share 1.0, median margin 5",
+      olA21 and olA21["kill_confirmed_share"] == 0.0 and olA21["reheld_after_kill_share"] == 1.0
+      and olA21["median_kill_margin_pips"] == 5)
+
+# ── Test V21-B: bear in-window instant fail — confirmed kill, never re-held ────────
+print("\nTest V21-B — bear margin + confirmed kill")
+c = [
+    mk(0, 1.1005, 1.1005, 1.0998, 1.1002),   # ft (bear fav = bot - low = 2)
+    mk(1, 1.0996, 1.0997, 1.0990, 1.0994),   # leave -> armed  fav 10
+    mk(2, 1.1012, 1.1015, 1.1008, 1.1013),   # re-enters AND closes 3p above top -> instant fail
+]
+for i in range(3, 15):
+    c.append(mk(i, 1.1014, 1.1018, 1.1012, 1.1016))  # stays beyond
+rB21 = run(bear_ob(), c)
+pB21 = rB21["per_ob"]["2"]
+check("failed event ctf 0, invalidated_in_window",
+      rB21["events"][0]["candles_to_failure"] == 0 and pB21["final_outcome"] == "invalidated_in_window")
+check("kill_margin_pips 3 (bear close-beyond)", pB21["kill_margin_pips"] == 3, str(pB21["kill_margin_pips"]))
+check("kill_confirmed_tf True (bucket close beyond)", pB21["kill_confirmed_tf"] is True)
+check("reheld_after_kill False", pB21["reheld_after_kill"] is False)
+check("mfe_before_death_pips 10", pB21["mfe_before_death_pips"] == 10, str(pB21["mfe_before_death_pips"]))
+check("mfe_after_r1_pips 0 (entry candle had no favorable move)", pB21["mfe_after_r1_pips"] == 0)
+
+# ── Test V21-C: wick-beyond mode margin uses the wick; confirm stays close-based ───
+print("\nTest V21-C — wick-mode kill margin")
+c = [
+    mk(0, 1.1000, 1.1005, 1.0995, 1.1002),
+    mk(1, 1.0998, 1.0999, 1.0980, 1.0995),   # wick 10p below bot, close inside -> wick KILL
+    mk(2, 1.0996, 1.0998, 1.0993, 1.0995),
+    mk(3, 1.0995, 1.0997, 1.0992, 1.0994),
+]
+rC21 = run(bull_ob(), c, config={"failure_threshold": "wick_beyond_ob"})
+pC21 = rC21["per_ob"]["1"]
+check("between-window wick kill", pC21["final_outcome"] == "invalidated_between_windows"
+      and pC21["invalidation_mode"] == "wick_breach")
+check("kill_margin_pips 10 (wick extreme)", pC21["kill_margin_pips"] == 10, str(pC21["kill_margin_pips"]))
+check("kill_confirmed_tf False (close-based confirmation)", pC21["kill_confirmed_tf"] is False)
+
+# ── Test V21-D: armed gap-breach + partial final bucket (deterministic) ────────────
+print("\nTest V21-D — partial final bucket confirmation")
+c = [
+    mk(0, 1.1000, 1.1005, 1.0995, 1.1002),
+    mk(1, 1.1006, 1.1010, 1.1003, 1.1008),
+    mk(2, 1.0985, 1.0988, 1.0980, 1.0982),   # gap below -> KILL (margin 8.0)
+    mk(3, 1.0983, 1.0986, 1.0978, 1.0980),   # still beyond; DATA END mid-bucket
+]
+rD21 = run(bull_ob(), c)
+pD21 = rD21["per_ob"]["1"]
+check("zero events, kill_margin_pips 8", rD21["summary"]["total_retests"] == 0 and pD21["kill_margin_pips"] == 8)
+check("kill_confirmed_tf True (last available close beyond)", pD21["kill_confirmed_tf"] is True)
+check("reheld_after_kill False", pD21["reheld_after_kill"] is False)
+
+# ── Test V21-E: re-held window is time-bounded (60m) ───────────────────────────────
+print("\nTest V21-E — re-held deadline")
+c = [
+    mk(0, 1.1000, 1.1005, 1.0995, 1.1002),
+    mk(1, 1.1006, 1.1010, 1.1003, 1.1008),
+    mk(2, 1.1001, 1.1004, 1.0996, 1.1001),
+    mk(3, 1.1004, 1.1009, 1.1001, 1.1007),
+    mk(4, 1.1008, 1.1012, 1.1005, 1.1009),
+    mk(5, 1.0992, 1.0993, 1.0980, 1.0985),   # KILL at minute 5
+]
+for i in range(6, 67):
+    c.append(mk(i, 1.0985, 1.0987, 1.0982, 1.0984))  # 61m beyond
+c.append(mk(67, 1.0993, 1.0996, 1.0992, 1.0995))     # back inside at +62m — too late
+rE21 = run(bull_ob(), c, config={"reaction_window_candles": 2})
+check("reheld_after_kill False (inside close after deadline)",
+      rE21["per_ob"]["1"]["reheld_after_kill"] is False)
+
+# ── Test V21-F: censored OB — MFE to data end; kill fields None ────────────────────
+print("\nTest V21-F — censored MFE")
+c = [
+    mk(0, 1.1000, 1.1005, 1.0995, 1.1002),
+    mk(1, 1.1006, 1.1010, 1.1003, 1.1008),
+    mk(2, 1.1001, 1.1004, 1.0996, 1.1001),
+    mk(3, 1.1004, 1.1009, 1.1001, 1.1007),
+]
+for i in range(4, 13):
+    c.append(mk(i, 1.1010, 1.1013, 1.1006, 1.1011))  # fav 13 to data end
+rF21 = run(bull_ob(), c)
+pF21 = rF21["per_ob"]["1"]
+check("alive_at_data_end", pF21["final_outcome"] == "alive_at_data_end")
+check("mfe_before_death_pips 13 (runs to data end)", pF21["mfe_before_death_pips"] == 13)
+check("mfe_after_r1_pips 13", pF21["mfe_after_r1_pips"] == 13)
+check("kill fields None when never invalidated",
+      pF21["kill_margin_pips"] is None and pF21["kill_confirmed_tf"] is None and pF21["reheld_after_kill"] is None)
+
+# ── Test V21-G: R1/R2/R3 anchors (window 1) ────────────────────────────────────────
+print("\nTest V21-G — MFE anchors R1/R2/R3")
+c = [
+    mk(0, 1.0998, 1.1000, 1.0995, 1.0998),   # ft          fav 0
+    mk(1, 1.1001, 1.1003, 1.1001, 1.1002),   # out -> armed fav 3
+    mk(2, 1.1000, 1.1001, 1.0997, 1.0999),   # R1 entry    fav 1
+    mk(3, 1.1002, 1.1006, 1.1001, 1.1004),   # survived    fav 6
+    mk(4, 1.1001, 1.1003, 1.1001, 1.1002),   # out -> armed fav 3
+    mk(5, 1.1000, 1.1001, 1.0996, 1.0999),   # R2 entry    fav 1
+    mk(6, 1.1002, 1.1004, 1.1001, 1.1003),   # survived    fav 4
+    mk(7, 1.1001, 1.1003, 1.1001, 1.1002),   # out -> armed fav 3
+    mk(8, 1.1000, 1.1001, 1.0995, 1.0998),   # R3 entry    fav 1
+    mk(9, 1.1001, 1.1002, 1.1000, 1.1001),   # survived    fav 2
+    mk(10, 1.1001, 1.1002, 1.1001, 1.1001),  # data end    fav 2
+]
+rG21 = run(bull_ob(), c, config={"reaction_window_candles": 1})
+pG21 = rG21["per_ob"]["1"]
+check("three survived retests", rG21["summary"]["total_retests"] == 3 and rG21["summary"]["survived"] == 3)
+check("mfe_before_death_pips 6", pG21["mfe_before_death_pips"] == 6, str(pG21["mfe_before_death_pips"]))
+check("mfe_after_r1_pips 6", pG21["mfe_after_r1_pips"] == 6)
+check("mfe_after_r2_pips 4", pG21["mfe_after_r2_pips"] == 4, str(pG21["mfe_after_r2_pips"]))
+check("mfe_after_r3_pips 2", pG21["mfe_after_r3_pips"] == 2, str(pG21["mfe_after_r3_pips"]))
+check("invariant R3 <= R2 <= R1 <= BD",
+      pG21["mfe_after_r3_pips"] <= pG21["mfe_after_r2_pips"] <= pG21["mfe_after_r1_pips"] <= pG21["mfe_before_death_pips"])
+
+# ── Test V21-H: artifact columns + summary_fields v2.1 keys ────────────────────────
+print("\nTest V21-H — v2.1 schema surfaces")
+sf21 = summary_fields(rA21)
+check("retest_schema_version == '2.1'", sf21["retest_schema_version"] == "2.1")
+check("retest_confirm_timeframe_minutes == 15", sf21["retest_confirm_timeframe_minutes"] == 15)
+check("retest_kill_confirmed_share 0.0", sf21["retest_kill_confirmed_share"] == 0.0)
+check("retest_reheld_after_kill_share 1.0", sf21["retest_reheld_after_kill_share"] == 1.0)
+check("retest_median_kill_margin_pips 5", sf21["retest_median_kill_margin_pips"] == 5)
+with tempfile.TemporaryDirectory() as d21:
+    ps21 = write_ob_retest_summary_csv(rA21, d21)
+    with open(ps21) as fh:
+        header21 = fh.readline().strip()
+    for col_name in ("kill_margin_pips", "kill_confirmed_tf", "reheld_after_kill",
+                     "mfe_before_death_pips", "mfe_after_r1_pips", "mfe_after_r2_pips", "mfe_after_r3_pips"):
+        check(f"summary csv has '{col_name}' (v2.1)", col_name in header21)
+    pe21 = write_ob_retests_csv(rA21, d21)
+    with open(pe21) as fh:
+        ev_header21 = fh.readline().strip()
+    check("ob_retests.csv columns UNCHANGED (no v2.1 columns)",
+          "kill_margin_pips" not in ev_header21 and "mfe_before_death_pips" not in ev_header21)
+
 # ── Summary ───────────────────────────────────────────────────────────────────────
 print(f"\n{'=' * 52}")
 print(f"Results: {PASS} passed, {FAIL} failed")

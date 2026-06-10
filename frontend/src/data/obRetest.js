@@ -62,6 +62,9 @@ export const DEFAULT_RETEST_CONFIG = {
     countFirstTouchAsRetest: false,
     pipSize: 0.0001,
     maxRetestsPerOB: 50,           // safety cap against pathological grinds
+    // v2.1 — confirmation timeframe (minutes) for kill confirmation. Tied to the
+    // run's detection timeframe in production; never hardcoded internally.
+    confirmTimeframeMinutes: 15,
 };
 
 // UTC-hour session bands — mirror ghost_tracker.py _SESSION_BOUNDARIES so retest
@@ -183,6 +186,7 @@ export function deriveRetests({ orderBlocks = [], tradesByObId = null, candles =
     const bufPrice = (num(cfg.failureBufferPips) || 0) * pip;
     const reactionMinPrice = (num(cfg.reactionMinPips) || 0) * pip;
     const N = Math.max(1, Math.floor(cfg.reactionWindowCandles || 10));
+    const confirmTfSec = (num(cfg.confirmTimeframeMinutes) || 15) * 60; // v2.1 confirm-TF bucket size
 
     const col = buildCandleColumns(candles);
     const events = [];
@@ -222,6 +226,16 @@ export function deriveRetests({ orderBlocks = [], tradesByObId = null, candles =
             invalidationMode: null,
             invalidatedAfterRetestIndex: null,
             timeToInvalidationMinutes: null,
+            // v2.1 — death-definition refinement + MFE family (OB-RETEST-V2.1).
+            // null until computed at OB finalize; null stays for anchors/states
+            // that never occurred (no invalidation, no first touch, missing Rk).
+            killMarginPips: null,
+            killConfirmedTf: null,
+            reheldAfterKill: null,
+            mfeBeforeDeathPips: null,
+            mfeAfterR1Pips: null,
+            mfeAfterR2Pips: null,
+            mfeAfterR3Pips: null,
         };
 
         // Geometry guards — skip degenerate OBs but still record them.
@@ -279,6 +293,52 @@ export function deriveRetests({ orderBlocks = [], tradesByObId = null, candles =
                 firstTouchTime != null ? Math.round((col.time[idx] - firstTouchTime) / 60) : null;
         };
 
+        // v2.1 — retest entry candle indices (R1, R2, R3 anchors for MFE).
+        const retestEntryIdx = [];
+
+        // v2.1 finalize — compute kill margin, confirmation-TF, re-held, and the MFE
+        // family once the OB has terminated. Called at every TOUCHED-OB exit point.
+        const confirmBreach = (closeVal) => (isBull ? closeVal < bot - bufPrice : closeVal > top + bufPrice);
+        const maxFavOver = (a, b) => {
+            if (a == null || b == null || a > b) return null;
+            let m = 0;
+            for (let idx = a; idx <= b; idx++) m = Math.max(m, favorablePips(idx));
+            return round2(m);
+        };
+        const finalizeV21 = () => {
+            if (firstTouchIndex < 0) return; // never touched → all v2.1 fields stay null
+            const killIdx = perRow.invalidatedAtCandleIndex;
+            const endIdx = killIdx != null ? killIdx : col.n - 1; // alive/censored → data end
+            // MFE family: max favorable excursion from the proximal edge, NOT counting
+            // any candle after invalidation. null when the anchor never occurred.
+            perRow.mfeBeforeDeathPips = maxFavOver(firstTouchIndex, endIdx);
+            perRow.mfeAfterR1Pips = retestEntryIdx.length >= 1 ? maxFavOver(retestEntryIdx[0], endIdx) : null;
+            perRow.mfeAfterR2Pips = retestEntryIdx.length >= 2 ? maxFavOver(retestEntryIdx[1], endIdx) : null;
+            perRow.mfeAfterR3Pips = retestEntryIdx.length >= 3 ? maxFavOver(retestEntryIdx[2], endIdx) : null;
+            if (killIdx == null) return; // alive/censored → kill-specific fields stay null
+            // Kill margin: pips beyond the distal edge at invalidation (close for
+            // close-beyond mode, low/high for wick-beyond mode).
+            perRow.killMarginPips = round2(
+                breachMode === "wick_breach"
+                    ? (isBull ? (bot - col.l[killIdx]) / pip : (col.h[killIdx] - top) / pip)
+                    : (isBull ? (bot - col.c[killIdx]) / pip : (col.c[killIdx] - top) / pip),
+            );
+            // Confirmation timeframe: bucket the kill candle into confirm-TF windows,
+            // take the bucket's last available close (partial final bucket handled
+            // deterministically), apply the close-beyond predicate.
+            const killTime = col.time[killIdx];
+            const bucketEnd = (Math.floor(killTime / confirmTfSec) + 1) * confirmTfSec;
+            const lastInBucket = indexAtOrAfter(col.time, bucketEnd) - 1;
+            perRow.killConfirmedTf = lastInBucket >= 0 ? confirmBreach(col.c[lastInBucket]) : null;
+            // Re-held: does price close back inside the OB within 60 minutes of the kill?
+            let reheld = false;
+            const reheldDeadline = killTime + 60 * 60;
+            for (let idx = killIdx + 1; idx < col.n && col.time[idx] <= reheldDeadline; idx++) {
+                if (closesInside(idx)) { reheld = true; break; }
+            }
+            perRow.reheldAfterKill = reheld;
+        };
+
         // Phase 1: seek first touch.
         let i = start;
         for (; i < col.n; i++) {
@@ -295,7 +355,7 @@ export function deriveRetests({ orderBlocks = [], tradesByObId = null, candles =
             }
         }
         if (firstTouchIndex < 0) { perRow.finalOutcome = "never_touched"; perOB.push(perRow); continue; }
-        if (perRow.invalidatedOnRetestIndex === 0) { perOB.push(perRow); continue; }
+        if (perRow.invalidatedOnRetestIndex === 0) { finalizeV21(); perOB.push(perRow); continue; }
 
         // State machine after first touch. We are currently INSIDE the zone.
         // INSIDE → (price leaves, debounce) → ARMED → (re-enter) → window eval.
@@ -408,6 +468,7 @@ export function deriveRetests({ orderBlocks = [], tradesByObId = null, candles =
                 session: sessionOf(retestTime),
                 minutesSinceFirstTouch: firstTouchTime != null ? Math.round((retestTime - firstTouchTime) / 60) : null,
             });
+            retestEntryIdx.push(retestIndex); // v2.1 MFE anchor (R1/R2/R3 = [0]/[1]/[2])
 
             if (outcome === "failed") { obTerminated = true; break; }
             if (outcome === "open") { perRow.finalOutcome = "alive_at_data_end"; obTerminated = true; break; } // no more candles
@@ -421,6 +482,7 @@ export function deriveRetests({ orderBlocks = [], tradesByObId = null, candles =
         if (perRow.finalOutcome == null) {
             perRow.finalOutcome = perRow.retestCount >= cfg.maxRetestsPerOB ? "capped" : "alive_at_data_end";
         }
+        finalizeV21();
         perOB.push(perRow);
     }
 
@@ -432,6 +494,7 @@ export function deriveRetests({ orderBlocks = [], tradesByObId = null, candles =
         config: cfg,
         dataBasis: "derived_frontend",
         engineVersion: 2,
+        schemaVersion: "2.1",
         semantics: "continuous_invalidation",
     };
 
@@ -498,6 +561,17 @@ export function summarizeRetestEvents(events = [], perOB = [], obsTotal = 0) {
                     .map((p) => p.timeToInvalidationMinutes),
             ),
         };
+        // v2.1 — death-definition aggregates. null (not 0) when the rows carry no
+        // v2.1 fields (e.g. v2 backend artifacts) so consumers can hide them.
+        const confirmKnown = terminalRows.filter((p) => p.killConfirmedTf === true || p.killConfirmedTf === false);
+        const reheldKnown = terminalRows.filter((p) => p.reheldAfterKill === true || p.reheldAfterKill === false);
+        obLevel.killConfirmedShare = confirmKnown.length
+            ? confirmKnown.filter((p) => p.killConfirmedTf === true).length / confirmKnown.length
+            : null;
+        obLevel.reheldAfterKillShare = reheldKnown.length
+            ? reheldKnown.filter((p) => p.reheldAfterKill === true).length / reheldKnown.length
+            : null;
+        obLevel.medianKillMarginPips = medianOf(terminalRows.map((p) => p.killMarginPips));
     }
 
     return {

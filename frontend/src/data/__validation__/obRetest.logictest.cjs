@@ -421,6 +421,172 @@ const bear = (extra = {}) => ({ id: "2", side: "bear", top: 1.1010, bot: 1.1000,
     check("V2-K: v1 perOB rows (no finalOutcome) → obLevel null", sV1.obLevel === null);
 }
 
+// ════════════════════════════════════════════════════════════════════════════════
+// ENGINE v2.1 — KILL MARGIN · CONFIRM-TF · RE-HELD · MFE FAMILY (OB-RETEST-V2.1)
+// ════════════════════════════════════════════════════════════════════════════════
+
+// V21-A: canonical combined fixture (also the JS↔Python parity fixture).
+// R1 survives a 2-candle window; candle 5 close-breaches between windows
+// (margin 5.0p); candle 6 closes back inside (re-held); candle 7 spikes +25p
+// AFTER death (must NOT count toward MFE); candles 8–14 fill the 15m confirm
+// bucket with closes back inside (kill NOT confirmed on the confirm TF).
+{
+    const c = [
+        mk(0, 1.1000, 1.1005, 1.0995, 1.1002),  // ft               fav 5
+        mk(1, 1.1006, 1.1010, 1.1003, 1.1008),  // leave → armed    fav 10
+        mk(2, 1.1001, 1.1004, 1.0996, 1.1001),  // R1 entry         fav 4
+        mk(3, 1.1004, 1.1009, 1.1001, 1.1007),  // window           fav 9
+        mk(4, 1.1008, 1.1012, 1.1005, 1.1009),  // window end → survived  fav 12
+        mk(5, 1.0992, 1.0993, 1.0980, 1.0985),  // INSIDE close-breach → KILL (margin 5.0)
+        mk(6, 1.0986, 1.0998, 1.0984, 1.0993),  // close inside → re-held
+        mk(7, 1.0994, 1.1025, 1.0992, 1.0996),  // post-death +25p spike — ignored
+    ];
+    for (let i = 8; i <= 14; i++) c.push(mk(i, 1.0994, 1.0997, 1.0992, 1.0995)); // bucket closes inside
+    const r = run("V21-A combined", bull(), c, { reactionWindowCandles: 2 });
+    const p = r.perOB[0];
+    check("V21-A: 1 survived event preserved, between-window kill", r.summary.totalRetests === 1 && p.finalOutcome === "invalidated_between_windows");
+    check("V21-A: killMarginPips 5 (bull close-beyond)", p.killMarginPips === 5, String(p.killMarginPips));
+    check("V21-A: killConfirmedTf false (15m bucket closes back inside)", p.killConfirmedTf === false, String(p.killConfirmedTf));
+    check("V21-A: reheldAfterKill true (close inside within 60m)", p.reheldAfterKill === true);
+    check("V21-A: mfeBeforeDeathPips 12 (post-death spike ignored)", p.mfeBeforeDeathPips === 12, String(p.mfeBeforeDeathPips));
+    check("V21-A: mfeAfterR1Pips 12", p.mfeAfterR1Pips === 12, String(p.mfeAfterR1Pips));
+    check("V21-A: missing R2/R3 anchors → null", p.mfeAfterR2Pips === null && p.mfeAfterR3Pips === null);
+    check("V21-A: meta schemaVersion 2.1, engineVersion 2", r.meta.schemaVersion === "2.1" && r.meta.engineVersion === 2);
+    const ol = r.summary.obLevel;
+    check("V21-A: obLevel killConfirmedShare 0, reheldShare 1, medianKillMargin 5",
+        ol && ol.killConfirmedShare === 0 && ol.reheldAfterKillShare === 1 && ol.medianKillMarginPips === 5, JSON.stringify(ol));
+}
+
+// V21-B: BEAR in-window instant fail — margin 3.0, kill CONFIRMED by the 15m
+// bucket close, never re-held.
+{
+    const c = [
+        mk(0, 1.1005, 1.1005, 1.0998, 1.1002),  // ft   (bear fav = bot − low = 2)
+        mk(1, 1.0996, 1.0997, 1.0990, 1.0994),  // leave → armed   fav 10
+        mk(2, 1.1012, 1.1015, 1.1008, 1.1013),  // re-enters AND closes 3p above top → instant fail
+    ];
+    for (let i = 3; i <= 14; i++) c.push(mk(i, 1.1014, 1.1018, 1.1012, 1.1016)); // stays beyond
+    const r = run("V21-B bear confirm", bear(), c);
+    const p = r.perOB[0];
+    check("V21-B: failed event ctf 0, invalidated_in_window", r.events[0]?.candlesToFailure === 0 && p.finalOutcome === "invalidated_in_window");
+    check("V21-B: killMarginPips 3 (bear close-beyond)", p.killMarginPips === 3, String(p.killMarginPips));
+    check("V21-B: killConfirmedTf true (bucket close beyond)", p.killConfirmedTf === true);
+    check("V21-B: reheldAfterKill false", p.reheldAfterKill === false);
+    check("V21-B: mfeBeforeDeathPips 10 (pre-kill leave candle)", p.mfeBeforeDeathPips === 10, String(p.mfeBeforeDeathPips));
+    check("V21-B: mfeAfterR1Pips 0 (entry candle had no favorable move)", p.mfeAfterR1Pips === 0, String(p.mfeAfterR1Pips));
+}
+
+// V21-C: wick-beyond mode — kill margin uses the WICK extreme; confirmation
+// stays close-based (bucket closes inside → not confirmed).
+{
+    const c = [
+        mk(0, 1.1000, 1.1005, 1.0995, 1.1002),  // ft (no wick breach: low > bot)
+        mk(1, 1.0998, 1.0999, 1.0980, 1.0995),  // INSIDE wick 10p below bot, close inside → wick KILL
+        mk(2, 1.0996, 1.0998, 1.0993, 1.0995),
+        mk(3, 1.0995, 1.0997, 1.0992, 1.0994),
+    ];
+    const r = run("V21-C wick margin", bull(), c, { failureThreshold: "wick_beyond_ob" });
+    const p = r.perOB[0];
+    check("V21-C: invalidated_between_windows, mode wick_breach", p.finalOutcome === "invalidated_between_windows" && p.invalidationMode === "wick_breach");
+    check("V21-C: killMarginPips 10 (wick extreme)", p.killMarginPips === 10, String(p.killMarginPips));
+    check("V21-C: killConfirmedTf false (confirmation is close-based)", p.killConfirmedTf === false);
+}
+
+// V21-D: ARMED gap-breach with the data ending mid-bucket — partial final
+// bucket is deterministic: last AVAILABLE close decides (beyond → confirmed).
+{
+    const c = [
+        mk(0, 1.1000, 1.1005, 1.0995, 1.1002),  // ft
+        mk(1, 1.1006, 1.1010, 1.1003, 1.1008),  // leave → armed
+        mk(2, 1.0985, 1.0988, 1.0980, 1.0982),  // gap below, no intersect → KILL (margin 8.0)
+        mk(3, 1.0983, 1.0986, 1.0978, 1.0980),  // still beyond; DATA END (partial bucket)
+    ];
+    const r = run("V21-D partial bucket", bull(), c);
+    const p = r.perOB[0];
+    check("V21-D: zero events, killMarginPips 8", r.summary.totalRetests === 0 && p.killMarginPips === 8, String(p.killMarginPips));
+    check("V21-D: killConfirmedTf true (partial bucket, last close beyond)", p.killConfirmedTf === true);
+    check("V21-D: reheldAfterKill false (no close back inside)", p.reheldAfterKill === false);
+}
+
+// V21-E: re-held window is TIME-bounded — a close back inside at +62m is too late.
+{
+    const c = [
+        mk(0, 1.1000, 1.1005, 1.0995, 1.1002),
+        mk(1, 1.1006, 1.1010, 1.1003, 1.1008),
+        mk(2, 1.1001, 1.1004, 1.0996, 1.1001),
+        mk(3, 1.1004, 1.1009, 1.1001, 1.1007),
+        mk(4, 1.1008, 1.1012, 1.1005, 1.1009),
+        mk(5, 1.0992, 1.0993, 1.0980, 1.0985),  // KILL at minute 5
+    ];
+    for (let i = 6; i <= 66; i++) c.push(mk(i, 1.0985, 1.0987, 1.0982, 1.0984)); // 61m beyond
+    c.push(mk(67, 1.0993, 1.0996, 1.0992, 1.0995)); // back inside at +62m — too late
+    const r = run("V21-E reheld window", bull(), c, { reactionWindowCandles: 2 });
+    check("V21-E: reheldAfterKill false (inside close after 60m deadline)", r.perOB[0].reheldAfterKill === false, String(r.perOB[0].reheldAfterKill));
+}
+
+// V21-F: alive/censored OB — MFE runs to data end; kill-specific fields stay null.
+{
+    const c = [
+        mk(0, 1.1000, 1.1005, 1.0995, 1.1002),  // fav 5
+        mk(1, 1.1006, 1.1010, 1.1003, 1.1008),  // fav 10
+        mk(2, 1.1001, 1.1004, 1.0996, 1.1001),  // R1 entry, fav 4
+        mk(3, 1.1004, 1.1009, 1.1001, 1.1007),  // fav 9
+    ];
+    for (let i = 4; i <= 12; i++) c.push(mk(i, 1.1010, 1.1013, 1.1006, 1.1011)); // fav 13 to data end
+    const r = run("V21-F censored MFE", bull(), c);
+    const p = r.perOB[0];
+    check("V21-F: alive_at_data_end", p.finalOutcome === "alive_at_data_end");
+    check("V21-F: mfeBeforeDeathPips 13 (runs to data end)", p.mfeBeforeDeathPips === 13, String(p.mfeBeforeDeathPips));
+    check("V21-F: mfeAfterR1Pips 13", p.mfeAfterR1Pips === 13);
+    check("V21-F: kill fields null when never invalidated",
+        p.killMarginPips === null && p.killConfirmedTf === null && p.reheldAfterKill === null);
+}
+
+// V21-G: R1/R2/R3 anchors — three survived retests (window 1) with descending
+// post-anchor favorable peaks: BD 6 ≥ R1 6 ≥ R2 4 ≥ R3 2.
+{
+    const c = [
+        mk(0, 1.0998, 1.1000, 1.0995, 1.0998),  // ft          fav 0
+        mk(1, 1.1001, 1.1003, 1.1001, 1.1002),  // out → armed fav 3
+        mk(2, 1.1000, 1.1001, 1.0997, 1.0999),  // R1 entry    fav 1
+        mk(3, 1.1002, 1.1006, 1.1001, 1.1004),  // survived    fav 6
+        mk(4, 1.1001, 1.1003, 1.1001, 1.1002),  // out → armed fav 3
+        mk(5, 1.1000, 1.1001, 1.0996, 1.0999),  // R2 entry    fav 1
+        mk(6, 1.1002, 1.1004, 1.1001, 1.1003),  // survived    fav 4
+        mk(7, 1.1001, 1.1003, 1.1001, 1.1002),  // out → armed fav 3
+        mk(8, 1.1000, 1.1001, 1.0995, 1.0998),  // R3 entry    fav 1
+        mk(9, 1.1001, 1.1002, 1.1000, 1.1001),  // survived    fav 2
+        mk(10, 1.1001, 1.1002, 1.1001, 1.1001), // data end    fav 2
+    ];
+    const r = run("V21-G anchors", bull(), c, { reactionWindowCandles: 1 });
+    const p = r.perOB[0];
+    check("V21-G: three survived retests", r.summary.totalRetests === 3 && r.summary.survived === 3, String(r.summary.totalRetests));
+    check("V21-G: mfeBeforeDeathPips 6", p.mfeBeforeDeathPips === 6, String(p.mfeBeforeDeathPips));
+    check("V21-G: mfeAfterR1Pips 6", p.mfeAfterR1Pips === 6, String(p.mfeAfterR1Pips));
+    check("V21-G: mfeAfterR2Pips 4", p.mfeAfterR2Pips === 4, String(p.mfeAfterR2Pips));
+    check("V21-G: mfeAfterR3Pips 2", p.mfeAfterR3Pips === 2, String(p.mfeAfterR3Pips));
+    check("V21-G: invariant R3 ≤ R2 ≤ R1 ≤ BD",
+        p.mfeAfterR3Pips <= p.mfeAfterR2Pips && p.mfeAfterR2Pips <= p.mfeAfterR1Pips && p.mfeAfterR1Pips <= p.mfeBeforeDeathPips);
+}
+
+// V21-H: obLevel aggregates gate to null on v2-style rows (no v2.1 fields).
+{
+    const sV2 = summarizeRetestEvents([], [
+        { touchCount: 1, retestCount: 1, finalOutcome: "invalidated_in_window", timeToInvalidationMinutes: 5 },
+    ], 1);
+    check("V21-H: v2 rows → killConfirmedShare/reheldShare/medianKillMargin null",
+        sV2.obLevel && sV2.obLevel.killConfirmedShare === null && sV2.obLevel.reheldAfterKillShare === null && sV2.obLevel.medianKillMarginPips === null,
+        JSON.stringify(sV2.obLevel));
+    const sV21 = summarizeRetestEvents([], [
+        { touchCount: 1, retestCount: 1, finalOutcome: "invalidated_in_window", timeToInvalidationMinutes: 5, killMarginPips: 2, killConfirmedTf: true, reheldAfterKill: false },
+        { touchCount: 1, retestCount: 0, finalOutcome: "invalidated_between_windows", timeToInvalidationMinutes: 9, killMarginPips: 6, killConfirmedTf: false, reheldAfterKill: true },
+        { touchCount: 1, retestCount: 1, finalOutcome: "alive_at_data_end" },
+    ], 3);
+    const ol = sV21.obLevel;
+    check("V21-H: mixed rows → shares 0.5/0.5, medianKillMargin 4",
+        ol && ol.killConfirmedShare === 0.5 && ol.reheldAfterKillShare === 0.5 && ol.medianKillMarginPips === 4, JSON.stringify(ol));
+}
+
 // ── MEDIAN: medianOf + summarizer medianCandlesToFailure ───────────────────────────
 {
     check("medianOf([]) === null", medianOf([]) === null);
