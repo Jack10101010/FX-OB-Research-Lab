@@ -719,8 +719,14 @@ export function ExcursionAnalysis({ losers = [], allLosers = [], allTrades = [],
             {/* ── 3. Selected Bucket Overview (composition; not a scorecard) ── */}
             <BucketOverview drill={drill} bucketDef={activeBucketDef} />
 
-            {/* ── 4. Failure Explorer (setup scorecard; bucket-aware) ───────── */}
-            <FailureExplorer allTrades={explorerSource} allLosers={source} bucket={explorerBucket} />
+            {/* ── 4. MFE Bucket Explorer (setup scorecard; bucket-aware) ────── */}
+            <FailureExplorer
+                allTrades={explorerSource}
+                allLosers={source}
+                bucket={explorerBucket}
+                title="MFE Bucket Explorer"
+                intro="Inside this MFE bucket, which setups explain these failures?"
+            />
 
             {/* ── 5. Break-even opportunity by arm level (upper bound) ──────── */}
             <BeOpportunityTable be={be} ranges={beRanges} />

@@ -24,6 +24,9 @@ import {
 } from "../shared/failuresAnalytics";
 import { archetypeLabel } from "../shared/failuresRegistry";
 import { buildHypothesisCard, writeHypothesisToStorage } from "../shared/failuresExporter";
+import { ConfirmedFalseLosersPanel } from "./ConfirmedFalseLosersPanel";
+import { FailureExplorer } from "../excursion/FailureExplorer";
+import { isPerformanceTrade } from "@/data/tradeClassification";
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
@@ -230,6 +233,15 @@ export function FailuresOverview({ losers = [], allLosers = [], allTrades = [], 
         [allLosers, allTrades, sessionStats, dirStats, weekdayStats],
     );
 
+    // Global Failure Explorer population — gate through the canonical performance
+    // classifier so loss-rate / lift / baseline match Run Detail and the Distance
+    // tab's MFE Bucket Explorer (same isPerformanceTrade predicate).
+    const validTrades = useMemo(
+        () => (Array.isArray(allTrades) ? allTrades.filter(isPerformanceTrade) : []),
+        [allTrades],
+    );
+    const explorerSource = validTrades.length ? validTrades : allTrades;
+
     if (!allTrades.length) return null;
 
     const sessionRows   = sessionStats.filter(s => s.total > 0).sort((a, b) => b.lossCount - a.lossCount);
@@ -242,6 +254,9 @@ export function FailuresOverview({ losers = [], allLosers = [], allTrades = [], 
         <div className="p-6 space-y-5">
             {/* ── Failure Command Center — verdict-first answer ─────────────── */}
             <FailureCommandCenter allTrades={allTrades} allLosers={allLosers} />
+
+            {/* ── Confirmed False Losers — surfaced here (V5 Phase 2B IA) ────── */}
+            <ConfirmedFalseLosersPanel allLosers={allLosers} />
 
             {/* ── KPI strip ─────────────────────────────────────────────────── */}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -365,6 +380,17 @@ export function FailuresOverview({ losers = [], allLosers = [], allTrades = [], 
                     </div>
                 </NeonPanel>
             </div>
+
+            {/* ── Global Failure Explorer — whole-run setup scorecard ───────── */}
+            <FailureExplorer
+                allTrades={explorerSource}
+                allLosers={allLosers}
+                bucket={null}
+                title="Global Failure Explorer"
+                prefsKey="fxob.failures.overview.explorer.v1"
+                roadmapKey={null}
+                intro="Across the full run, which setups are most harmful?"
+            />
 
             {/* ── Equity curve ──────────────────────────────────────────────── */}
             <FailuresEquityPanel allTrades={allTrades} />

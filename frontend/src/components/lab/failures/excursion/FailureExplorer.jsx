@@ -93,24 +93,36 @@ function Stat({ label, value, tone }) {
 }
 
 // ── UI persistence (per-browser; no backend, no data rows) ─────────────────────
-const EXPLORER_PREFS_KEY = "fxob.failures.distanceToStop.explorer.v1";
+const DEFAULT_EXPLORER_PREFS_KEY = "fxob.failures.distanceToStop.explorer.v1";
 const SCOPE_VALUES = ["bucket", "alllosers", "alltrades"];
 const SORT_VALUES = ["lossRate", "netR", "fullLossR", "bucketLossR", "bucketLosses", "pf", "lift"];
 const EXPLORER_ADV_KEYS = ["lift", "delta", "tradeShare", "lossShare"];
 
-function loadExplorerPrefs() {
+function loadExplorerPrefs(prefsKey) {
     try {
-        const p = JSON.parse(localStorage.getItem(EXPLORER_PREFS_KEY) || "{}");
+        const p = JSON.parse(localStorage.getItem(prefsKey) || "{}");
         return p && typeof p === "object" ? p : {};
     } catch { return {}; }
 }
 const pick = (v, allowed, fallback) => (allowed.includes(v) ? v : fallback);
 
-export function FailureExplorer({ allTrades = [], allLosers = [], bucket = null }) {
+// Title / prefsKey / roadmapKey / intro are parametrised (V5 Phase 2B) so the same
+// component serves the bucket-scoped "MFE Bucket Explorer" (Distance to Stop) and
+// the bucket-less "Global Failure Explorer" (Overview) without sharing persisted
+// UI state. Defaults preserve the original Distance-to-Stop usage exactly.
+export function FailureExplorer({
+    allTrades = [],
+    allLosers = [],
+    bucket = null,
+    title = "Failure Explorer",
+    prefsKey = DEFAULT_EXPLORER_PREFS_KEY,
+    roadmapKey = "distance-to-stop",
+    intro = null,
+}) {
     // Per-browser UI persistence (no backend, no data rows) — restore last-used
     // controls. Invalid persisted dimension keys fall back gracefully because the
     // engine resolves an unavailable dim to the first available one.
-    const initialPrefs = useMemo(loadExplorerPrefs, []);
+    const initialPrefs = useMemo(() => loadExplorerPrefs(prefsKey), [prefsKey]);
     const [scope, setScope] = useState(() => pick(initialPrefs.scope, SCOPE_VALUES, "bucket")); // bucket | alllosers | alltrades
     const [dimA, setDimA] = useState(() => (typeof initialPrefs.dimA === "string" ? initialPrefs.dimA : "session"));
     const [dimB, setDimB] = useState(() => (typeof initialPrefs.dimB === "string" ? initialPrefs.dimB : ""));
@@ -130,9 +142,9 @@ export function FailureExplorer({ allTrades = [], allLosers = [], bucket = null 
     // Persist UI state (per-browser). Never persists data rows or the expanded row.
     useEffect(() => {
         try {
-            localStorage.setItem(EXPLORER_PREFS_KEY, JSON.stringify({ scope, dimA, dimB, metric, floor, advCols, bucketSort, showOverall, refineDim }));
+            localStorage.setItem(prefsKey, JSON.stringify({ scope, dimA, dimB, metric, floor, advCols, bucketSort, showOverall, refineDim }));
         } catch { /* storage unavailable — ignore */ }
-    }, [scope, dimA, dimB, metric, floor, advCols, bucketSort, showOverall, refineDim]);
+    }, [prefsKey, scope, dimA, dimB, metric, floor, advCols, bucketSort, showOverall, refineDim]);
 
     // Effective scope: "bucket" only applies when a bucket is selected.
     const effScope = (scope === "bucket" && !bucket) ? "alltrades" : scope;
@@ -213,7 +225,7 @@ export function FailureExplorer({ allTrades = [], allLosers = [], bucket = null 
 
     if (!result.available.length && !bucket) {
         return (
-            <NeonPanel title="Failure Explorer" action={<div className="flex items-center gap-2"><SectionRoadmap sectionKey="distance-to-stop" /><Pill tone="muted">controlled · max 2 dimensions</Pill></div>}>
+            <NeonPanel title={title} action={<div className="flex items-center gap-2">{roadmapKey && <SectionRoadmap sectionKey={roadmapKey} />}<Pill tone="muted">controlled · max 2 dimensions</Pill></div>}>
                 <div className="p-4 text-[11.5px] font-ui text-[hsl(var(--text-2))]">No categorical dimensions are available in this run to explore.</div>
             </NeonPanel>
         );
@@ -232,8 +244,11 @@ export function FailureExplorer({ allTrades = [], allLosers = [], bucket = null 
             : { title: "All trades (winners + losers)", trades: exp.totals.trades, lossR: exp.totals.lossR, share: null };
 
     return (
-        <NeonPanel title="Failure Explorer" action={<div className="flex items-center gap-2"><SectionRoadmap sectionKey="distance-to-stop" /><Pill tone="muted">controlled · max 2 dimensions</Pill></div>}>
+        <NeonPanel title={title} action={<div className="flex items-center gap-2">{roadmapKey && <SectionRoadmap sectionKey={roadmapKey} />}<Pill tone="muted">controlled · max 2 dimensions</Pill></div>}>
             <div className="p-3 space-y-3">
+                {intro && (
+                    <p className="text-[10.5px] font-ui text-[hsl(var(--text-2))] leading-relaxed">{intro}</p>
+                )}
                 {/* ── Zone 1: scope + "Analyzing" header ─────────────────────── */}
                 <div className="border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm p-3 space-y-2.5">
                     <div className="flex flex-wrap items-center gap-1.5">
