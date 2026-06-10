@@ -94,19 +94,39 @@ check("R2 prev = 10m → '<30m'", enSeq[1].minutesSincePrevRetest === 10 && enSe
 check("R3 prev = 60m → '30m-2h'", enSeq[2].minutesSincePrevRetest === 60 && enSeq[2].timeSincePrevRetestBucket === "30m-2h", String(enSeq[2].minutesSincePrevRetest));
 check("OB 5 R1 independent → 'first'", enSeq[3].minutesSincePrevRetest === null);
 
-// ── Test 5: grouped arithmetic invariant ─────────────────────────────────────────
-console.log("\nTest 5 — grouped arithmetic (survived+failed+open == n)");
+// ── Test 5: grouped arithmetic invariant + honest-taxonomy rates ─────────────────
+console.log("\nTest 5 — grouped arithmetic (survived+failed+open == n; hold/reaction split)");
 const batch = [];
-for (let i = 0; i < 25; i++) batch.push(mkEvent({ obId: `b${i}`, structure: "BOS", outcome: i < 15 ? "survived" : i < 23 ? "failed" : "open", maxPenetrationPct: i % 2 ? 80 : 20 }));
+// BOS: 15 survived (10 reaction-met + 5 weak), 8 failed (candlesToFailure 1..8), 2 open.
+for (let i = 0; i < 25; i++) {
+    const outcome = i < 15 ? "survived" : i < 23 ? "failed" : "open";
+    batch.push(mkEvent({
+        obId: `b${i}`, structure: "BOS", outcome,
+        reactionMet: outcome === "survived" ? i % 3 !== 0 : false,
+        candlesToFailure: outcome === "failed" ? i - 14 : null, // 1..8 → median 4.5
+        maxPenetrationPct: i % 2 ? 80 : 20,
+    }));
+}
 for (let i = 0; i < 5; i++) batch.push(mkEvent({ obId: `c${i}`, structure: "CHoCH", outcome: "survived" }));
 const enBatch = R.enrichRetestEvents(batch, []);
 const byStruct = R.groupRetestsByDimension(enBatch, (e) => e.structure, { minN: 20 });
 let invariantOk = byStruct.every((r) => r.survived + r.failed + r.open === r.n);
 check("every row: survived+failed+open == n", invariantOk);
+check("every row: reactionSuccessCount+weakHoldCount == survived",
+    byStruct.every((r) => r.reactionSuccessCount + r.weakHoldCount === r.survived));
+check("every row: windowHoldRate === survivalRate (alias)",
+    byStruct.every((r) => r.windowHoldRate === r.survivalRate));
+check("every row (closed>0): reactionSuccessRate+weakHoldRate == windowHoldRate",
+    byStruct.every((r) => r.windowHoldRate == null || Math.abs(r.reactionSuccessRate + r.weakHoldRate - r.windowHoldRate) < 1e-9));
+check("every row (closed>0): reactionSuccess+weakHold+failure rates == 1",
+    byStruct.every((r) => r.windowHoldRate == null || Math.abs(r.reactionSuccessRate + r.weakHoldRate + r.failureRate - 1) < 1e-9));
 const bos = byStruct.find((r) => r.key === "BOS");
 const choch = byStruct.find((r) => r.key === "CHoCH");
 check("BOS n=25", bos && bos.n === 25, bos && String(bos.n));
 check("BOS survivalRate = 15/23 (closed only, open excluded)", bos && Math.abs(bos.survivalRate - 15 / 23) < 1e-9, bos && String(bos.survivalRate));
+check("BOS reactionSuccessRate = 10/23 (i%3!==0 of the 15 held)", bos && Math.abs(bos.reactionSuccessRate - 10 / 23) < 1e-9, bos && String(bos.reactionSuccessRate));
+check("BOS weakHoldRate = 5/23", bos && Math.abs(bos.weakHoldRate - 5 / 23) < 1e-9, bos && String(bos.weakHoldRate));
+check("BOS medianCandlesToFailure = 4.5 (1..8)", bos && bos.medianCandlesToFailure === 4.5, bos && String(bos.medianCandlesToFailure));
 
 // ── Test 6: min-N suppression flag ───────────────────────────────────────────────
 console.log("\nTest 6 — min-N suppression (default 20)");
@@ -121,6 +141,25 @@ check("all best/worst entries have n >= 20", allEligibleNBig, JSON.stringify([..
 // NB: the dimension LABEL "Structure (BOS/CHoCH)" contains "CHoCH"; match the VALUE slice via endsWith.
 check("no CHoCH-value slice (n=5) in best/worst", ![...bw.best, ...bw.worst].some((c) => c.condition.endsWith(": CHoCH")));
 check("eligible count > 0", bw.eligible > 0, String(bw.eligible));
+
+// ── Test 7b: best/worst ranks by REACTION SUCCESS, not window hold ───────────────
+console.log("\nTest 7b — best/worst ranked by reaction success (Phase 1 taxonomy fix)");
+// BOS: 20 weak holds → window hold 100% but reaction success 0% (old metric would
+// crown this best). CHoCH: 15 reaction successes + 5 fails → hold 75%, RS 75%.
+const rankEvents = [];
+for (let i = 0; i < 20; i++) rankEvents.push(mkEvent({ obId: `wh${i}`, structure: "BOS", outcome: "survived", reactionMet: false }));
+for (let i = 0; i < 20; i++) rankEvents.push(mkEvent({ obId: `rs${i}`, structure: "CHoCH", outcome: i < 15 ? "survived" : "failed", reactionMet: i < 15, candlesToFailure: i < 15 ? null : 2 }));
+const bwRank = R.buildBestWorstRetestConditions(R.enrichRetestEvents(rankEvents, []), { minN: 20, top: 3 });
+check("best[0] is a CHoCH slice (RS 75%), NOT the 100%-hold weak BOS slice",
+    bwRank.best[0] && bwRank.best[0].condition.includes("CHoCH") && Math.abs(bwRank.best[0].reactionSuccessRate - 0.75) < 1e-9,
+    JSON.stringify(bwRank.best[0]));
+check("best[0] windowHold 75% < the BOS slice's 100% (proves ranking switched off hold)",
+    bwRank.best[0] && Math.abs(bwRank.best[0].windowHoldRate - 0.75) < 1e-9);
+const worstHold100 = bwRank.worst.find((c) => c.reactionSuccessRate === 0 && c.windowHoldRate === 1);
+check("worst includes a 100%-hold / 0%-reaction (all-weak) slice", !!worstHold100, JSON.stringify(bwRank.worst.map((c) => c.condition)));
+check("worst[0] reactionSuccessRate is the minimum (0%)", bwRank.worst[0] && bwRank.worst[0].reactionSuccessRate === 0);
+check("reaction-quality dimension excluded from conditions (degenerate under RS ranking)",
+    ![...bwRank.best, ...bwRank.worst, ...bw.best, ...bw.worst].some((c) => c.condition.startsWith("Reaction Quality:")));
 
 // ── Test 8: buildRetestEdgeBreakdowns shape ──────────────────────────────────────
 console.log("\nTest 8 — buildRetestEdgeBreakdowns produces all standard dimensions");
@@ -152,6 +191,8 @@ const cL = mx.cells["Unknown"]["London"];
 const cNY = mx.cells["Unknown"]["New York"];
 check("cell Unknown×London n=20 survival=1 belowMinN=false", cL.n === 20 && cL.survivalRate === 1 && cL.belowMinN === false);
 check("cell Unknown×NewYork n=20 survival=0", cNY.n === 20 && cNY.survivalRate === 0);
+check("cells carry windowHoldRate alias === survivalRate", cL.windowHoldRate === cL.survivalRate && cNY.windowHoldRate === cNY.survivalRate);
+check("cells carry reactionSuccessRate (met holds: London 1, NY 0)", cL.reactionSuccessRate === 1 && cNY.reactionSuccessRate === 0);
 
 // ── Test 11: deterministic findings ──────────────────────────────────────────────
 console.log("\nTest 11 — deterministic findings (no AI, stat comparisons only)");

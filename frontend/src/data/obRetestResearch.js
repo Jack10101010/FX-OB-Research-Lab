@@ -12,7 +12,7 @@
  * with FIXED buckets. No backend, no importer changes. ATR/volume/displacement and
  * origin candle structure are deferred to C2/C3.
  */
-import { sessionOf } from "@/data/obRetest";
+import { sessionOf, medianOf } from "@/data/obRetest";
 
 export const DEFAULT_MIN_N = 20;
 
@@ -282,6 +282,12 @@ export function enrichRetestEvents(events = [], orderBlocks = []) {
 /**
  * Group enriched events by a dimension accessor (key string or fn) into rows with
  * outcome counts + rates. survived+failed+open === n holds per row (invariant).
+ *
+ * Honest taxonomy (Phase 1): each row carries, over CLOSED events,
+ *   windowHoldRate      = survived / closed   (renamed survival; kept as legacy alias)
+ *   reactionSuccessRate = held ∧ reactionMet / closed   ← primary ranking metric
+ *   weakHoldRate        = held ∧ ¬reactionMet / closed
+ * plus medianCandlesToFailure over failed events.
  */
 export function groupRetestsByDimension(events = [], dimension, { minN = DEFAULT_MIN_N } = {}) {
     const dimFn = typeof dimension === "function" ? dimension : (e) => e[dimension];
@@ -290,15 +296,18 @@ export function groupRetestsByDimension(events = [], dimension, { minN = DEFAULT
         const key = dimFn(e);
         if (key == null || key === "") continue;
         if (!map.has(key)) {
-            map.set(key, { key, n: 0, survived: 0, failed: 0, open: 0, reactionSum: 0, reactionN: 0, failCandleSum: 0, failN: 0 });
+            map.set(key, { key, n: 0, survived: 0, failed: 0, open: 0, reactionSuccess: 0, weakHold: 0, reactionSum: 0, reactionN: 0, failCandleSum: 0, failN: 0, failCandles: [] });
         }
         const r = map.get(key);
         r.n += 1;
-        if (e.outcome === "survived") r.survived += 1;
-        else if (e.outcome === "failed") r.failed += 1;
+        if (e.outcome === "survived") {
+            r.survived += 1;
+            if (e.reactionMet) r.reactionSuccess += 1;
+            else r.weakHold += 1;
+        } else if (e.outcome === "failed") r.failed += 1;
         else r.open += 1;
         if (e.outcome !== "open" && num(e.reactionMaxPips) != null) { r.reactionSum += Number(e.reactionMaxPips); r.reactionN += 1; }
-        if (e.outcome === "failed" && num(e.candlesToFailure) != null) { r.failCandleSum += Number(e.candlesToFailure); r.failN += 1; }
+        if (e.outcome === "failed" && num(e.candlesToFailure) != null) { r.failCandleSum += Number(e.candlesToFailure); r.failN += 1; r.failCandles.push(Number(e.candlesToFailure)); }
     }
     return [...map.values()].map((r) => {
         const closed = r.survived + r.failed;
@@ -308,10 +317,17 @@ export function groupRetestsByDimension(events = [], dimension, { minN = DEFAULT
             survived: r.survived,
             failed: r.failed,
             open: r.open,
+            reactionSuccessCount: r.reactionSuccess,
+            weakHoldCount: r.weakHold,
+            windowHoldRate: closed ? r.survived / closed : null,
+            reactionSuccessRate: closed ? r.reactionSuccess / closed : null,
+            weakHoldRate: closed ? r.weakHold / closed : null,
+            // Legacy alias of windowHoldRate — do not label as "Survival" in UI.
             survivalRate: closed ? r.survived / closed : null,
             failureRate: closed ? r.failed / closed : null,
             avgReactionPips: r.reactionN ? r.reactionSum / r.reactionN : null,
             avgCandlesToFailure: r.failN ? r.failCandleSum / r.failN : null,
+            medianCandlesToFailure: medianOf(r.failCandles),
             belowMinN: r.n < minN,
         };
     }).sort((a, b) => b.n - a.n);
@@ -369,8 +385,8 @@ export const SESSION_ORDER = ["Asia", "London", "London Lull", "New York", "Outs
 
 /**
  * Session Matrix — Origin Session (rows) × Retest Session (cols). Each cell: n +
- * survival rate (closed-only) + belowMinN flag. Pure 2-D grouping over the already
- * enriched originSession / retestSession fields (no new statistic).
+ * reaction-success / window-hold rates (closed-only) + belowMinN flag. Pure 2-D
+ * grouping over the already enriched originSession / retestSession fields.
  */
 export function buildSessionMatrix(events = [], { minN = DEFAULT_MIN_N } = {}) {
     const agg = new Map(); // "origin|retest" → counts
@@ -381,10 +397,10 @@ export function buildSessionMatrix(events = [], { minN = DEFAULT_MIN_N } = {}) {
         const r = e.retestSession || "Unknown";
         seenOrigin.add(o); seenRetest.add(r);
         const k = `${o}|${r}`;
-        if (!agg.has(k)) agg.set(k, { n: 0, survived: 0, failed: 0, open: 0 });
+        if (!agg.has(k)) agg.set(k, { n: 0, survived: 0, failed: 0, open: 0, reactionSuccess: 0 });
         const c = agg.get(k);
         c.n += 1;
-        if (e.outcome === "survived") c.survived += 1;
+        if (e.outcome === "survived") { c.survived += 1; if (e.reactionMet) c.reactionSuccess += 1; }
         else if (e.outcome === "failed") c.failed += 1;
         else c.open += 1;
     }
@@ -396,10 +412,13 @@ export function buildSessionMatrix(events = [], { minN = DEFAULT_MIN_N } = {}) {
         cells[o] = {};
         for (const r of cols) {
             const c = agg.get(`${o}|${r}`);
-            if (!c) { cells[o][r] = { n: 0, survivalRate: null, belowMinN: true }; continue; }
+            if (!c) { cells[o][r] = { n: 0, survivalRate: null, windowHoldRate: null, reactionSuccessRate: null, belowMinN: true }; continue; }
             const closed = c.survived + c.failed;
             cells[o][r] = {
                 n: c.n, survived: c.survived, failed: c.failed, open: c.open,
+                windowHoldRate: closed ? c.survived / closed : null,
+                reactionSuccessRate: closed ? c.reactionSuccess / closed : null,
+                // Legacy alias of windowHoldRate.
                 survivalRate: closed ? c.survived / closed : null,
                 belowMinN: c.n < minN,
             };
@@ -410,25 +429,30 @@ export function buildSessionMatrix(events = [], { minN = DEFAULT_MIN_N } = {}) {
 
 /**
  * Deterministic, data-driven findings (NO AI, NO scoring). Each finding is a plain
- * survival-rate comparison between two existing buckets, gated by min sample and a
- * minimum percentage-point delta, then ranked by |delta|. Operates on the already
- * computed breakdowns so no statistic is recomputed.
+ * rate comparison between two existing buckets, gated by min sample and a minimum
+ * percentage-point delta, then ranked by |delta|. Operates on the already computed
+ * breakdowns so no statistic is recomputed.
+ *
+ * Phase 1 honesty change: comparisons rank by REACTION SUCCESS (held + reaction
+ * met), not the old survival/window-hold rate. The one exception is the reaction
+ * met-vs-missed pair, which compares WINDOW HOLD (its reaction-success rates are
+ * degenerate: "missed" is 0% by construction).
  */
 export function buildRetestFindings(breakdowns, { minN = DEFAULT_MIN_N, minDeltaPP = 10 } = {}) {
     const findings = [];
     const fmt = (x) => `${Math.round(x * 100)}%`;
     const pp = (a, b) => Math.round((a - b) * 100);
-    const eligibleRows = (k) => (breakdowns?.[k]?.rows || []).filter((r) => r.n >= minN && r.survivalRate != null);
+    const eligibleRows = (k) => (breakdowns?.[k]?.rows || []).filter((r) => r.n >= minN && r.reactionSuccessRate != null);
 
     const bestWorst = (dimKey, label) => {
         const rows = eligibleRows(dimKey);
         if (rows.length < 2) return;
-        const sorted = [...rows].sort((a, b) => b.survivalRate - a.survivalRate);
+        const sorted = [...rows].sort((a, b) => b.reactionSuccessRate - a.reactionSuccessRate);
         const top = sorted[0], bot = sorted[sorted.length - 1];
-        const delta = pp(top.survivalRate, bot.survivalRate);
+        const delta = pp(top.reactionSuccessRate, bot.reactionSuccessRate);
         if (delta >= minDeltaPP) {
             findings.push({ dimension: label, deltaPP: delta, samples: Math.min(top.n, bot.n),
-                text: `${label}: "${top.key}" survives ${fmt(top.survivalRate)} vs "${bot.key}" ${fmt(bot.survivalRate)} (+${delta}pp).` });
+                text: `${label}: "${top.key}" reaction success ${fmt(top.reactionSuccessRate)} vs "${bot.key}" ${fmt(bot.reactionSuccessRate)} (+${delta}pp).` });
         }
     };
     bestWorst("byRetestSession", "Retest session");
@@ -436,30 +460,31 @@ export function buildRetestFindings(breakdowns, { minN = DEFAULT_MIN_N, minDelta
     bestWorst("byObSize", "OB size");
     bestWorst("byStructureDirection", "Structure × direction");
 
-    const pair = (dimKey, aKey, bKey, label, minPP = 5) => {
+    const pair = (dimKey, aKey, bKey, label, minPP = 5, metric = "reactionSuccessRate", metricLabel = "reaction success") => {
         const rows = breakdowns?.[dimKey]?.rows || [];
         const a = rows.find((r) => r.key === aKey), b = rows.find((r) => r.key === bKey);
-        if (!a || !b || a.n < minN || b.n < minN || a.survivalRate == null || b.survivalRate == null) return;
-        const delta = Math.abs(pp(a.survivalRate, b.survivalRate));
+        if (!a || !b || a.n < minN || b.n < minN || a[metric] == null || b[metric] == null) return;
+        const delta = Math.abs(pp(a[metric], b[metric]));
         if (delta < minPP) return;
-        const better = a.survivalRate >= b.survivalRate;
+        const better = a[metric] >= b[metric];
         findings.push({ dimension: label, deltaPP: delta, samples: Math.min(a.n, b.n),
-            text: `${aKey} retests ${better ? "outperform" : "underperform"} ${bKey} (${fmt(a.survivalRate)} vs ${fmt(b.survivalRate)}).` });
+            text: `${aKey} retests ${better ? "outperform" : "underperform"} ${bKey} on ${metricLabel} (${fmt(a[metric])} vs ${fmt(b[metric])}).` });
     };
     pair("byRetestNumber", "R2", "R1", "Retest number");
     pair("bySameSession", "same", "cross", "Session continuity", 10);
-    pair("byReactionQuality", "met", "missed", "Reaction quality", 10);
+    // Reaction met vs missed compares WINDOW HOLD: "do reactions predict holding?"
+    pair("byReactionQuality", "met", "missed", "Reaction quality", 10, "windowHoldRate", "window hold");
 
-    // Full penetration vs shallower
+    // Full penetration vs shallower (reaction success)
     const penRows = breakdowns?.byPenetration?.rows || [];
     const full = penRows.find((r) => r.key === "full (100%)");
-    const others = penRows.filter((r) => r.key !== "full (100%)" && r.n >= minN && r.survivalRate != null);
-    if (full && full.n >= minN && full.survivalRate != null && others.length) {
-        const avgOther = others.reduce((s, r) => s + r.survivalRate, 0) / others.length;
-        const delta = pp(avgOther, full.survivalRate);
+    const others = penRows.filter((r) => r.key !== "full (100%)" && r.n >= minN && r.reactionSuccessRate != null);
+    if (full && full.n >= minN && full.reactionSuccessRate != null && others.length) {
+        const avgOther = others.reduce((s, r) => s + r.reactionSuccessRate, 0) / others.length;
+        const delta = pp(avgOther, full.reactionSuccessRate);
         if (delta >= minDeltaPP) {
             findings.push({ dimension: "Max penetration", deltaPP: delta, samples: full.n,
-                text: `Full penetrations underperform shallower retests (${fmt(full.survivalRate)} vs ~${fmt(avgOther)}).` });
+                text: `Full penetrations underperform shallower retests on reaction success (${fmt(full.reactionSuccessRate)} vs ~${fmt(avgOther)}).` });
         }
     }
 
@@ -468,24 +493,33 @@ export function buildRetestFindings(breakdowns, { minN = DEFAULT_MIN_N, minDelta
 
 /**
  * Best / Worst conditions: flatten standard dimensions into labeled slices, keep
- * only slices with n >= minN and at least one closed retest, rank by survival rate.
+ * only slices with n >= minN and at least one closed retest, rank by REACTION
+ * SUCCESS rate (Phase 1 — was survival/window-hold). Window hold is carried on
+ * each slice as the secondary stat.
  */
 export function buildBestWorstRetestConditions(events = [], { minN = DEFAULT_MIN_N, top = 3 } = {}) {
     const candidates = [];
     for (const dim of Object.values(RETEST_DIMENSIONS)) {
+        // The reaction-quality dimension is degenerate under reaction-success
+        // ranking ("missed" = 0%, "met" = its hold rate by construction) — skip it.
+        if (dim.fn === RETEST_DIMENSIONS.byReactionQuality.fn) continue;
         for (const row of groupRetestsByDimension(events, dim.fn, { minN })) {
-            if (row.n >= minN && row.survivalRate != null) {
+            if (row.n >= minN && row.reactionSuccessRate != null) {
                 candidates.push({
                     dimension: dim.label,
                     condition: `${dim.label}: ${row.key}`,
                     n: row.n,
-                    survivalRate: row.survivalRate,
+                    reactionSuccessRate: row.reactionSuccessRate,
+                    windowHoldRate: row.windowHoldRate,
+                    weakHoldRate: row.weakHoldRate,
+                    // Legacy alias of windowHoldRate.
+                    survivalRate: row.windowHoldRate,
                     avgReactionPips: row.avgReactionPips,
                 });
             }
         }
     }
-    const byRate = [...candidates].sort((a, b) => b.survivalRate - a.survivalRate || b.n - a.n);
+    const byRate = [...candidates].sort((a, b) => b.reactionSuccessRate - a.reactionSuccessRate || b.n - a.n);
     return {
         minN,
         eligible: candidates.length,

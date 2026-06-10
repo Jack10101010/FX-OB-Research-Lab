@@ -513,10 +513,44 @@ export const GLOSSARY = {
     },
 
     // ── OB Retest Lab (Phase C education layer; additive, no logic) ──────────────
+    // Survival-taxonomy rename (OB-RETEST-SURVIVAL-DEFINITION-AUDIT-1, Phase 1):
+    // the old "Survival Rate" is now Window Hold %; Reaction Success % is the headline.
+    retest_window_hold: {
+        friendlyName: "Window Hold %",
+        definition: "Of retests that resolved (held or failed), the share with no close beyond the OB's far edge inside the reaction window (~10 candles). It does NOT require a favorable reaction, and it is not eventual survival — failures after the window are not yet detected (continuous invalidation tracking is planned).",
+        whyItMatters: "An honest short-horizon hold measure. It runs high by construction — use Reaction Success % to judge whether retests are actually tradeable.",
+    },
+    retest_reaction_success: {
+        friendlyName: "Reaction Success %",
+        definition: "Of resolved retests, the share that held the reaction window AND produced at least the configured minimum favorable move (reaction met). Open (right-censored) retests are excluded.",
+        whyItMatters: "The headline metric: a retest only matters if the OB held and price actually reacted. Reaction Success + Weak Hold + Failure = 100% of resolved retests.",
+    },
+    retest_weak_hold: {
+        friendlyName: "Weak Hold %",
+        definition: "Of resolved retests, the share that held the reaction window but did NOT produce the minimum favorable move — price just sat there without breaching.",
+        whyItMatters: "These padded the old 'Survival Rate'. A high weak-hold share means many 'holds' were untradeable.",
+    },
+    retest_eventual_failure: {
+        friendlyName: "Eventual Failure % (planned)",
+        definition: "The share of retested OBs that are EVER invalidated, at the OB level. Not yet available: the current engine only checks for breaches inside reaction windows, so delayed (between-window) failures are not detected.",
+        whyItMatters: "The number users usually want when they say 'survival'. Lands with the continuous-invalidation engine fix.",
+    },
+    retest_delayed_failure: {
+        friendlyName: "Delayed Failure (caveat)",
+        definition: "A breach of the OB that happens AFTER a held reaction window and outside any later window. The current engine does not detect these — such OBs stay 'alive' and later re-entries ('zombie retests') can still be counted, slightly inflating hold rates.",
+        whyItMatters: "Known limitation until the continuous-invalidation fix lands. Treat Window Hold % as a window-scoped statement only.",
+    },
+    retest_backend_computed: {
+        friendlyName: "Backend Computed",
+        definition: "These retest events were computed by the backend exporter and imported as artifacts (rather than derived in-browser from candles). It is a statement about the data's source, not a validation of the metric definitions.",
+        whyItMatters: "Backend and frontend implement the same logic — provenance differs, definitions (and their caveats) are identical.",
+    },
+    // Legacy key (pre-rename) — kept so older surfaces still resolve. Same meaning
+    // as retest_window_hold; do not present as "Survival" anywhere new.
     retest_survival: {
-        friendlyName: "Survival Rate",
-        definition: "Of retests that resolved (survived or failed), the share that survived — i.e. price re-entered the order block and it held without a breach inside the reaction window. Open (right-censored) retests are excluded.",
-        whyItMatters: "The headline measure of whether a retested OB still offers a reaction or has lost its edge.",
+        friendlyName: "Window Hold % (formerly Survival Rate)",
+        definition: "Of retests that resolved (held or failed), the share that held without a close-breach inside the reaction window. Weak/no-reaction holds count; failures after the window are not yet detected. Open (right-censored) retests are excluded.",
+        whyItMatters: "Renamed from 'Survival Rate' because it measures a short window hold, not eventual OB survival. See Reaction Success % for the headline.",
     },
     retest_rate: {
         friendlyName: "Retest Rate",
@@ -525,23 +559,23 @@ export const GLOSSARY = {
     },
     retest_failure_rate: {
         friendlyName: "Failure Rate",
-        definition: "Of retests that resolved (survived or failed), the share that failed — price re-entered and then breached the OB within the reaction window. Open retests are excluded. = 1 − survival rate.",
-        whyItMatters: "The complement of survival; high failure means retested OBs are breaking rather than holding.",
+        definition: "Of retests that resolved (held or failed), the share that failed — price re-entered and then breached the OB within the reaction window. Open retests are excluded. = 1 − window hold %. Failures occurring after the window are not yet counted.",
+        whyItMatters: "The complement of window hold; high failure means retested OBs are breaking rather than holding.",
     },
     retest_candles_to_failure: {
-        friendlyName: "Avg Candles to Failure",
-        definition: "For failed retests only, the average number of candles from re-entry until the breach.",
-        whyItMatters: "How quickly a failing retest breaks — fast breaks leave little room to react.",
+        friendlyName: "Median Candles to Failure",
+        definition: "For failed retests only, the median number of candles from re-entry until the breach (median, not mean — failure times are skewed and window-truncated).",
+        whyItMatters: "How quickly a typical failing retest breaks — fast breaks leave little room to react.",
     },
     retest_open: {
         friendlyName: "Open (Excluded)",
-        definition: "Retests whose reaction window extended past the available data (right-censored). Counted but excluded from survival/failure rates.",
+        definition: "Retests whose reaction window extended past the available data (right-censored). Counted but excluded from hold/reaction/failure rates.",
         whyItMatters: "Keeps rates honest — unresolved retests aren't scored as wins or losses.",
     },
     retest_reaction: {
-        friendlyName: "Reaction",
-        definition: "How far price moved away from the order block after the retest, measured in pips (favorable excursion).",
-        whyItMatters: "Survival says the OB held; reaction says how tradeable that hold actually was.",
+        friendlyName: "Avg Max Favorable",
+        definition: "The maximum favorable excursion within the reaction window — how far price moved away from the order block after the retest, in pips. Averaged over resolved retests; it is a best-case within-window move, not a realized result.",
+        whyItMatters: "Window hold says the OB held; max favorable says how tradeable that hold could have been.",
     },
     retest_sample: {
         friendlyName: "Sample Size (n)",
@@ -625,8 +659,8 @@ export const GLOSSARY = {
     },
     retest_reaction_quality: {
         friendlyName: "Reaction Quality",
-        definition: "Whether the retest's reaction met the configured minimum pip threshold (met) or not (missed). Independent of survival.",
-        whyItMatters: "An OB can 'survive' without producing a tradeable move — this separates the two.",
+        definition: "Whether the retest's reaction met the configured minimum pip threshold (met) or not (missed). Independent of the window-hold outcome — combined they define Reaction Success (held + met) vs Weak Hold (held + missed).",
+        whyItMatters: "An OB can hold the window without producing a tradeable move — this separates the two.",
     },
     retest_intelligence: {
         friendlyName: "Retest Intelligence",
@@ -635,22 +669,22 @@ export const GLOSSARY = {
     },
     retest_strongest_segment: {
         friendlyName: "Strongest Segment",
-        definition: "The single condition with the highest (or lowest) survival rate among groups meeting the minimum sample size.",
+        definition: "The single condition with the highest (or lowest) reaction success rate among groups meeting the minimum sample size. Window hold is shown alongside as the secondary stat.",
         whyItMatters: "The clearest single signal to investigate first.",
     },
     retest_best_worst: {
         friendlyName: "Top Conditions",
-        definition: "Conditions ranked by survival rate, filtered to those with at least the minimum sample size; thin slices are excluded from ranking.",
-        whyItMatters: "Highlights where retests work best and worst without overfitting tiny samples.",
+        definition: "Conditions ranked by reaction success rate (held + minimum favorable move), filtered to those with at least the minimum sample size; thin slices are excluded from ranking.",
+        whyItMatters: "Highlights where retests actually pay off best and worst without overfitting tiny samples.",
     },
     retest_key_findings: {
         friendlyName: "Key Findings",
-        definition: "Deterministic, data-driven statements comparing two existing buckets (e.g. R2 vs R1), gated by minimum sample and a minimum survival-gap. No AI, no scoring.",
+        definition: "Deterministic, data-driven statements comparing two existing buckets (e.g. R2 vs R1) on reaction success, gated by minimum sample and a minimum gap. No AI, no scoring.",
         whyItMatters: "Plain-language read of the most material differences in the data.",
     },
     retest_session_matrix: {
         friendlyName: "Session Matrix",
-        definition: "A grid of survival rate by origin session (rows) versus retest session (columns), with the same minimum-sample safeguards.",
+        definition: "A grid of reaction success rate (with window hold beneath) by origin session (rows) versus retest session (columns), with the same minimum-sample safeguards.",
         whyItMatters: "Reveals origin/retest session combinations that a one-dimensional breakdown would miss.",
     },
 

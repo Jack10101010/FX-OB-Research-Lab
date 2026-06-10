@@ -19,7 +19,7 @@ const code = transformFileSync(SRC, { presets: ["@babel/preset-env"] }).code;
 const m = new Module("obRetest");
 m.paths = Module._nodeModulePaths(process.cwd());
 m._compile(code, "obRetest.js");
-const { deriveRetests } = m.exports;
+const { deriveRetests, summarizeRetestEvents, medianOf } = m.exports;
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 const T0 = 1_700_000_000; // epoch seconds
@@ -34,12 +34,33 @@ function check(name, cond, extra = "") {
 function run(scenario, ob, candles, config = {}) {
     const res = deriveRetests({ orderBlocks: [ob], tradesByObId: null, candles, config });
     const s = res.summary;
-    // Universal invariant for every scenario.
+    // Universal invariants for every scenario (Phase 1 honest-taxonomy additions).
     check(
         `${scenario}: invariant survived+failed+open === totalRetests`,
         s.survived + s.failed + s.open === s.totalRetests,
         `(${s.survived}+${s.failed}+${s.open} vs ${s.totalRetests})`,
     );
+    check(
+        `${scenario}: invariant reactionSuccess+weakHold === survived`,
+        s.reactionSuccessCount + s.weakHoldCount === s.survived,
+        `(${s.reactionSuccessCount}+${s.weakHoldCount} vs ${s.survived})`,
+    );
+    check(
+        `${scenario}: invariant windowHoldRate === survivalRate (alias)`,
+        s.windowHoldRate === s.survivalRate,
+    );
+    const closed = s.survived + s.failed;
+    if (closed > 0) {
+        check(
+            `${scenario}: invariant reactionSuccessRate+weakHoldRate+failureRate === 1`,
+            Math.abs(s.reactionSuccessRate + s.weakHoldRate + s.failureRate - 1) < 1e-9,
+            `(${s.reactionSuccessRate}+${s.weakHoldRate}+${s.failureRate})`,
+        );
+        check(
+            `${scenario}: invariant windowHoldRate === reactionSuccessRate+weakHoldRate`,
+            Math.abs(s.windowHoldRate - (s.reactionSuccessRate + s.weakHoldRate)) < 1e-9,
+        );
+    }
     return res;
 }
 
@@ -61,6 +82,31 @@ const bull = (extra = {}) => ({ id: "1", side: "bull", top: 1.1000, bot: 1.0990,
     check("BULL survived: outcome survived", e && e.outcome === "survived", e && e.outcome);
     check("BULL survived: reactionMet true", e && e.reactionMet === true, e && String(e.reactionMaxPips));
     check("BULL survived: survivalRate 1", r.summary.survivalRate === 1);
+    check("BULL survived: windowHoldRate 1", r.summary.windowHoldRate === 1);
+    check("BULL survived: reactionSuccessRate 1 (held + reaction)", r.summary.reactionSuccessRate === 1);
+    check("BULL survived: weakHoldRate 0", r.summary.weakHoldRate === 0);
+    check("BULL survived: medianCandlesToFailure null (no failures)", r.summary.medianCandlesToFailure === null);
+}
+
+// WEAK HOLD: window completes with no breach but reaction BELOW the 8-pip minimum →
+// outcome is still "survived" (a window hold), but it is a weak hold, NOT a reaction
+// success. This is the case the old "Survival Rate" silently counted as a win.
+{
+    const c = [
+        mk(0, 1.1000, 1.1005, 1.0995, 1.1002), // first touch
+        mk(1, 1.1006, 1.1010, 1.1003, 1.1008), // leave → armed
+        mk(2, 1.1001, 1.1004, 1.0996, 1.1001), // retest entry
+    ];
+    // grind just above/inside; max favorable ≈ 4 pips above top (< 8 minimum), no breach
+    for (let i = 3; i <= 12; i++) c.push(mk(i, 1.1001, 1.1004, 1.0997, 1.1000));
+    const r = run("BULL weak hold", bull(), c);
+    const e = r.events[0];
+    check("BULL weak hold: outcome survived (window hold)", e && e.outcome === "survived", e && e.outcome);
+    check("BULL weak hold: reactionMet false", e && e.reactionMet === false, e && String(e.reactionMaxPips));
+    check("BULL weak hold: windowHoldRate 1", r.summary.windowHoldRate === 1);
+    check("BULL weak hold: reactionSuccessRate 0", r.summary.reactionSuccessRate === 0);
+    check("BULL weak hold: weakHoldRate 1", r.summary.weakHoldRate === 1);
+    check("BULL weak hold: weakHoldCount 1", r.summary.weakHoldCount === 1);
 }
 
 // FAILED: retest then close below distal (bottom) within the window.
@@ -162,6 +208,35 @@ const bear = (extra = {}) => ({ id: "2", side: "bear", top: 1.1010, bot: 1.1000,
     ];
     const r = run("BEAR open", bear(), c);
     check("BEAR open: outcome open", r.events[0] && r.events[0].outcome === "open", r.events[0] && r.events[0].outcome);
+}
+
+// ── MEDIAN: medianOf + summarizer medianCandlesToFailure ───────────────────────────
+{
+    check("medianOf([]) === null", medianOf([]) === null);
+    check("medianOf([7]) === 7", medianOf([7]) === 7);
+    check("medianOf([1,3,7]) === 3 (odd count)", medianOf([1, 3, 7]) === 3);
+    check("medianOf([1,3]) === 2 (even count averages)", medianOf([1, 3]) === 2);
+    check("medianOf unsorted [7,1,3] === 3", medianOf([7, 1, 3]) === 3);
+
+    // Synthetic events through the shared summarizer: failures at 1, 9, 2 candles →
+    // median 2 (mean would be 4 — the rename away from "Avg" matters).
+    const evs = [
+        { outcome: "failed", candlesToFailure: 1, reactionMaxPips: 0, reactionMet: false },
+        { outcome: "failed", candlesToFailure: 9, reactionMaxPips: 0, reactionMet: false },
+        { outcome: "failed", candlesToFailure: 2, reactionMaxPips: 0, reactionMet: false },
+        { outcome: "survived", candlesToFailure: null, reactionMaxPips: 10, reactionMet: true },
+        { outcome: "survived", candlesToFailure: null, reactionMaxPips: 2, reactionMet: false },
+        { outcome: "open", candlesToFailure: null, reactionMaxPips: 1, reactionMet: false },
+    ];
+    const s = summarizeRetestEvents(evs, [], 0);
+    check("summarizer: medianCandlesToFailure 2 (1,2,9)", s.medianCandlesToFailure === 2, String(s.medianCandlesToFailure));
+    check("summarizer: avgCandlesToFailure 4 (kept for compat)", s.avgCandlesToFailure === 4, String(s.avgCandlesToFailure));
+    check("summarizer: closed 5, reactionSuccess 1, weakHold 1, failed 3",
+        s.reactionSuccessCount === 1 && s.weakHoldCount === 1 && s.failed === 3);
+    check("summarizer: reactionSuccessRate 0.2", Math.abs(s.reactionSuccessRate - 0.2) < 1e-9, String(s.reactionSuccessRate));
+    check("summarizer: weakHoldRate 0.2", Math.abs(s.weakHoldRate - 0.2) < 1e-9);
+    check("summarizer: windowHoldRate 0.4 === survivalRate", s.windowHoldRate === s.survivalRate && Math.abs(s.windowHoldRate - 0.4) < 1e-9);
+    check("summarizer: open excluded (failureRate 0.6)", Math.abs(s.failureRate - 0.6) < 1e-9);
 }
 
 // ── result ──────────────────────────────────────────────────────────────────────

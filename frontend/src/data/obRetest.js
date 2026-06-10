@@ -20,10 +20,21 @@
  *   • open     — no breach, but the reaction window extends beyond the last
  *                available candle (right-censored). Excluded from rates.
  *   • survived — no breach and the window completed within available data.
- * The configured reaction-pip threshold is recorded as a survival-QUALITY flag
+ * The configured reaction-pip threshold is recorded as a hold-QUALITY flag
  * (`reactionMet`) + measured `reactionMaxPips`, not a 4th bucket (see plan §3.4
  * and the deviation note in the closeout message). This keeps the invariant
  * `survived + failed + open === totalRetests` exact.
+ *
+ * METRIC NAMING (OB-RETEST-SURVIVAL-DEFINITION-AUDIT-1, Phase 1):
+ * "survived" is a WINDOW HOLD — no close-breach inside ~N candles — NOT eventual
+ * OB survival (delayed/between-window failures are not yet detected; that engine
+ * fix is deferred). The summary therefore exposes honest derived metrics:
+ *   windowHoldRate       = survived / closed            (alias of survivalRate)
+ *   reactionSuccessRate  = (survived ∧ reactionMet) / closed   ← headline
+ *   weakHoldRate         = (survived ∧ ¬reactionMet) / closed
+ *   failureRate          = failed / closed
+ *   medianCandlesToFailure (failed events; median, not mean)
+ * Event classification and the exported artifact schema are UNCHANGED.
  */
 
 export const DEFAULT_RETEST_CONFIG = {
@@ -377,12 +388,19 @@ export function summarizeRetestEvents(events = [], perOB = [], obsTotal = 0) {
     const obsRetested = perOB.filter((p) => p.retestCount > 0).length;
     const totalRetests = events.length;
     let survived = 0, failed = 0, open = 0, reactionSum = 0, reactionN = 0, failCandleSum = 0, failN = 0;
+    let reactionSuccessCount = 0, weakHoldCount = 0;
+    const failCandles = [];
     for (const e of events) {
-        if (e.outcome === "survived") survived += 1;
-        else if (e.outcome === "failed") failed += 1;
+        if (e.outcome === "survived") {
+            survived += 1;
+            if (e.reactionMet) reactionSuccessCount += 1;
+            else weakHoldCount += 1;
+        } else if (e.outcome === "failed") failed += 1;
         else open += 1;
         if (e.outcome !== "open" && isFinite(e.reactionMaxPips)) { reactionSum += e.reactionMaxPips; reactionN += 1; }
-        if (e.outcome === "failed" && isFinite(e.candlesToFailure)) { failCandleSum += e.candlesToFailure; failN += 1; }
+        if (e.outcome === "failed" && isFinite(e.candlesToFailure)) {
+            failCandleSum += e.candlesToFailure; failN += 1; failCandles.push(e.candlesToFailure);
+        }
     }
     const closed = survived + failed;
     return {
@@ -394,11 +412,32 @@ export function summarizeRetestEvents(events = [], perOB = [], obsTotal = 0) {
         survived,
         failed,
         open,
+        // Honest taxonomy (Phase 1). windowHoldRate is the renamed headline-of-old;
+        // reactionSuccessRate is the new headline. Invariants:
+        //   reactionSuccessCount + weakHoldCount === survived
+        //   reactionSuccessRate + weakHoldRate + failureRate === 1 (closed > 0)
+        reactionSuccessCount,
+        weakHoldCount,
+        windowHoldRate: closed ? survived / closed : 0,
+        reactionSuccessRate: closed ? reactionSuccessCount / closed : 0,
+        weakHoldRate: closed ? weakHoldCount / closed : 0,
+        // Legacy name kept for internal compatibility — same value as windowHoldRate.
+        // Do NOT label this "Survival Rate" in UI (see the audit).
         survivalRate: closed ? survived / closed : 0,
         failureRate: closed ? failed / closed : 0,
         avgReactionPips: reactionN ? reactionSum / reactionN : 0,
         avgCandlesToFailure: failN ? failCandleSum / failN : 0,
+        medianCandlesToFailure: medianOf(failCandles),
     };
+}
+
+// Median of a numeric array (null when empty). Exported for the research layer
+// so per-bucket medians use the identical definition.
+export function medianOf(values) {
+    const v = (values || []).filter((x) => x != null && isFinite(x)).sort((a, b) => a - b);
+    if (!v.length) return null;
+    const mid = v.length >> 1;
+    return v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2;
 }
 
 function round2(v) {

@@ -28,9 +28,11 @@ const fmtTime = (epochSec) => {
     return `${dt.getUTCFullYear()}-${p(dt.getUTCMonth() + 1)}-${p(dt.getUTCDate())} ${p(dt.getUTCHours())}:${p(dt.getUTCMinutes())}`;
 };
 
-// Survival color bands (C1.5) — uses ONLY existing design tokens, no hardcoded hex.
-// 90%+ strong success · 75-90% success · 60-75% neutral · <60% weak.
-function survivalBandClass(rate) {
+// Color bands — use ONLY existing design tokens, no hardcoded hex.
+// Window-hold bands (legacy C1.5 thresholds): 90%+ strong · 75-90% good · 60-75%
+// neutral · <60% weak. Hold rates run structurally high (see survival audit), so
+// these are deliberately strict.
+function holdBandClass(rate) {
     if (rate == null || !isFinite(rate)) return "text-muted-lab";
     if (rate >= 0.90) return "text-[hsl(var(--success))] text-glow-success font-semibold";
     if (rate >= 0.75) return "text-[hsl(var(--success))]";
@@ -38,7 +40,28 @@ function survivalBandClass(rate) {
     return "text-[hsl(var(--danger))]";
 }
 
+// Reaction-success bands — recalibrated lower: requiring a real favorable move
+// makes rates run well below window-hold. 70%+ strong · 50-70% good · 35-50%
+// neutral · <35% weak.
+function reactionBandClass(rate) {
+    if (rate == null || !isFinite(rate)) return "text-muted-lab";
+    if (rate >= 0.70) return "text-[hsl(var(--success))] text-glow-success font-semibold";
+    if (rate >= 0.50) return "text-[hsl(var(--success))]";
+    if (rate >= 0.35) return "text-[hsl(var(--warning))]";
+    return "text-[hsl(var(--danger))]";
+}
+
+// Event-table outcome display: "survived" is shown as a HOLD (window-scoped),
+// split into strong (reaction met) vs weak (no reaction) — see survival audit.
 const OUTCOME_TONE = { survived: "success", failed: "danger", open: "muted" };
+function outcomePill(e) {
+    if (e.outcome === "survived") {
+        return e.reactionMet
+            ? <Pill tone="success">held</Pill>
+            : <Pill tone="warning">held · weak</Pill>;
+    }
+    return <Pill tone={OUTCOME_TONE[e.outcome] || "muted"}>{e.outcome}</Pill>;
+}
 const RETEST_TYPE_LABEL = {
     wick_only: "Wick-only",
     clean: "Clean",
@@ -135,7 +158,7 @@ function BasisBanner({ candleCount, meta, summary, source }) {
     return (
         <div className="flex flex-wrap items-center gap-2">
             {isBackend
-                ? <HeroBadge tone="success">Backend Verified</HeroBadge>
+                ? <HeroBadge tone="success"><TermTip termKey="retest_backend_computed">Backend Computed</TermTip></HeroBadge>
                 : <HeroBadge tone="secondary">Frontend Derived</HeroBadge>}
             {isBackend
                 ? <HeroBadge tone="muted">from imported run</HeroBadge>
@@ -143,7 +166,7 @@ function BasisBanner({ candleCount, meta, summary, source }) {
             {!isBackend && meta?.computeMs != null && <HeroBadge tone="muted">{meta.computeMs} ms</HeroBadge>}
             {summary && <HeroBadge tone="muted">{summary.totalRetests} retest events</HeroBadge>}
             <span className="text-[10.5px] text-muted-lab ml-1">
-                Open (right-censored) retests are excluded from survival/failure rates.
+                Rates are window-based (see Window Hold %); open (right-censored) retests are excluded.
             </span>
         </div>
     );
@@ -203,21 +226,28 @@ function SummaryCards({ summary }) {
     const cards = [
         { label: "OBs Retested", value: String(summary.obsRetested), sub: `of ${summary.obsWithFirstTouch} touched`, tone: "primary", icon: Boxes },
         { label: "Retest Rate", value: summary.obsWithFirstTouch ? pct(summary.retestRate, 0) : "—", sub: "touched OBs revisited", tone: "secondary", icon: Repeat2, tip: "retest_rate" },
-        { label: "Survival Rate", value: closed ? pct(summary.survivalRate, 0) : "—", sub: `${summary.survived} survived (closed)`, tone: "success", icon: ShieldCheck, tip: "retest_survival" },
+        // Headline: held AND produced the configured minimum favorable move.
+        { label: "Reaction Success %", value: closed ? pct(summary.reactionSuccessRate, 0) : "—", sub: `${summary.reactionSuccessCount} held + reacted (closed)`, tone: "success", icon: ShieldCheck, tip: "retest_reaction_success" },
+        // The old "Survival Rate", renamed to what it actually measures.
+        { label: "Window Hold %", value: closed ? pct(summary.windowHoldRate, 0) : "—", sub: `${summary.survived} held window (closed)`, tone: "secondary", icon: Activity, tip: "retest_window_hold" },
+        { label: "Weak Hold %", value: closed ? pct(summary.weakHoldRate, 0) : "—", sub: `${summary.weakHoldCount} held, no reaction`, tone: "warning", icon: Hourglass, tip: "retest_weak_hold" },
         { label: "Failure Rate", value: closed ? pct(summary.failureRate, 0) : "—", sub: `${summary.failed} failed (closed)`, tone: "danger", icon: ShieldAlert, tip: "retest_failure_rate" },
-        { label: "Avg Reaction", value: pips(summary.avgReactionPips, 1), sub: "pips, closed retests", tone: "primary", icon: Activity, tip: "retest_reaction" },
-        { label: "Avg Candles to Fail", value: summary.failed ? pips(summary.avgCandlesToFailure, 1) : "—", sub: "across failed retests", tone: "warning", icon: Timer, tip: "retest_candles_to_failure" },
+        { label: "Avg Max Favorable", value: pips(summary.avgReactionPips, 1), sub: "pips, closed retests", tone: "primary", icon: TrendingUp, tip: "retest_reaction" },
+        { label: "Median Candles to Fail", value: summary.failed ? pips(summary.medianCandlesToFailure, 1) : "—", sub: "across failed retests", tone: "warning", icon: Timer, tip: "retest_candles_to_failure" },
         { label: "Open (excluded)", value: String(summary.open), sub: "right-censored", tone: "muted", icon: Hourglass, tip: "retest_open" },
     ];
     return (
         <div className="space-y-1.5">
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2.5">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
                 {cards.map((c) => (
                     <MetricChip key={c.label} label={c.label} value={c.value} sub={c.sub} tone={c.tone} icon={c.icon} size="compact" tip={c.tip} />
                 ))}
             </div>
             <div className="text-[10.5px] text-muted-lab leading-relaxed">
-                Survived = held without breach inside the reaction window. Reaction threshold is tracked separately as reaction quality.
+                Window Hold = no close-breach inside the reaction window (a hold, not eventual survival —
+                failures after the window are not yet detected). Reaction Success additionally requires the
+                configured minimum favorable move; Weak Hold held without one.
+                Reaction Success % + Weak Hold % + Failure Rate = 100% of closed retests.
             </div>
         </div>
     );
@@ -244,14 +274,14 @@ function EventTable({ events }) {
         { key: "retestTime", label: "Retest time", align: "left", render: (r) => fmtTime(r.retestTime) },
         { key: "retestType", label: "Type", align: "left", render: (r) => RETEST_TYPE_LABEL[r.retestType] || r.retestType },
         { key: "maxPenetrationPct", label: "Max pen", align: "right", tip: "retest_max_penetration", render: (r) => `${pips(r.maxPenetrationPct, 0)}%` },
-        { key: "reactionMaxPips", label: "Reaction", align: "right", tip: "retest_reaction",
+        { key: "reactionMaxPips", label: "Max Fav", align: "right", tip: "retest_reaction",
           render: (r) => (
               <span>
                   {pips(r.reactionMaxPips, 1)}p
                   {!r.reactionMet && <span className="text-muted-lab text-[9.5px]"> weak</span>}
               </span>
           ) },
-        { key: "outcome", label: "Outcome", align: "left", render: (r) => <Pill tone={OUTCOME_TONE[r.outcome] || "muted"}>{r.outcome}</Pill> },
+        { key: "outcome", label: "Outcome", align: "left", render: (r) => outcomePill(r) },
         { key: "candlesToFailure", label: "→ Fail", align: "right", render: (r) => (r.candlesToFailure == null ? "—" : r.candlesToFailure) },
         { key: "session", label: "Session", align: "left", tip: "retest_retest_session" },
         { key: "minutesSinceFirstTouch", label: "Min since FT", align: "right", render: (r) => (r.minutesSinceFirstTouch == null ? "—" : r.minutesSinceFirstTouch) },
@@ -307,18 +337,28 @@ function EdgeBreakdownTable({ entry, minN }) {
         { key: "key", label: entry.label, align: "left", tip: entry.tip,
           render: (r) => (r.belowMinN ? <span className="text-muted-lab">{r.key} *</span> : r.key) },
         { key: "n", label: "n", align: "right", tip: "retest_sample" },
-        { key: "survived", label: "Surv", align: "right" },
+        { key: "survived", label: "Held", align: "right" },
         { key: "failed", label: "Fail", align: "right" },
         { key: "open", label: "Open", align: "right" },
-        { key: "survivalRate", label: "Survival", align: "right", tip: "retest_survival",
-          sortValue: (r) => (r.survivalRate == null ? -1 : r.survivalRate),
-          render: (r) => (r.survivalRate == null ? "—" : (
-              <span className={r.belowMinN ? "text-muted-lab" : survivalBandClass(r.survivalRate)}>
-                  {pct(r.survivalRate, 0)}{r.belowMinN ? " *" : ""}
+        // Primary % — held AND reaction met (closed-only).
+        { key: "reactionSuccessRate", label: "React Succ", align: "right", tip: "retest_reaction_success",
+          sortValue: (r) => (r.reactionSuccessRate == null ? -1 : r.reactionSuccessRate),
+          render: (r) => (r.reactionSuccessRate == null ? "—" : (
+              <span className={r.belowMinN ? "text-muted-lab" : reactionBandClass(r.reactionSuccessRate)}>
+                  {pct(r.reactionSuccessRate, 0)}{r.belowMinN ? " *" : ""}
               </span>
           )) },
-        { key: "avgReactionPips", label: "Avg React", align: "right", tip: "retest_reaction", render: (r) => pips(r.avgReactionPips, 1) },
-        { key: "avgCandlesToFailure", label: "→ Fail", align: "right", render: (r) => (r.avgCandlesToFailure == null ? "—" : pips(r.avgCandlesToFailure, 1)) },
+        // Secondary % — the old "Survival", renamed.
+        { key: "windowHoldRate", label: "Window Hold", align: "right", tip: "retest_window_hold",
+          sortValue: (r) => (r.windowHoldRate == null ? -1 : r.windowHoldRate),
+          render: (r) => (r.windowHoldRate == null ? "—" : (
+              <span className={r.belowMinN ? "text-muted-lab" : holdBandClass(r.windowHoldRate)}>
+                  {pct(r.windowHoldRate, 0)}{r.belowMinN ? " *" : ""}
+              </span>
+          )) },
+        { key: "avgReactionPips", label: "Avg Max Fav", align: "right", tip: "retest_reaction", render: (r) => pips(r.avgReactionPips, 1) },
+        { key: "medianCandlesToFailure", label: "Med → Fail", align: "right", tip: "retest_candles_to_failure",
+          render: (r) => (r.medianCandlesToFailure == null ? "—" : pips(r.medianCandlesToFailure, 1)) },
     ];
     const hasThin = rows.some((r) => r.belowMinN);
     return (
@@ -345,7 +385,7 @@ function EdgeDiscoveryTabs({ edgeBreakdowns, minN }) {
         <div className="space-y-3">
             <div className="flex items-center justify-between flex-wrap gap-2">
                 <div className="panel-title-label uppercase text-title-lab">Retest Edge Discovery</div>
-                <div className="text-[10px] text-muted-lab">Survival closed-only; rows below n ≥ {minN} shown but not ranked (*).</div>
+                <div className="text-[10px] text-muted-lab">Reaction success &amp; window hold are closed-only; rows below n ≥ {minN} shown but not ranked (*).</div>
             </div>
             <Segment options={groups.map((g) => ({ value: g.key, label: g.label }))} value={active} onChange={setActive} />
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
@@ -369,8 +409,8 @@ function ConditionList({ title, icon: Icon, items }) {
                     <div key={i} className="flex items-center justify-between text-[12px] gap-2">
                         <span className="text-[hsl(var(--text-2))] truncate">{c.condition}</span>
                         <span className="shrink-0 tabular-nums">
-                            <span className={survivalBandClass(c.survivalRate)}>{pct(c.survivalRate, 0)}</span>
-                            <span className="text-muted-lab"> · n={c.n} · {pips(c.avgReactionPips, 1)}p</span>
+                            <span className={reactionBandClass(c.reactionSuccessRate)}>{pct(c.reactionSuccessRate, 0)}</span>
+                            <span className="text-muted-lab"> · hold {pct(c.windowHoldRate, 0)} · n={c.n} · {pips(c.avgReactionPips, 1)}p</span>
                         </span>
                     </div>
                 ))}
@@ -389,8 +429,8 @@ function StrongestCard({ label, icon: Icon, item }) {
                 <>
                     <div className="text-[13px] text-[hsl(var(--text))] mt-1 leading-snug">{item.condition}</div>
                     <div className="mt-1 text-[12px]">
-                        <span className={survivalBandClass(item.survivalRate)}>{pct(item.survivalRate, 0)} survival</span>
-                        <span className="text-muted-lab"> · n={item.n} · {pips(item.avgReactionPips, 1)}p react</span>
+                        <span className={reactionBandClass(item.reactionSuccessRate)}>{pct(item.reactionSuccessRate, 0)} reaction success</span>
+                        <span className="text-muted-lab"> · hold {pct(item.windowHoldRate, 0)} · n={item.n} · {pips(item.avgReactionPips, 1)}p</span>
                     </div>
                 </>
             ) : (
@@ -411,8 +451,8 @@ function RetestIntelligence({ bestWorst, findings, minN }) {
             ) : (
                 <div className="space-y-4">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                        <StrongestCard label={<TermTip termKey="retest_strongest_segment">Strongest survived segment</TermTip>} icon={Trophy} item={bestWorst.best?.[0]} />
-                        <StrongestCard label={<TermTip termKey="retest_strongest_segment">Strongest failed segment</TermTip>} icon={ShieldAlert} item={bestWorst.worst?.[0]} />
+                        <StrongestCard label={<TermTip termKey="retest_strongest_segment">Strongest reaction segment</TermTip>} icon={Trophy} item={bestWorst.best?.[0]} />
+                        <StrongestCard label={<TermTip termKey="retest_strongest_segment">Weakest reaction segment</TermTip>} icon={ShieldAlert} item={bestWorst.worst?.[0]} />
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <ConditionList title={<TermTip termKey="retest_best_worst">Top positive conditions</TermTip>} icon={TrendingUp} items={bestWorst.best} />
@@ -435,7 +475,8 @@ function RetestIntelligence({ bestWorst, findings, minN }) {
                         )}
                     </div>
                     <div className="text-[10px] text-muted-lab">
-                        Conditions &amp; findings respect a minimum sample of n ≥ {minN}; survival is closed-only (open excluded). Deterministic — derived only from the statistics above.
+                        Conditions &amp; findings ranked by reaction success (held + min favorable move), closed-only (open excluded),
+                        minimum sample n ≥ {minN}. Window hold shown as the secondary stat. Deterministic — derived only from the statistics above.
                     </div>
                 </div>
             )}
@@ -450,7 +491,7 @@ function SessionMatrix({ matrix, minN }) {
     return (
         <NeonPanel title={<TermTip termKey="retest_session_matrix">Session Matrix — Origin × Retest</TermTip>} dense>
             <div className="text-[10.5px] text-muted-lab mb-2">
-                Survival % by origin session (rows) vs retest session (columns).
+                Reaction success % (window hold % below) by origin session (rows) vs retest session (columns).
                 <span className="ml-1">* = below min sample (n &lt; {minN}); muted, not emphasized.</span>
             </div>
             <div className="overflow-x-auto scrollbar-thin">
@@ -470,13 +511,15 @@ function SessionMatrix({ matrix, minN }) {
                                 {cols.map((c) => {
                                     const cell = cells[o]?.[c];
                                     if (!cell || cell.n === 0) return <td key={c} className="px-2 py-1.5 text-center text-muted-lab">·</td>;
-                                    const muted = cell.belowMinN || cell.survivalRate == null;
+                                    const muted = cell.belowMinN || cell.reactionSuccessRate == null;
                                     return (
                                         <td key={c} className="px-2 py-1.5 text-center tabular-nums">
-                                            <div className={muted ? "text-muted-lab" : survivalBandClass(cell.survivalRate)}>
-                                                {cell.survivalRate == null ? "—" : pct(cell.survivalRate, 0)}{cell.belowMinN ? " *" : ""}
+                                            <div className={muted ? "text-muted-lab" : reactionBandClass(cell.reactionSuccessRate)}>
+                                                {cell.reactionSuccessRate == null ? "—" : pct(cell.reactionSuccessRate, 0)}{cell.belowMinN ? " *" : ""}
                                             </div>
-                                            <div className="text-[9.5px] text-muted-lab">n={cell.n}</div>
+                                            <div className="text-[9.5px] text-muted-lab">
+                                                hold {cell.windowHoldRate == null ? "—" : pct(cell.windowHoldRate, 0)} · n={cell.n}
+                                            </div>
                                         </td>
                                     );
                                 })}
