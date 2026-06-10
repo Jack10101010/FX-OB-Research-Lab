@@ -48,7 +48,7 @@ function ExplorerSelect({ label, value, onChange, options, includeNone = false }
             <select
                 value={value}
                 onChange={(e) => onChange(e.target.value)}
-                className="[color-scheme:dark] bg-[hsl(var(--panel-2))] border border-[hsl(var(--border-soft))] text-[hsl(var(--text))] text-[11.5px] font-ui rounded px-2 py-1.5 clip-bevel-sm focus:outline-none focus:border-[hsl(var(--accent-primary)/0.6)]"
+                className="appearance-none [color-scheme:dark] bg-[hsl(var(--panel-2))] border border-[hsl(var(--border-soft))] text-[hsl(var(--text))] text-[11.5px] font-ui rounded px-2 pr-7 py-1.5 clip-bevel-sm focus:outline-none focus:border-[hsl(var(--accent-primary)/0.6)]"
             >
                 {includeNone && <option value="">None</option>}
                 {options.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
@@ -253,14 +253,15 @@ export function FailureExplorer({ allTrades = [], allLosers = [], bucket = null 
                         // Totals across the rows currently shown (reflects filtering / sample floor).
                         const T = bucketRows.reduce((a, c) => {
                             a.bL += c.bucketLosses;
-                            if (c.bucketWinsKnown) a.bW += c.bucketWins; else a.bWpartial = true;
+                            if (c.bucketWinsKnown) { a.bW += c.bucketWins; if (c.bucketPosR != null) a.bPos += c.bucketPosR; } else a.bWpartial = true;
                             a.bLossR += c.bucketLossR;
                             a.fL += c.fullLosses; a.fW += c.fullWins; a.fT += c.fullTotal;
                             a.fLossR += c.fullLossR; a.fPos += c.fullPosR;
                             return a;
-                        }, { bL: 0, bW: 0, bLossR: 0, fL: 0, fW: 0, fT: 0, fLossR: 0, fPos: 0, bWpartial: false });
+                        }, { bL: 0, bW: 0, bPos: 0, bLossR: 0, fL: 0, fW: 0, fT: 0, fLossR: 0, fPos: 0, bWpartial: false });
                         const tFullLossRate = T.fT ? r1((T.fL / T.fT) * 100) : 0;
                         const tNetR = r1(T.fPos - T.fLossR);
+                        const tBucketNetR = r1(T.bPos - T.bLossR); // bucket net across shown rows (known winner R only)
                         const tPF = T.fLossR > 0 ? r2(T.fPos / T.fLossR) : null;
 
                         // Optional advanced columns (default OFF) — appended to the Overall group.
@@ -303,7 +304,7 @@ export function FailureExplorer({ allTrades = [], allLosers = [], bucket = null 
                                     <span className="ml-auto inline-flex items-center gap-1.5">
                                         <span className="uppercase tracking-[0.05em] text-[hsl(var(--text-3))]">Sort</span>
                                         <select value={bucketSort} onChange={(e) => setBucketSort(e.target.value)}
-                                            className="[color-scheme:dark] bg-[hsl(var(--panel-2))] border border-[hsl(var(--border-soft))] text-[hsl(var(--text))] text-[10.5px] font-ui rounded px-1.5 py-1 clip-bevel-sm focus:outline-none">
+                                            className="appearance-none [color-scheme:dark] bg-[hsl(var(--panel-2))] border border-[hsl(var(--border-soft))] text-[hsl(var(--text))] text-[10.5px] font-ui rounded px-1.5 pr-6 py-1 clip-bevel-sm focus:outline-none">
                                             <option value="lossRate">Overall loss rate</option>
                                             <option value="netR">Overall Net R</option>
                                             <option value="fullLossR">Overall −R</option>
@@ -321,7 +322,7 @@ export function FailureExplorer({ allTrades = [], allLosers = [], bucket = null 
                                             {/* group header */}
                                             <tr className="text-[9px] uppercase tracking-[0.06em] text-[hsl(var(--text-3))]">
                                                 <th className="py-1 pr-2 sticky left-0 z-[3] bg-[hsl(var(--panel))]" />
-                                                <th className="py-1 px-2 text-center bg-[hsl(var(--panel-2)/0.4)] border-l border-[hsl(var(--border-soft))]" colSpan={4}>Bucket: {bucket.label}</th>
+                                                <th className="py-1 px-2 text-center bg-[hsl(var(--panel-2)/0.4)] border-l border-[hsl(var(--border-soft))]" colSpan={5}>Bucket: {bucket.label}</th>
                                                 {showOverall && (
                                                     <th className="py-1 px-2 text-center border-l border-[hsl(var(--border-soft))]" colSpan={overallSpan}>
                                                         <TermTip termKey="overall_setup">Overall valid setup</TermTip>
@@ -335,6 +336,7 @@ export function FailureExplorer({ allTrades = [], allLosers = [], bucket = null 
                                                 <th className="text-right font-medium py-1.5 px-2">Losses</th>
                                                 <th className="text-right font-medium py-1.5 px-2">Wins</th>
                                                 <th className="text-right font-medium py-1.5 px-2"><TermTip termKey="loss_r_contribution">Loss-R</TermTip></th>
+                                                <th className="text-right font-medium py-1.5 px-2"><TermTip termKey="net_r">Net R</TermTip></th>
                                                 {showOverall && <>
                                                     <th className="text-right font-medium py-1.5 px-2 border-l border-[hsl(var(--border-soft))]">Total</th>
                                                     <th className="text-right font-medium py-1.5 px-2">Losses</th>
@@ -364,19 +366,20 @@ export function FailureExplorer({ allTrades = [], allLosers = [], bucket = null 
                                                         )}>
                                                         <td className={cn(setupCell, "text-[hsl(var(--text))] truncate max-w-[190px]")}>{setup}</td>
                                                         {/* Bucket group */}
-                                                        <td className="text-right py-2 px-2 font-num tabular-nums text-[hsl(var(--danger))] border-l border-[hsl(var(--border-soft)/0.5)]">{c.bucketLosses}</td>
+                                                        <td className="text-right py-2 px-2 font-num tabular-nums text-[hsl(var(--text))] border-l border-[hsl(var(--border-soft)/0.5)]">{bTotal}</td>
+                                                        <td className="text-right py-2 px-2 font-num tabular-nums text-[hsl(var(--danger))]">{c.bucketLosses}</td>
                                                         <td className="text-right py-2 px-2 font-num tabular-nums text-[hsl(var(--success))]">{bWins}</td>
-                                                        <td className="text-right py-2 px-2 font-num tabular-nums text-[hsl(var(--text))]">{bTotal}</td>
                                                         <td className="text-right py-2 px-2 font-num tabular-nums text-[hsl(var(--danger))]">{fmtLossR(c.bucketLossR)}</td>
+                                                        <td className="text-right py-2 px-2 font-num tabular-nums">{c.bucketNetR == null ? <span className="text-[hsl(var(--text-3))]">—</span> : netNode(c.bucketNetR)}</td>
                                                         {/* Overall group */}
                                                         {showOverall && <>
-                                                            <td className="text-right py-2 px-2 font-num tabular-nums text-[hsl(var(--danger))] border-l border-[hsl(var(--border-soft)/0.5)]">{c.fullLosses}</td>
+                                                            <td className="text-right py-2 px-2 font-num tabular-nums text-white border-l border-[hsl(var(--border-soft)/0.5)]">{c.fullTotal}</td>
+                                                            <td className="text-right py-2 px-2 font-num tabular-nums text-[hsl(var(--danger))]">{c.fullLosses}</td>
                                                             <td className="text-right py-2 px-2 font-num tabular-nums text-[hsl(var(--success))]">{c.fullWins}</td>
-                                                            <td className="text-right py-2 px-2 font-num tabular-nums text-white">{c.fullTotal}</td>
-                                                            <td className="text-right py-2 px-2 font-num tabular-nums font-semibold" style={{ color: lossRateColor(c.fullLossRate) }}>{c.fullLossRate}%</td>
                                                             <td className="text-right py-2 px-2 font-num tabular-nums text-[hsl(var(--success))]">+{c.fullPosR}R</td>
                                                             <td className="text-right py-2 px-2 font-num tabular-nums text-[hsl(var(--danger))]">{fmtLossR(c.fullNegR)}</td>
                                                             <td className="text-right py-2 px-2 font-num tabular-nums">{netNode(c.fullNetR)}</td>
+                                                            <td className="text-right py-2 px-2 font-num tabular-nums font-semibold" style={{ color: lossRateColor(c.fullLossRate) }}>{c.fullLossRate}%</td>
                                                             <td className="text-right py-2 px-2 font-num tabular-nums">{pfNode(c.fullProfitFactor, c.fullPosR)}</td>
                                                             {advOn.map((a) => a.cell(c))}
                                                         </>}
@@ -387,18 +390,19 @@ export function FailureExplorer({ allTrades = [], allLosers = [], bucket = null 
                                         <tfoot>
                                             <tr className="border-t-2 border-[hsl(var(--border-mid))] text-[11px] font-ui">
                                                 <td className="text-left py-2 pr-2 text-[9.5px] uppercase tracking-[0.05em] text-[hsl(var(--text-2))] sticky left-0 z-[2] bg-[hsl(var(--panel))]">All shown ({bucketRows.length})</td>
-                                                <td className="text-right py-2 px-2 font-num tabular-nums font-semibold text-[hsl(var(--danger))] border-l border-[hsl(var(--border-soft)/0.5)]">{T.bL}</td>
+                                                <td className="text-right py-2 px-2 font-num tabular-nums font-semibold text-[hsl(var(--text))] border-l border-[hsl(var(--border-soft)/0.5)]">{T.bL + T.bW}{T.bWpartial ? "*" : ""}</td>
+                                                <td className="text-right py-2 px-2 font-num tabular-nums font-semibold text-[hsl(var(--danger))]">{T.bL}</td>
                                                 <td className="text-right py-2 px-2 font-num tabular-nums font-semibold text-[hsl(var(--success))]">{T.bW}{T.bWpartial ? "*" : ""}</td>
-                                                <td className="text-right py-2 px-2 font-num tabular-nums font-semibold text-[hsl(var(--text))]">{T.bL + T.bW}{T.bWpartial ? "*" : ""}</td>
                                                 <td className="text-right py-2 px-2 font-num tabular-nums font-semibold text-[hsl(var(--danger))]">{fmtLossR(r1(T.bLossR))}</td>
+                                                <td className="text-right py-2 px-2 font-num tabular-nums font-semibold">{netNode(tBucketNetR)}{T.bWpartial ? "*" : ""}</td>
                                                 {showOverall && <>
-                                                    <td className="text-right py-2 px-2 font-num tabular-nums font-semibold text-[hsl(var(--danger))] border-l border-[hsl(var(--border-soft)/0.5)]">{T.fL}</td>
+                                                    <td className="text-right py-2 px-2 font-num tabular-nums font-semibold text-white border-l border-[hsl(var(--border-soft)/0.5)]">{T.fT}</td>
+                                                    <td className="text-right py-2 px-2 font-num tabular-nums font-semibold text-[hsl(var(--danger))]">{T.fL}</td>
                                                     <td className="text-right py-2 px-2 font-num tabular-nums font-semibold text-[hsl(var(--success))]">{T.fW}</td>
-                                                    <td className="text-right py-2 px-2 font-num tabular-nums font-semibold text-white">{T.fT}</td>
-                                                    <td className="text-right py-2 px-2 font-num tabular-nums font-semibold" style={{ color: lossRateColor(tFullLossRate) }}>{tFullLossRate}%</td>
                                                     <td className="text-right py-2 px-2 font-num tabular-nums font-semibold text-[hsl(var(--success))]">+{r1(T.fPos)}R</td>
                                                     <td className="text-right py-2 px-2 font-num tabular-nums font-semibold text-[hsl(var(--danger))]">{fmtLossR(r1(T.fLossR))}</td>
                                                     <td className="text-right py-2 px-2 font-num tabular-nums font-semibold">{netNode(tNetR)}</td>
+                                                    <td className="text-right py-2 px-2 font-num tabular-nums font-semibold" style={{ color: lossRateColor(tFullLossRate) }}>{tFullLossRate}%</td>
                                                     <td className="text-right py-2 px-2 font-num tabular-nums font-semibold">{pfNode(tPF, T.fPos)}</td>
                                                     {advOn.map((a) => a.tot())}
                                                 </>}

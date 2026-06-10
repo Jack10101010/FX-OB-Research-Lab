@@ -552,25 +552,27 @@ export function buildExplorer(trades, { dimA = "session", dimB = null, sampleFlo
     return { available, dimA: aKey, dimB: bKey, metric, sampleFloor, rows, totals };
 }
 
-// ── Bucket Explorer rows with TRUE denominators (cohort-context fix) ────────────
-// When an MFE bucket is selected, the Explorer must answer two things per row:
-//   (1) how much of the SELECTED BUCKET's damage came from this dimension value/pair
-//       — computed from `bucketLosers` only (losers inside the bucket); and
-//   (2) the FULL-COHORT context for that same value/pair — winners + losers + loss
-//       rate vs baseline — computed from `allTrades`.
-// MFE buckets are a loser-only concept, so winners can NEVER live in a bucket; we
-// recover the real denominator by MATCHING `allTrades` on the same dimension key(s)
-// (e.g. Session=New York AND Structure=CHoCH) rather than pretending winners belong
-// to the bucket. This does NOT touch MFE bucket logic — `bucketLosers` is produced
-// upstream (losersInRawBucket); we only read it.
+// ── Bucket Explorer rows: bucket scorecard with TRUE denominators ───────────────
+// When an MFE bucket is selected, each row answers TWO things for one setup
+// (e.g. Long + CHoCH):
+//   (1) BUCKET — what happened to this setup INSIDE the selected MFE band:
+//       bucketLosses / bucketWins / bucketTotal / bucketLossR. Losers AND winners
+//       are placed in the band with the SAME raw-R logic (bucketMfeRaw(getMfeR(t))),
+//       guarded on a finite mfeR — we NEVER fake a winner into a band. If a setup's
+//       winners carry no MFE at all, bucketWins/bucketTotal are null (UI shows "—").
+//   (2) OVERALL — the full valid-universe win/loss record for the SAME setup:
+//       fullLosses / fullWins / fullTotal / fullLossRate / fullLossR — matched on the
+//       same dimension key(s) across `allTrades` (the valid universe).
 //
-// Rows are the value/pair combinations that actually contributed losses to the
-// bucket ("what caused THIS bucket"), each enriched with its full denominator.
-export function buildBucketExplorerRows({ bucketLosers, allTrades, dimA, dimB = null, sampleFloor = DRILL_SAMPLE_FLOOR } = {}) {
+// `bucketKey` is the raw-R band id (e.g. "05_1"); pass it to bucket BOTH sides from
+// the valid universe. Without `bucketKey` (legacy callers) bucket losses come from
+// the passed `bucketLosers` and winners are unknown ("—"). Reuses bucketMfeRaw — it
+// does NOT change MFE bucket definitions.
+export function buildBucketExplorerRows({ bucketLosers, bucketKey = null, allTrades, dimA, dimB = null, sampleFloor = DRILL_SAMPLE_FLOOR } = {}) {
     const bl = Array.isArray(bucketLosers) ? bucketLosers : [];
     const at = Array.isArray(allTrades) ? allTrades : [];
+    const legacy = bucketKey == null;
 
-    // Availability + dim resolution judged over the winners-inclusive population.
     const available = availableDimensions(at.length ? at : bl);
     const availKeys = new Set(available.map((d) => d.key));
     const reqA = resolveDimension(dimA);
@@ -580,76 +582,129 @@ export function buildBucketExplorerRows({ bucketLosers, allTrades, dimA, dimB = 
     const dA = resolveDimension(aKey);
     const dB = bKey ? resolveDimension(bKey) : null;
 
-    // Baseline loss rate over ALL trades (the genuine denominator).
     const baseLosers = at.filter((t) => rOf(t) < 0).length;
     const baselineLossRate = at.length ? (baseLosers / at.length) * 100 : 0;
     const totalAll = at.length;
     const allLossR = at.reduce((s, t) => s + lossRof(t), 0);
 
     const totals = {
+        bucketKey: bucketKey ?? null,
         bucketTrades: bl.length,
         bucketLossR: round1(sumLossR(bl)),
         allTrades: totalAll,
         baselineLossRate: round1(baselineLossRate),
     };
-    if (!dA) return { available, dimA: null, dimB: null, sampleFloor, rows: [], totals };
+    if (!dA) return { available, dimA: null, dimB: null, bucketKey: bucketKey ?? null, sampleFloor, rows: [], totals };
 
-    const SEP = "\u0000";
-    const idOf = (t, dim2) => {
+    const SEP = "||";
+    const keyPair = (t) => {
         const va = dA.accessor(t);
         if (va == null) return null;
-        if (dim2) { const vb = dim2.accessor(t); if (vb == null) return null; return `${String(va)}${SEP}${String(vb)}`; }
-        return String(va);
+        if (dB) { const vb = dB.accessor(t); if (vb == null) return null; return { keyA: String(va), keyB: String(vb) }; }
+        return { keyA: String(va), keyB: null };
     };
+    const idFromKeys = (keyA, keyB) => (keyB != null ? `${keyA}${SEP}${keyB}` : keyA);
 
-    // Bucket-side groups (losers inside the selected bucket).
-    const bucketTotalLossR = sumLossR(bl);
-    const bucketGroups = new Map(); // id → { keyA, keyB, losers, lossR }
-    for (const t of bl) {
-        const id = idOf(t, dB);
-        if (id == null) continue;
-        const [keyA, keyB] = dB ? id.split(SEP) : [id, null];
-        let g = bucketGroups.get(id);
-        if (!g) { g = { keyA, keyB, losers: 0, lossR: 0 }; bucketGroups.set(id, g); }
-        g.losers += 1;
-        g.lossR += lossRof(t);
-    }
-
-    // Full-cohort groups (ALL trades matching the same key) — single pass.
-    const fullGroups = new Map(); // id → { total, losers, lossR }
+    // Single pass over the valid universe -> overall split + (with bucketKey) the
+    // in-band breakdown for BOTH losers and winners.
+    const groups = new Map();
     for (const t of at) {
-        const id = idOf(t, dB);
-        if (id == null) continue;
-        let g = fullGroups.get(id);
-        if (!g) { g = { total: 0, losers: 0, lossR: 0 }; fullGroups.set(id, g); }
+        const k = keyPair(t);
+        if (!k) continue;
+        const id = idFromKeys(k.keyA, k.keyB);
+        let g = groups.get(id);
+        if (!g) { g = { keyA: k.keyA, keyB: k.keyB, total: 0, losers: 0, lossR: 0, posR: 0, winners: 0, winnersWithMfe: 0, bandLosers: 0, bandLossR: 0, bandWinners: 0, bandPosR: 0 }; groups.set(id, g); }
         g.total += 1;
         const r = rOf(t);
-        if (r < 0) { g.losers += 1; g.lossR += -r; }
+        const isLoss = r < 0;
+        if (isLoss) { g.losers += 1; g.lossR += -r; }
+        else { g.winners += 1; if (r > 0) g.posR += r; }
+        if (!legacy) {
+            const m = getMfeR(t);
+            const hasMfe = isFiniteNumber(m);
+            if (!isLoss && hasMfe) g.winnersWithMfe += 1;
+            if (hasMfe && bucketMfeRaw(m) === bucketKey) {
+                if (isLoss) { g.bandLosers += 1; g.bandLossR += -r; }
+                else { g.bandWinners += 1; if (r > 0) g.bandPosR += r; } // in-band winner R for bucket Net R
+            }
+        }
     }
 
-    const rows = [...bucketGroups.values()].map((g) => {
-        const id = dB ? `${g.keyA}${SEP}${g.keyB}` : g.keyA;
-        const full = fullGroups.get(id) || { total: 0, losers: 0, lossR: 0 };
-        const fullWinners = full.total - full.losers;
-        const fullLossRate = full.total ? (full.losers / full.total) * 100 : 0;
+    // Legacy bucket-loss source (no band key): group the passed losers.
+    const blGroups = new Map();
+    if (legacy) {
+        for (const t of bl) {
+            const k = keyPair(t);
+            if (!k) continue;
+            const id = idFromKeys(k.keyA, k.keyB);
+            let g = blGroups.get(id);
+            if (!g) { g = { keyA: k.keyA, keyB: k.keyB, losers: 0, lossR: 0 }; blGroups.set(id, g); }
+            g.losers += 1;
+            g.lossR += lossRof(t);
+        }
+    }
+    const bucketTotalLossR = legacy ? sumLossR(bl) : [...groups.values()].reduce((s, g) => s + g.bandLossR, 0);
+
+    const buildRow = (g, id) => {
+        const fullLosers = g.losers;
+        const fullWinners = g.total - g.losers;
+        const fullTotal = g.total;
+        const fullLossRate = fullTotal ? (fullLosers / fullTotal) * 100 : 0;
         const lossRateDelta = fullLossRate - baselineLossRate;
-        const tradeSharePct = totalAll ? (full.total / totalAll) * 100 : 0;
-        const lossSharePct = allLossR > 0 ? (full.lossR / allLossR) * 100 : 0;
+        const tradeSharePct = totalAll ? (fullTotal / totalAll) * 100 : 0;
+        const lossSharePct = allLossR > 0 ? (g.lossR / allLossR) * 100 : 0;
         const lift = tradeSharePct > 0 ? lossSharePct / tradeSharePct : 0;
-        const lowSample = full.total < sampleFloor;
-        const bucketContributionPct = bucketTotalLossR > 0 ? round1((g.lossR / bucketTotalLossR) * 100) : 0;
+        const lowSample = fullTotal < sampleFloor;
+
+        let bucketLosses, bucketLossRv, bucketWins, bucketTotal, bucketWinsKnown, bucketPosR, bucketNetR;
+        if (legacy) {
+            const b = blGroups.get(id) || { losers: 0, lossR: 0 };
+            bucketLosses = b.losers;
+            bucketLossRv = round1(b.lossR);
+            bucketWinsKnown = false;
+            bucketWins = null;
+            bucketTotal = null;
+            bucketPosR = null;          // no band key ⇒ winner R unavailable
+            bucketNetR = null;
+        } else {
+            bucketLosses = g.bandLosers;
+            bucketLossRv = round1(g.bandLossR);
+            bucketWinsKnown = g.winners === 0 ? true : g.winnersWithMfe > 0;
+            bucketWins = bucketWinsKnown ? g.bandWinners : null;
+            bucketTotal = bucketWins == null ? null : bucketLosses + bucketWins;
+            // Bucket Net R = in-band winner R − in-band loss-R. Only when winner R is
+            // attributable (same gate as bucketWins); otherwise null → UI shows "—".
+            bucketPosR = bucketWinsKnown ? round1(g.bandPosR) : null;
+            bucketNetR = bucketWinsKnown ? round1(g.bandPosR - g.bandLossR) : null;
+        }
+        const bucketContributionPct = bucketTotalLossR > 0 ? round1((bucketLossRv / bucketTotalLossR) * 100) : 0;
+
         const row = {
             keyA: g.keyA, labelA: dA.label,
-            // ── selected-bucket metrics (losses inside the bucket only) ──
-            bucketLosers: g.losers,
-            bucketLossR: round1(g.lossR),
+            // selected-bucket metrics
+            bucketLosses,
+            bucketWins,
+            bucketTotal,
+            bucketWinsKnown,
+            bucketLossR: bucketLossRv,
+            bucketPosR,
+            bucketNetR,
+            bucketLosers: bucketLosses,
             bucketLossRSharePct: bucketContributionPct,
-            bucketContributionPct, // alias
-            // ── full-cohort denominator (ALL trades matching the same key) ──
-            fullLosers: full.losers,
+            bucketContributionPct,
+            // overall valid-universe metrics
+            fullLosses: fullLosers,
+            fullWins: fullWinners,
+            fullLosers,
             fullWinners,
-            fullTotal: full.total,
+            fullTotal,
             fullLossRate: round1(fullLossRate),
+            fullLossR: round1(g.lossR),
+            // expectancy (overall valid universe) — posR/negR magnitudes; netR signed
+            fullPosR: round1(g.posR),
+            fullNegR: round1(g.lossR),
+            fullNetR: round1(g.posR - g.lossR),
+            fullProfitFactor: g.lossR > 0 ? round2(g.posR / g.lossR) : null, // null = no losses (∞ when posR>0)
             baselineLossRate: round1(baselineLossRate),
             lossRateDelta: round1(lossRateDelta),
             tradeSharePct: round1(tradeSharePct),
@@ -660,12 +715,63 @@ export function buildBucketExplorerRows({ bucketLosers, allTrades, dimA, dimB = 
         };
         if (dB) { row.keyB = g.keyB; row.labelB = dB.label; }
         return row;
-    });
+    };
 
-    // "What caused THIS bucket": rank by bucket damage (rankable-first by full sample).
-    rows.sort((a, b) => (Number(b.rankable) - Number(a.rankable)) || (b.bucketLossR - a.bucketLossR));
+    let rows;
+    if (legacy) {
+        rows = [...blGroups.values()].map((bg) => {
+            const id = idFromKeys(bg.keyA, bg.keyB);
+            const overall = groups.get(id)
+                || { keyA: bg.keyA, keyB: bg.keyB, total: 0, losers: 0, lossR: 0, posR: 0, winners: 0, winnersWithMfe: 0, bandLosers: 0, bandLossR: 0, bandWinners: 0, bandPosR: 0 };
+            return buildRow(overall, id);
+        });
+    } else {
+        rows = [...groups.values()].filter((g) => g.bandLosers > 0).map((g) => buildRow(g, idFromKeys(g.keyA, g.keyB)));
+    }
 
-    return { available, dimA: aKey, dimB: bKey, sampleFloor, rows, totals };
+    // Default: worst-first by OVERALL loss rate, then absolute loss-R (rankable first).
+    rows.sort((a, b) => (Number(b.rankable) - Number(a.rankable))
+        || (b.fullLossRate - a.fullLossRate)
+        || (Math.abs(b.fullLossR) - Math.abs(a.fullLossR)));
+
+    return { available, dimA: aKey, dimB: bKey, bucketKey: bucketKey ?? null, sampleFloor, rows, totals };
+}
+
+// Pick the single "worst" setup row for subtle highlighting: highest OVERALL loss
+// rate, tie-broken by absolute full loss-R; sample floor must be met (rankable).
+// Pure; returns the row or null.
+export function pickWorstSetupRow(rows) {
+    const ranked = (Array.isArray(rows) ? rows : []).filter((r) => r && r.rankable);
+    if (!ranked.length) return null;
+    return [...ranked].sort((a, b) =>
+        (b.fullLossRate - a.fullLossRate) || (Math.abs(b.fullLossR) - Math.abs(a.fullLossR)),
+    )[0];
+}
+
+// ── Backtest action label (decision support, NOT a live rule) ───────────────────
+// Retained (dormant in the scorecard UI) for reuse / tests. A suggestion to TEST,
+// never an auto-disable or live-trading rule.
+export const ACTION_LOSS_RATE_DISABLE = 65;
+export const ACTION_LOSS_RATE_WATCH = 55;
+export const ACTION_BUCKET_DAMAGE_FLOOR_R = 1;
+
+export function bucketRowAction(row, { sampleFloor = DRILL_SAMPLE_FLOOR } = {}) {
+    if (!row) return { key: "insufficient", label: "Not enough sample", tone: "muted" };
+    const total = row.fullTotal ?? 0;
+    const lossRate = row.fullLossRate ?? 0;
+    const fullLosers = row.fullLosers ?? 0;
+    const damage = row.bucketLossR ?? 0;
+
+    if (total < sampleFloor) return { key: "insufficient", label: "Not enough sample", tone: "muted" };
+
+    const meaningful = damage >= ACTION_BUCKET_DAMAGE_FLOOR_R;
+    if (lossRate >= ACTION_LOSS_RATE_DISABLE && fullLosers >= sampleFloor && meaningful) {
+        return { key: "test_disable", label: "Test disable", tone: "danger" };
+    }
+    if (lossRate >= ACTION_LOSS_RATE_WATCH && meaningful) {
+        return { key: "watchlist", label: "Watchlist", tone: "warning" };
+    }
+    return { key: "normal", label: "Probably normal", tone: "success" };
 }
 
 // ── MFE-by-dimension outcome (V4 Phase 2) ──────────────────────────────────────

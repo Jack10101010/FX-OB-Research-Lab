@@ -58,13 +58,15 @@ const exc = loadCjs(`${BASE}/excursionAnalytics.js`, (spec) => {
 // predicate (isPerformanceTrade) that the Explorer denominator must use.
 const tc = loadCjs("src/data/tradeClassification.js", () => ({}));
 const { isPerformanceTrade } = tc;
+// roadmapStore is import-free (localStorage guarded → empty overrides in node).
+const roadmap = loadCjs("src/data/roadmapStore.js", () => ({}));
 
 const {
     getMfeR, getTargetRR, mfePctOfTarget, bucketMfePct, bucketMfeRaw,
     buildMfeDistribution, buildBeOpportunity,
     buildBeExclusiveRanges, bucketBeExclusive,
     buildRawRDistribution, buildBucketDrilldown, losersInRawBucket, buildFailureDrivers, buildPairDrivers,
-    buildExplorer, buildBucketExplorerRows, buildLoserMfeReachTable, buildMfeByDimension, buildDistanceInsights,
+    buildExplorer, buildBucketExplorerRows, bucketRowAction, pickWorstSetupRow, buildLoserMfeReachTable, buildMfeByDimension, buildDistanceInsights,
     isHighlightCell, EXPLORER_LIFT_HIGHLIGHT,
     getMaeR, bucketMaeDepth, buildWinnerMaeDistribution, getMaeForStopPressure,
 } = exc;
@@ -602,6 +604,117 @@ const buggy = buildBucketExplorerRows({ bucketLosers: vuBucketLosers, allTrades:
 const buggyRow = buggy.rows.find((r) => r.keyA === "Short" && r.keyB === "CHoCH");
 ok(buggyRow.fullTotal === 99, "raw-rows denominator (the bug) would report 99 total");
 ok(fixedRow.fullTotal < buggyRow.fullTotal, "valid-universe denominator < raw-rows denominator (fix confirmed: 19 < 99)");
+
+// ── DECISION ROW CLARITY: bucketRowAction labels ───────────────────────────────
+// Turns a bucket-Explorer row into one plain backtest suggestion (decision support,
+// not a live rule). Sample floor 8 throughout.
+console.log("Backtest action labels (decision support)");
+const longChoch = { keyA: "Long", keyB: "CHoCH", bucketLosers: 11, bucketLossR: 11.9, fullLosers: 42, fullWinners: 13, fullTotal: 55, fullLossRate: 76.4 };
+const aDisable = bucketRowAction(longChoch, { sampleFloor: 8 });
+ok(aDisable.key === "test_disable" && aDisable.label === "Test disable", "Long+CHoCH (76.4%, 55 trades, 11.9R) → Test disable");
+
+const shortBos = { keyA: "Short", keyB: "BOS", bucketLosers: 6, bucketLossR: 5.2, fullLosers: 20, fullWinners: 19, fullTotal: 39, fullLossRate: 51 };
+const aNormal = bucketRowAction(shortBos, { sampleFloor: 8 });
+ok(aNormal.key === "normal" && aNormal.label === "Probably normal", "Short+BOS (51%, sample ok) → Probably normal");
+
+const watch = { keyA: "Long", keyB: "BOS", bucketLosers: 9, bucketLossR: 7.4, fullLosers: 24, fullWinners: 16, fullTotal: 40, fullLossRate: 60 };
+const aWatch = bucketRowAction(watch, { sampleFloor: 8 });
+ok(aWatch.key === "watchlist" && aWatch.label === "Watchlist", "Long+BOS (60%, meaningful damage) → Watchlist");
+
+const thin = { keyA: "Long", keyB: "CHoCH", bucketLosers: 3, bucketLossR: 3.0, fullLosers: 3, fullWinners: 1, fullTotal: 4, fullLossRate: 75 };
+const aThin = bucketRowAction(thin, { sampleFloor: 8 });
+ok(aThin.key === "insufficient" && aThin.label === "Not enough sample", "thin sample (4 < floor 8) → Not enough sample (even at 75%)");
+
+// high loss rate but trivial bucket damage → not worth testing within this bucket
+const trivialDamage = { keyA: "Long", keyB: "CHoCH", bucketLosers: 1, bucketLossR: 0.2, fullLosers: 30, fullWinners: 5, fullTotal: 35, fullLossRate: 85.7 };
+ok(bucketRowAction(trivialDamage, { sampleFloor: 8 }).key === "normal", "high loss rate but <1R bucket damage → not flagged (meaningful-damage gate)");
+// null-safe
+ok(bucketRowAction(null).key === "insufficient", "null row → Not enough sample (no crash)");
+
+// setup label composition (mirrors the UI): "Long + CHoCH" for a pair, "Long" alone.
+const setupLabel = (row, hasB) => (hasB ? `${row.keyA} + ${row.keyB}` : row.keyA);
+ok(setupLabel(longChoch, true) === "Long + CHoCH", "setup label combines Dim A + Dim B (Long + CHoCH)");
+ok(setupLabel(longChoch, false) === "Long", "single-dim setup label is just Dim A");
+
+// ── BUCKET SCORECARD: dual-population rows + winner bucketing (PHASE H) ──────────
+// Selected band "05_1" (0.5–1R). Long×CHoCH has winners WITH mfeR (bucketable);
+// Short×BOS has winners with NO mfeR (must show "—", never faked).
+console.log("Bucket scorecard rows (dual population + winner bucketing)");
+const scAll = [
+    ...Array.from({ length: 11 }, () => ({ direction: "long",  structureTag: "choch", r: -1, mfeR: 0.7 })), // in-band losers
+    ...Array.from({ length: 31 }, () => ({ direction: "long",  structureTag: "choch", r: -1, mfeR: 1.5 })), // out-of-band losers
+    ...Array.from({ length: 3 },  () => ({ direction: "long",  structureTag: "choch", r: 1,  mfeR: 0.7 })), // in-band winners (MFE present)
+    ...Array.from({ length: 10 }, () => ({ direction: "long",  structureTag: "choch", r: 1,  mfeR: 2.5 })), // out-of-band winners
+    ...Array.from({ length: 5 },  () => ({ direction: "short", structureTag: "bos",   r: -1, mfeR: 0.7 })), // in-band losers
+    ...Array.from({ length: 8 },  () => ({ direction: "short", structureTag: "bos",   r: 1 })),               // winners, NO mfeR
+];
+const sc = buildBucketExplorerRows({ bucketKey: "05_1", allTrades: scAll, dimA: "direction", dimB: "structure", sampleFloor: 8 });
+const lc = sc.rows.find((r) => r.keyA === "Long" && r.keyB === "CHoCH");
+const sb = sc.rows.find((r) => r.keyA === "Short" && r.keyB === "BOS");
+ok(lc && sb, "rows for both in-bucket setups");
+// 1. bucket losses from the selected band only
+ok(lc.bucketLosses === 11 && lc.bucketLossR === 11, "1. bucket losses from band (11 losses, 11R)");
+// 2. bucket wins = in-band winners with MFE
+ok(lc.bucketWins === 3 && lc.bucketWinsKnown === true, "2. bucket wins = in-band winners with MFE (3)");
+// 3. bucket total = losses + wins
+ok(lc.bucketTotal === 14, "3. bucket total = bucket losses + bucket wins (14)");
+// 4. overall from all matching valid trades
+ok(lc.fullLosses === 42 && lc.fullWins === 13 && lc.fullTotal === 55, "4. overall split from valid universe (42L / 13W / 55)");
+ok(Math.abs(lc.fullLossRate - 76.4) <= 0.1, "4. overall loss rate 76.4%");
+// 5. full Loss-R exposed (magnitude; UI renders negative)
+ok(lc.fullLossR === 42, "5. overall full Loss-R exposed = 42 (UI shows -42R)");
+ok(lc.bucketLossR === 11, "5. bucket Loss-R = 11 (UI shows -11R)");
+// winners without MFE → "—"
+ok(sb.bucketWinsKnown === false && sb.bucketWins === null && sb.bucketTotal === null, "winners without MFE → bucketWins/total null (UI shows —), not faked");
+ok(sb.bucketLosses === 5, "bucket losses still counted when winner MFE absent (5)");
+// bucket positive R + Net R (in-band winner R − in-band loss-R)
+ok(lc.bucketPosR === 3, "bucket +R = in-band winner R (Long×CHoCH: 3 winners × +1R = 3)");
+ok(lc.bucketNetR === -8, "bucket Net R = +3 − 11 = -8 (in-band winners minus in-band losses)");
+ok(sb.bucketPosR === null && sb.bucketNetR === null, "missing winner R → bucket +R / Net R null (UI shows —), not faked");
+// bucket Net R totals across shown rows (known winner R only)
+const tbPos = sc.rows.reduce((s, r) => s + ((r.bucketWinsKnown && r.bucketPosR != null) ? r.bucketPosR : 0), 0);
+const tbLossR = sc.rows.reduce((s, r) => s + r.bucketLossR, 0);
+ok(tbPos === 3 && tbLossR === 16, "bucket totals: Σ bucket +R 3, Σ bucket loss-R 16");
+ok(Math.round((tbPos - tbLossR) * 10) / 10 === -13, "bucket Net R total = Σ+R − Σloss-R = -13");
+// 6. worst-row selection: loss rate, then |loss-R|, sample floor met
+const worst = pickWorstSetupRow(sc.rows);
+ok(worst && worst.keyA === "Long" && worst.keyB === "CHoCH", "6. worst row = highest overall loss rate (Long+CHoCH 76.4% > Short+BOS 38.5%)");
+ok(pickWorstSetupRow([{ rankable: true, fullLossRate: 70, fullLossR: 5 }, { rankable: true, fullLossRate: 70, fullLossR: 9 }]).fullLossR === 9, "6. worst tie-break by absolute full Loss-R");
+ok(pickWorstSetupRow([{ rankable: false, fullLossRate: 99, fullLossR: 50 }]) === null, "6. worst ignores low-sample rows (sample floor must be met)");
+
+// ── EXPECTANCY: +R / −R / Net R / Profit Factor on bucket rows ──────────────────
+// Reuses scAll: Long×CHoCH = 42 losers (−42R) + 13 winners (+13R); Short×BOS =
+// 5 losers (−5R) + 8 winners (+8R, no MFE).
+console.log("Expectancy fields (overall valid universe)");
+ok(lc.fullPosR === 13 && lc.fullNegR === 42, "Long×CHoCH: +R 13, −R 42 (magnitude)");
+ok(lc.fullNetR === -29, "Long×CHoCH Net R = +13 − 42 = -29");
+ok(Math.abs(lc.fullProfitFactor - 0.31) <= 0.01, `Long×CHoCH PF = 13/42 ≈ 0.31 (got ${lc.fullProfitFactor})`);
+ok(sb.fullPosR === 8 && sb.fullNegR === 5 && sb.fullNetR === 3, "Short×BOS: +R 8, −R 5, Net R +3");
+ok(Math.abs(sb.fullProfitFactor - 1.6) <= 0.01, `Short×BOS PF = 8/5 = 1.6 (got ${sb.fullProfitFactor})`);
+ok(sb.fullProfitFactor > 1 && lc.fullProfitFactor < 1, "PF > 1 (profitable) vs < 1 (losing) distinguishes setups");
+// totals across shown rows (mirrors the scorecard tfoot) + default sort
+const tPos = sc.rows.reduce((s, r) => s + r.fullPosR, 0);
+const tNeg = sc.rows.reduce((s, r) => s + r.fullNegR, 0);
+const tBucketL = sc.rows.reduce((s, r) => s + r.bucketLosses, 0);
+ok(tPos === 21 && tNeg === 47, "overall totals: Σ+R 21, Σ−R 47");
+ok(Math.round((tPos - tNeg) * 10) / 10 === -26, "totals Net R = Σ+R − Σ−R = -26");
+ok(tBucketL === 16, "bucket totals: Σ bucket losses 16 (11 + 5)");
+ok(sc.rows[0].keyA === "Long" && sc.rows[0].keyB === "CHoCH", "default sort: worst overall loss rate first (76.4% before 38.5%)");
+ok(sc.rows.every((r, i, a) => i === 0 || !r.rankable || a[i - 1].fullLossRate >= r.fullLossRate || !a[i - 1].rankable), "rows ordered by overall loss rate desc among rankable (loss-rate then −R)");
+
+// ── ROADMAP: per-section seed merge (PHASE 4-6) ─────────────────────────────────
+console.log("Section roadmap seed (Distance to Stop)");
+const { getRoadmap, ROADMAP_STATUSES } = roadmap;
+const dts = getRoadmap("distance-to-stop");
+ok(dts.title === "Distance to Stop Roadmap", "roadmap title seeded");
+ok(dts.items.length >= 19, `roadmap seeded with all items (got ${dts.items.length})`);
+ok(dts.items.some((i) => i.label === "Net R" && i.status === "complete"), "High-priority Net R seeded as complete");
+ok(dts.items.some((i) => i.label === "Profit Factor" && i.status === "complete"), "Profit Factor seeded as complete");
+ok(dts.items.some((i) => i.label === "Break-even replay backtesting" && i.status === "planned"), "Future-research item seeded as planned");
+ok(dts.items.some((i) => i.label === "Setup: Max Loss Streak" && i.status === "idea"), "Funded-survival item seeded as idea (roadmap only, not implemented)");
+ok(dts.items.some((i) => i.label === "FTMO-style failure probability" && i.status === "idea"), "FTMO funded-survival item present as idea");
+ok(ROADMAP_STATUSES.length === 4, "four roadmap columns (idea / planned / in_progress / complete)");
+ok(getRoadmap("unknown-section").items.length === 0, "unknown section → empty roadmap (no crash)");
 
 console.log(`\n${failures === 0 ? "ALL PASS" : failures + " FAILURE(S)"}`);
 process.exit(failures === 0 ? 0 : 1);
