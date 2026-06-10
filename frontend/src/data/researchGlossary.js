@@ -634,6 +634,21 @@ export const GLOSSARY = {
         definition: "In the monetization layer, 1R = the OB's width: entry at the near edge, stop at the far edge, perfect fills, no spread. It measures OPPORTUNITY, not realized PnL — treat every R-based capture figure as an upper bound.",
         whyItMatters: "One pinned definition prevents the lab's most quotable numbers from being misread as achievable trade results.",
     },
+    retest_monetization: {
+        friendlyName: "Monetization Before Death",
+        definition: "How much idealized opportunity each touched zone offered before it was invalidated: the RR capture curve, the time-to-invalidation distribution, and MFE decay across successive retests. Requires v2.1 data (frontend-derived, or a re-exported v2.1 artifact).",
+        whyItMatters: "Zones almost always die — the tradeable question is how much they pay first, and which conditions pay best.",
+    },
+    retest_tti_distribution: {
+        friendlyName: "Time To Invalidation Distribution",
+        definition: "How long zones survive from first touch to invalidation, bucketed <15m / 15-60m / 1-4h / 4-24h / 1-7d / >7d. Zones still alive at data end (or tracking-capped) are 'censored' — shown, never mixed into a time bucket.",
+        whyItMatters: "The distribution is extremely skewed (evidence run: p25 ≈ 16m, p75 ≈ 19h) — a single median misleads; the shape is the finding.",
+    },
+    retest_decay_by_retest: {
+        friendlyName: "Decay By Retest",
+        definition: "MFE measured from each retest entry (R1 / R2 / R3) to the zone's death, in idealized R — does the payout shrink with each successive retest?",
+        whyItMatters: "First evidence says retests do NOT consume the payout (1R capture from R1 matched first-touch capture) — confirming or refuting that across runs decides how late retests can be traded.",
+    },
     retest_backend_computed: {
         friendlyName: "Backend Computed",
         definition: "These retest events were computed by the backend exporter and imported as artifacts (rather than derived in-browser from candles). It is a statement about the data's source, not a validation of the metric definitions. Check the engine-version badge: v1 artifacts predate the continuous-invalidation fix.",

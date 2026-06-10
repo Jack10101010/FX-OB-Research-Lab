@@ -16,6 +16,7 @@ import { useDataset } from "@/data/store";
 import { buildTradesByObId, deriveOBStatus } from "@/data/obLifecycle";
 import { deriveRetests, summarizeRetestEvents, DEFAULT_RETEST_CONFIG } from "@/data/obRetest";
 import { enrichRetestEvents, buildRetestEdgeBreakdowns, buildBestWorstRetestConditions, buildSessionMatrix, buildRetestFindings, DEFAULT_MIN_N } from "@/data/obRetestResearch";
+import { buildMonetizationSummary } from "@/data/obRetestMonetization";
 
 // Synthesize per-OB rows from events when the ob_retest_summary.csv sidecar is
 // absent — lets summarizeRetestEvents derive obsRetested even without it.
@@ -184,6 +185,17 @@ export function useRetestData({ orderBlocks = [], trades = [], activeRun = null,
         };
     }, [result, activeRun]);
 
+    // ── Phase D: monetization layer (v2.1 per-OB fields → pure module) ──────────
+    // Gating lives in the module (hasV21Fields): available only for v2.1
+    // frontend-derived results or v2.1 backend artifacts; otherwise it returns
+    // { available: false, reason } — never zeros. v1/v2 artifacts and synthesized
+    // perOB therefore hide the UI section via `available`.
+    const monetizationSummary = React.useMemo(() => {
+        const perOBRows = result?.perOB || [];
+        const obs = Array.isArray(activeRun?.orderBlocks) ? activeRun.orderBlocks : [];
+        return buildMonetizationSummary(perOBRows, obs);
+    }, [result, activeRun]);
+
     // Resolve the public status enum. Candle availability is decided by the load
     // RESULT (not just the imported `hasCandles` flag): backend events win; a
     // completed-but-empty load is NO_CANDLES; a thrown load error is FAILED (retry);
@@ -213,6 +225,8 @@ export function useRetestData({ orderBlocks = [], trades = [], activeRun = null,
         bestWorstConditions: research.bestWorstConditions,
         sessionMatrix: research.sessionMatrix,
         findings: research.findings,
+        // Phase D monetization (null-gated inside the module)
+        monetizationSummary,
         minN: DEFAULT_MIN_N,
         config,
         setConfig,

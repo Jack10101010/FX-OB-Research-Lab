@@ -84,7 +84,7 @@ function GateShell({ title, badge, children }) {
 }
 
 export function RetestLabTab({ orderBlocks = [], trades = [], activeRun = null, activeRunId = null, enabled = false }) {
-    const { status, source, error, candleCount, events, perOB, summary, meta, edgeBreakdowns, bestWorstConditions, sessionMatrix, findings, minN, config, setConfig, retryLoad } = useRetestData({
+    const { status, source, error, candleCount, events, perOB, summary, meta, edgeBreakdowns, bestWorstConditions, sessionMatrix, findings, monetizationSummary, minN, config, setConfig, retryLoad } = useRetestData({
         orderBlocks, trades, activeRun, activeRunId, enabled,
     });
 
@@ -145,6 +145,7 @@ export function RetestLabTab({ orderBlocks = [], trades = [], activeRun = null, 
                 <RetestIntelligence bestWorst={bestWorstConditions} findings={findings} minN={minN} />
                 <SummaryCards summary={summary} />
                 <ObLevelCards summary={summary} />
+                <MonetizationSection mon={monetizationSummary} />
                 <SessionMatrix matrix={sessionMatrix} minN={minN} />
                 <EdgeDiscoveryTabs edgeBreakdowns={edgeBreakdowns} minN={minN} />
                 <EventTable events={events} />
@@ -512,6 +513,124 @@ function RetestIntelligence({ bestWorst, findings, minN }) {
                         Conditions &amp; findings ranked by reaction success (held + min favorable move), closed-only (open excluded),
                         minimum sample n ≥ {minN}. Window hold shown as the secondary stat. Deterministic — derived only from the statistics above.
                     </div>
+                </div>
+            )}
+        </NeonPanel>
+    );
+}
+
+// ── Monetization Before Death (Phase D — v2.1 fields via obRetestMonetization) ──
+// Tiny presentational table (deterministic row order; plain <table> like the
+// Session Matrix so no sort state is involved).
+const MINI_ALIGN = { left: "text-left", right: "text-right", center: "text-center" };
+function MiniTable({ columns, rows, rowKey }) {
+    return (
+        <table className="w-full border-collapse text-[11.5px] font-display">
+            <thead>
+                <tr>
+                    {columns.map((c) => (
+                        <th key={c.label} className={`px-2 py-1 text-[10px] uppercase tracking-[0.05em] text-title-lab whitespace-nowrap ${MINI_ALIGN[c.align] || MINI_ALIGN.left}`}>
+                            {c.tip ? <TermTip termKey={c.tip}>{c.label}</TermTip> : c.label}
+                        </th>
+                    ))}
+                </tr>
+            </thead>
+            <tbody>
+                {rows.map((r) => (
+                    <tr key={r[rowKey]} className="border-t border-[hsl(var(--border-soft)/0.4)]">
+                        {columns.map((c) => (
+                            <td key={c.label} className={`px-2 py-1 tabular-nums ${MINI_ALIGN[c.align] || MINI_ALIGN.left} text-[hsl(var(--text-2))]`}>
+                                {c.render ? c.render(r) : r[c.key]}
+                            </td>
+                        ))}
+                    </tr>
+                ))}
+            </tbody>
+        </table>
+    );
+}
+
+function MonetizationSection({ mon }) {
+    if (!mon) return null;
+    if (!mon.available) {
+        // v1/v2 artifacts: explain instead of rendering zeros.
+        return (
+            <NeonPanel title={<TermTip termKey="retest_monetization">Monetization Before Death</TermTip>} dense collapsible defaultCollapsed>
+                <div className="text-[11px] text-muted-lab leading-relaxed">
+                    {mon.reason || "Monetization data is unavailable for this run."}
+                </div>
+            </NeonPanel>
+        );
+    }
+    const { rrCapture, ttiBuckets, decayByRetest } = mon;
+    const pt = (r) => rrCapture.points.find((p) => p.r === r);
+    const fmtR = (v) => (v == null || !isFinite(v) ? "—" : `${Number(v).toFixed(2)}R`);
+    const cards = [
+        { label: "Median MFE Before Death", value: fmtR(mon.medianMfeBeforeDeathR), sub: `${mon.eligibleN} touched OBs`, tone: "primary", icon: TrendingUp, tip: "retest_mfe_before_death" },
+        { label: "1R Capture", value: pct(pt(1)?.share, 0), sub: `${pt(1)?.captured ?? "—"} of ${rrCapture.eligibleN}`, tone: "success", icon: Trophy, tip: "retest_rr_capture" },
+        { label: "2R Capture", value: pct(pt(2)?.share, 0), sub: `${pt(2)?.captured ?? "—"} of ${rrCapture.eligibleN}`, tone: "secondary", icon: Activity, tip: "retest_rr_capture" },
+        { label: "5R Capture", value: pct(pt(5)?.share, 0), sub: `${pt(5)?.captured ?? "—"} of ${rrCapture.eligibleN}`, tone: "warning", icon: Lightbulb, tip: "retest_rr_capture" },
+    ];
+    return (
+        <NeonPanel title={<TermTip termKey="retest_monetization">Monetization Before Death</TermTip>} dense collapsible defaultCollapsed={false}>
+            <div className="text-[10.5px] text-muted-lab leading-relaxed mb-2.5">
+                <TermTip termKey="retest_idealized_r">Idealized opportunity only</TermTip>: 1R = OB width, entry at
+                proximal edge, stop at distal edge. Not realized PnL.
+            </div>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 mb-3">
+                {cards.map((c) => (
+                    <MetricChip key={c.label} label={c.label} value={c.value} sub={c.sub} tone={c.tone} icon={c.icon} size="compact" tip={c.tip} />
+                ))}
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div>
+                    <div className="text-[10px] uppercase tracking-[0.08em] text-muted-lab mb-1.5">
+                        <TermTip termKey="retest_rr_capture">RR Capture</TermTip>
+                    </div>
+                    <MiniTable
+                        rowKey="r"
+                        rows={rrCapture.points}
+                        columns={[
+                            { label: "Target", render: (r) => `≥ ${r.r}R` },
+                            { label: "n", align: "right", render: (r) => r.captured },
+                            { label: "Capture", align: "right", render: (r) => pct(r.share, 0) },
+                        ]}
+                    />
+                </div>
+                <div>
+                    <div className="text-[10px] uppercase tracking-[0.08em] text-muted-lab mb-1.5">
+                        <TermTip termKey="retest_tti_distribution">Time To Invalidation</TermTip>
+                    </div>
+                    <MiniTable
+                        rowKey="key"
+                        rows={ttiBuckets.buckets}
+                        columns={[
+                            { label: "Bucket", render: (r) => r.label },
+                            { label: "n", align: "right", render: (r) => r.n },
+                            { label: "Share", align: "right", render: (r) => pct(r.share, 0) },
+                        ]}
+                    />
+                </div>
+                <div>
+                    <div className="text-[10px] uppercase tracking-[0.08em] text-muted-lab mb-1.5">
+                        <TermTip termKey="retest_decay_by_retest">Decay By Retest</TermTip>
+                    </div>
+                    <MiniTable
+                        rowKey="key"
+                        rows={decayByRetest.rows}
+                        columns={[
+                            { label: "Retest", render: (r) => r.key },
+                            { label: "n", align: "right", render: (r) => r.n },
+                            { label: "Med MFE", align: "right", render: (r) => fmtR(r.medianR) },
+                            { label: "≥1R", align: "right", render: (r) => pct(r.capture1R, 0) },
+                            { label: "≥2R", align: "right", render: (r) => pct(r.capture2R, 0) },
+                        ]}
+                    />
+                </div>
+            </div>
+            {mon.excludedNoWidth > 0 && (
+                <div className="mt-2 text-[10px] text-muted-lab">
+                    {mon.excludedNoWidth} OB{mon.excludedNoWidth === 1 ? "" : "s"} excluded from R calculations because OB width was unavailable.
                 </div>
             )}
         </NeonPanel>
