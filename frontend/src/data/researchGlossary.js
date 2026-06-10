@@ -524,6 +524,26 @@ export const GLOSSARY = {
         ],
     },
 
+    // ── Filter Discovery (Failures Lab V5 Phase 1) ───────────────────────────────
+    filter_discovery: {
+        term: "Filter Discovery",
+        friendlyName: "Filter Discovery simulator",
+        definition: "For each cohort (a session, structure, penetration band, pair, …) the simulator REMOVES the actual matching trades and recomputes Net R, win rate and profit factor from the remaining trades. Both sides are counted: the losses you'd avoid AND the winners you'd give up.",
+        whyItMatters: "Turns diagnostics into decisions: 'this cohort is damaging' becomes 'disabling it would have changed the run by X R'. It is in-sample optimization on one run — treat results as hypotheses to re-test, not live trading instructions.",
+    },
+    net_r_impact: {
+        term: "Net R Change",
+        friendlyName: "Net R change if removed",
+        definition: "Run Net R after removing the cohort minus Net R before — exactly the cohort's loss-R saved minus its winner-R lost, computed from the matched trades' actual realized R.",
+        whyItMatters: "The single number that decides whether a filter helps: positive = the run would have been better without this cohort; negative = the filter costs more winners than it saves in losses.",
+    },
+    winner_r_lost: {
+        term: "Winner R Lost",
+        friendlyName: "Winner R lost (filter cost)",
+        definition: "The total realized positive R of the WINNING trades the filter would also remove. Every filter has this cost side — cohorts rarely contain only losers.",
+        whyItMatters: "The honest counterweight to 'loss R saved'. A cohort with a big loss pile can still be a bad filter if its winners are bigger.",
+    },
+
     // ── OB Retest Lab (Phase C education layer; additive, no logic) ──────────────
     // Survival-taxonomy rename (OB-RETEST-SURVIVAL-DEFINITION-AUDIT-1, Phase 1):
     // the old "Survival Rate" is now Window Hold %; Reaction Success % is the headline.
