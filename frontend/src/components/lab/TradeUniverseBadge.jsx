@@ -74,6 +74,12 @@ export function TradeUniverseBadge({
     showCodes = DEFAULT_USER_FACING_WARNING_CODES,
     compact = false,
     className = "",
+    // ── Reserved for RESEARCH-CONTEXT-BANNER Phase B (NOT enabled yet) ──────────
+    // Optional run-identity cells (run name / id + symbol·TF) for pages that show
+    // this banner standalone, without a LabRunHero. Defaults keep every current
+    // consumer byte-identical; no cell renders until Phase B wires them up.
+    run = null,            // eslint-disable-line no-unused-vars
+    showRunIdentity = false, // eslint-disable-line no-unused-vars
 }) {
     // Derive the warnings list once per (universe.warnings, override, showCodes)
     // change. If the caller passes `warnings`, we trust them and render the
@@ -101,9 +107,9 @@ export function TradeUniverseBadge({
                     value={isScenario ? "Scenario trades" : "Baseline reference"}
                     tone={isScenario ? "success" : "muted"}
                 />
-                <BadgeCell label="Model" value={universe.label || "—"} />
+                <BadgeCell label="Result View" value={universe.label || "—"} />
                 {universe.variant && (
-                    <BadgeCell label="Variant" value={universe.variant} />
+                    <BadgeCell label="Position Variant" value={universe.variant} />
                 )}
                 {/* Source CSV is the most useful field for debugging "why are
                     the numbers different than I expected" but it's also the
