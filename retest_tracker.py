@@ -20,7 +20,7 @@ STAGING NOTE
     dropped in there later (next to ghost_tracker.py) and called from the
     run_backtest.py export step behind an `emit_ob_retests` config flag.
 
-SEMANTICS (must match Phase 1 — frontend obRetest.js)
+SEMANTICS (must match the frontend obRetest.js — ENGINE v2)
     first touch  : first candle whose range intersects the OB after detection.
     first fill   : trade fill_time — ANNOTATION ONLY, never conflated with touch.
     retest       : a later re-entry, counted only after price has LEFT the zone
@@ -32,6 +32,21 @@ SEMANTICS (must match Phase 1 — frontend obRetest.js)
                    it does NOT gate the outcome.
     Rates        : survival/failure computed over CLOSED retests only (exclude open).
     Invariant    : survived + failed + open == total retests.
+
+ENGINE v2 — CONTINUOUS INVALIDATION (OB-RETEST-SURVIVAL-DEFINITION-AUDIT-2):
+    From the first touch onward the breach predicate is evaluated on EVERY candle.
+    A breach outside any reaction window terminates the OB at the OB level
+    (final_outcome = "invalidated_between_windows") WITHOUT creating an event,
+    and no later re-entries are counted (no "zombie retests"). ARMED ordering:
+    re-entry is checked BEFORE breach, so a candle that re-enters and closes
+    beyond remains a genuine instant-failed retest event (candles_to_failure 0).
+    Per-OB terminal taxonomy (final_outcome — NOTE: v2 changes this column's value
+    domain; in v1 it held the last event outcome):
+        invalidated_on_first_touch | invalidated_in_window |
+        invalidated_between_windows | alive_at_data_end (censored) | capped |
+        never_touched (geometry-degenerate OBs keep final_outcome = None).
+    Event CSV columns are UNCHANGED; the summary CSV gains additive columns and
+    "invalidation_mode" in its header is the v2 artifact fingerprint.
 
 stdlib only. No pandas / numpy.
 """
@@ -71,12 +86,18 @@ OB_RETESTS_COLUMNS = [
 ]
 
 # Canonical column order for ob_retest_summary.csv (OB-RETEST-3 §6, sidecar form).
+# v2: four additive columns appended; "invalidation_mode" is the v2 fingerprint
+# consumers sniff to distinguish v2 artifacts from v1.
 OB_RETEST_SUMMARY_COLUMNS = [
     "ob_id", "direction", "structure", "ob_touch_count", "retest_count",
     "retests_survived", "retests_failed", "retests_open",
     "first_retest_outcome", "final_outcome", "invalidated_on_retest_index",
     "max_reaction_pips_any_retest", "time_to_invalidation_minutes",
+    "invalidated_at_time", "invalidated_at_candle_index",
+    "invalidation_mode", "invalidated_after_retest_index",
 ]
+
+ENGINE_VERSION = 2
 
 # UTC-hour session bands — mirror ghost_tracker.py _SESSION_BOUNDARIES.
 _SESSION_BANDS = [
@@ -162,6 +183,17 @@ def _round2(v):
         return round(float(v), 2)
     except (TypeError, ValueError):
         return v
+
+
+def _median(values):
+    """Median of a numeric list (None when empty). Mirrors obRetest.js medianOf."""
+    vals = sorted(v for v in (values or []) if v is not None)
+    if not vals:
+        return None
+    mid = len(vals) // 2
+    if len(vals) % 2:
+        return vals[mid]
+    return (vals[mid - 1] + vals[mid]) / 2.0
 
 
 def _normalize_direction(ob, trade):
@@ -273,10 +305,16 @@ def compute_ob_retests(order_blocks, candles, trades=None, config=None):
             "retests_failed": 0,
             "retests_open": 0,
             "first_retest_outcome": None,
+            # v2: terminal status enum (was: last event outcome in v1).
             "final_outcome": None,
             "invalidated_on_retest_index": None,
             "max_reaction_pips_any_retest": 0.0,
             "time_to_invalidation_minutes": None,
+            # v2 OB-level terminal fields (continuous invalidation).
+            "invalidated_at_time": None,
+            "invalidated_at_candle_index": None,
+            "invalidation_mode": None,
+            "invalidated_after_retest_index": None,
         }
 
         top_raw = _f(_get(ob, "top", "high"))
@@ -328,6 +366,21 @@ def compute_ob_retests(order_blocks, candles, trades=None, config=None):
         start = bisect.bisect_left(times, detection_time) if detection_time is not None else 0
         first_touch_index = -1
         first_touch_time = None
+
+        # v2 terminal recorder — one definition of "invalidated" per run (the same
+        # configured breach predicate the windows use). Mirrors obRetest.js.
+        breach_mode = "wick_breach" if failure_threshold == "wick_beyond_ob" else "close_breach"
+
+        def mark_invalidated(idx, kind, after_retests):
+            rec["final_outcome"] = kind
+            rec["invalidated_at_time"] = int(times[idx])
+            rec["invalidated_at_candle_index"] = idx
+            rec["invalidation_mode"] = breach_mode
+            rec["invalidated_after_retest_index"] = after_retests
+            rec["time_to_invalidation_minutes"] = (
+                round((times[idx] - first_touch_time) / 60.0) if first_touch_time is not None else None
+            )
+
         i = start
         while i < n:
             if intersects(i):
@@ -335,10 +388,15 @@ def compute_ob_retests(order_blocks, candles, trades=None, config=None):
                 first_touch_time = times[i]
                 rec["ob_touch_count"] = 1
                 if is_breach(i):
-                    rec["invalidated_on_retest_index"] = 0  # invalidated on first touch
+                    rec["invalidated_on_retest_index"] = 0  # legacy field, kept
+                    mark_invalidated(i, "invalidated_on_first_touch", 0)
                 break
             i += 1
-        if first_touch_index < 0 or rec["invalidated_on_retest_index"] == 0:
+        if first_touch_index < 0:
+            rec["final_outcome"] = "never_touched"
+            per_ob[ob_id] = rec
+            continue
+        if rec["invalidated_on_retest_index"] == 0:
             per_ob[ob_id] = rec
             continue
 
@@ -354,13 +412,28 @@ def compute_ob_retests(order_blocks, candles, trades=None, config=None):
 
         while j < n and not terminated and rec["retest_count"] < max_retests:
             if state == STATE_INSIDE:
+                # v2: breach takes precedence over exit-debounce — a candle that
+                # closes beyond the distal edge (even while still intersecting the
+                # zone) is a between-window invalidation, not an exit.
+                if is_breach(j):
+                    mark_invalidated(j, "invalidated_between_windows", rec["retest_count"])
+                    terminated = True
+                    break
                 if has_left(j):
                     state = STATE_ARMED
                 j += 1
                 continue
 
+            # ARMED — re-entry is evaluated BEFORE breach (v2 ordering guard): a
+            # candle that re-enters and closes beyond stays a genuine retest event
+            # that instantly fails (candles_to_failure 0) inside its window.
             reentered = intersects(j) and pen_pct(j) >= entry_thr
             if not reentered:
+                # v2: gap/no-entry breach while armed → between-window invalidation.
+                if is_breach(j):
+                    mark_invalidated(j, "invalidated_between_windows", rec["retest_count"])
+                    terminated = True
+                    break
                 j += 1
                 continue
 
@@ -421,10 +494,10 @@ def compute_ob_retests(order_blocks, candles, trades=None, config=None):
 
             reaction_met = reaction_max_pips >= reaction_min_pips
 
-            # per-OB aggregates
+            # per-OB aggregates (v2: final_outcome is a TERMINAL status, no longer
+            # overwritten with each event's outcome)
             rec["retest_count"] = k
             rec["ob_touch_count"] += 1
-            rec["final_outcome"] = outcome
             if k == 1:
                 rec["first_retest_outcome"] = outcome
             rec["max_reaction_pips_any_retest"] = max(rec["max_reaction_pips_any_retest"], reaction_max_pips)
@@ -432,9 +505,8 @@ def compute_ob_retests(order_blocks, candles, trades=None, config=None):
                 rec["retests_survived"] += 1
             elif outcome == "failed":
                 rec["retests_failed"] += 1
-                rec["invalidated_on_retest_index"] = k
-                if first_touch_time is not None and breach_at >= 0:
-                    rec["time_to_invalidation_minutes"] = round((times[breach_at] - first_touch_time) / 60.0)
+                rec["invalidated_on_retest_index"] = k  # legacy field, kept
+                mark_invalidated(breach_at, "invalidated_in_window", k)
             else:
                 rec["retests_open"] += 1
 
@@ -464,12 +536,21 @@ def compute_ob_retests(order_blocks, candles, trades=None, config=None):
                 ),
             })
 
-            if outcome in ("failed", "open"):
+            if outcome == "failed":
+                terminated = True
+                break
+            if outcome == "open":
+                rec["final_outcome"] = "alive_at_data_end"  # no more candles
                 terminated = True
                 break
             # survived -> resume after the window for the next retest
             state = STATE_INSIDE
             j = window_end + 1
+
+        # v2 terminal default: nothing invalidated this OB. Distinguish hitting
+        # the safety cap (tracking stopped) from genuinely reaching data end.
+        if rec["final_outcome"] is None:
+            rec["final_outcome"] = "capped" if rec["retest_count"] >= max_retests else "alive_at_data_end"
 
         rec["max_reaction_pips_any_retest"] = _round2(rec["max_reaction_pips_any_retest"])
         per_ob[ob_id] = rec
@@ -480,6 +561,8 @@ def compute_ob_retests(order_blocks, candles, trades=None, config=None):
         "compute_ms": round((_time.perf_counter() - t0) * 1000.0, 2),
         "config": cfg,
         "data_basis": "backend_postprocess",
+        "engine_version": ENGINE_VERSION,
+        "semantics": "continuous_invalidation",
     }
     return {"events": events, "per_ob": per_ob, "summary": summary, "meta": meta}
 
@@ -517,6 +600,42 @@ def _build_summary(events, per_ob, obs_total):
 
     total = survived + failed + open_
     closed = survived + failed
+
+    # ── v2 OB-level terminal block (mirrors obRetest.js summary.obLevel) ─────────
+    # Only computable when per-OB rows carry final_outcome terminals; None when
+    # unavailable so consumers never see fake zeros.
+    ob_level = None
+    terminal_rows = [r for r in per_ob.values() if r.get("final_outcome") is not None]
+    if terminal_rows:
+        def _count(status):
+            return sum(1 for r in terminal_rows if r["final_outcome"] == status)
+
+        inv_ft = _count("invalidated_on_first_touch")
+        inv_win = _count("invalidated_in_window")
+        inv_btw = _count("invalidated_between_windows")
+        invalidated = inv_ft + inv_win + inv_btw
+        alive = _count("alive_at_data_end")
+        capped = _count("capped")
+        # Denominator: touched OBs with a terminal state (never_touched excluded).
+        # Censored OBs count as not-failed — a conservative lower bound.
+        touched_terminal = invalidated + alive + capped
+        ob_level = {
+            "obs_invalidated": invalidated,
+            "obs_invalidated_on_first_touch": inv_ft,
+            "obs_invalidated_in_window": inv_win,
+            "obs_invalidated_between_windows": inv_btw,
+            "obs_alive_at_data_end": alive,
+            "obs_capped": capped,
+            "eventual_failure_rate": (invalidated / touched_terminal) if touched_terminal else 0.0,
+            "delayed_failure_count": inv_btw,
+            "delayed_failure_share": (inv_btw / invalidated) if invalidated else 0.0,
+            "median_time_to_invalidation_minutes": _median([
+                r["time_to_invalidation_minutes"] for r in terminal_rows
+                if str(r["final_outcome"]).startswith("invalidated")
+                and r.get("time_to_invalidation_minutes") is not None
+            ]),
+        }
+
     return {
         "obs_total": obs_total,
         "obs_with_first_touch": obs_with_first_touch,
@@ -533,6 +652,8 @@ def _build_summary(events, per_ob, obs_total):
         "breakdown_by_session": by_session,
         "breakdown_by_structure": by_structure,
         "breakdown_by_direction": by_direction,
+        # v2 OB-level terminal stats; None when terminal data is unavailable.
+        "ob_level": ob_level,
     }
 
 
@@ -540,6 +661,7 @@ def _build_summary(events, per_ob, obs_total):
 def summary_fields(result):
     """Return additive summary.json keys (OB-RETEST-3 §7), mirroring the ghost_* pattern."""
     s = result["summary"]
+    ob = s.get("ob_level") or {}
     return {
         "ob_retest_total": s["total_retests"],
         "ob_with_retest_count": s["obs_retested"],
@@ -552,6 +674,17 @@ def summary_fields(result):
         "retest_breakdown_by_session": s["breakdown_by_session"],
         "retest_breakdown_by_structure": s["breakdown_by_structure"],
         "retest_breakdown_by_direction": s["breakdown_by_direction"],
+        # v2 — continuous invalidation (OB-level eventual-failure stats).
+        "retest_engine_version": ENGINE_VERSION,
+        "retest_obs_invalidated": ob.get("obs_invalidated", 0),
+        "retest_obs_invalidated_between_windows": ob.get("obs_invalidated_between_windows", 0),
+        "retest_obs_invalidated_in_window": ob.get("obs_invalidated_in_window", 0),
+        "retest_obs_invalidated_on_first_touch": ob.get("obs_invalidated_on_first_touch", 0),
+        "retest_obs_alive_at_data_end": ob.get("obs_alive_at_data_end", 0),
+        "retest_eventual_failure_rate": round(ob.get("eventual_failure_rate", 0.0), 4),
+        "retest_delayed_failure_count": ob.get("delayed_failure_count", 0),
+        "retest_delayed_failure_share": round(ob.get("delayed_failure_share", 0.0), 4),
+        "retest_median_time_to_invalidation_minutes": ob.get("median_time_to_invalidation_minutes"),
     }
 
 

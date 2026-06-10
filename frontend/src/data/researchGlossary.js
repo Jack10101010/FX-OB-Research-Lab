@@ -529,7 +529,7 @@ export const GLOSSARY = {
     // the old "Survival Rate" is now Window Hold %; Reaction Success % is the headline.
     retest_window_hold: {
         friendlyName: "Window Hold %",
-        definition: "Of retests that resolved (held or failed), the share with no close beyond the OB's far edge inside the reaction window (~10 candles). It does NOT require a favorable reaction, and it is not eventual survival — failures after the window are not yet detected (continuous invalidation tracking is planned).",
+        definition: "Of retests that resolved (held or failed), the share with no close beyond the OB's far edge inside the reaction window (~10 candles). It does NOT require a favorable reaction, and it is not eventual survival — an OB can hold a window and be invalidated later (tracked separately as Eventual Failure, engine v2).",
         whyItMatters: "An honest short-horizon hold measure. It runs high by construction — use Reaction Success % to judge whether retests are actually tradeable.",
     },
     retest_reaction_success: {
@@ -543,18 +543,33 @@ export const GLOSSARY = {
         whyItMatters: "These padded the old 'Survival Rate'. A high weak-hold share means many 'holds' were untradeable.",
     },
     retest_eventual_failure: {
-        friendlyName: "Eventual Failure % (planned)",
-        definition: "The share of retested OBs that are EVER invalidated, at the OB level. Not yet available: the current engine only checks for breaches inside reaction windows, so delayed (between-window) failures are not detected.",
-        whyItMatters: "The number users usually want when they say 'survival'. Lands with the continuous-invalidation engine fix.",
+        friendlyName: "Eventual Failure %",
+        definition: "Of touched OBs with a known end (never-touched excluded), the share EVER invalidated — on first touch, inside a retest window, or between windows (engine v2 checks every candle after first touch). OBs still alive when the data ends are censored and counted as not-failed, so this is a conservative lower bound.",
+        whyItMatters: "The OB-level number users usually mean by 'survival' — did the zone eventually die? — as opposed to the per-retest window metrics above.",
     },
     retest_delayed_failure: {
-        friendlyName: "Delayed Failure (caveat)",
-        definition: "A breach of the OB that happens AFTER a held reaction window and outside any later window. The current engine does not detect these — such OBs stay 'alive' and later re-entries ('zombie retests') can still be counted, slightly inflating hold rates.",
-        whyItMatters: "Known limitation until the continuous-invalidation fix lands. Treat Window Hold % as a window-scoped statement only.",
+        friendlyName: "Delayed Failure",
+        definition: "An OB invalidated BETWEEN reaction windows — after a held window (or before any retest) but outside any window. Engine v2 detects these and stops tracking the OB, so re-entries into a dead zone ('zombie retests') are no longer counted. v1 backend artifacts predate this and may still contain zombies.",
+        whyItMatters: "Shows how much OB failure happens outside the windows that per-retest metrics can see.",
+    },
+    retest_time_to_invalidation: {
+        friendlyName: "Median Time to Invalidation",
+        definition: "For invalidated OBs only, the median minutes from the OB's first touch to the breach that killed it (median, not mean — these times are heavily skewed).",
+        whyItMatters: "How long a typical zone stays usable after price first interacts with it.",
+    },
+    retest_censored_obs: {
+        friendlyName: "Alive at Data End (censored)",
+        definition: "OBs that were never invalidated before the candle data ended (including any that hit the per-OB retest tracking cap). They are counted as not-failed in Eventual Failure %, which therefore understates true failure.",
+        whyItMatters: "Keeps the eventual-failure rate honest — unknown endings are disclosed, not guessed.",
+    },
+    retest_engine_version: {
+        friendlyName: "Retest Engine Version",
+        definition: "v2 (continuous invalidation) checks for OB breaches on every candle after first touch and reports OB-level eventual failure. v1 only checked inside reaction windows, so v1 backend artifacts can include zombie retests and slightly inflated hold rates — re-export the run to upgrade.",
+        whyItMatters: "Explains why a v1 artifact and a v2 frontend derivation of the same run can legitimately disagree.",
     },
     retest_backend_computed: {
         friendlyName: "Backend Computed",
-        definition: "These retest events were computed by the backend exporter and imported as artifacts (rather than derived in-browser from candles). It is a statement about the data's source, not a validation of the metric definitions.",
+        definition: "These retest events were computed by the backend exporter and imported as artifacts (rather than derived in-browser from candles). It is a statement about the data's source, not a validation of the metric definitions. Check the engine-version badge: v1 artifacts predate the continuous-invalidation fix.",
         whyItMatters: "Backend and frontend implement the same logic — provenance differs, definitions (and their caveats) are identical.",
     },
     // Legacy key (pre-rename) — kept so older surfaces still resolve. Same meaning

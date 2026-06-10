@@ -144,6 +144,7 @@ export function RetestLabTab({ orderBlocks = [], trades = [], activeRun = null, 
                 <ConfigBar config={config} setConfig={setConfig} source={source} />
                 <RetestIntelligence bestWorst={bestWorstConditions} findings={findings} minN={minN} />
                 <SummaryCards summary={summary} />
+                <ObLevelCards summary={summary} />
                 <SessionMatrix matrix={sessionMatrix} minN={minN} />
                 <EdgeDiscoveryTabs edgeBreakdowns={edgeBreakdowns} minN={minN} />
                 <EventTable events={events} />
@@ -155,11 +156,15 @@ export function RetestLabTab({ orderBlocks = [], trades = [], activeRun = null, 
 // ── Basis banner ──────────────────────────────────────────────────────────────
 function BasisBanner({ candleCount, meta, summary, source }) {
     const isBackend = source === "backend";
+    const isV1 = isBackend && meta?.engineVersion !== 2;
     return (
         <div className="flex flex-wrap items-center gap-2">
             {isBackend
                 ? <HeroBadge tone="success"><TermTip termKey="retest_backend_computed">Backend Computed</TermTip></HeroBadge>
                 : <HeroBadge tone="secondary">Frontend Derived</HeroBadge>}
+            {isV1
+                ? <HeroBadge tone="warning"><TermTip termKey="retest_engine_version">engine v1 · pre-invalidation fix</TermTip></HeroBadge>
+                : <HeroBadge tone="muted"><TermTip termKey="retest_engine_version">engine v2</TermTip></HeroBadge>}
             {isBackend
                 ? <HeroBadge tone="muted">from imported run</HeroBadge>
                 : <HeroBadge tone="muted">{candleCount.toLocaleString()} candles</HeroBadge>}
@@ -244,12 +249,41 @@ function SummaryCards({ summary }) {
                 ))}
             </div>
             <div className="text-[10.5px] text-muted-lab leading-relaxed">
-                Window Hold = no close-breach inside the reaction window (a hold, not eventual survival —
-                failures after the window are not yet detected). Reaction Success additionally requires the
-                configured minimum favorable move; Weak Hold held without one.
-                Reaction Success % + Weak Hold % + Failure Rate = 100% of closed retests.
+                Window Hold = no close-breach inside the reaction window (a hold, not eventual survival).
+                Reaction Success additionally requires the configured minimum favorable move; Weak Hold held
+                without one. Reaction Success % + Weak Hold % + Failure Rate = 100% of closed retests.
+                Engine v2 also tracks breaches between windows — see OB Outcomes below.
             </div>
         </div>
+    );
+}
+
+// ── OB-level outcomes (engine v2 — continuous invalidation) ──────────────────────
+// Eventual-failure stats per OB (not per event). Renders ONLY when terminal data
+// exists (frontend-derived v2 or a v2 backend summary artifact) — v1 artifacts get
+// nothing here rather than fake zeros.
+function ObLevelCards({ summary }) {
+    const ol = summary?.obLevel;
+    if (!ol) return null;
+    const cards = [
+        { label: "Eventual Failure %", value: pct(ol.eventualFailureRate, 0), sub: `${ol.obsInvalidated} OBs invalidated (any mode)`, tone: "danger", icon: ShieldAlert, tip: "retest_eventual_failure" },
+        { label: "Delayed Failures", value: String(ol.delayedFailureCount), sub: `${pct(ol.delayedFailureShare, 0)} of invalidations between windows`, tone: "warning", icon: Timer, tip: "retest_delayed_failure" },
+        { label: "Median Time to Invalidation", value: ol.medianTimeToInvalidationMinutes == null ? "—" : `${ol.medianTimeToInvalidationMinutes}m`, sub: "first touch → breach", tone: "secondary", icon: Hourglass, tip: "retest_time_to_invalidation" },
+        { label: "Alive at Data End", value: String(ol.obsAliveAtDataEnd + (ol.obsCapped || 0)), sub: `censored${ol.obsCapped ? ` (incl. ${ol.obsCapped} capped)` : ""} — counted as not-failed`, tone: "muted", icon: Boxes, tip: "retest_censored_obs" },
+    ];
+    return (
+        <NeonPanel title={<TermTip termKey="retest_eventual_failure">OB Outcomes — Eventual Failure (v2)</TermTip>} dense>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+                {cards.map((c) => (
+                    <MetricChip key={c.label} label={c.label} value={c.value} sub={c.sub} tone={c.tone} icon={c.icon} size="compact" tip={c.tip} />
+                ))}
+            </div>
+            <div className="mt-1.5 text-[10px] text-muted-lab leading-relaxed">
+                Per-OB (not per-retest): breaches are tracked on every candle after first touch, including
+                between reaction windows. Censored OBs (data ended while alive) count as not-failed — a
+                conservative lower bound on eventual failure.
+            </div>
+        </NeonPanel>
     );
 }
 

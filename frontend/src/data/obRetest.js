@@ -25,16 +25,30 @@
  * and the deviation note in the closeout message). This keeps the invariant
  * `survived + failed + open === totalRetests` exact.
  *
+ * ENGINE v2 — CONTINUOUS INVALIDATION (OB-RETEST-SURVIVAL-DEFINITION-AUDIT-2):
+ * From the first touch onward the breach predicate is evaluated on EVERY candle.
+ * A breach outside any reaction window terminates the OB at the OB level
+ * (`finalOutcome = "invalidated_between_windows"`) WITHOUT creating an event —
+ * a between-window breach is not a retest — and no later re-entries are counted
+ * ("zombie retests" are gone). ARMED ordering: re-entry is checked BEFORE breach,
+ * so a candle that re-enters and closes beyond remains a genuine instant-failed
+ * retest event (candlesToFailure 0). Per-OB terminal taxonomy (`finalOutcome`):
+ *   invalidated_on_first_touch | invalidated_in_window |
+ *   invalidated_between_windows | alive_at_data_end (censored) | capped |
+ *   never_touched (geometry-degenerate OBs keep finalOutcome = null: unevaluated).
+ *
  * METRIC NAMING (OB-RETEST-SURVIVAL-DEFINITION-AUDIT-1, Phase 1):
  * "survived" is a WINDOW HOLD — no close-breach inside ~N candles — NOT eventual
- * OB survival (delayed/between-window failures are not yet detected; that engine
- * fix is deferred). The summary therefore exposes honest derived metrics:
+ * OB survival. The summary therefore exposes honest derived metrics:
  *   windowHoldRate       = survived / closed            (alias of survivalRate)
  *   reactionSuccessRate  = (survived ∧ reactionMet) / closed   ← headline
  *   weakHoldRate         = (survived ∧ ¬reactionMet) / closed
  *   failureRate          = failed / closed
  *   medianCandlesToFailure (failed events; median, not mean)
- * Event classification and the exported artifact schema are UNCHANGED.
+ * plus the v2 OB-level block (`summary.obLevel`, null when perOB rows carry no
+ * finalOutcome — e.g. v1 backend artifacts): eventual failure, delayed failure,
+ * median time to invalidation. Event ROW SCHEMA is unchanged; the event
+ * POPULATION shrinks where v1 would have produced zombie retests.
  */
 
 export const DEFAULT_RETEST_CONFIG = {
@@ -200,6 +214,14 @@ export function deriveRetests({ orderBlocks = [], tradesByObId = null, candles =
             retestsFailed: 0,
             retestsOpen: 0,
             invalidatedOnRetestIndex: null,
+            // v2 OB-level terminal fields (continuous invalidation). finalOutcome
+            // stays null only for geometry-degenerate OBs that cannot be evaluated.
+            finalOutcome: null,
+            invalidatedAtTime: null,
+            invalidatedAtCandleIndex: null,
+            invalidationMode: null,
+            invalidatedAfterRetestIndex: null,
+            timeToInvalidationMinutes: null,
         };
 
         // Geometry guards — skip degenerate OBs but still record them.
@@ -244,6 +266,19 @@ export function deriveRetests({ orderBlocks = [], tradesByObId = null, candles =
         let firstTouchTime = null;
         let firstTouchIndex = -1;
 
+        // v2 terminal recorder — one definition of "invalidated" per run (the same
+        // configured breach predicate the windows use).
+        const breachMode = cfg.failureThreshold === "wick_beyond_ob" ? "wick_breach" : "close_breach";
+        const markInvalidated = (idx, kind, afterRetests) => {
+            perRow.finalOutcome = kind;
+            perRow.invalidatedAtTime = col.time[idx];
+            perRow.invalidatedAtCandleIndex = idx;
+            perRow.invalidationMode = breachMode;
+            perRow.invalidatedAfterRetestIndex = afterRetests;
+            perRow.timeToInvalidationMinutes =
+                firstTouchTime != null ? Math.round((col.time[idx] - firstTouchTime) / 60) : null;
+        };
+
         // Phase 1: seek first touch.
         let i = start;
         for (; i < col.n; i++) {
@@ -252,11 +287,15 @@ export function deriveRetests({ orderBlocks = [], tradesByObId = null, candles =
                 firstTouchTime = col.time[i];
                 perRow.touchCount = 1;
                 // Immediate breach on the very first touch → invalidated, no retest.
-                if (isBreach(i)) { perRow.invalidatedOnRetestIndex = 0; }
+                if (isBreach(i)) {
+                    perRow.invalidatedOnRetestIndex = 0; // legacy field, kept
+                    markInvalidated(i, "invalidated_on_first_touch", 0);
+                }
                 break;
             }
         }
-        if (firstTouchIndex < 0 || perRow.invalidatedOnRetestIndex === 0) { perOB.push(perRow); continue; }
+        if (firstTouchIndex < 0) { perRow.finalOutcome = "never_touched"; perOB.push(perRow); continue; }
+        if (perRow.invalidatedOnRetestIndex === 0) { perOB.push(perRow); continue; }
 
         // State machine after first touch. We are currently INSIDE the zone.
         // INSIDE → (price leaves, debounce) → ARMED → (re-enter) → window eval.
@@ -272,13 +311,24 @@ export function deriveRetests({ orderBlocks = [], tradesByObId = null, candles =
 
         while (j < col.n && !obTerminated && perRow.retestCount < cfg.maxRetestsPerOB) {
             if (state === STATE.INSIDE) {
+                // v2: breach takes precedence over exit-debounce — a candle that
+                // closes beyond the distal edge (even while still intersecting the
+                // zone) is a between-window invalidation, not an exit.
+                if (isBreach(j)) { markInvalidated(j, "invalidated_between_windows", perRow.retestCount); obTerminated = true; break; }
                 if (hasLeft(j)) state = STATE.ARMED;
                 j++;
                 continue;
             }
-            // ARMED — look for re-entry that meets the entry threshold.
+            // ARMED — re-entry is evaluated BEFORE breach (v2 ordering guard): a
+            // candle that re-enters and closes beyond stays a genuine retest event
+            // that instantly fails (candlesToFailure 0) inside its window.
             const reentered = intersects(j) && penPct(j) >= cfg.retestEntryThresholdPct;
-            if (!reentered) { j++; continue; }
+            if (!reentered) {
+                // v2: gap/no-entry breach while armed → between-window invalidation.
+                if (isBreach(j)) { markInvalidated(j, "invalidated_between_windows", perRow.retestCount); obTerminated = true; break; }
+                j++;
+                continue;
+            }
 
             // ── Retest k begins at candle j ───────────────────────────────────
             const k = perRow.retestCount + 1;
@@ -329,8 +379,11 @@ export function deriveRetests({ orderBlocks = [], tradesByObId = null, candles =
             perRow.retestCount = k;
             perRow.touchCount += 1;
             if (outcome === "survived") perRow.retestsSurvived += 1;
-            else if (outcome === "failed") { perRow.retestsFailed += 1; perRow.invalidatedOnRetestIndex = k; }
-            else perRow.retestsOpen += 1;
+            else if (outcome === "failed") {
+                perRow.retestsFailed += 1;
+                perRow.invalidatedOnRetestIndex = k; // legacy field, kept
+                markInvalidated(breachAt, "invalidated_in_window", k);
+            } else perRow.retestsOpen += 1;
 
             events.push({
                 obId: perRow.obId,
@@ -357,12 +410,17 @@ export function deriveRetests({ orderBlocks = [], tradesByObId = null, candles =
             });
 
             if (outcome === "failed") { obTerminated = true; break; }
-            if (outcome === "open") { obTerminated = true; break; } // no more candles to evaluate
+            if (outcome === "open") { perRow.finalOutcome = "alive_at_data_end"; obTerminated = true; break; } // no more candles
             // survived → resume scanning after the window for the next retest.
             state = STATE.INSIDE;
             j = windowEnd + 1;
         }
 
+        // v2 terminal default: nothing invalidated this OB. Distinguish hitting
+        // the safety cap (tracking stopped) from genuinely reaching data end.
+        if (perRow.finalOutcome == null) {
+            perRow.finalOutcome = perRow.retestCount >= cfg.maxRetestsPerOB ? "capped" : "alive_at_data_end";
+        }
         perOB.push(perRow);
     }
 
@@ -373,6 +431,8 @@ export function deriveRetests({ orderBlocks = [], tradesByObId = null, candles =
         computeMs: Math.round((t1 - t0) * 10) / 10,
         config: cfg,
         dataBasis: "derived_frontend",
+        engineVersion: 2,
+        semantics: "continuous_invalidation",
     };
 
     return { events, perOB, summary, meta };
@@ -403,6 +463,43 @@ export function summarizeRetestEvents(events = [], perOB = [], obsTotal = 0) {
         }
     }
     const closed = survived + failed;
+
+    // ── v2 OB-level terminal block ───────────────────────────────────────────────
+    // Only computable when perOB rows carry finalOutcome (frontend-derived v2, or a
+    // v2 backend summary sidecar). v1 artifacts / synthesized perOB → null; callers
+    // MUST hide eventual-failure metrics rather than show fake zeros.
+    let obLevel = null;
+    const terminalRows = perOB.filter((p) => p && p.finalOutcome != null);
+    if (terminalRows.length) {
+        const countOf = (s) => terminalRows.filter((p) => p.finalOutcome === s).length;
+        const obsInvalidatedOnFirstTouch = countOf("invalidated_on_first_touch");
+        const obsInvalidatedInWindow = countOf("invalidated_in_window");
+        const obsInvalidatedBetweenWindows = countOf("invalidated_between_windows");
+        const obsInvalidated = obsInvalidatedOnFirstTouch + obsInvalidatedInWindow + obsInvalidatedBetweenWindows;
+        const obsAliveAtDataEnd = countOf("alive_at_data_end");
+        const obsCapped = countOf("capped");
+        // Denominator: touched OBs with a terminal state (never_touched excluded).
+        // Censored OBs (alive_at_data_end, capped) count as not-failed — a
+        // conservative lower bound; their counts are reported alongside.
+        const obsTouchedTerminal = obsInvalidated + obsAliveAtDataEnd + obsCapped;
+        obLevel = {
+            obsInvalidated,
+            obsInvalidatedOnFirstTouch,
+            obsInvalidatedInWindow,
+            obsInvalidatedBetweenWindows,
+            obsAliveAtDataEnd,
+            obsCapped,
+            eventualFailureRate: obsTouchedTerminal ? obsInvalidated / obsTouchedTerminal : 0,
+            delayedFailureCount: obsInvalidatedBetweenWindows,
+            delayedFailureShare: obsInvalidated ? obsInvalidatedBetweenWindows / obsInvalidated : 0,
+            medianTimeToInvalidationMinutes: medianOf(
+                terminalRows
+                    .filter((p) => p.finalOutcome.startsWith("invalidated") && p.timeToInvalidationMinutes != null)
+                    .map((p) => p.timeToInvalidationMinutes),
+            ),
+        };
+    }
+
     return {
         obsTotal,
         obsWithFirstTouch,
@@ -428,6 +525,8 @@ export function summarizeRetestEvents(events = [], perOB = [], obsTotal = 0) {
         avgReactionPips: reactionN ? reactionSum / reactionN : 0,
         avgCandlesToFailure: failN ? failCandleSum / failN : 0,
         medianCandlesToFailure: medianOf(failCandles),
+        // v2 OB-level terminal stats; null when terminal data is unavailable.
+        obLevel,
     };
 }
 

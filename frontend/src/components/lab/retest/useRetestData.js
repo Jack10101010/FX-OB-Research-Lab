@@ -136,8 +136,11 @@ export function useRetestData({ orderBlocks = [], trades = [], activeRun = null,
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [hasBackend, loadState, candles, orderBlocks, tradesByObId, config]);
 
-    // Backend-verified result: built from imported ob_retests.csv (+ optional
+    // Backend-computed result: built from imported ob_retests.csv (+ optional
     // ob_retest_summary.csv) via the SAME summarizer → identical cards/breakdowns.
+    // v2 detection: the importer maps terminal fields only for v2 artifacts
+    // (invalidation_mode header fingerprint); v1 rows carry finalOutcome null →
+    // summary.obLevel stays null and the eventual-failure UI hides itself.
     const backendResult = React.useMemo(() => {
         if (!hasBackend) return null;
         const events = activeRun.obRetests || [];
@@ -146,7 +149,15 @@ export function useRetestData({ orderBlocks = [], trades = [], activeRun = null,
             : synthPerOBFromEvents(events);
         const obsTotal = Array.isArray(activeRun.orderBlocks) ? activeRun.orderBlocks.length : perOB.length;
         const summary = summarizeRetestEvents(events, perOB, obsTotal);
-        return { events, perOB, summary, meta: { dataBasis: "backend", candleCount: null, config: null } };
+        const isV2 = perOB.some((p) => p && p.retestArtifactVersion === 2);
+        return {
+            events, perOB, summary,
+            meta: {
+                dataBasis: "backend", candleCount: null, config: null,
+                engineVersion: isV2 ? 2 : 1,
+                semantics: isV2 ? "continuous_invalidation" : "window_only",
+            },
+        };
     }, [hasBackend, activeRun]);
 
     const result = hasBackend ? backendResult : derived;

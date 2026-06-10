@@ -326,8 +326,17 @@ export function parseObRetestsCSV(text) {
 
 // Per-OB aggregate sidecar → perOB shape consumed by summarizeRetestEvents
 // (touchCount / retestCount drive obsWithFirstTouch / obsRetested).
+//
+// v2 artifact sniffing (continuous invalidation): the "invalidation_mode" header
+// is the v2 fingerprint. v1 artifacts also HAVE a final_outcome column, but with
+// the old value domain (last event outcome: survived/failed/open) — mapping it as
+// a terminal status would corrupt the OB-level eventual-failure stats, so the v2
+// terminal fields are mapped ONLY when the fingerprint is present. Old artifacts
+// remain loadable; their rows carry retestArtifactVersion: 1 and finalOutcome:
+// null, which makes summary.obLevel null downstream (no fake metrics).
 export function parseObRetestSummaryCSV(text) {
-    const { rows } = parseCSV(text);
+    const { headers, rows } = parseCSV(text);
+    const isV2 = (headers || []).some((h) => String(h).trim().toLowerCase() === "invalidation_mode");
     return rows.map((r) => ({
         obId: pick(r, "ob_id", "obId"),
         direction: obRetestDirection(pick(r, "direction")),
@@ -337,6 +346,13 @@ export function parseObRetestSummaryCSV(text) {
         retestsSurvived: numOrNull(pick(r, "retests_survived", "retestsSurvived")) ?? 0,
         retestsFailed: numOrNull(pick(r, "retests_failed", "retestsFailed")) ?? 0,
         retestsOpen: numOrNull(pick(r, "retests_open", "retestsOpen")) ?? 0,
+        retestArtifactVersion: isV2 ? 2 : 1,
+        finalOutcome: isV2 ? (String(pick(r, "final_outcome", "finalOutcome") || "") || null) : null,
+        invalidatedAtTime: isV2 ? numOrNull(pick(r, "invalidated_at_time", "invalidatedAtTime")) : null,
+        invalidatedAtCandleIndex: isV2 ? numOrNull(pick(r, "invalidated_at_candle_index", "invalidatedAtCandleIndex")) : null,
+        invalidationMode: isV2 ? (String(pick(r, "invalidation_mode", "invalidationMode") || "") || null) : null,
+        invalidatedAfterRetestIndex: isV2 ? numOrNull(pick(r, "invalidated_after_retest_index", "invalidatedAfterRetestIndex")) : null,
+        timeToInvalidationMinutes: isV2 ? numOrNull(pick(r, "time_to_invalidation_minutes", "timeToInvalidationMinutes")) : null,
     }));
 }
 
