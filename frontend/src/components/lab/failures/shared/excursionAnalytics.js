@@ -737,6 +737,33 @@ export function buildBucketExplorerRows({ bucketLosers, bucketKey = null, allTra
     return { available, dimA: aKey, dimB: bKey, bucketKey: bucketKey ?? null, sampleFloor, rows, totals };
 }
 
+// ── Refine a selected bucket row by ONE extra dimension (controlled) ─────────────
+// Given a clicked scorecard row (keyA[/keyB] on dimA[/dimB]), filter BOTH populations
+// to that exact cell using the registry accessors, then re-run buildBucketExplorerRows
+// with `refineDim` as the only grouping dimension. This yields e.g. "London + CHoCH"
+// split by Direction → Long / Short. Strictly ONE extra dimension — no 3-way grid,
+// no cascade. Reuses the existing engine + denominator logic (no new aggregation).
+export function buildRefinedBucketRows({ bucketLosers, allTrades, bucketKey, dimA, dimB = null, keyA, keyB = null, refineDim, sampleFloor = DRILL_SAMPLE_FLOOR } = {}) {
+    const dA = resolveDimension(dimA);
+    const dB = dimB != null ? resolveDimension(dimB) : null;
+    if (!dA || !refineDim) return { available: [], dimA: null, dimB: null, bucketKey: bucketKey ?? null, sampleFloor, rows: [], totals: { bucketTrades: 0, bucketLossR: 0, allTrades: 0, baselineLossRate: 0 } };
+    const matchCell = (t) => {
+        if (String(dA.accessor(t) ?? "__none__") !== String(keyA)) return false;
+        if (dB && String(dB.accessor(t) ?? "__none__") !== String(keyB)) return false;
+        return true;
+    };
+    const at = (Array.isArray(allTrades) ? allTrades : []).filter(matchCell);
+    const bl = (Array.isArray(bucketLosers) ? bucketLosers : []).filter(matchCell);
+    return buildBucketExplorerRows({ bucketKey, bucketLosers: bl, allTrades: at, dimA: refineDim, dimB: null, sampleFloor });
+}
+
+// Dimensions offered as refine targets: available in the population, minus the ones
+// already used by the main table (dimA / dimB). Pure.
+export function availableRefineDimensions(allTrades, usedKeys = []) {
+    const used = new Set((usedKeys || []).filter(Boolean));
+    return availableDimensions(Array.isArray(allTrades) ? allTrades : []).filter((d) => !used.has(d.key));
+}
+
 // Pick the single "worst" setup row for subtle highlighting: highest OVERALL loss
 // rate, tie-broken by absolute full loss-R; sample floor must be met (rankable).
 // Pure; returns the row or null.
@@ -1027,5 +1054,98 @@ export function buildWinnerMaeDistribution(winners) {
             : source === "mixed" ? "Mixed (some legacy)"
             : null,
         warning,
+    };
+}
+
+// ── MAE-by-dimension (Phase 3B — which cohorts' WINNERS came closest to the stop) ─
+// Mirror of buildMfeByDimension but WINNER-based: for each value of a dimension, how
+// deep did its winners dip toward the stop before winning? Uses getMaeForStopPressure
+// (to-original-exit preferred, stop-anchored fallback) + bucketMaeDepth for the near-stop
+// (≤ -0.75R) and ≤ -1R anomaly thresholds — identical to the Winner MAE / Stop-Pressure
+// panel. Deliberately does NOT use aggregateFailures (that engine is loser / loss-R
+// oriented). Source array is never mutated.
+const MAE_DIM_NEAR_KEYS = new Set(["075_1", "le_1"]); // ≤ -0.75R "nearly failed"
+
+// Source provenance + fallback warning (shared with the Winner MAE distribution).
+function maeSourceMeta(eligible, fallbackCount) {
+    const allFallback = eligible > 0 && fallbackCount === eligible;
+    const source = eligible === 0
+        ? null
+        : fallbackCount === 0 ? "to_original_exit"
+        : allFallback ? "stop_anchored_fallback"
+        : "mixed";
+    const warning = fallbackCount === 0
+        ? null
+        : allFallback
+            ? "This run uses legacy stop-anchored MAE. Re-export with mae_r_to_original_exit for accurate stop-pressure research."
+            : "Some trades use legacy stop-anchored MAE because mae_r_to_original_exit is missing.";
+    return { source, warning };
+}
+
+export function buildMaeByDimension(winners, dimKey, { sampleFloor = DRILL_SAMPLE_FLOOR } = {}) {
+    const dim = resolveDimension(dimKey);
+    const list = Array.isArray(winners) ? winners : [];
+    const eligibleAll = list.filter((t) => getMaeForStopPressure(t).value != null);
+    const eligible = eligibleAll.length;
+    if (!dim || !eligible || !dimensionAvailable(dim, eligibleAll)) {
+        return {
+            dimKey: dim?.key ?? null, dimLabel: dim?.label ?? null, rows: [], available: false,
+            eligible: 0, totalWinR: 0, avgMaeR: null, fallbackCount: 0, fallbackPct: 0, source: null, warning: null,
+        };
+    }
+
+    const fallbackCountAll = eligibleAll.filter((t) => getMaeForStopPressure(t).source === "stop_anchored_fallback").length;
+    const totalWinR = eligibleAll.reduce((s, t) => s + (rOf(t) || 0), 0);
+    const avgMaeR = round2(eligibleAll.reduce((s, t) => s + getMaeForStopPressure(t).value, 0) / eligible);
+
+    // Group ALL winners by dimension value (null → Unknown dropped, like buildMfeByDimension);
+    // MAE stats are computed over each group's MAE-carrying subset. Groups with no MAE-eligible
+    // winner are dropped.
+    const groups = new Map();
+    for (const t of list) {
+        const v = dim.accessor(t);
+        if (v == null) continue;
+        const k = String(v);
+        if (!groups.has(k)) groups.set(k, []);
+        groups.get(k).push(t);
+    }
+
+    const rows = [];
+    for (const [k, members] of groups.entries()) {
+        const elig = members.map((t) => ({ t, res: getMaeForStopPressure(t) })).filter((x) => x.res.value != null);
+        const e = elig.length;
+        if (!e) continue;
+        const maes = elig.map((x) => x.res.value);
+        const winR = elig.reduce((s, x) => s + (rOf(x.t) || 0), 0);
+        const nearStopCount = elig.filter((x) => MAE_DIM_NEAR_KEYS.has(bucketMaeDepth(x.res.value))).length;
+        const anomalyCount = elig.filter((x) => bucketMaeDepth(x.res.value) === "le_1").length;
+        const fb = elig.filter((x) => x.res.source === "stop_anchored_fallback").length;
+        rows.push({
+            key: k,
+            label: k,
+            totalWinners: members.length,
+            eligible: e,
+            avgMaeR: round2(maes.reduce((s, m) => s + m, 0) / e),
+            nearStopCount,
+            nearStopPct: round1((nearStopCount / e) * 100),
+            anomalyCount,
+            anomalyPct: round1((anomalyCount / e) * 100),
+            avgWinR: round2(winR / e),
+            totalWinR: round1(winR),
+            fallbackCount: fb,
+            fallbackPct: round1((fb / e) * 100),
+            lowSample: e < sampleFloor,
+        });
+    }
+    // Closest-to-stop cohort first: highest near-stop %, tiebreak most-negative avg MAE.
+    rows.sort((a, b) => (b.nearStopPct - a.nearStopPct) || (a.avgMaeR - b.avgMaeR));
+
+    const { source, warning } = maeSourceMeta(eligible, fallbackCountAll);
+    return {
+        dimKey: dim.key, dimLabel: dim.label, rows, available: true,
+        eligible, totalWinR: round1(totalWinR), avgMaeR,
+        fallbackCount: fallbackCountAll,
+        fallbackPct: eligible ? round1((fallbackCountAll / eligible) * 100) : 0,
+        source, warning,
     };
 }

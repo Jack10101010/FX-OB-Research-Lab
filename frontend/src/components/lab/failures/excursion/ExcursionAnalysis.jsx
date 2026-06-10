@@ -20,7 +20,7 @@ import {
     buildRawRDistribution, buildBucketDrilldown, losersInRawBucket,
     buildFailureDrivers, buildPairDrivers,
     buildBeOpportunity, buildBeExclusiveRanges,
-    buildLoserMfeReachTable, buildMfeByDimension, buildDistanceInsights,
+    buildLoserMfeReachTable, buildMfeByDimension, buildMaeByDimension, buildDistanceInsights,
     buildWinnerMaeDistribution,
 } from "../shared/excursionAnalytics";
 import { FailureExplorer, LiftCell } from "./FailureExplorer";
@@ -137,6 +137,73 @@ function MfeOutcomePanel({ data, title, question }) {
                                     <td key={L} className="text-right py-1.5 px-2 font-num tabular-nums text-[hsl(var(--text-2))]">{r.reach[L]}%</td>
                                 ))}
                                 <td className="text-right py-1.5 pl-2"><LiftCell lift={r.lift} /></td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </NeonPanel>
+    );
+}
+
+// MAE-by-dimension (Phase 3B): which cohorts' WINNERS came closest to the stop before
+// winning. Mirrors MfeOutcomePanel but winner/MAE-based. Self-gates on MAE availability
+// (does NOT block the rest of the tab) and surfaces the to-exit/legacy fallback warning.
+function MaeOutcomePanel({ data, title, question }) {
+    if (!data) return null;
+    if (!data.available || !data.rows.length) {
+        return (
+            <NeonPanel title={title}>
+                <div className="p-4 flex items-start gap-3 text-[11.5px] font-ui text-[hsl(var(--text-2))] leading-relaxed">
+                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-[hsl(var(--warning))]" />
+                    <div>Requires <span className="font-num text-[hsl(var(--text))]">maeR</span> / <span className="font-num text-[hsl(var(--text))]">mae_r_to_original_exit</span> — no winners with adverse-excursion data for this dimension.</div>
+                </div>
+            </NeonPanel>
+        );
+    }
+    return (
+        <NeonPanel
+            title={title}
+            action={<Pill tone="muted">avg <TermTip termKey="mae">MAE</TermTip> {data.avgMaeR}R · {data.eligible} winners</Pill>}
+        >
+            {data.warning && (
+                <div className={cn(
+                    "mx-3 mt-3 flex items-start gap-2 clip-bevel-sm border p-2",
+                    data.source === "stop_anchored_fallback"
+                        ? "border-[hsl(var(--danger)/0.4)] bg-[hsl(var(--danger)/0.06)]"
+                        : "border-[hsl(var(--warning)/0.35)] bg-[hsl(var(--warning)/0.05)]",
+                )}>
+                    <AlertTriangle className={cn("w-3.5 h-3.5 shrink-0 mt-0.5", data.source === "stop_anchored_fallback" ? "text-[hsl(var(--danger))]" : "text-[hsl(var(--warning))]")} />
+                    <p className="text-[10.5px] font-ui text-[hsl(var(--text-2))] leading-relaxed">
+                        {data.warning}
+                        {data.source === "mixed" && <span className="text-[hsl(var(--text-3))]"> ({data.fallbackCount}/{data.eligible} · {data.fallbackPct}%)</span>}
+                    </p>
+                </div>
+            )}
+            <p className="px-3 pt-3 text-[10.5px] font-ui text-[hsl(var(--text-2))] leading-relaxed">
+                {question} Ranked by <span className="text-[hsl(var(--text))]">near-stop %</span> — a deeper avg <TermTip termKey="mae">MAE</TermTip> means that cohort's winners came closer to the stop before winning.
+            </p>
+            <div className="p-3 overflow-x-auto">
+                <table className="w-full text-[11.5px] font-ui border-collapse">
+                    <thead>
+                        <tr className="text-[9.5px] uppercase tracking-[0.05em] text-[hsl(var(--text-2))] border-b border-[hsl(var(--border-soft))]">
+                            <th className="text-left font-medium py-1.5 pr-2">{data.dimLabel}</th>
+                            <th className="text-right font-medium py-1.5 px-2">Winners</th>
+                            <th className="text-right font-medium py-1.5 px-2">Avg MAE</th>
+                            <th className="text-right font-medium py-1.5 px-2"><TermTip termKey="stop_pressure">Near-stop</TermTip> ≤-0.75R</th>
+                            <th className="text-right font-medium py-1.5 px-2">≤ -1R</th>
+                            <th className="text-right font-medium py-1.5 pl-2">Avg Win R</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {data.rows.map((r) => (
+                            <tr key={r.key} className={cn("border-b border-[hsl(var(--border-soft)/0.5)]", r.lowSample && "opacity-50")}>
+                                <td className="text-left py-1.5 pr-2 text-[hsl(var(--text))] truncate max-w-[150px]">{r.label}{r.lowSample && <span className="ml-1.5 text-[9px] uppercase tracking-wider text-[hsl(var(--warning))]">low n</span>}</td>
+                                <td className="text-right py-1.5 px-2 font-num tabular-nums text-white">{r.eligible}{r.totalWinners !== r.eligible && <span className="text-[hsl(var(--text-3))]">/{r.totalWinners}</span>}</td>
+                                <td className="text-right py-1.5 px-2 font-num tabular-nums text-[hsl(var(--text))]">{r.avgMaeR}R</td>
+                                <td className="text-right py-1.5 px-2 font-num tabular-nums text-[hsl(var(--warning))]">{r.nearStopPct}%</td>
+                                <td className="text-right py-1.5 px-2 font-num tabular-nums text-[hsl(var(--danger))]">{r.anomalyPct}%</td>
+                                <td className="text-right py-1.5 pl-2 font-num tabular-nums text-[hsl(var(--success))]">+{r.avgWinR}R</td>
                             </tr>
                         ))}
                     </tbody>
@@ -562,6 +629,10 @@ export function ExcursionAnalysis({ losers = [], allLosers = [], allTrades = [],
     );
     const mfeByStructure = useMemo(() => buildMfeByDimension(source, "structure"), [source]);
     const mfeBySession = useMemo(() => buildMfeByDimension(source, "session"), [source]);
+    // MAE-by-dimension (Phase 3B) — winner-based; reuses the `winners` set derived for the
+    // Stop-Pressure panel. "Which cohorts' winners came closest to the stop before winning?"
+    const maeByStructure = useMemo(() => buildMaeByDimension(winners, "structure"), [winners]);
+    const maeBySession = useMemo(() => buildMaeByDimension(winners, "session"), [winners]);
 
     // Bucket object handed to the Explorer so it can scope to "what caused THIS bucket".
     const explorerBucket = useMemo(() => {
@@ -656,6 +727,18 @@ export function ExcursionAnalysis({ losers = [], allLosers = [], allTrades = [],
 
             {/* ── 6. Winner MAE / Stop Pressure (gates on maeR separately) ──── */}
             <MaeStopPressurePanel mae={mae} />
+
+            {/* ── Structure × MAE / Session × MAE outcomes (Phase 3B) ───────── */}
+            <MaeOutcomePanel
+                data={maeByStructure}
+                title={<TermTip termKey="stop_pressure">Structure vs stop pressure</TermTip>}
+                question="Which structures produce winners that came closest to the stop before winning?"
+            />
+            <MaeOutcomePanel
+                data={maeBySession}
+                title={<TermTip termKey="stop_pressure">Session vs stop pressure</TermTip>}
+                question="Which sessions produce winners that nearly stopped out before winning?"
+            />
 
             {/* ── Structure × MFE / Session × MFE outcomes ──────────────────── */}
             <MfeOutcomePanel
