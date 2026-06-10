@@ -142,9 +142,13 @@ export function costRatio(trade, runConfig) {
 // Returns true if a given field is likely present on this trade set
 // (based on the first 20 trades to avoid full-scan cost).
 
+// `fieldName` may be a single key or an array of alias keys (e.g. an exporter
+// field exported under different names across versions). A trade "has" the field
+// if ANY alias is non-null/non-empty. Single-string callers are unaffected.
 export function fieldPresent(trades, fieldName, sampleSize = 20) {
     if (!Array.isArray(trades) || trades.length === 0) return false;
+    const keys = Array.isArray(fieldName) ? fieldName : [fieldName];
     const sample = trades.slice(0, sampleSize);
-    const found  = sample.filter(t => t?.[fieldName] != null && t[fieldName] !== "").length;
+    const found  = sample.filter(t => keys.some(k => t?.[k] != null && t[k] !== "")).length;
     return found / sample.length >= 0.5;
 }

@@ -20,6 +20,7 @@ export const FAILURES_TABS = [
     { key: "direction",   label: "Direction",         short: "Direction" },
     { key: "sessions",    label: "Sessions",          short: "Sessions"  },
     { key: "streaks",     label: "Streaks",           short: "Streaks"   },
+    { key: "excursion",   label: "Distance to Stop",  short: "Distance"  },
     { key: "prevention",  label: "Prevention",        short: "Prevent"   },
     { key: "drilldown",   label: "Drilldown",         short: "Drill"     },
     { key: "workspace",   label: "Views & Export",    short: "Export"    },

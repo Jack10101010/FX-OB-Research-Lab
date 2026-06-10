@@ -82,6 +82,16 @@ ok(short.lossRate === 100, "short loss rate 100% (all short are losers)");
 ok(approx(long.lossRate, 33.3), "long loss rate ~33.3% (5 of 15)");
 ok(short.lossRateLift === 2 && approx(long.lossRateLift, 0.67), "loss-rate lift: short 2×, long ~0.67×");
 
+console.log("cohort context fields (PHASE A — additive, keeps existing metrics)");
+ok(short.losers === 5 && short.winners === 0 && short.totalTrades === 5, "short cohort: 5 losers / 0 winners / 5 total");
+ok(long.losers === 5 && long.winners === 10 && long.totalTrades === 15, "long cohort: 5 losers / 10 winners / 15 total");
+ok(short.winRate === 0 && approx(long.winRate, 66.7), "winRate: short 0%, long ~66.7%");
+ok(short.baselineLossRate === 50 && long.baselineLossRate === 50, "baselineLossRate exposed per cell (50%)");
+ok(short.lossRateDelta === 50 && approx(long.lossRateDelta, -16.7), "lossRateDelta: short +50, long ~-16.7 (lossRate − baseline)");
+ok(short.lossSharePct === short.lossRSharePct && long.lossSharePct === long.lossRSharePct, "lossSharePct alias == lossRSharePct");
+ok(short.tradeSharePct === 25 && long.tradeSharePct === 75, "tradeSharePct retained (existing metric)");
+ok(short.contributionPct === short.lossSharePct, "contribution metric retained (== loss share)");
+
 console.log("sample floor → rankable");
 ok(short.rankable === false && short.lowSample === true, "short (n=5) not rankable at floor 8");
 ok(long.rankable === true, "long (n=15) rankable at floor 8");

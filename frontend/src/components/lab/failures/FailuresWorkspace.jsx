@@ -21,6 +21,7 @@ import { FailuresTemporal }      from "./temporal/FailuresTemporal";
 import { DirectionalAsymmetry }  from "./direction/DirectionalAsymmetry";
 import { SessionFailures }       from "./sessions/SessionFailures";
 import { StreakAnalysis }         from "./streaks/StreakAnalysis";
+import { ExcursionAnalysis }     from "./excursion/ExcursionAnalysis";
 import { PreventionEngine }      from "./prevention/PreventionEngine";
 import { FailureDrilldown }      from "./drilldown/FailureDrilldown";
 import { ViewManager }           from "./workspace/ViewManager";
@@ -199,6 +200,7 @@ export function FailuresWorkspace() {
                 {activeTab === "direction"  && <DirectionalAsymmetry {...sharedProps} />}
                 {activeTab === "sessions"   && <SessionFailures      {...sharedProps} />}
                 {activeTab === "streaks"    && <StreakAnalysis        {...sharedProps} />}
+                {activeTab === "excursion"  && <ExcursionAnalysis    {...sharedProps} />}
                 {activeTab === "prevention" && <PreventionEngine     {...sharedProps} />}
                 {activeTab === "drilldown"  && <FailureDrilldown     {...sharedProps} />}
                 {activeTab === "workspace"  && <ViewManager          {...sharedProps} filters={filters} />}

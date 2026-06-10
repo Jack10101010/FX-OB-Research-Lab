@@ -17,9 +17,17 @@ export const FIELD_DEPS = {
     entry:         { tier: 0, label: "Entry timestamp",  modules: ["temporal", "streaks"] },
     exit:          { tier: 0, label: "Exit timestamp",   modules: ["archetypes"] },
 
-    // Tier 1 — exporter upgrades needed
-    mae:           { tier: 1, label: "MAE (R)",          modules: ["excursion", "archetypes_full", "replay"] },
-    mfe:           { tier: 1, label: "MFE (R)",          modules: ["excursion", "archetypes_full", "replay"] },
+    // Tier 1 — exporter upgrades needed.
+    // `keys` lists the actual per-trade field names the importer maps (mapped as
+    // maeR/mae_r, mfeR/mfe_r since backtester Phase 11A / importer Phase 11B), with the
+    // legacy `mae`/`mfe` retained for backwards compatibility with older imports.
+    mae:           { tier: 1, label: "MAE (R)",          modules: ["excursion", "archetypes_full", "replay"], keys: ["maeR", "mae_r", "mae"] },
+    mfe:           { tier: 1, label: "MFE (R)",          modules: ["excursion", "archetypes_full", "replay"], keys: ["mfeR", "mfe_r", "mfe"] },
+    // MAE over the trade's real life (backend Phase 11A.2). Absent on legacy bundles —
+    // the Stop-Pressure panel then falls back to stop-anchored mae_r with its own warning.
+    mae_to_exit:   { tier: 1, label: "MAE to original exit (R)", modules: ["stop_pressure"], keys: ["maeRToOriginalExit", "mae_r_to_original_exit"] },
+    // Counterfactual R if no target had capped the trade (BE-replay prerequisite).
+    r_if_no_target:{ tier: 1, label: "R if no target",   modules: ["be_replay"], keys: ["rIfNoTarget", "r_if_no_target"] },
     minutes_to_exit:         { tier: 1, label: "Trade duration (min)", modules: ["archetypes_full"] },
     post_stop_continuation_r:{ tier: 1, label: "Post-stop continuation (R)", modules: ["false_losers"] },
 
@@ -44,7 +52,7 @@ export function scanFieldCoverage(trades) {
         if (meta.tier === 0) {
             result[field] = { coverage: 1, status: "ok", tier: 0 };
         } else {
-            const present = fieldPresent(trades, field);
+            const present = fieldPresent(trades, meta.keys ?? field);
             result[field] = {
                 coverage: present ? 1 : 0,
                 status:   present ? "ok" : "absent",
@@ -59,7 +67,7 @@ export function scanFieldCoverage(trades) {
 export function getMissingTier1Fields(trades) {
     const tier1 = Object.entries(FIELD_DEPS).filter(([, v]) => v.tier === 1);
     return tier1
-        .filter(([field]) => !fieldPresent(trades, field))
+        .filter(([field, meta]) => !fieldPresent(trades, meta.keys ?? field))
         .map(([field, meta]) => ({ field, label: meta.label }));
 }
 
@@ -67,7 +75,7 @@ export function getMissingTier1Fields(trades) {
 export function isModuleAvailable(moduleName, trades) {
     const neededFields = Object.entries(FIELD_DEPS)
         .filter(([, v]) => v.tier > 0 && v.modules.includes(moduleName))
-        .map(([field]) => field);
+        .map(([field, meta]) => meta.keys ?? field);
     if (neededFields.length === 0) return true;
     return neededFields.every(f => fieldPresent(trades, f));
 }

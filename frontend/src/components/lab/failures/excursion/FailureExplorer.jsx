@@ -21,7 +21,7 @@ import { NeonPanel } from "@/components/lab/NeonPanel";
 import { Pill } from "@/components/lab/DataTable";
 import { cn } from "@/lib/utils";
 import { TermTip } from "@/components/lab/TermTip";
-import { buildExplorer, buildBucketExplorerRows, buildRefinedBucketRows, availableRefineDimensions, pickWorstSetupRow, EXPLORER_METRICS, EXPLORER_FLOORS, isHighlightCell } from "../shared/excursionAnalytics";
+import { buildExplorer, buildBucketExplorerRows, buildRefinedBucketRows, availableRefineDimensions, bucketRowAction, pickWorstSetupRow, EXPLORER_METRICS, EXPLORER_FLOORS, isHighlightCell } from "../shared/excursionAnalytics";
 import { SectionRoadmap } from "@/components/lab/roadmap/SectionRoadmap";
 
 // Lift = loss-R share ÷ trade share. >1 ⇒ disproportionate (a real driver).
@@ -31,6 +31,19 @@ export function LiftCell({ lift }) {
         : lift >= 1.15 ? "hsl(var(--warning))"
         : "hsl(var(--text-2))";
     return <span className="w-12 text-right font-num tabular-nums" style={{ color, fontWeight: lift >= 1.15 ? 600 : 400 }}>{lift}×</span>;
+}
+
+// Verdict chip from the shared bucketRowAction engine (V2 Phase 3A). Restrained:
+// only "Test disable" / "Watchlist" earn a chip; normal / insufficient rows render
+// a dash (the verdict is still available via the hover title). No new logic here —
+// thresholds live in excursionAnalytics.bucketRowAction (validated).
+const ACTION_TITLE = "Backtest action is based on cohort loss rate and loss-R damage. It is not a live trading instruction.";
+function ActionCell({ row, sampleFloor }) {
+    const a = bucketRowAction(row, { sampleFloor });
+    if (a.key === "test_disable" || a.key === "watchlist") {
+        return <td className="text-right py-2 px-2 whitespace-nowrap" title={ACTION_TITLE}><Pill tone={a.tone}>{a.label}</Pill></td>;
+    }
+    return <td className="text-right py-2 px-2 font-num text-[hsl(var(--text-3))]" title={`${a.label} — ${ACTION_TITLE}`}>—</td>;
 }
 
 // Δ vs baseline loss rate. Green = loses LESS often than baseline (below); red =
@@ -318,7 +331,7 @@ export function FailureExplorer({ allTrades = [], allLosers = [], bucket = null 
                         ];
                         const advOn = ADV.filter((a) => advCols[a.key]);
                         const overallSpan = 8 + advOn.length; // Losses,Wins,Total,LossRate,+R,−R,NetR,PF + advanced
-                        const colCount = 1 + 5 + (showOverall ? overallSpan : 0); // Setup + bucket(5) + overall
+                        const colCount = 1 + 6 + (showOverall ? overallSpan : 0); // Setup + bucket(5 + Action) + overall
 
                         // Shared data cells (bucket group + overall group) — reused by the
                         // main rows AND the refined sub-rows so columns always align.
@@ -332,6 +345,7 @@ export function FailureExplorer({ allTrades = [], allLosers = [], bucket = null 
                                     <td className="text-right py-2 px-2 font-num tabular-nums text-[hsl(var(--success))]">{bWins}</td>
                                     <td className="text-right py-2 px-2 font-num tabular-nums text-[hsl(var(--danger))]">{fmtLossR(c.bucketLossR)}</td>
                                     <td className="text-right py-2 px-2 font-num tabular-nums">{c.bucketNetR == null ? <span className="text-[hsl(var(--text-3))]">—</span> : netNode(c.bucketNetR)}</td>
+                                    <ActionCell row={c} sampleFloor={floor} />
                                     {showOverall && <>
                                         <td className="text-right py-2 px-2 font-num tabular-nums text-white border-l border-[hsl(var(--border-soft)/0.5)]">{c.fullTotal}</td>
                                         <td className="text-right py-2 px-2 font-num tabular-nums text-[hsl(var(--danger))]">{c.fullLosses}</td>
@@ -386,7 +400,7 @@ export function FailureExplorer({ allTrades = [], allLosers = [], bucket = null 
                                             {/* group header */}
                                             <tr className="text-[9px] uppercase tracking-[0.06em] text-[hsl(var(--text-3))]">
                                                 <th className="py-1 pr-2 sticky left-0 z-[3] bg-[hsl(var(--panel))]" />
-                                                <th className="py-1 px-2 text-center bg-[hsl(var(--panel-2)/0.4)] border-l border-[hsl(var(--border-soft))]" colSpan={5}>Bucket: {bucket.label}</th>
+                                                <th className="py-1 px-2 text-center bg-[hsl(var(--panel-2)/0.4)] border-l border-[hsl(var(--border-soft))]" colSpan={6}>Bucket: {bucket.label}</th>
                                                 {showOverall && (
                                                     <th className="py-1 px-2 text-center border-l border-[hsl(var(--border-soft))]" colSpan={overallSpan}>
                                                         <TermTip termKey="overall_setup">Overall valid setup</TermTip>
@@ -401,6 +415,7 @@ export function FailureExplorer({ allTrades = [], allLosers = [], bucket = null 
                                                 <th className="text-right font-medium py-1.5 px-2">Wins</th>
                                                 <th className="text-right font-medium py-1.5 px-2"><TermTip termKey="loss_r_contribution">Loss-R</TermTip></th>
                                                 <th className="text-right font-medium py-1.5 px-2"><TermTip termKey="net_r">Net R</TermTip></th>
+                                                <th className="text-right font-medium py-1.5 px-2" title={ACTION_TITLE}>Action</th>
                                                 {showOverall && <>
                                                     <th className="text-right font-medium py-1.5 px-2 border-l border-[hsl(var(--border-soft))]">Total</th>
                                                     <th className="text-right font-medium py-1.5 px-2">Losses</th>
@@ -477,6 +492,7 @@ export function FailureExplorer({ allTrades = [], allLosers = [], bucket = null 
                                                 <td className="text-right py-2 px-2 font-num tabular-nums font-semibold text-[hsl(var(--success))]">{T.bW}{T.bWpartial ? "*" : ""}</td>
                                                 <td className="text-right py-2 px-2 font-num tabular-nums font-semibold text-[hsl(var(--danger))]">{fmtLossR(r1(T.bLossR))}</td>
                                                 <td className="text-right py-2 px-2 font-num tabular-nums font-semibold">{netNode(tBucketNetR)}{T.bWpartial ? "*" : ""}</td>
+                                                <td className="text-right py-2 px-2 font-num text-[hsl(var(--text-3))]">—</td>
                                                 {showOverall && <>
                                                     <td className="text-right py-2 px-2 font-num tabular-nums font-semibold text-white border-l border-[hsl(var(--border-soft)/0.5)]">{T.fT}</td>
                                                     <td className="text-right py-2 px-2 font-num tabular-nums font-semibold text-[hsl(var(--danger))]">{T.fL}</td>
