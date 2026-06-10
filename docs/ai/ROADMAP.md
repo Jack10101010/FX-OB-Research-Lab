@@ -6,7 +6,7 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` todo. Render with `/roadmap`.
 > to, in order. `BACKLOG.md` is the **unscheduled queue**. An item lives primarily in one place;
 > `/promote` moves it backlog → roadmap when it's picked up.
 
-*Last updated: 2026-06-07.*
+*Last updated: 2026-06-10.*
 
 ## Phase 1 — Fill-state foundation  `[x]`
 
@@ -25,14 +25,15 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` todo. Render with `/roadmap`.
 - [x] Session Breakdown (conditional Outside)
 - [x] Entry Model Breakdown (kept); Entry Context table removed
 
-## Phase 2 — Research Signals + Confidence  `[~]`
+## Phase 2 — Research Signals + Confidence  `[~]` *(paused — core shipped; 2 polish items open)*
 
 - [x] Research Signals engine (auto strongest +/- findings, dedup, suppression) — `researchSignals.js`
 - [x] Confidence layer (Very Low / Low / Medium / High) — `computeConfidence`
 - [x] `researchSignals.js` + validation (37 assertions pass)
-- [ ] Glossary keys: `research_signals`, `confidence`, `confidence_*`
-- [ ] `ConfidenceChip.jsx`
-- [ ] RunDetail: Research Signals section + confidence chips
+- [x] Glossary keys: `research_signals`, `effect`, `confidence`, `confidence_*`
+- [x] `ConfidenceChip.jsx`
+- [x] RunDetail: Research Signals section (Strongest Edges / Key Risks)
+- [ ] Optional: confidence chips on the existing Signal Cards
 - [ ] (2b) `sumR2` in accumulators → true effect-SE confidence
 
 ## Phase 3 — Distance  `[ ]`
@@ -41,11 +42,25 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` todo. Render with `/roadmap`.
 - [ ] Distance breakdown section (0–2 / 2–5 / 5–10 / 10+ pips)
 - [ ] Confirm/derive "Outside" session availability for danger surfacing
 
-## Phase 4 — Comparison & library  `[ ]`
+## Phase 4 — Comparison & library  `[~]`
 
-- [ ] TE variant naming cleanup
-- [ ] Model family comparison (TE delays vs penetration vs baseline)
+- [x] TE variant naming cleanup — TE C0–C3 labels (registry + glossary)
+- [x] Enabled Variant Comparison (in-tab) — all enabled entry-model variants + Max DD column;
+      importer dual-key dedup + baseline-label fix
+- [ ] Model Family Comparison (full: cross-run, per-variant equity/Sharpe, variant→signal) — deferred
 - [ ] Save findings / research library (persist + revisit named findings)
+
+## Failures Lab V4  `[~]` *(current focus — final cleanup, then pause)*
+
+- [x] Overview command center · shared aggregation engine (`failuresAggregation.js`)
+- [x] Failure Explorer (3 scopes, 2-dim cap, refine-by-dimension, persisted prefs)
+- [x] Distance to Stop tab: raw-R buckets + drilldown · loser MFE reach · BE opportunity
+      (cumulative + exclusive, upper-bound framing) · winner MAE stop pressure · MAE/MFE by
+      dimension · penetration dimension · distance insights
+- [x] Verdict action engine (`bucketRowAction`) + validation
+- [~] Final integration cleanup — tab wiring · roadmap deps · MFE/MAE alias detection ·
+      text-diffable separator · verdict chip UI *(implemented; commit pending)*
+- [ ] Future (post-pause): BE replay backtest · winner-cost modelling (see `roadmapStore` seeds)
 
 ## Backlog candidates (not scheduled)
 

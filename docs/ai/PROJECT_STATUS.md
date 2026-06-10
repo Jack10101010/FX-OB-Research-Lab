@@ -4,7 +4,7 @@
 > git-coordination doc (dirty files, commits ahead). This one is the product/research
 > state. Verify against live git before trusting it.
 
-*Last updated: 2026-06-07.*
+*Last updated: 2026-06-10.*
 
 ## Project
 
@@ -14,7 +14,13 @@ Branch: `codex-dev`. Theme: dark "neon lab" (do not change without request).
 
 ## Current major workstream
 
-**Trade Classification / Classification Tab V2.**
+**Failures Lab V4 — final integration cleanup, then pause.** (These docs previously still
+named Classification Tab V2 as active; that was stale and is corrected — Classification is
+paused with Phase 2 shipped.)
+
+Parallel state: **Master Controls is strong/stable** (composed preview lens, instant cost
+rescore, promotion flow all shipped). OB-Retest and Protection/BE-Replay have active
+uncommitted work owned by other streams.
 
 ## Completed
 
@@ -33,7 +39,23 @@ Branch: `codex-dev`. Theme: dark "neon lab" (do not change without request).
   / `buildSignalCards`) + validation script.
 - **Research Signals + Confidence engine** — `researchSignals.js` (`computeConfidence` →
   Very Low/Low/Medium/High; signal ranking; low-sample suppression; parent/child dedup). Pure,
-  validated (37 assertions), committed. **UI wiring still pending.**
+  validated (37 assertions), committed.
+- **Research Signals UI** — `researchGlossary` keys + `ConfidenceChip.jsx` + the Research Signals
+  section (Strongest Edges / Key Risks) at the top of the Classification panel (`b3a200e`).
+- **Entry-model clarity + Enabled Variant Comparison** — TE C0–C3 labels; in-tab Enabled Variant
+  Comparison (all enabled entry-model variants from `entryResults.tradesByMode`, read-only),
+  importer dual-key dedup + baseline-label fix, and a **Max DD** column from per-variant
+  `entryResults.equityCurveByMode`.
+
+- **Failures Lab V4 (June 8–10)** — Overview command center, shared aggregation engine,
+  Failure Explorer (3 scopes, refine-by-dimension, persisted prefs, verdict action chips),
+  Distance to Stop tab: loser MFE reach, BE opportunity (cumulative + exclusive, upper-bound
+  framing), winner MAE stop pressure (to-original-exit + fallback provenance), MAE/MFE by
+  dimension, penetration dimension, distance insights. Key commits: `0b5e499` overview,
+  `649e200` shared engine, `19e8470` explorer + BE table, `dae7bfd` MFE reach, `ac5e070` MAE
+  stop pressure, `880d67d` penetration + verdict engine, `c30486c` MAE by dimension.
+  **Final integration cleanup implemented (commit pending):** tab wiring, roadmap deps,
+  alias detection, NUL→`\u001F` separator, verdict chip UI.
 
 Key commits (codex-dev): `4715513` feat(classification): add fill-state V2 tab;
 `acdf4d7` / `6c8fc60` migrate consumers to flag-based suppression; `d68d237` add fill state
@@ -41,12 +63,16 @@ glossary and derivation.
 
 ## Active / next
 
-- **Research Signals UI wiring** — glossary keys (`research_signals`, `confidence`, `confidence_*`)
-  + `ConfidenceChip.jsx` + RunDetail "Research Signals" section. (Engine `researchSignals.js` done.)
-- **TE variant naming cleanup**.
-- **Distance importer mapping** — `price_distance_from_ob_at_arm_pips` (NOT yet in `importer.js`).
-- **Distance breakdown** (blocked on the importer mapping above).
-- **Model family comparison**.
+- **Failures Lab V4 cleanup commits** — hand scoped commits to host, then **pause Failures Lab**.
+- **Pivot decision** — Master Controls vs Protection Lab as next focus (Session Lab has no momentum).
+- **Research Signals polish** — (optional) confidence chips on Signal Cards; (Phase 2b) `sumR2`
+  accumulators → true effect-SE confidence. *(paused with Classification)*
+- **UI Explainability Audit** — tooltips / plain-English descriptions across screens (one shared
+  dark tooltip style via `TermTip`/`GlossaryCard`). *(next candidate)*
+- **Distance importer mapping** — `price_distance_from_ob_at_arm_pips` (NOT yet in `importer.js`);
+  then the **Distance-at-arm breakdown**. *(next candidate)*
+- **Model Family Comparison (full, cross-run)** — deferred; the in-tab Enabled Variant Comparison
+  is the compact first step. *(next candidate: planning)*
 - **Save findings / research library**.
 
 ## Important research findings

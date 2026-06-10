@@ -5,21 +5,37 @@
 > Attach to a workstream (or add one) before coding. Never touch another stream's files
 > without explicit scope.
 
-*Last updated: 2026-06-07.*
+*Last updated: 2026-06-10.*
 
-## Trade Classification  ← PRIMARY (this memory system's focus)
+## Failures Lab V4  ← CURRENT FOCUS (final integration cleanup, then pause)
 
-- **Status:** active.
+- **Status:** active — feature-complete; integration cleanup implemented, commit pending.
+- **Lead:** Claude (design/analytics/frontend).
+- **Purpose:** loss diagnostics — Distance to Stop (Excursion) tab: MFE reach, BE opportunity
+  (upper bound), winner MAE stop pressure, MAE/MFE by dimension, penetration dimension,
+  Failure Explorer (refine + verdict action chips), shared aggregation engine.
+- **Owns:** `components/lab/failures/**`, `components/lab/roadmap/SectionRoadmap.jsx`,
+  `data/roadmapStore.js`, `data/__validation__/failuresAggregation.validate.mjs`,
+  `excursionAnalytics.validate.mjs`, `failuresFieldDetection.validate.mjs`,
+  `pages/FailuresLab.jsx`. Design refs: `FAILURES-LAB-V4-ARCHITECTURE-AUDIT-1.md`,
+  `FAILURES-LAB-V2-*`, `FAILURES-LAB-UX-AUDIT-1.md`.
+- **Shared/caution:** `data/researchGlossary.js` (shared with Classification), `data/importer.js`
+  (excursion field mapping — shared with Entry/FFT).
+- **Next:** hand scoped commits to host → pause → pivot decision (Master Controls vs Protection).
+
+## Trade Classification
+
+- **Status:** paused (Phase 2 shipped; polish items in backlog).
 - **Lead:** Claude (design/UX/frontend); Codex for data/test.
 - **Purpose:** fill-state taxonomy, Classification Tab V2, research signals, confidence.
 - **Owns:** `frontend/src/data/tradeClassificationDims.js`, `classificationRegistry.js`,
   `researchGlossary.js`, `fillStateBreakdown.js`, `components/lab/ClassificationBadge.jsx`,
   `components/lab/TermTip.jsx`, `components/lab/MetricChip.jsx` (read), and the Classification
-  tab in `pages/RunDetail.jsx`. Phase 2 adds `data/researchSignals.js`,
+  tab in `pages/RunDetail.jsx`. Phase 2 added `data/researchSignals.js`,
   `components/lab/ConfidenceChip.jsx`.
 - **Shared/caution:** `pages/RunDetail.jsx` (huge, frequently dirty), `data/tradeUniverse.js`
   (shared with Strategy Map). Stage deliberately.
-- **Next:** Research Signals engine + Confidence layer (Phase 2).
+- **Next (when resumed):** Signal-Card confidence chips · `sumR2` effect-SE confidence (2b).
 
 ## Master Controls / Research Control Plane
 

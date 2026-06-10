@@ -81,6 +81,71 @@ Do not:
 - Refactor unrelated code.
 - Change architecture without justification.
 
+## Tooltip & Explainability Philosophy
+
+Users should rarely have to guess what a metric, label, filter, toggle, column, badge,
+classification, signal, score, or status means.
+
+Prefer adding lightweight tooltips for: table headers · KPI cards · metrics · scores · ratings ·
+badges · chips · filters · toggles · classifications · research findings · strategy settings ·
+technical terminology · domain-specific concepts.
+
+Tooltips should:
+- Use plain English.
+- Explain what the item is.
+- Explain why it matters.
+- Avoid unnecessary jargon.
+- Be understandable by a first-time user.
+- Be concise (typically 1–3 short sentences).
+
+Good example: *"Max Drawdown: The largest drop from a peak in performance before recovery. Lower
+drawdown generally means a smoother and safer strategy."*
+Bad example: *"Maximum peak-to-trough equity excursion."*
+
+Do **not** add tooltips to obvious UI elements (Save, Delete, Edit, Close, Search, standard
+navigation). **When in doubt, favor explainability over minimalism.**
+
+## Tooltip Visual Style
+
+Tooltips should use a **premium dark UI style** by default.
+
+Preferred style:
+- Dark background, similar to the Run Detail equity-curve trade tooltip.
+- Subtle border.
+- Slightly sharp corners — not large rounded bubbles.
+- Clear text hierarchy: strong, readable title; body text in readable light gray.
+- Muted text should still be bright enough to read comfortably.
+- Avoid bright cyan / light-blue tooltip backgrounds.
+- Avoid white text on bright cyan backgrounds.
+- Avoid oversized rounded-bubble styling.
+- Avoid low-contrast gray text.
+
+Reference: the **Run Detail equity-curve trade tooltip** is the preferred direction — dark
+navy/charcoal panel, thin teal/muted border, compact spacing, sharp-ish corners, readable
+label/value layout.
+
+When implementing new tooltips:
+- Prefer reusing or **centralizing one** tooltip style.
+- Do **not** create one-off tooltip styles per component.
+- If a tooltip primitive already exists (e.g. `TermTip` over `components/ui/tooltip.jsx`),
+  **improve the shared style** rather than duplicating custom styles.
+- Keep tooltip content concise and easy to scan.
+
+Bad example: bright cyan tooltip, white text, large rounded corners.
+Good example: dark compact tooltip, subtle border, readable light text, clear spacing.
+
+## Research Platform Rule
+
+This application is a **research platform**. Users should always be able to understand:
+- What they are seeing.
+- Why it matters.
+- How it is calculated.
+- What action it suggests.
+
+Prefer self-explanatory interfaces. Avoid requiring users to remember terminology from previous
+pages, previous sessions, or external documentation. **Surface explanations near the data whenever
+practical.**
+
 ## Current focus
 
 See `CURRENT_WORKSTREAM.md`. As of 2026-06-07: Classification Tab V2 is shipped; next is the

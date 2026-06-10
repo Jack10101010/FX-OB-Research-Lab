@@ -6,23 +6,61 @@ Groomed by ChatGPT. Priority: P1 (next up) · P2 (soon) · P3 (later).
 > sequence it moves to `ROADMAP.md` (use `/promote`); not-yet-ready thoughts live in
 > `IDEA_CAPTURE.md`. Don't list the same item as "active" in both backlog and roadmap.
 
-*Last updated: 2026-06-07.*
+*Last updated: 2026-06-10.*
 
 ## P1
 
-- **Research Signals engine + Confidence layer** — `researchSignals.js`, `ConfidenceChip.jsx`,
-  glossary keys, RunDetail section. (Designed; this is the active next build.)
+- **Next-focus decision after Failures Lab pause** — Master Controls vs Protection Lab
+  (Session Lab has no momentum). Failures Lab V4 cleanup is in `ROADMAP.md`, not here.
 - **Distance importer mapping** — map `price_distance_from_ob_at_arm_pips` in `importer.js`
   (Codex). Unblocks the distance breakdown.
 
+> *(Shipped, removed from queue: Research Signals engine + Confidence layer — committed
+> `b3a200e`; was stale-listed here as "active next build".)*
+
 ## P2
 
-- **Distance breakdown section** — bands 0–2 / 2–5 / 5–10 / 10+ pips; flag the <2 pip danger.
-  Blocked on the importer mapping.
+- **Distance & Occupation-Depth Research** *(Priority: Medium · Owner: Codex (backend export +
+  importer) → Claude (classification + UI) · likely its OWN workstream once unblocked)* — research
+  family that may explain **why** the Vacant edge exists. **Key design insight:** vacancy distance
+  and occupation depth are **one signed metric** — the price's offset from the OB **entry-side edge
+  at arm** (**+ = vacant/outside, − = occupied/inside, 0 = on edge**). The existing
+  `ob_occupied_at_arm` is just its **sign**; this is the **magnitude**.
+  - **Blocked FIRST on a backend export** (frontend has no arm-distance and it is **not derivable**
+    — no price-at-arm snapshot). Then importer map (~2 lines).
+  - **Final export spec (recommended):** `price_distance_from_ob_at_arm_pips` (signed, entry-edge ref)
+    **+** `price_distance_from_ob_at_arm_pct` (signed, % of OB width). Everything else — absolute,
+    vacancy distance, occupation depth — is **derived in-frontend** (don't export redundant fields).
+  - **Architecture:** a new **orthogonal `distance_band` dimension** (NOT folded into `fill_state`),
+    derived like `deriveFillState`, with **signed, symmetric, config-driven bands** spanning
+    occupied→edge→vacant. Make the **Edge Zone (|offset| < ~2 pips) an explicit band** — hypothesis:
+    the danger is *edge-proximity regardless of side*, generalizing **F-004**. Crosses freely with
+    fill-state × session × entry-model × AAE; plugs into **Research Signals** as another candidate
+    dimension (zero engine change) → auto "Edge-Zone danger" flag.
+  - **Home:** Classification Tab (Distance/Occupation breakdown, gated on availability); Entries Lab
+    for deep entry-mechanics + the FFT-displacement family later; dedicated surface only if it grows.
+  - **Validate** against F-004; supersedes the old "Distance breakdown section" item.
+- **Occupation-Depth angle** *(same data dependency as above)* — the **negative side** of the signed
+  arm-offset: does *deeper* occupation make the (weak ~+0.08R) Occupied cohort better or worse, and
+  does "barely occupied" ≈ "barely vacant" (the Edge-Zone straddle)? Free once the signed field
+  exists — it's the same `distance_band` dimension viewed on the occupied side.
 - **`sumR2` in accumulators** — enables true effect-SE confidence (upgrades the heuristic).
 - **TE variant naming cleanup** — consistent naming for TE Same/Next/D2/D3 across UI + glossary.
 - **Confirm "Outside" session availability** — verify backend emits it, or derive from fill hour
   (reuse SessionLab `SESSION_DEFINITIONS`).
+- **UI Explainability Pass** *(Priority: Medium · Owner: Claude)* — audit all major screens and add
+  missing tooltips, descriptions, and plain-English explanations for: metrics · table headers ·
+  signals · scores · badges · filters · strategy settings · technical terminology. Follow the
+  **Tooltip & Explainability Philosophy** and **Tooltip Visual Style** in `CLAUDE.md` (one shared
+  dark tooltip style — improve the existing `TermTip` primitive, don't fork per-component styles).
+- **Terminology Consistency Pass** *(Priority: Medium · Owner: Claude)* — audit the whole app so the
+  same concept is always referred to by the same name across label, tooltip, glossary entry, badge
+  text, filter text, table header, and docs wording. Watch for: Triggered Edge vs TE vs Triggered
+  Entry · Vacant vs OB Vacant vs Vacant At Arm · Occupied vs Occupied At Arm · Research Signals
+  naming · Confidence terminology · Protection terminology · Promotion terminology · Session
+  terminology · Failure terminology · Directional terminology.
+  **Deliverables:** canonical term list · alias list · inconsistency report · recommended standard
+  naming. **Goal:** a user should never wonder whether two different labels mean the same concept.
 
 ## P3
 
