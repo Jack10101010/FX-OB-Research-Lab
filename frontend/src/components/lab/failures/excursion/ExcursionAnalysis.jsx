@@ -32,10 +32,6 @@ const BE_CORE_LEVELS = new Set([0.25, 0.5, 0.75, 1]);
 
 const FLAG_TONE = { instant: "danger", almost: "success" };
 
-function Contribution({ pct }) {
-    return <span className="font-num tabular-nums text-[hsl(var(--text-2))]">{pct}%</span>;
-}
-
 // Compact lift value (shares the legend colours of the imported LiftCell).
 function liftColor(lift) {
     return lift >= 1.5 ? "hsl(var(--danger))" : lift >= 1.15 ? "hsl(var(--warning))" : "hsl(var(--text-2))";
@@ -151,25 +147,100 @@ function MfeOutcomePanel({ data, title, question }) {
 }
 
 // Compact ranked section for one dimension inside the drilldown.
-function DrillSection({ section }) {
+// ── Selected Bucket Overview (composition, NOT setup scorecard) ─────────────────
+// Answers "what makes up this bucket?" — bucket-level composition by dimension.
+// Setup-level win/loss & expectancy live in the Failure Explorer (do not duplicate).
+const BUCKET_OVERVIEW_DEFAULT_DIMS = ["session", "direction", "structure"];
+
+function SummaryStat({ label, value, tone, big }) {
+    return (
+        <div className="flex flex-col gap-0.5">
+            <span className="text-[9px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--text-3))]">{label}</span>
+            <span className={cn(big ? "text-[15px]" : "text-[13px]", "font-num tabular-nums leading-none", tone || "text-[hsl(var(--text))]")}>{value}</span>
+        </div>
+    );
+}
+
+// One dimension group inside the overview: Count · Loss-R · % bucket · Avg Loss-R.
+function OverviewDimGroup({ section }) {
     const max = Math.max(...section.rows.map((r) => r.lossR), 1);
     return (
         <div>
-            <div className="text-[10px] font-ui font-semibold uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))] mb-1.5">{section.label}</div>
-            <div className="space-y-1">
-                {section.rows.map((r) => (
-                    <div key={r.value} className="flex items-center gap-2 text-[11.5px] font-ui">
-                        <span className="w-28 shrink-0 truncate text-[hsl(var(--text))]">{r.value}</span>
-                        <div className="flex-1 h-1.5 bg-[hsl(var(--panel-2))] rounded-full overflow-hidden">
-                            <div className="h-full rounded-full bg-[hsl(var(--danger)/0.7)]" style={{ width: `${Math.min(100, (r.lossR / max) * 100)}%` }} />
+            <div className="text-[10.5px] font-ui font-semibold uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))] mb-2 pb-1.5 border-b border-[hsl(var(--border-soft)/0.6)]">{section.label}</div>
+            <div className="flex items-center gap-2 px-0.5 mb-1.5 text-[9px] font-ui uppercase tracking-[0.04em] text-[hsl(var(--text-3))]">
+                <span className="w-28 shrink-0" />
+                <span className="flex-1" />
+                <span className="w-8 text-right">n</span>
+                <span className="w-12 text-right">Loss-R</span>
+                <span className="w-12 text-right">% bkt</span>
+                <span className="w-12 text-right">avg</span>
+            </div>
+            <div className="space-y-1.5">
+                {section.rows.map((r) => {
+                    const avg = r.count ? Math.round((r.lossR / r.count) * 100) / 100 : 0;
+                    return (
+                        <div key={r.value} className="flex items-center gap-2 text-[11.5px] font-ui">
+                            <span className="w-28 shrink-0 truncate text-[hsl(var(--text))]">{r.value}</span>
+                            <div className="flex-1 h-1.5 bg-[hsl(var(--panel-2))] rounded-full overflow-hidden">
+                                <div className="h-full rounded-full bg-[hsl(var(--danger)/0.7)]" style={{ width: `${Math.min(100, (r.lossR / max) * 100)}%` }} />
+                            </div>
+                            <span className="w-8 text-right font-num tabular-nums text-white">{r.count}</span>
+                            <span className="w-12 text-right font-num tabular-nums text-[hsl(var(--text-2))]">{r.lossR}R</span>
+                            <span className="w-12 text-right font-num tabular-nums text-[hsl(var(--text-2))]">{r.contributionPct}%</span>
+                            <span className="w-12 text-right font-num tabular-nums text-[hsl(var(--text-2))]">{avg}R</span>
                         </div>
-                        <span className="w-7 text-right font-num tabular-nums text-white">{r.count}</span>
-                        <span className="w-12 text-right font-num tabular-nums text-[hsl(var(--text-2))]">{r.lossR}R</span>
-                        <span className="w-10 text-right"><Contribution pct={r.contributionPct} /></span>
-                    </div>
-                ))}
+                    );
+                })}
             </div>
         </div>
+    );
+}
+
+function BucketOverview({ drill, bucketDef }) {
+    const [showMore, setShowMore] = useState(false);
+    if (!drill || !bucketDef) return null;
+    const defaults = drill.sections.filter((s) => BUCKET_OVERVIEW_DEFAULT_DIMS.includes(s.key));
+    const more = drill.sections.filter((s) => !BUCKET_OVERVIEW_DEFAULT_DIMS.includes(s.key));
+    const shown = showMore ? [...defaults, ...more] : defaults;
+    const avgLoss = drill.trades ? Math.round((drill.lossR / drill.trades) * 100) / 100 : 0;
+    return (
+        <NeonPanel
+            title={<span className="text-[14px]">Selected Bucket Overview</span>}
+            tone="secondary"
+            action={<Pill tone="secondary">Viewing bucket: {bucketDef.label}</Pill>}
+        >
+            {/* Summary strip — immediate context before reading dimensions */}
+            <div className="px-4 pt-4">
+                <div className="flex flex-wrap items-end gap-x-8 gap-y-3 border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm px-4 py-3">
+                    <SummaryStat label="Selected bucket" value={bucketDef.label} tone="text-[hsl(var(--accent-primary))]" big />
+                    <SummaryStat label="Losses" value={drill.trades} tone="text-white" />
+                    <SummaryStat label="Damage" value={`${drill.lossR}R`} tone="text-[hsl(var(--danger))]" />
+                    <SummaryStat label="% of total loss-R" value={`${drill.contributionPct}%`} tone="text-[hsl(var(--accent-secondary))]" />
+                    <SummaryStat label="Avg loss" value={`${avgLoss}R`} tone="text-[hsl(var(--text))]" />
+                </div>
+                <p className="text-[10.5px] font-ui text-[hsl(var(--text-3))] mt-2 leading-relaxed">
+                    What makes up this bucket — composition by dimension. For setup-level win/loss &amp; expectancy, use the <span className="text-[hsl(var(--text-2))]">Failure Explorer</span> below.
+                </p>
+            </div>
+
+            {defaults.length ? (
+                <>
+                    <div className="p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-x-8 gap-y-6">
+                        {shown.map((s) => <OverviewDimGroup key={s.key} section={s} />)}
+                    </div>
+                    {more.length > 0 && (
+                        <div className="px-4 pb-4 -mt-1">
+                            <button type="button" onClick={() => setShowMore((v) => !v)}
+                                className="px-2.5 py-1 text-[10.5px] font-ui clip-bevel-sm border border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))] hover:text-[hsl(var(--text))] hover:bg-[hsl(var(--panel-2)/0.5)] transition-colors">
+                                {showMore ? "Show less" : `Show more (${more.length})`}
+                            </button>
+                        </div>
+                    )}
+                </>
+            ) : (
+                <div className="p-4 text-[11.5px] font-ui text-[hsl(var(--text-2))]">No dimension data for this bucket.</div>
+            )}
+        </NeonPanel>
     );
 }
 
@@ -545,10 +616,7 @@ export function ExcursionAnalysis({ losers = [], allLosers = [], allTrades = [],
             {/* ── Insight synthesis (Command Center) ────────────────────────── */}
             <InsightsCard insights={insights.insights} />
 
-            {/* ── Loser MFE reach table (realized losses) ───────────────────── */}
-            <ReachTable reach={reach} />
-
-            {/* ── Bucket distribution (clickable) ───────────────────────────── */}
+            {/* ── 2. How far losers moved (clickable bucket chooser) ────────── */}
             <NeonPanel
                 title={<TermTip termKey="distance_before_stop">How far losers moved in favour</TermTip>}
                 action={<Pill tone="muted">{dist.coverage.withMfe}/{dist.coverage.total} losers · {dist.coverage.pct}% have MFE</Pill>}
@@ -574,37 +642,20 @@ export function ExcursionAnalysis({ losers = [], allLosers = [], allTrades = [],
                 </div>
             </NeonPanel>
 
-            {/* ── Break-even opportunity by arm level (upper bound) ─────────── */}
+            {/* ── How many losers reached profit (companion to the chart) ───── */}
+            <ReachTable reach={reach} />
+
+            {/* ── 3. Selected Bucket Overview (composition; not a scorecard) ── */}
+            <BucketOverview drill={drill} bucketDef={activeBucketDef} />
+
+            {/* ── 4. Failure Explorer (setup scorecard; bucket-aware) ───────── */}
+            <FailureExplorer allTrades={explorerSource} allLosers={source} bucket={explorerBucket} />
+
+            {/* ── 5. Break-even opportunity by arm level (upper bound) ──────── */}
             <BeOpportunityTable be={be} ranges={beRanges} />
 
-            {/* ── Winner MAE / Stop Pressure (Phase 2; gates on maeR separately) ── */}
+            {/* ── 6. Winner MAE / Stop Pressure (gates on maeR separately) ──── */}
             <MaeStopPressurePanel mae={mae} />
-
-            {/* ── Selected-bucket drilldown ─────────────────────────────────── */}
-            {drill && activeBucketDef && (
-                <NeonPanel
-                    title={<>Selected bucket: <span className="text-[hsl(var(--accent-primary))]">{activeBucketDef.label}</span></>}
-                    tone="secondary"
-                    action={
-                        <div className="flex items-center gap-1.5">
-                            <Pill tone="muted">{drill.trades} trades</Pill>
-                            <Pill tone="danger">{drill.lossR}R</Pill>
-                            <Pill tone="secondary">{drill.contributionPct}% of loss-R</Pill>
-                        </div>
-                    }
-                >
-                    {drill.sections.length ? (
-                        <div className="p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-x-6 gap-y-4">
-                            {drill.sections.map((s) => <DrillSection key={s.key} section={s} />)}
-                        </div>
-                    ) : (
-                        <div className="p-4 text-[11.5px] font-ui text-[hsl(var(--text-2))]">No trades in this bucket.</div>
-                    )}
-                </NeonPanel>
-            )}
-
-            {/* ── Failure Explorer (controlled, shared engine; bucket-aware) ── */}
-            <FailureExplorer allTrades={explorerSource} allLosers={source} bucket={explorerBucket} />
 
             {/* ── Structure × MFE / Session × MFE outcomes ──────────────────── */}
             <MfeOutcomePanel
