@@ -18,6 +18,7 @@ import { useTradeUniverse } from "@/data/useTradeUniverse";
 import { derivePrimaryResultView } from "@/data/tradeUniverse";
 import { ImportZone } from "@/components/lab/ImportZone";
 import { PageHeader } from "@/components/lab/AppShell";
+import { TradeUniverseBadge } from "@/components/lab/TradeUniverseBadge";
 import { SessionLabWorkspace } from "@/components/lab/session/SessionLabWorkspace";
 
 export default function SessionLab() {
@@ -54,6 +55,11 @@ export default function SessionLab() {
                 title="Session Lab"
                 subtitle="Session-first edge analysis — discover which sessions deserve capital."
             />
+            {/* RESEARCH-CONTEXT-BANNER Phase B: read-only context strip for the EXACT
+                universe these analytics use (locally-derived primaryScenario, not the
+                global scenario). Surfaces Universe / Result View / Position Variant /
+                Source / Rows + the Arm C0/C1 double-count warning. Not interactive. */}
+            <TradeUniverseBadge universe={universe} />
             <SessionLabWorkspace trades={trades} bundle={bundle} />
         </div>
     );

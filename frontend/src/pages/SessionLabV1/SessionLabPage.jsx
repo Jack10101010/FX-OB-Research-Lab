@@ -12,6 +12,7 @@ import { SESSION_LIST } from "./mockData";
 import { useDataset } from "../../data/store";
 import { useTradeUniverse } from "../../data/useTradeUniverse";
 import { derivePrimaryResultView } from "../../data/tradeUniverse";
+import { TradeUniverseBadge } from "../../components/lab/TradeUniverseBadge";
 import {
   buildDefaultSessionRules,
   applySessionRules,
@@ -63,7 +64,11 @@ export default function SessionLabPage() {
   const runId = dataset.ACTIVE_RUN?.id ?? null;
   const bundle = runId ? dataset.getRunData(runId) : null;
   const primaryScenario = useMemo(() => derivePrimaryResultView(bundle), [bundle]);
-  const { trades: allTrades = [], label: resultViewLabel = "Baseline" } = useTradeUniverse(runId, primaryScenario);
+  // Keep the full resolved universe so the read-only context banner shows the EXACT
+  // set these analytics use (allTrades / resultViewLabel are derived from it unchanged).
+  const universe = useTradeUniverse(runId, primaryScenario);
+  const allTrades = universe?.trades ?? [];
+  const resultViewLabel = universe?.label ?? "Baseline";
   const hasRealData = Array.isArray(allTrades) && allTrades.length > 0;
 
   // Rule state for real data (keyed by canonical session name)
@@ -305,6 +310,11 @@ export default function SessionLabPage() {
             </span>
           )}
         </div>
+
+        {/* RESEARCH-CONTEXT-BANNER Phase B: read-only context strip for the EXACT
+            universe these analytics use. Shown only for a real run (mock mode keeps
+            the data-mode badge above). Not an interactive Result View switcher. */}
+        {hasRealData && <TradeUniverseBadge universe={universe} />}
 
         <RunImpactSummary
           previewMode={previewMode}
