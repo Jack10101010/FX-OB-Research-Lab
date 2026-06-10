@@ -584,8 +584,55 @@ export const GLOSSARY = {
     },
     retest_engine_version: {
         friendlyName: "Retest Engine Version",
-        definition: "v2 (continuous invalidation) checks for OB breaches on every candle after first touch and reports OB-level eventual failure. v1 only checked inside reaction windows, so v1 backend artifacts can include zombie retests and slightly inflated hold rates — re-export the run to upgrade.",
-        whyItMatters: "Explains why a v1 artifact and a v2 frontend derivation of the same run can legitimately disagree.",
+        definition: "v2 (continuous invalidation) checks for OB breaches on every candle after first touch and reports OB-level eventual failure. v1 only checked inside reaction windows, so v1 backend artifacts can include zombie retests and slightly inflated hold rates — re-export the run to upgrade. Schema v2.1 adds death-quality fields (kill margin, confirmation, re-held) and the MFE family on the same engine.",
+        whyItMatters: "Explains why artifacts of different vintages can legitimately disagree, and which panels each artifact version can power.",
+    },
+
+    // ── OB Retest v2.1 — death-definition refinement + monetization terms ────────
+    retest_kill_margin: {
+        friendlyName: "Kill Margin",
+        definition: "How far beyond the OB's far edge price was at the moment of invalidation, in pips (the close for close-beyond mode, the wick extreme for wick mode). On the evidence run the median was just 1.0 pip — half of all deaths were spread-sized.",
+        whyItMatters: "Separates decisive breaks from technical deaths: kills that were both confirmed and never re-held carried ~3× the margin of everything else.",
+    },
+    retest_kill_confirmed: {
+        friendlyName: "Confirmed Kill (Confirmation Timeframe)",
+        definition: "Whether the confirmation-timeframe bucket containing the kill candle (default 15 minutes — tied to the run's detection timeframe) ALSO closed beyond the edge. Confirmation is close-based in both failure modes; a partial final bucket uses its last available close.",
+        whyItMatters: "On the evidence run only ~63% of 1-minute kills were confirmed by the 15-minute close — the rest are deaths the chart timeframe never agreed with.",
+    },
+    retest_reheld_after_kill: {
+        friendlyName: "Re-held After Kill",
+        definition: "Whether price closed back inside the OB within 60 minutes of the kill. ~80% of killed zones re-held on the evidence run — most nominal deaths did not look structurally dead on the chart.",
+        whyItMatters: "The strongest single flag that a recorded death was noise rather than a decisive break.",
+    },
+    retest_soft_kill: {
+        friendlyName: "Soft Kill",
+        definition: "The current (v2/v2.1) death event: the first execution-timeframe close beyond the far edge, buffer 0. Every eventual-failure stat is built on soft kills; the v2.1 fields grade each one (margin, confirmation, re-held) without changing it.",
+        whyItMatters: "Soft kills saturate (~98% of touched zones eventually soft-kill under any tested definition) — the grade of the kill, not the kill itself, carries the information.",
+    },
+    retest_death_tiers: {
+        friendlyName: "Death Tiers (planned — v2.2)",
+        definition: "A planned upgrade (see OB-DEATH-QUALITY-AUDIT-1): grade each OB's death as soft → confirmed → decisive (confirmed + never re-held) → abandoned, with a time-to-death per tier. On the evidence run only ~20% of first kills were decisive, and those carried ~3× the kill margin. v2.1 records the ingredients but does NOT implement tier modelling — zones still terminate at the first soft kill.",
+        whyItMatters: "Across every death definition tested, the eventual-failure RATE converges to ~92–98%; what differs — by two orders of magnitude — is WHEN death is declared. Tiers make time-to-death the first-class axis.",
+    },
+    retest_mfe_before_death: {
+        friendlyName: "MFE Before Death",
+        definition: "The maximum favorable excursion from the OB's near edge between first touch and invalidation (or data end for zones still alive), in pips. Candles after invalidation never count.",
+        whyItMatters: "The zone's total payable opportunity before it died — the foundation of the monetization layer (evidence run: median ≈ 1.5R; ~63% of zones reached 1R before dying).",
+    },
+    retest_mfe_after_rk: {
+        friendlyName: "MFE After R1 / R2 / R3",
+        definition: "The same favorable-excursion measure, anchored at the first / second / third retest entry instead of the first touch (null when that retest never happened). Always ≤ MFE Before Death.",
+        whyItMatters: "Tests whether retests consume the payout — first evidence says they don't (the 1R-capture rate measured from R1 matched the from-first-touch rate).",
+    },
+    retest_rr_capture: {
+        friendlyName: "RR Capture",
+        definition: "Of touched zones, the share whose MFE before death reached at least a given R multiple (0.25R, 0.5R, 1R, 1.5R, 2R, 3R, 5R), where 1R = the zone's own width.",
+        whyItMatters: "The realistic-target curve: on the evidence run 1R was reached by ~63% of zones and 2R by ~46% — each higher target roughly halves the hit rate.",
+    },
+    retest_idealized_r: {
+        friendlyName: "Idealized R Unit",
+        definition: "In the monetization layer, 1R = the OB's width: entry at the near edge, stop at the far edge, perfect fills, no spread. It measures OPPORTUNITY, not realized PnL — treat every R-based capture figure as an upper bound.",
+        whyItMatters: "One pinned definition prevents the lab's most quotable numbers from being misread as achievable trade results.",
     },
     retest_backend_computed: {
         friendlyName: "Backend Computed",

@@ -138,9 +138,12 @@ export function useRetestData({ orderBlocks = [], trades = [], activeRun = null,
 
     // Backend-computed result: built from imported ob_retests.csv (+ optional
     // ob_retest_summary.csv) via the SAME summarizer → identical cards/breakdowns.
-    // v2 detection: the importer maps terminal fields only for v2 artifacts
-    // (invalidation_mode header fingerprint); v1 rows carry finalOutcome null →
-    // summary.obLevel stays null and the eventual-failure UI hides itself.
+    // Artifact-version detection comes from the importer's header sniff
+    // (retestArtifactVersion on summary rows: 1 | 2 | 2.1):
+    //   v1   → no OB Outcomes, no monetization (terminal fields null)
+    //   v2   → OB Outcomes yes, monetization hidden (v2.1 fields null)
+    //   v2.1 → OB Outcomes + monetization data available (Phase D wires the UI)
+    // Synthesized perOB (no summary sidecar) has no version → treated as v1.
     const backendResult = React.useMemo(() => {
         if (!hasBackend) return null;
         const events = activeRun.obRetests || [];
@@ -149,13 +152,15 @@ export function useRetestData({ orderBlocks = [], trades = [], activeRun = null,
             : synthPerOBFromEvents(events);
         const obsTotal = Array.isArray(activeRun.orderBlocks) ? activeRun.orderBlocks.length : perOB.length;
         const summary = summarizeRetestEvents(events, perOB, obsTotal);
-        const isV2 = perOB.some((p) => p && p.retestArtifactVersion === 2);
+        const artifactVersion = perOB.find((p) => p && p.retestArtifactVersion != null)?.retestArtifactVersion ?? 1;
         return {
             events, perOB, summary,
             meta: {
                 dataBasis: "backend", candleCount: null, config: null,
-                engineVersion: isV2 ? 2 : 1,
-                semantics: isV2 ? "continuous_invalidation" : "window_only",
+                engineVersion: artifactVersion >= 2 ? 2 : 1,
+                schemaVersion: artifactVersion === 2.1 ? "2.1" : artifactVersion === 2 ? "2" : null,
+                retestArtifactVersion: artifactVersion,
+                semantics: artifactVersion >= 2 ? "continuous_invalidation" : "window_only",
             },
         };
     }, [hasBackend, activeRun]);

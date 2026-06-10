@@ -270,6 +270,42 @@ check("originLow mapped", parsedOB.originLow === 1.0998);
 check("originClose mapped", parsedOB.originClose === 1.1010);
 check("breakLevel mapped", parsedOB.breakLevel === 1.1040);
 
+// ── Test 17: parseObRetestSummaryCSV artifact-version sniffing (v1 / v2 / v2.1) ────
+console.log("\nTest 17 — ob_retest_summary.csv version sniff + v2.1 field mapping");
+const V1_HDR = "ob_id,direction,structure,ob_touch_count,retest_count,retests_survived,retests_failed,retests_open,first_retest_outcome,final_outcome,invalidated_on_retest_index,max_reaction_pips_any_retest,time_to_invalidation_minutes";
+const V2_HDR = V1_HDR + ",invalidated_at_time,invalidated_at_candle_index,invalidation_mode,invalidated_after_retest_index";
+const V21_HDR = V2_HDR + ",kill_margin_pips,kill_confirmed_tf,reheld_after_kill,mfe_before_death_pips,mfe_after_r1_pips,mfe_after_r2_pips,mfe_after_r3_pips";
+
+// v1 artifact: final_outcome carries the OLD value domain (last event outcome) —
+// it must NOT be mapped as a terminal status; all v2/v2.1 fields explicit null.
+const [v1row] = imp.parseObRetestSummaryCSV(V1_HDR + "\n1,bullish,BOS,3,2,1,1,0,survived,survived,2,12.5,40\n");
+check("v1: retestArtifactVersion 1", v1row.retestArtifactVersion === 1, String(v1row.retestArtifactVersion));
+check("v1: finalOutcome null (old value domain not mapped)", v1row.finalOutcome === null);
+check("v1: v2.1 fields null", v1row.killMarginPips === null && v1row.killConfirmedTf === null && v1row.mfeBeforeDeathPips === null);
+check("v1: counts still mapped", v1row.touchCount === 3 && v1row.retestCount === 2);
+
+// v2 artifact: terminal fields mapped, v2.1 fields explicit null.
+const [v2row] = imp.parseObRetestSummaryCSV(
+    V2_HDR + "\n1,bullish,BOS,3,2,1,1,0,survived,invalidated_in_window,2,12.5,40,1700000300,5,close_breach,2\n");
+check("v2: retestArtifactVersion 2", v2row.retestArtifactVersion === 2, String(v2row.retestArtifactVersion));
+check("v2: terminal fields mapped", v2row.finalOutcome === "invalidated_in_window" && v2row.invalidationMode === "close_breach" && v2row.invalidatedAtCandleIndex === 5);
+check("v2: v2.1 fields null (no kill_margin_pips header)", v2row.killMarginPips === null && v2row.killConfirmedTf === null && v2row.reheldAfterKill === null && v2row.mfeAfterR1Pips === null);
+
+// v2.1 artifact: everything mapped; booleans true/false/empty → true/false/null.
+const v21rows = imp.parseObRetestSummaryCSV(
+    V21_HDR
+    + "\n1,bullish,BOS,3,2,1,1,0,survived,invalidated_between_windows,,12.5,40,1700000300,5,close_breach,1,5,true,false,12,12,,"
+    + "\n2,bearish,CHoCH,1,0,0,0,0,,alive_at_data_end,,3.0,,,,,,,,,13,,,\n");
+const [k21, a21] = v21rows;
+check("v2.1: retestArtifactVersion 2.1", k21.retestArtifactVersion === 2.1, String(k21.retestArtifactVersion));
+check("v2.1: killMarginPips 5, mfeBeforeDeath 12, mfeAfterR1 12", k21.killMarginPips === 5 && k21.mfeBeforeDeathPips === 12 && k21.mfeAfterR1Pips === 12);
+check("v2.1: boolean true → true", k21.killConfirmedTf === true);
+check("v2.1: boolean false → false", k21.reheldAfterKill === false);
+check("v2.1: missing R2/R3 → null", k21.mfeAfterR2Pips === null && k21.mfeAfterR3Pips === null);
+check("v2.1 alive row: empty booleans → null (not false)", a21.killConfirmedTf === null && a21.reheldAfterKill === null);
+check("v2.1 alive row: killMarginPips null, censored MFE mapped (13)", a21.killMarginPips === null && a21.mfeBeforeDeathPips === 13);
+check("v2.1 alive row: finalOutcome alive_at_data_end", a21.finalOutcome === "alive_at_data_end");
+
 // ── result ───────────────────────────────────────────────────────────────────────
 console.log(`\n${"=".repeat(52)}`);
 console.log(`Results: ${PASS} passed, ${FAIL} failed`);
