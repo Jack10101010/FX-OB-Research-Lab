@@ -7,6 +7,7 @@ import React, { useMemo } from "react";
 import { getRunDisplayName, useDataset } from "@/data/store";
 import { useTradeUniverse } from "@/data/useTradeUniverse";
 import ResearchResultViewBanner from "@/components/lab/ResearchResultViewBanner";
+import { buildBannerRunIdentity } from "@/components/lab/researchBanner/bannerRun";
 import { LabRunHero } from "@/components/lab/LabRunHero";
 import { RunConfigStrip } from "@/components/lab/RunConfigStrip";
 import { WorkspaceTabBar } from "../entries/shared/WorkspaceTabBar";
@@ -164,7 +165,7 @@ export function FailuresWorkspace() {
                 Hero (LabRunHero) above carries run identity; same universe the failures
                 analytics use; Arm C0/C1 warning shown once (right panel). Not interactive. */}
             <div className="px-6 mt-2 mb-2">
-                <ResearchResultViewBanner universe={universe} />
+                <ResearchResultViewBanner universe={universe} run={buildBannerRunIdentity(activeRun)} />
             </div>
 
             {/* Tab rail */}

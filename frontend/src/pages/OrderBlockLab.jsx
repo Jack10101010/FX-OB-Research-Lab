@@ -4,6 +4,8 @@ import { MetricChip } from "@/components/lab/MetricChip";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
 import { HeroBadge, NeonSelect, Segment } from "@/components/lab/controls";
 import { LabRunHero } from "@/components/lab/LabRunHero";
+import ResearchResultViewBanner from "@/components/lab/ResearchResultViewBanner";
+import { buildBannerRunIdentity } from "@/components/lab/researchBanner/bannerRun";
 import { RunConfigStrip } from "@/components/lab/RunConfigStrip";
 import { useDataset } from "@/data/store";
 import { setSelectedTradeVariant, getTradeUniverse } from "@/data/store";
@@ -203,52 +205,46 @@ export default function OrderBlockLab() {
     // Persistent header — LabRunHero + RunConfigStrip + TradeUniverseBadge only.
     // KPI chips and InsightCallouts belong in Tab 1 (Model Analysis) where they
     // serve as the verdict surface, not in the always-visible navigation band.
-    const universeDescription = activeRunId && universe ? (
-        <div className="flex flex-col gap-2.5">
-            <span className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-[11px] font-ui">
-                <span>
-                    <span className="text-[9.5px] uppercase tracking-[0.08em] text-[hsl(var(--text-muted))] mr-1.5">Universe</span>
-                    <span className="font-semibold text-[hsl(var(--text-1))]">
-                        {universe.universeType === "scenario" ? "Scenario trades" : "Baseline reference"}
-                    </span>
-                </span>
-                {universe.label && (
-                    <span>
-                        <span className="text-[9.5px] uppercase tracking-[0.08em] text-[hsl(var(--text-muted))] mr-1.5">Model</span>
-                        <span className="font-semibold text-[hsl(var(--text-1))]">{universe.label}</span>
-                    </span>
-                )}
-            </span>
-            <RunConfigButton run={activeRun} />
-        </div>
+    // RESEARCH-RESULT-VIEW-BANNER: the Universe / Model context now lives in the wide
+    // ResearchResultViewBanner rendered below the hero (see tabHeader). The hero keeps
+    // only the RunConfigButton affordance, so we never stack duplicate result-view context.
+    const headerConfigNode = activeRunId ? (
+        <RunConfigButton run={activeRun} />
     ) : null;
 
     const tabHeader = (
-        <LabRunHero
-            pageLabel="Order Block Lab"
-            titleFallback="Order Block Lab"
-            description={universeDescription}
-            activeProject={ACTIVE_PROJECT}
-            activeRun={activeRun}
-            activeSummary={ACTIVE_RUN}
-            activeRunId={activeRunId}
-            tradeCount={trades.length}
-            variant={ACTIVE_TRADE_VARIANT}
-            showDefaultStatusBadges={false}
-            actions={(
-                <>
-                    <button
-                        type="button"
-                        onClick={() => setReportOpen(true)}
-                        className="inline-flex items-center gap-2 rounded-md border border-[hsl(var(--accent-primary)/0.45)] bg-[hsl(var(--accent-primary)/0.10)] px-3 py-1.5 text-[12px] font-medium text-[hsl(var(--accent-primary))] transition-colors hover:bg-[hsl(var(--accent-primary)/0.16)]"
-                    >
-                        <FileText className="w-3.5 h-3.5" />
-                        Generate Report
-                    </button>
-                    <VariantSelector variants={AVAILABLE_TRADE_VARIANTS} value={ACTIVE_TRADE_VARIANT} />
-                </>
+        <>
+            <LabRunHero
+                pageLabel="Order Block Lab"
+                titleFallback="Order Block Lab"
+                description={headerConfigNode}
+                activeProject={ACTIVE_PROJECT}
+                activeRun={activeRun}
+                activeSummary={ACTIVE_RUN}
+                activeRunId={activeRunId}
+                tradeCount={trades.length}
+                variant={ACTIVE_TRADE_VARIANT}
+                showDefaultStatusBadges={false}
+                actions={(
+                    <>
+                        <button
+                            type="button"
+                            onClick={() => setReportOpen(true)}
+                            className="inline-flex items-center gap-2 rounded-md border border-[hsl(var(--accent-primary)/0.45)] bg-[hsl(var(--accent-primary)/0.10)] px-3 py-1.5 text-[12px] font-medium text-[hsl(var(--accent-primary))] transition-colors hover:bg-[hsl(var(--accent-primary)/0.16)]"
+                        >
+                            <FileText className="w-3.5 h-3.5" />
+                            Generate Report
+                        </button>
+                        <VariantSelector variants={AVAILABLE_TRADE_VARIANTS} value={ACTIVE_TRADE_VARIANT} />
+                    </>
+                )}
+            />
+            {activeRunId && universe && (
+                <div className="px-6 -mt-2 mb-3">
+                    <ResearchResultViewBanner universe={universe} run={buildBannerRunIdentity(activeRun)} />
+                </div>
             )}
-        />
+        </>
     );
 
     // FilterBar — rendered by OBLabTabShell between the sticky tab bar and tab

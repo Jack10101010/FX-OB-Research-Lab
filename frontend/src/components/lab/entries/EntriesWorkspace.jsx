@@ -6,6 +6,8 @@ import { useEntryWorkspace, useModelSelectionGuard } from "./shared/useEntryWork
 import { WorkspaceTabBar } from "./shared/WorkspaceTabBar";
 import { GlobalFilterBar } from "./shared/GlobalFilterBar";
 import { EntryWorkspaceHeader } from "./shared/EntryWorkspaceHeader";
+import ResearchContextBanner from "@/components/lab/ResearchContextBanner";
+import { buildBannerRunIdentity } from "@/components/lab/researchBanner/bannerRun";
 import { buildEntryResultRows, buildExactSummary, buildEntryAnalytics } from "./analytics/entryAnalytics";
 import { ModelAnalysis } from "./model/ModelAnalysis";
 import { ExperimentCompare } from "./compare/ExperimentCompare";
@@ -183,6 +185,27 @@ export function EntriesWorkspace() {
                 activeVariant={ACTIVE_TRADE_VARIANT}
                 exactRows={exactRows}
             />
+
+            {/* RESEARCH-RESULT-VIEW-BANNER: multi-model page → truthful CONTEXT banner
+                (NOT "Current Result View" — this page compares many entry models).
+                Shows run identity + symbol/TF + date range + the comparison scope. */}
+            {activeRun && (
+                <div className="px-6 mt-2 mb-1">
+                    <ResearchContextBanner
+                        run={buildBannerRunIdentity(activeRun)}
+                        scopeTitle="Entry Model Comparison"
+                        scopeSummary={
+                            availableModelKeys.length > 0
+                                ? `Comparing ${availableModelKeys.length} entry model${availableModelKeys.length === 1 ? "" : "s"} vs baseline`
+                                : "Baseline only — no entry-model variants in this run"
+                        }
+                        facts={[
+                            { label: "Models", value: availableModelKeys.length },
+                            { label: "Variant", value: ACTIVE_TRADE_VARIANT || "Primary" },
+                        ]}
+                    />
+                </div>
+            )}
 
             <div className="mt-4">
                 <WorkspaceTabBar

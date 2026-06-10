@@ -3,6 +3,9 @@ import { Link } from "react-router-dom";
 import { useResolvedScenario } from "./strategyMap/useResolvedScenario";
 import { ScenarioSelector } from "./strategyMap/ScenarioSelector";
 import { LabRunHero } from "@/components/lab/LabRunHero";
+import ResearchResultViewBanner from "@/components/lab/ResearchResultViewBanner";
+import { buildBannerRunIdentity } from "@/components/lab/researchBanner/bannerRun";
+import { useTradeUniverse } from "@/data/useTradeUniverse";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { NeonInput, NeonSelect, Segment, NeonButton, FilterToggle } from "@/components/lab/controls";
 import { Pill } from "@/components/lab/DataTable";
@@ -211,6 +214,10 @@ export default function StrategyMap() {
         r.id && r.id !== runId && (r.hasCandles || r.candleCount || r.trades || r.ob_count || r.obCount)
     ))?.id || null;
     const bundle = runId ? getRunData(runId) : null;
+    // RESEARCH-RESULT-VIEW-BANNER: read-only context banner reads the SAME store
+    // scenario (SCENARIO) that useResolvedScenario drives the chart from, so the
+    // banner cannot disagree with the map for entry-model / baseline views.
+    const resultViewUniverse = useTradeUniverse(runId, SCENARIO);
     const activeRunMeta = RUNS.find((r) => r.id === runId) || {};
     const isViewedActiveRun = Boolean(runId && activeRunId === runId);
     const runHasOverlayData = Boolean(
@@ -703,6 +710,15 @@ export default function StrategyMap() {
                     ) : null
                 }
             />
+
+            {/* RESEARCH-RESULT-VIEW-BANNER: read-only context banner. The ScenarioSelector
+                below remains the interactive switcher. Hidden in directional mode, whose
+                trades bypass the universe resolver and would not be reflected here. */}
+            {runId && !isDirectionalMode && (
+                <div className="px-6 mb-3">
+                    <ResearchResultViewBanner universe={resultViewUniverse} run={buildBannerRunIdentity(bundle)} />
+                </div>
+            )}
 
             <div className={`px-6 grid grid-cols-1 gap-3 min-w-0 ${showTradeList ? "xl:grid-cols-[240px_minmax(0,1fr)]" : ""}`}>
                 {showTradeList && (

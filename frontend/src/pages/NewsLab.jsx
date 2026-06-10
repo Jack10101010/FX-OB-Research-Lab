@@ -8,6 +8,7 @@ import { RunConfigStrip } from "@/components/lab/RunConfigStrip";
 import { useDataset } from "@/data/store";
 import { useTradeUniverse } from "@/data/useTradeUniverse";
 import ResearchResultViewBanner from "@/components/lab/ResearchResultViewBanner";
+import { buildBannerRunIdentity } from "@/components/lab/researchBanner/bannerRun";
 // Phase RB-5 — overlap breakdown tables route through the shared canonical
 // bucket table (frozen RB-3.2 contract). Other NewsLab surfaces are unchanged.
 import { useResultsLens } from "@/data/useResultsLens";
@@ -268,7 +269,7 @@ export default function NewsLab() {
                 uses; Arm C0/C1 warning shown once (right panel). */}
             {activeRunId && (
                 <div className="px-6 mt-2 mb-3">
-                    <ResearchResultViewBanner universe={universe} />
+                    <ResearchResultViewBanner universe={universe} run={buildBannerRunIdentity(activeRun)} />
                 </div>
             )}
             <RunConfigStrip run={activeRun} />

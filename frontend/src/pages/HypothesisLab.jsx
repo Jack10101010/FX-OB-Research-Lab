@@ -7,6 +7,7 @@ import { HeroBadge } from "@/components/lab/controls";
 import { useDataset } from "@/data/store";
 import { useRunVariant } from "@/data/useRunVariant";
 import ResearchResultViewBanner from "@/components/lab/ResearchResultViewBanner";
+import { buildBannerRunIdentity } from "@/components/lab/researchBanner/bannerRun";
 // Canonical KPI primitives — the SAME helpers Run Detail uses for its win-rate /
 // expectancy / Net R strip (verbatim copies live in fftDisplay). Importing them
 // here guarantees Hypothesis Lab's stats reconcile with Run Detail for the same
@@ -268,7 +269,7 @@ export default function HypothesisLab() {
                 Same universe the simulator uses; Arm C0/C1 warning shown once (right). */}
             {activeRunId && (
                 <div className="px-6 mt-3 mb-2">
-                    <ResearchResultViewBanner universe={universe} />
+                    <ResearchResultViewBanner universe={universe} run={buildBannerRunIdentity(activeRun)} />
                 </div>
             )}
 

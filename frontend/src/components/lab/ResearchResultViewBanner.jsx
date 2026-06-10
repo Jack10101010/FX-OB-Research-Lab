@@ -24,10 +24,11 @@
  *
  * Contract (RESEARCH-RESULT-VIEW-BANNER-AUDIT-1 §5):
  *   universe                REQUIRED — from useTradeUniverse / useRunVariant
- *   run = null              OPTIONAL { id, name, symbol, timeframe, dateRange, basisLabel }
- *   showRunIdentity = false show the run name + symbol·TF cell (hero-less pages only)
+ *   run = null              run identity { id, name, symbol, timeframe, dateRange, basisLabel }
+ *                           (build with buildBannerRunIdentity); shown by default when present
+ *   showRunIdentity = true  show the run name + symbol·TF cell; set false to opt out
  *   baselineCount = null    OPTIONAL baseline reference count for the "Baseline: N" line
- *   compact = false         drop the embedded data strip on tight pages
+ *   compact = false         drop the Source cell on tight pages
  *   interactive / resultViewOptions / activeResultViewOption / onResultViewChange — reserved
  */
 
@@ -66,7 +67,10 @@ function fillModeLabel(fm) {
 export default function ResearchResultViewBanner({
     universe,
     run = null,
-    showRunIdentity = false,
+    // Run identity (run name + symbol·TF) shows by DEFAULT whenever `run` data is
+    // supplied. Pages that already surface identity elsewhere can opt out with
+    // showRunIdentity={false}. Render still gates on `run` being present.
+    showRunIdentity = true,
     baselineCount = null,
     compact = false,
     // ── Reserved for a future interactive-switching phase (accepted, not used) ──
