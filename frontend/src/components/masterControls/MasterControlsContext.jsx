@@ -184,6 +184,10 @@ const MasterControlsContext = createContext({
     openMasterControls:   () => {},
     closeMasterControls:  () => {},
     toggleMasterControls: () => {},
+    // Dock mode — when true the drawer is non-modal (no backdrop) so the page
+    // stays interactive while it's open; persisted. Default false (modal).
+    docked:               false,
+    toggleDock:           () => {},
 
     // Config state
     activeConfig:         null,   // cfg derived from the active run bundle, or null
@@ -253,6 +257,16 @@ export function MasterControlsProvider({ children }) {
     const openMasterControls  = useCallback(() => setIsOpen(true),            []);
     const closeMasterControls = useCallback(() => setIsOpen(false),           []);
     const toggleMasterControls = useCallback(() => setIsOpen((v) => !v),      []);
+
+    // Dock mode (non-modal). Persisted; default false (modal, current behaviour).
+    const [docked, setDockedState] = useState(() => {
+        try { return localStorage.getItem("fxob_mc_docked_v1") === "true"; } catch { return false; }
+    });
+    const toggleDock = useCallback(() => setDockedState((prev) => {
+        const next = !prev;
+        try { localStorage.setItem("fxob_mc_docked_v1", String(next)); } catch { /* best-effort */ }
+        return next;
+    }), []);
 
     // ── Store subscriptions ─────────────────────────────────────────────────
     const { activeRunId } = useDataset();
@@ -1117,6 +1131,8 @@ export function MasterControlsProvider({ children }) {
         openMasterControls,
         closeMasterControls,
         toggleMasterControls,
+        docked,
+        toggleDock,
         // Config
         activeConfig,
         draftConfig,
@@ -1174,6 +1190,8 @@ export function MasterControlsProvider({ children }) {
         openMasterControls,
         closeMasterControls,
         toggleMasterControls,
+        docked,
+        toggleDock,
         activeConfig,
         draftConfig,
         effectiveConfig,

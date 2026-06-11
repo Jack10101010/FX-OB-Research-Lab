@@ -5,7 +5,7 @@ import AppBlueprintBackground from "./AppBlueprintBackground";
 import { MasterControlsProvider, useMasterControls } from "@/components/masterControls/MasterControlsContext";
 import { MasterControlsDrawer } from "@/components/masterControls/MasterControlsDrawer";
 import { GlobalPreviewBanner } from "@/components/masterControls/GlobalPreviewBanner";
-import { RunPlaybookProvider } from "@/components/lab/playbook/RunPlaybookProvider";
+import { RunPlaybookProvider, useRunPlaybook } from "@/components/lab/playbook/RunPlaybookProvider";
 import { RunAnalysisPlaybookDrawer } from "@/components/lab/playbook/RunAnalysisPlaybookDrawer";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
@@ -18,8 +18,15 @@ import { TooltipProvider } from "@/components/ui/tooltip";
  * scrolling <main>, so it stays pinned and persists across every page.
  */
 function AppShellLayout({ children }) {
-    const { previewLens } = useMasterControls();
+    const { previewLens, isOpen: mcOpen, docked: mcDocked } = useMasterControls();
+    const { isOpen: playbookOpen, docked: playbookDocked } = useRunPlaybook();
     const lensActive = !!previewLens?.active;
+    // When a panel is docked + open, shift the main column left so the non-modal
+    // panel sits beside the content (on xl; it overlays on smaller widths). Playbook
+    // (440px) takes priority over Master Controls (384px) if both are docked + open.
+    const playbookDockedOpen = playbookOpen && playbookDocked;
+    const mcDockedOpen = mcOpen && mcDocked;
+    const dockShiftClass = playbookDockedOpen ? "xl:mr-[440px]" : mcDockedOpen ? "xl:mr-[384px]" : "";
 
     return (
         <div
@@ -32,7 +39,7 @@ function AppShellLayout({ children }) {
             {/* Subtle noise texture overlay */}
             <div className="pointer-events-none fixed inset-0 noise" />
             <Sidebar />
-            <div className="flex-1 min-w-0 flex flex-col relative">
+            <div className={`flex-1 min-w-0 flex flex-col relative transition-[margin] duration-300 ${dockShiftClass}`}>
                 <TopBar />
                 {/* Persistent, non-modal preview indicator — pinned under the top bar. */}
                 <GlobalPreviewBanner />

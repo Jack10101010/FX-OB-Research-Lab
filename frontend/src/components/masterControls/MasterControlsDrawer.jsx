@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from "react";
-import { X, SlidersHorizontal, Database, Layers, Zap, GitBranch, Activity, Settings2, Play, AlertTriangle } from "lucide-react";
+import { X, SlidersHorizontal, Database, Layers, Zap, GitBranch, Activity, Settings2, Play, AlertTriangle, PanelRight } from "lucide-react";
 import { useMasterControls } from "./MasterControlsContext";
 import { CONFIG_REGISTRY, getVisibleEntries, RERUN_TIER_META } from "@/data/configRegistry";
 import { useDataset, getRawRunData } from "@/data/store";
@@ -208,7 +208,7 @@ function LensActionButtons({ lensActive, onApply, onExit, onClear, tone = "warni
 
 export function MasterControlsDrawer() {
     const {
-        isOpen, closeMasterControls,
+        isOpen, closeMasterControls, docked, toggleDock,
         activeConfig, effectiveConfig,
         dirtyFields, dirtyFieldList,
         dirtyCount, highestDirtyTier, highestRerunTier, hasDirtyFields,
@@ -312,8 +312,9 @@ export function MasterControlsDrawer() {
 
     return (
         <>
-            {/* Backdrop */}
-            {isOpen && (
+            {/* Backdrop — only in modal mode. When docked, no backdrop so the page
+                stays interactive while the drawer is open. */}
+            {isOpen && !docked && (
                 <div
                     className="fixed inset-0 z-40 bg-black/50"
                     onClick={closeMasterControls}
@@ -329,7 +330,7 @@ export function MasterControlsDrawer() {
                     "bg-[hsl(var(--bg-2)/0.97)] border-l border-[hsl(var(--border-soft))]",
                     "backdrop-blur-xl shadow-2xl font-ui",
                     "transition-transform duration-300 ease-in-out",
-                    isOpen ? "translate-x-0" : "translate-x-full",
+                    isOpen ? "translate-x-0" : "translate-x-full pointer-events-none",
                 ].join(" ")}
             >
                 {/* Header */}
@@ -340,9 +341,23 @@ export function MasterControlsDrawer() {
                     </span>
                     <button
                         type="button"
+                        onClick={toggleDock}
+                        aria-label={docked ? "Switch to overlay mode" : "Dock alongside the page"}
+                        title={docked ? "Docked — click for overlay (focus) mode" : "Overlay — click to dock alongside the page"}
+                        className={[
+                            "ml-auto p-1.5 rounded border transition-colors",
+                            docked
+                                ? "border-[hsl(var(--accent-primary)/0.5)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.08)]"
+                                : "border-transparent text-muted-lab hover:text-white hover:bg-[hsl(var(--panel))]",
+                        ].join(" ")}
+                    >
+                        <PanelRight size={13} />
+                    </button>
+                    <button
+                        type="button"
                         onClick={closeMasterControls}
                         aria-label="Close master controls"
-                        className="ml-auto p-1.5 rounded text-muted-lab hover:text-white hover:bg-[hsl(var(--panel))] transition-colors"
+                        className="p-1.5 rounded text-muted-lab hover:text-white hover:bg-[hsl(var(--panel))] transition-colors"
                     >
                         <X size={13} />
                     </button>
