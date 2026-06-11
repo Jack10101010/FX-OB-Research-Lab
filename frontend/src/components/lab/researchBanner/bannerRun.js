@@ -16,14 +16,17 @@
  */
 
 import { getRunDisplayName } from "@/data/store";
-import { readHeroDateRange, formatHeroDateRange } from "@/components/lab/labHeroUtils";
+import { readHeroDateRange, formatHeroDateRange, formatHeroMonthSpan } from "@/components/lab/labHeroUtils";
 
 export function buildBannerRunIdentity(runOrBundle) {
     if (!runOrBundle) return null;
     const r = runOrBundle;
     const summary = r.summary || r;
-    // Canonical, hero-consistent date range; "" when no source field exists → omit.
-    const dateRange = formatHeroDateRange(readHeroDateRange(r, summary)) || null;
+    // Canonical, hero-consistent date range + month span (e.g. "7 months"); both
+    // null when no source field exists → omitted cleanly. Never invents dates.
+    const rangeValue = readHeroDateRange(r, summary);
+    const dateRange = formatHeroDateRange(rangeValue) || null;
+    const monthsSpan = formatHeroMonthSpan(rangeValue) || null;
     return {
         id: r.id ?? summary.id ?? null,
         name: getRunDisplayName(r),
@@ -36,6 +39,7 @@ export function buildBannerRunIdentity(runOrBundle) {
             ?? summary.execution_tf
             ?? null,
         dateRange,
+        monthsSpan,
     };
 }
 

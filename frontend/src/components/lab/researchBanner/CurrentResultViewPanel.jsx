@@ -46,7 +46,7 @@ export function CurrentResultViewPanel({
             {/* Inline stats row */}
             <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 mb-1.5">
                 <div className="flex items-baseline gap-1.5">
-                    <span className="text-[9.5px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--text-2)/0.55)]">Trades</span>
+                    <span className="text-[9.5px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--text-2)/0.8)]">Trades</span>
                     <span className="text-[13px] font-num tabular-nums font-semibold text-[hsl(var(--text-2))]">
                         {isScenarioView && hasSelectedUniverseTrades
                             ? selectedTradeCount
@@ -54,7 +54,7 @@ export function CurrentResultViewPanel({
                     </span>
                 </div>
                 <div className="flex items-baseline gap-1.5">
-                    <span className="text-[9.5px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--text-2)/0.55)]">Analytics</span>
+                    <span className="text-[9.5px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--text-2)/0.8)]">Analytics</span>
                     <span className={[
                         "text-[12px] font-semibold",
                         !isScenarioView
@@ -65,7 +65,7 @@ export function CurrentResultViewPanel({
                     ].join(" ")}>{analyticsChipLabel}</span>
                 </div>
                 <div className="flex items-baseline gap-1.5">
-                    <span className="text-[9.5px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--text-2)/0.55)]">Status</span>
+                    <span className="text-[9.5px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--text-2)/0.8)]">Status</span>
                     <span className={[
                         "text-[12px] font-semibold",
                         isUnavailable ? "text-[hsl(var(--warning))]" : "text-[hsl(var(--text-2))]",
@@ -76,7 +76,7 @@ export function CurrentResultViewPanel({
             </div>
             {/* Scenario baseline count / directional source info */}
             {isScenarioView && hasSelectedUniverseTrades && (
-                <div className="text-[10px] text-[hsl(var(--text-2)/0.55)]">
+                <div className="text-[10px] text-[hsl(var(--text-2)/0.8)]">
                     {isDirectionalView ? (
                         <>
                             <span className="text-[hsl(var(--text-2))]">Backend · Split-pass</span>

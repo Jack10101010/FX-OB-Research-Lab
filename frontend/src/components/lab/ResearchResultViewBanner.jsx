@@ -36,6 +36,7 @@ import React from "react";
 import { Pill } from "@/components/lab/DataTable";
 import { ResearchBannerShell } from "@/components/lab/researchBanner/ResearchBannerShell";
 import { CurrentResultViewPanel } from "@/components/lab/researchBanner/CurrentResultViewPanel";
+import BannerRunIdentity from "@/components/lab/researchBanner/BannerRunIdentity";
 
 // Small label + value chip (mirrors ResearchRunHeader's ScopeRow within the
 // AGENTS.md tracking ceiling). Local + lightweight for this read-only banner;
@@ -43,7 +44,7 @@ import { CurrentResultViewPanel } from "@/components/lab/researchBanner/CurrentR
 function Field({ label, children }) {
     return (
         <span className="inline-flex items-center gap-1.5">
-            <span className="text-[9.5px] font-ui uppercase tracking-[0.08em] text-muted-lab">{label}</span>
+            <span className="text-[9.5px] font-ui uppercase tracking-[0.08em] text-[hsl(var(--text-2)/0.8)]">{label}</span>
             {children}
         </span>
     );
@@ -73,6 +74,11 @@ export default function ResearchResultViewBanner({
     showRunIdentity = true,
     baselineCount = null,
     compact = false,
+    // Optional shell-tone override ("active" | "neutral" | "warning"). When unset the
+    // tone is derived from the universe (scenario→blue, baseline→neutral, empty→amber).
+    // Pages that want the premium blue treatment regardless (e.g. baseline-only pages)
+    // can force tone="active".
+    tone = null,
     // ── Reserved for a future interactive-switching phase (accepted, not used) ──
     interactive = false,            // eslint-disable-line no-unused-vars
     resultViewOptions = [],         // eslint-disable-line no-unused-vars
@@ -96,7 +102,14 @@ export default function ResearchResultViewBanner({
         ?? universe.baselineStats?.total
         ?? (isScenarioView ? 0 : tradeCount);
 
-    const tone = !isScenarioView ? "neutral" : hasTrades ? "active" : "warning";
+    // v1 tone standard: a selected scenario/model with trades → blue ("active");
+    // BASELINE view → orange ("baseline") so it's instantly obvious you're not on a
+    // selected variant; an empty selected scenario → orange "warning". Callers may
+    // override via `tone`.
+    const computedTone = isScenarioView
+        ? (hasTrades ? "active" : "warning")
+        : "baseline";
+    const shellTone = tone || computedTone;
     const currentViewDisplay = universe.label || (isScenarioView ? "Scenario" : "Baseline Reference");
     const analyticsChipLabel = !isScenarioView
         ? "Baseline trades"
@@ -108,18 +121,7 @@ export default function ResearchResultViewBanner({
     // ── Left: static Result View breakdown (+ optional run identity + data strip) ──
     const left = (
         <div className="px-4 py-3">
-            {showRunIdentity && run && (
-                <div className="mb-2.5 pb-2 border-b border-[hsl(var(--border-soft)/0.25)]">
-                    <div className="text-[13px] font-ui font-semibold text-[hsl(var(--text-1))] truncate">
-                        {run.name || run.id || "Run"}
-                    </div>
-                    {(run.symbol || run.timeframe || run.dateRange) && (
-                        <div className="text-[10.5px] font-ui text-[hsl(var(--text-2))]">
-                            {[run.symbol, run.timeframe, run.dateRange].filter(Boolean).join(" · ")}
-                        </div>
-                    )}
-                </div>
-            )}
+            {showRunIdentity && run && <BannerRunIdentity run={run} />}
             <div className="text-[10px] font-semibold font-ui uppercase tracking-[0.1em] text-[hsl(var(--text-2))] mb-2">
                 Result View
             </div>
@@ -180,5 +182,5 @@ export default function ResearchResultViewBanner({
         />
     );
 
-    return <ResearchBannerShell tone={tone} left={left} right={right} />;
+    return <ResearchBannerShell tone={shellTone} left={left} right={right} />;
 }

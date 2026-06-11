@@ -9,17 +9,20 @@
  * ResearchResultViewBanner, so the premium styling lives in exactly one place.
  *
  * tone:
- *   "active"  → a scenario is selected and has trades        (accent-primary)
- *   "warning" → a scenario is selected but is unavailable     (warning)
- *   "neutral" → baseline reference / no scenario              (border-soft)
+ *   "active"   → a scenario / model is selected and has trades  (accent-primary, blue)
+ *   "baseline" → baseline view (no model selected)              (warning, orange)
+ *   "warning"  → a scenario is selected but is unavailable       (warning, orange)
+ *   "neutral"  → fallback / no run                               (border-soft, grey)
  */
 
 import React from "react";
 
 const TONE_CLASS = {
-    active:  "border-[hsl(var(--accent-primary)/0.45)] bg-[hsl(var(--accent-primary)/0.05)]",
-    warning: "border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.05)]",
-    neutral: "border-[hsl(var(--border-soft)/0.5)] bg-[hsl(var(--panel-2)/0.2)]",
+    active:   "border-[hsl(var(--accent-primary)/0.45)] bg-[hsl(var(--accent-primary)/0.05)]",
+    // Baseline view — orange, so it's instantly clear you're NOT on a selected variant.
+    baseline: "border-[hsl(var(--warning)/0.55)] bg-[hsl(var(--warning)/0.07)]",
+    warning:  "border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.05)]",
+    neutral:  "border-[hsl(var(--border-soft)/0.5)] bg-[hsl(var(--panel-2)/0.2)]",
 };
 
 export function ResearchBannerShell({ tone = "neutral", left = null, right = null, children = null }) {

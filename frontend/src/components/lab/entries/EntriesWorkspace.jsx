@@ -203,6 +203,8 @@ export function EntriesWorkspace() {
                             { label: "Models", value: availableModelKeys.length },
                             { label: "Variant", value: ACTIVE_TRADE_VARIANT || "Primary" },
                         ]}
+                        chipsLabel="Models"
+                        chips={(exactRows || []).map((r) => r.label || r.mode).filter(Boolean)}
                     />
                 </div>
             )}

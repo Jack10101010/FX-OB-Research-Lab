@@ -7,7 +7,8 @@ import { LabRunHero } from "@/components/lab/LabRunHero";
 import { RunConfigStrip } from "@/components/lab/RunConfigStrip";
 import { useDataset } from "@/data/store";
 import { useTradeUniverse } from "@/data/useTradeUniverse";
-import { TradeUniverseBadge } from "@/components/lab/TradeUniverseBadge";
+import ResearchResultViewBanner from "@/components/lab/ResearchResultViewBanner";
+import { buildBannerRunIdentity } from "@/components/lab/researchBanner/bannerRun";
 import {
     ShieldAlert, ShieldCheck, AlertTriangle, TrendingUp, Activity,
     Hash, Target, Clock, Newspaper, Ban, ListChecks, Check, ChevronDown, ChevronUp,
@@ -34,12 +35,6 @@ import { useSearchParams } from "react-router-dom";
 const PENETRATION_THRESHOLDS = [75, 90, 100];
 
 const EMPTY_TRADES = [];
-
-// Phase 3B-2 — stable scenario override so useTradeUniverse memoizes
-// correctly. ProtectionLab pins to the baseline universe regardless of the
-// user's currently-selected Strategy Map scenario; the protection-result
-// CSVs were exported against the primary variant only.
-const BASELINE_SCENARIO_OVERRIDE = Object.freeze({ family: "baseline" });
 
 const WHAT_IF_FILTERS = [
     { key: "noNyFill", group: "Session", label: "Exclude NY fills", summary: "NY fills", matches: (t) => fillSessionOf(t) === "New York" },
@@ -88,17 +83,16 @@ const PROTECTION_BACKLOG = [
 ];
 
 export default function ProtectionLab() {
-    const { ACTIVE_PROJECT, ACTIVE_RUN, TRADES, ACTIVE_TRADE_VARIANT, activeRunId, runs, CANDLES } = useDataset();
-    const trades = React.useMemo(() => (Array.isArray(TRADES) ? TRADES : EMPTY_TRADES), [TRADES]);
+    const { ACTIVE_PROJECT, ACTIVE_RUN, ACTIVE_TRADE_VARIANT, activeRunId, runs, CANDLES } = useDataset();
+    // Protection Lab now FOLLOWS the selected Result View / variant (same store
+    // scenario every other lab page consumes), so a model selected on Run Detail
+    // flows through here too. `universe.trades` drives every KPI, table, and chart;
+    // the banner reflects the selection (blue) and only shows orange on baseline.
+    // Panels that need exporter fields a given variant's CSV lacks fall back to
+    // their existing "Limited data" guards.
+    const universe = useTradeUniverse();
+    const trades = React.useMemo(() => (Array.isArray(universe?.trades) ? universe.trades : EMPTY_TRADES), [universe]);
     const candles = React.useMemo(() => (Array.isArray(CANDLES) ? CANDLES : []), [CANDLES]);
-    // Phase 3B-2 — Protection Lab is intentionally baseline-only. We resolve
-    // the baseline universe via useTradeUniverse with an explicit override so
-    // the TradeUniverseBadge shows the unprotected reference source even when
-    // the user has a triggered-edge scenario selected in Strategy Map. No
-    // analytics consume this universe — `trades` (above) still drives every
-    // KPI, table, and chart on the page. The badge exists purely to make the
-    // page's design contract visible.
-    const baselineUniverse = useTradeUniverse(null, BASELINE_SCENARIO_OVERRIDE);
     const [whatIfFilters, setWhatIfFilters] = React.useState({});
     const [selectedProtectionMode, setSelectedProtectionMode] = React.useState(null);
     // IA Phase 3: overview | deepdive | research | fft (FFT-IA Phase 1).
@@ -210,19 +204,15 @@ export default function ProtectionLab() {
 
             <RunConfigStrip run={activeRun} />
 
-            {/* Phase 3B-2 — baseline-only universe badge.
-                Protection results are computed against the primary variant /
-                unprotected baseline, NOT against arbitrary entry-model
-                scenarios. The badge below mirrors the unprotected baseline
-                source even when the user has a triggered-edge scenario active
-                in Strategy Map. Analytics are unchanged — this is clarity UI
-                only. See Phase 3A audit for the design rationale. */}
+            {/* Result-view banner — Protection Lab now follows the selected Result View
+                (blue) and shows orange on baseline. Analytics below derive from the same
+                `universe.trades`, so a model/variant selected on Run Detail flows through. */}
             {activeRunId && (
                 <div className="px-6 mt-2 mb-3 flex flex-col gap-1.5">
-                    <TradeUniverseBadge universe={baselineUniverse} />
+                    <ResearchResultViewBanner universe={universe} run={buildBannerRunIdentity(activeRun)} />
                     <p className="text-[10.5px] font-ui text-[hsl(var(--text-2))] leading-relaxed">
-                        Protection results are computed against the primary variant / unprotected baseline.
-                        Scenario-aware protection requires a backend re-export.
+                        Protection analysis reflects the selected Result View. Panels needing exporter
+                        fields a variant's CSV lacks will show limited data.
                     </p>
                 </div>
             )}
@@ -646,6 +636,23 @@ export default function ProtectionLab() {
             {/* ════════════════ BREAK-EVEN REPLAY (BE-Replay Phase 2) ════════════════ */}
             {protTab === "breakeven" && (
                 <div className="px-6">
+                    {/* Model / Variant headline KPIs — stacked ABOVE the Break-even
+                        results so the selected Result View's raw result is easy to
+                        compare against the BE-adjusted result (mirrors the Run Detail
+                        whole-run strip; same metrics, R basis). */}
+                    <div className="mb-1.5 flex flex-wrap items-baseline gap-x-2 text-[9px] font-ui uppercase tracking-[0.12em] text-[hsl(var(--text-2)/0.8)]">
+                        <span>Model / Variant Results</span>
+                        {universe?.label && <span className="text-[hsl(var(--accent-primary))] normal-case tracking-normal">{universe.label}</span>}
+                        <span className="text-[hsl(var(--text-2)/0.6)]">· {p.n} trades</span>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-4">
+                        <MetricChip label="Net R"         value={fmtR(p.netR)}         sub="cost-adjusted total"  tone={p.netR >= 0 ? "primary" : "danger"} icon={TrendingUp} />
+                        <MetricChip label="Win Rate"      value={fmtPct(p.winRate)}    sub={`${p.wins}W / ${p.losses}L`} tone="secondary" icon={Target} />
+                        <MetricChip label="Trades"        value={String(p.n)}          sub="valid trades"         tone="primary"   icon={Hash} />
+                        <MetricChip label="Expectancy"    value={fmtExp(p.expectancy)} sub="Net R per trade"      tone="primary"   icon={Activity} />
+                        <MetricChip label="Profit Factor" value={p.profitFactor != null ? String(p.profitFactor) : "—"} sub="Σ wins ÷ Σ losses" tone={p.profitFactor != null && p.profitFactor >= 1.5 ? "success" : p.profitFactor != null && p.profitFactor < 1 ? "danger" : "muted"} icon={BarChart2} />
+                        <MetricChip label="Max DD"        value={p.maxDD !== 0 ? fmtR(p.maxDD) : "—"} sub="worst equity dip" tone={p.maxDD < -2 ? "danger" : p.maxDD < 0 ? "warning" : "muted"} icon={AlertTriangle} />
+                    </div>
                     <BreakevenTab
                         trades={trades}
                         candles={candles}
