@@ -148,33 +148,58 @@ function writeOverrides(obj) {
 
 const VALID = new Set(ROADMAP_STATUSES.map((s) => s.key));
 
+// ── Override-value shape (STORAGE-1A) ─────────────────────────────────────────
+// An override value is EITHER a legacy bare status string ("planned") OR the
+// current timestamped object ({ status, updatedAt }). These helpers read both
+// shapes so existing localStorage/backend data keeps working; the first new
+// write upgrades that item to the object shape.
+function overrideStatus(v) {
+    if (typeof v === "string") return v;
+    if (v && typeof v === "object" && typeof v.status === "string") return v.status;
+    return null;
+}
+
+// Conflict-resolution timestamp in ms. Legacy strings / missing timestamps read
+// as 0 (oldest), so any timestamped value beats un-timestamped legacy data.
+function overrideTime(v) {
+    if (v && typeof v === "object" && typeof v.updatedAt === "string") {
+        return Date.parse(v.updatedAt) || 0;
+    }
+    return 0;
+}
+
 // Merge seed defaults with persisted status overrides for one section.
 export function getRoadmap(sectionKey) {
     const seed = ROADMAP_SEEDS[sectionKey] || { title: "Roadmap", items: [] };
     const overrides = readOverrides()[sectionKey] || {};
-    const items = seed.items.map((it) => ({
-        ...it,
-        status: VALID.has(overrides[it.id]) ? overrides[it.id] : it.status,
-    }));
+    const items = seed.items.map((it) => {
+        const st = overrideStatus(overrides[it.id]); // tolerates string OR { status }
+        return { ...it, status: (st && VALID.has(st)) ? st : it.status };
+    });
     // labels/findings are optional per-section extras (read-only, no overrides).
     return { title: seed.title, sectionKey, items, labels: seed.labels || {}, findings: seed.findings || [] };
 }
 
-// Persist a single item's status override.
+// Persist a single item's status override (timestamped object shape).
 export function setRoadmapStatus(sectionKey, itemId, status) {
     if (!VALID.has(status)) return;
     const all = readOverrides();
     const section = { ...(all[sectionKey] || {}) };
-    section[itemId] = status;
+    section[itemId] = { status, updatedAt: new Date().toISOString() };
     all[sectionKey] = section;
     writeOverrides(all);
 }
 
-// ── Durable backend mirror (STORAGE Phase 1) ──────────────────────────────────
-// Merge rule: union by sectionKey, then by itemId. There are no per-item
-// timestamps, so a same-item conflict prefers the LOCAL value (the machine the
-// user is actively on); a fresh browser with empty local correctly takes the
-// backend copy via the empty-side rule. Invalid statuses are dropped.
+// ── Durable backend mirror (STORAGE-1A) ───────────────────────────────────────
+// Merge rule: union by sectionKey, then by itemId.
+//   • only one side has the item → keep it.
+//   • both sides have it → the newer `updatedAt` wins (last-writer-wins).
+//     Legacy bare strings / missing timestamps read as 0 (oldest), so a
+//     timestamped value always beats stale un-timestamped legacy data; a true
+//     tie keeps local. The original (timestamped) value is preserved so the
+//     shape converges to objects over time.
+//   • statuses are validated; invalid values are dropped, and a valid value is
+//     never lost to a newer-but-invalid one (only valid candidates compete).
 export function mergeRoadmapOverrides(local, remote) {
     const safe = (o) => (o && typeof o === "object") ? o : {};
     const l = safe(local), r = safe(remote);
@@ -183,8 +208,16 @@ export function mergeRoadmapOverrides(local, remote) {
         const ls = safe(l[sk]), rs = safe(r[sk]);
         const merged = {};
         for (const id of new Set([...Object.keys(ls), ...Object.keys(rs)])) {
-            const val = (id in ls) ? ls[id] : rs[id]; // conflict → prefer local
-            if (VALID.has(val)) merged[id] = val;
+            // Only valid-status candidates compete (local first → wins ties).
+            const candidates = [];
+            if (id in ls && VALID.has(overrideStatus(ls[id]))) candidates.push(ls[id]);
+            if (id in rs && VALID.has(overrideStatus(rs[id]))) candidates.push(rs[id]);
+            if (!candidates.length) continue; // invalid on both sides → drop
+            let win = candidates[0];
+            for (const c of candidates) {
+                if (overrideTime(c) > overrideTime(win)) win = c; // strictly newer wins
+            }
+            merged[id] = win;
         }
         if (Object.keys(merged).length) out[sk] = merged;
     }
