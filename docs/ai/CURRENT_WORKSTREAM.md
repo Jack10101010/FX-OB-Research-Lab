@@ -2,7 +2,7 @@
 
 > The single active focus. Update this first when focus changes. Source for `/status`.
 
-*Last updated: 2026-06-10 (PM).*
+*Last updated: 2026-06-11.*
 
 ## Focus
 
@@ -74,6 +74,10 @@ changes (Overview explorer passes `roadmapKey={null}`). Scoped commit = these 5 
   false-loser builder + surface (prompt drafted, see BACKLOG).
 - Parallel streams active on this branch: OB-Retest (v2.1 committed), Protection/BE-Replay
   (`ProtectionLab.jsx` dirty — do not stage), Hypothesis Lab fixes landing from host.
+- **Master Controls Phase 13** landed as a parallel stream — preview consolidation implemented +
+  validated + smoke-tested. `MasterControlsContext.jsx` / `MasterControlsDrawer.jsx` / `previewComposer.js`
+  (+ `__validation__/previewComposer.parity.mjs`) are dirty as their **own** scoped commit — do not fold
+  into Failures commits. See `DECISIONS.md` D-009.
 
 ## Remaining
 

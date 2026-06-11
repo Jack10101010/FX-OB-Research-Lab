@@ -4,7 +4,7 @@
 > git-coordination doc (dirty files, commits ahead). This one is the product/research
 > state. Verify against live git before trusting it.
 
-*Last updated: 2026-06-10.*
+*Last updated: 2026-06-11.*
 
 ## Project
 
@@ -19,12 +19,20 @@ V5 Phase 2 (confirmed false losers, frontend) + Phase 2B (Overview IA) built and
 Phase 2B commit pending. Live data path waits on the Lux-OB-Backtester post-stop export.
 (Classification Tab V2 is paused with Phase 2 shipped.)
 
-Parallel state: **Master Controls is strong/stable** (composed preview lens, instant cost
-rescore, promotion flow all shipped). OB-Retest and Protection/BE-Replay have active
-uncommitted work owned by other streams.
+Parallel state: **Master Controls is through Phase 12C, with Phase 13 (preview consolidation)
+implemented + validated + smoke-tested (scoped commit pending on host)** — Preview is now a single
+composer-driven system (`composePreviewBundle`); `previewLens` remains the single read path. OB-Retest
+and Protection/BE-Replay have active uncommitted work owned by other streams.
 
 ## Completed
 
+- **Master Controls Phase 13 — preview consolidation (frontend)** — collapsed the five parallel preview
+  paths (cost / filter / FFT / RR / composed) into ONE composer-driven path: `composePreviewBundle` is the
+  sole builder, with one preview state machine, one Apply path, and one drawer preview card. `previewLens`
+  remains the single app-wide read overlay (unchanged); transform math unchanged. Added
+  `__validation__/previewComposer.parity.mjs` (25/25); cost / filter / RR / FFT-unavailable / multi-stage /
+  run-switch / apply-exit / cross-page all verified in the live app. Decision `D-009`. (Scoped commit
+  pending on host: `MasterControlsContext.jsx`, `MasterControlsDrawer.jsx`, `previewComposer.js`, parity script.)
 - **Failures Lab V5 Phase 2 + 2B (frontend)** — `buildConfirmedFalseLosers` classifies losers
   confirmed/candidate/genuine (reached ≥1R or hit original TP / ≥0.5R / never) with cohort
   breakdowns + horizon; importer maps the 5 `post_stop_*` fields dual-keyed; field-gated with a

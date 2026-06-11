@@ -5,7 +5,7 @@
 > Attach to a workstream (or add one) before coding. Never touch another stream's files
 > without explicit scope.
 
-*Last updated: 2026-06-10.*
+*Last updated: 2026-06-11.*
 
 ## Failures Lab V4  ← CURRENT FOCUS (final integration cleanup, then pause)
 
@@ -39,9 +39,16 @@
 
 ## Master Controls / Research Control Plane
 
-- **Status:** active (parallel). **Phase 7A complete.** Milestones since 4A/4B: preview→run
-  promotion, active-vs-preview compare, rerun-tier classification, and the **Instant Cost Rescore
-  panel**.
+- **Status:** active (parallel). **Through Phase 12C; Phase 13 (preview consolidation) implemented +
+  validated + smoke-tested — scoped commit pending on host.** (Corrects the earlier stale "Phase 7A".)
+  Earlier milestones: draft/active config, dirty + rerun-tier classification, preview→run promotion,
+  active-vs-preview compare, the four instant Preview Lenses (cost / filter / FFT / RR) + the composed lens.
+- **Phase 13 outcome:** the five parallel preview paths (cost / filter / FFT / RR / composed) are collapsed
+  into ONE composer-driven path — `composePreviewBundle` is the sole preview builder, with a single preview
+  state machine, single Apply path, and single drawer preview card. `previewLens` remains the single
+  app-wide read overlay (unchanged); transform math unchanged. Added
+  `components/masterControls/__validation__/previewComposer.parity.mjs` (25/25). See `DECISIONS.md` D-009
+  and the repo-root `MASTER-CONTROLS-PHASE-13-*` audit/plan docs.
 - **Owns:** `components/masterControls/*`, `data/configRegistry.js`, `data/configTranslator.js`.
 - **Do not touch** from Classification work.
 

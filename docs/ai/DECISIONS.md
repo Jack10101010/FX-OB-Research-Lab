@@ -6,9 +6,26 @@ Append-only. Newest at top. Each entry: what we decided, why, and the consequenc
 > Validated **research conclusions** (what the data says) live in `FINDINGS.md`. Decisions cite
 > findings — e.g. D-003 is the *decision* to lead with Vacant, justified by F-001/F-002.
 
-*Last updated: 2026-06-07.*
+*Last updated: 2026-06-11.*
 
 ---
+
+### D-009 · Phase 13 — one composer-driven preview (five lenses collapsed)
+Master Controls' five parallel preview paths (cost / filter / FFT / RR + the composed lens) are replaced
+by a single path: `composePreviewBundle` is the sole preview builder, driven by ONE preview state machine,
+ONE Apply path, and ONE drawer preview card. The four single-kind build effects / signatures / suppress
+refs / apply callbacks / sync effects were removed; the composer build effect now serves any instant
+dirty-set (1–4 stage kinds) by dropping the former "≥2 kinds" gate. One additive metadata field
+(`stages.filter.filters`) preserves the filter-detail readout, and a parity validator
+(`components/masterControls/__validation__/previewComposer.parity.mjs`, 25/25) guards the
+composer→drawer contract.
+**Why:** the four single-kind lenses duplicated orchestration around the *same* transforms; the read side
+was already unified through `previewLens`, so only the build/state/UI layer needed consolidating.
+**Consequence:** `previewLens` remains the single app-wide read overlay and the transform math is
+unchanged; future preview work extends one engine, not five. Verified in the live app
+(cost / filter / RR / FFT-unavailable / multi-stage / run-switch / apply-exit / cross-page).
+Phase 14 (run-concept naming) and TradingView Mode remain **open** — not addressed here.
+(Scoped commit pending on host.)
 
 ### D-008 · Confidence = sample + stability; effect-SE deferred
 Confidence (Very Low/Low/Medium/High) is computed from sample size + win-rate Wilson interval
