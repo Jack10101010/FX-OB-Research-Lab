@@ -123,5 +123,24 @@ const reportOff = buildRunConfigLoadReport({}, { config: {}, summary: {} });
 ok(reportOff.config.beEnabled === undefined || reportOff.config.beEnabled === false,
     "old bundle without BE → beEnabled not forced on");
 
+// ─────────────────────────────────────────────────────────────────────────────
+console.log("\n§7  be_variants serialization (P2)");
+// ─────────────────────────────────────────────────────────────────────────────
+ok(buildBeConfig({ beEnabled: true, beArmLevels: [0.5] }).be_variants === "baseline",
+    "default (no beVariants) → be_variants 'baseline'");
+ok(buildBeConfig({ beEnabled: true, beArmLevels: [0.5], beVariants: "baseline" }).be_variants === "baseline",
+    "explicit baseline → 'baseline'");
+ok(buildBeConfig({ beEnabled: true, beArmLevels: [0.5], beVariants: "all" }).be_variants === "all",
+    "'all' → 'all'");
+ok(buildBeConfig({ beEnabled: true, beArmLevels: [0.5], beVariants: "bogus" }).be_variants === "baseline",
+    "unknown value coerced to 'baseline' (never silently 'all')");
+ok(!("be_variants" in buildBeConfig({ beEnabled: false, beVariants: "all" })),
+    "BE disabled → no be_variants emitted (only be_enabled:false)");
+// Full payload carries be_variants when on.
+const cfgAll = buildBacktesterConfig({ ...baseCfg, beEnabled: true, beArmLevels: [0.5, 1.0], beTriggerBases: ["wick"], beVariants: "all" });
+ok(cfgAll.be_variants === "all", "full payload carries be_variants 'all'");
+const cfgBaseOnly = buildBacktesterConfig({ ...baseCfg, beEnabled: true, beArmLevels: [0.5], beTriggerBases: ["wick"] });
+ok(cfgBaseOnly.be_variants === "baseline", "full payload defaults be_variants 'baseline'");
+
 console.log(`\n${failures === 0 ? "✅ ALL PASS" : `❌ ${failures} FAILURE(S)`}\n`);
 process.exit(failures === 0 ? 0 : 1);

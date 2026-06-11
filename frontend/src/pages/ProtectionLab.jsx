@@ -4,7 +4,6 @@ import { NeonPanel } from "@/components/lab/NeonPanel";
 import { MetricChip } from "@/components/lab/MetricChip";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
 import { LabRunHero } from "@/components/lab/LabRunHero";
-import { RunConfigStrip } from "@/components/lab/RunConfigStrip";
 import { useDataset } from "@/data/store";
 import { useTradeUniverse } from "@/data/useTradeUniverse";
 import ResearchResultViewBanner from "@/components/lab/ResearchResultViewBanner";
@@ -201,8 +200,6 @@ export default function ProtectionLab() {
                 variant={ACTIVE_TRADE_VARIANT}
                 showTradeCountBadge
             />
-
-            <RunConfigStrip run={activeRun} />
 
             {/* Result-view banner — Protection Lab now follows the selected Result View
                 (blue) and shows orange on baseline. Analytics below derive from the same
@@ -667,12 +664,11 @@ export default function ProtectionLab() {
                         beResults={activeRun?.beResults}
                         beTradesByMode={activeRun?.beTradesByMode}
                         executionMode={universe?.variant || activeRun?.primaryVariant}
-                        // Backend BE is computed on the BASELINE trade set only.
-                        // EXACT is therefore valid only when the active result view
-                        // is baseline; non-baseline variants fall back to REPLAY so
-                        // baseline BE is never mislabelled as the variant's BE.
-                        isBaselineView={universe?.universeType !== "scenario"}
-                        resultViewLabel={universe?.label}
+                        // Variant-aware BE (P2): resolve EXACT against the current
+                        // result view's entry variant. The resolver never substitutes
+                        // baseline BE for a variant; a view without exact BE shows REPLAY.
+                        entryVariantKey={universe?.sourceKey || "baseline"}
+                        resultViewLabel={universe?.label || "Baseline"}
                     />
                 </div>
             )}

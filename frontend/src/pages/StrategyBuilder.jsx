@@ -138,6 +138,9 @@ export default function StrategyBuilder() {
         beArmLevels: [0.25, 0.5, 0.75, 1.0, 1.5, 2.0],
         beTriggerBases: ["wick", "close"],
         beDelayCandles: 0,
+        // Which entry trade sets get exact BE: "baseline" (default) or "all"
+        // (every active entry variant). Default baseline — "all" multiplies passes.
+        beVariants: "baseline",
         };
     });
     const set = (k) => (v) => setCfg((c) => ({ ...c, [k]: v }));
@@ -861,6 +864,22 @@ export default function StrategyBuilder() {
                                                 value={cfg.beDelayCandles}
                                                 onChange={(v) => set("beDelayCandles")(Number(v))}
                                             />
+                                        </div>
+                                        <div>
+                                            <div className="control-label mb-2 text-[11px] font-ui uppercase tracking-wider text-muted-lab">Generate exact BE for</div>
+                                            <Segment
+                                                options={[
+                                                    { value: "baseline", label: "Baseline only" },
+                                                    { value: "all", label: "All entry variants" },
+                                                ]}
+                                                value={cfg.beVariants}
+                                                onChange={set("beVariants")}
+                                            />
+                                            <p className="mt-1 text-[10.5px] text-muted-lab">
+                                                {cfg.beVariants === "all"
+                                                    ? "Runs BE against every active entry model (Triggered Edge, Penetration, …). Many more passes — slower and larger bundles."
+                                                    : "Runs BE against the baseline entry trade set only. Variant result views fall back to REPLAY."}
+                                            </p>
                                         </div>
                                         <div className="text-[10.5px] text-muted-lab">
                                             Stop buffer fixed at 0R (exact entry) for now.{" "}

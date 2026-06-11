@@ -267,6 +267,11 @@ export function CandleChart({
     selectedTradeId,
     highlightObId = null,    // OB id to treat as "selected" (FFT map-link focus) — reuses the selected styling path
     verificationOverlay = null,
+    // BE visual verification (P1): { entryPrice, originalStop, originalTp,
+    // beArmPrice, beStopPrice, beArmTime, beExitTime, armLevelR }. When set,
+    // draws BE arm/stop + entry/SL/TP price lines and arm/exit markers for the
+    // selected trade. Null ⇒ no BE overlay (existing behavior unchanged).
+    beVerification = null,
     rrTools = [],
     newsEvents = [],
     sessionRanges = [],
@@ -301,6 +306,7 @@ export function CandleChart({
     const chartRef = useRef(null);
     const seriesRef = useRef(null);
     const priceLinesRef = useRef([]);
+    const beLinesRef = useRef([]);
     const [overlayKey, setOverlayKey] = useState(0); // triggers OB box reposition
     const hasRealCandleTime = candles.some((c) => normalizeChartTimestamp(c.time ?? c.t ?? c.timestamp ?? c.datetime) != null);
     const safeHeight = Number.isFinite(Number(height)) && Number(height) > 0 ? Math.round(Number(height)) : 460;
@@ -470,11 +476,34 @@ export function CandleChart({
     }, [candles]);
 
     // Entry arrows are intentionally hidden in verifier mode; the RR tool and details panel carry entry context.
+    // Single owner of setMarkers: when BE verification is active for the selected
+    // trade, place arm / exit markers (time-snapped). Otherwise clear markers.
     useEffect(() => {
         const series = seriesRef.current;
         if (!series) return;
-        series.setMarkers([]);
-    }, [trades, showLongs, showShorts, showWins, showLosses, selectedTradeId, hasRealCandleTime]);
+        if (beVerification && (beVerification.beArmTime || beVerification.beExitTime)) {
+            const snap = (raw) => {
+                const t = normalizeChartTimestamp(raw);
+                if (t == null) return null;
+                return hasRealCandleTime ? snapFloor(t) : t;
+            };
+            const armT = beVerification.beArmTime ? snap(beVerification.beArmTime) : null;
+            const exitT = beVerification.beExitTime ? snap(beVerification.beExitTime) : null;
+            const mk = [];
+            // Drop the arm marker if it snaps to the same candle as the exit
+            // (lightweight-charts requires strictly ascending, unique times).
+            if (armT != null && (exitT == null || armT !== exitT)) {
+                mk.push({ time: armT, position: "aboveBar", color: "rgba(245, 158, 11, 0.95)", shape: "arrowDown", text: "BE arm" });
+            }
+            if (exitT != null) {
+                mk.push({ time: exitT, position: "belowBar", color: "rgba(59, 130, 246, 0.95)", shape: "arrowUp", text: "BE exit" });
+            }
+            mk.sort((a, b) => a.time - b.time);
+            series.setMarkers(mk);
+        } else {
+            series.setMarkers([]);
+        }
+    }, [trades, showLongs, showShorts, showWins, showLosses, selectedTradeId, hasRealCandleTime, beVerification]);
 
     // Push TP/SL price lines
     useEffect(() => {
@@ -488,6 +517,27 @@ export function CandleChart({
             priceLinesRef.current.push(tp, sl);
         });
     }, [tpSlLines]);
+
+    // BE verification price lines — entry / SL / TP / BE arm / BE stop for the
+    // selected trade. Separate ref so it never disturbs the tpSlLines set.
+    useEffect(() => {
+        const series = seriesRef.current;
+        if (!series) return;
+        beLinesRef.current.forEach((pl) => series.removePriceLine(pl));
+        beLinesRef.current = [];
+        if (!beVerification) return;
+        const add = (price, color, style, title) => {
+            if (price == null || !Number.isFinite(Number(price))) return;
+            beLinesRef.current.push(series.createPriceLine({
+                price: Number(price), color, lineWidth: 1, lineStyle: style, axisLabelVisible: true, title,
+            }));
+        };
+        add(beVerification.entryPrice,  "rgba(148, 163, 184, 0.9)",  LineStyle.Solid,  "Entry");
+        add(beVerification.originalStop, "rgba(220, 38, 38, 0.85)",  LineStyle.Dashed, "SL");
+        add(beVerification.originalTp,   "rgba(22, 163, 74, 0.85)",  LineStyle.Dashed, "TP");
+        add(beVerification.beArmPrice,   "rgba(245, 158, 11, 0.95)", LineStyle.Dotted, `BE arm ${beVerification.armLevelR != null ? beVerification.armLevelR + "R" : ""}`.trim());
+        add(beVerification.beStopPrice,  "rgba(59, 130, 246, 0.95)", LineStyle.Dotted, "BE stop");
+    }, [beVerification]);
 
     const debugInfo = {
         candleCount: candles.length,

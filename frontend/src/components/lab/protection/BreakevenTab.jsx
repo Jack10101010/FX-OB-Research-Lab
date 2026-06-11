@@ -16,8 +16,10 @@ import {
     buildBeScenarioSummary,
     beReplayAvailability,
 } from "@/data/beReplay";
-import { resolveBeScenarioSource, hasAnyExactBe, describeBeAvailability } from "@/data/beResolve";
-import { useDataset } from "@/data/store";
+import { resolveBeScenarioSource, hasAnyExactBe, entryVariantHasExact, describeBeAvailability } from "@/data/beResolve";
+import { buildBeAffectedTrades } from "@/data/protectionTimeline";
+import { useDataset, setFocusedBeTrade } from "@/data/store";
+import { useNavigate } from "react-router-dom";
 import { ShieldAlert, AlertTriangle, TrendingUp, BarChart2, Hash, Activity, Loader2, FlaskConical, Circle, CheckCircle2 } from "lucide-react";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -210,32 +212,82 @@ function buildTableColumns(armLevelR, setArmLevelR) {
     ];
 }
 
+// ── Affected-trade list column definitions ──────────────────────────────────────
+
+const AFFECTED_CLASS = {
+    loss_saved: { label: "Loss Saved", tone: "success" },
+    winner_cut: { label: "Winner Cut", tone: "danger" },
+    be_exit:    { label: "BE Exit",    tone: "muted" },
+};
+function fmtTimeShort(t) {
+    if (!t) return "—";
+    const s = String(t).replace("T", " ").replace(/\+00:00$|Z$/, "");
+    return s.length > 16 ? s.slice(5, 16) : s;
+}
+
+function buildAffectedColumns(onViewOnMap) {
+    return [
+        {
+            key: "classification", label: "Result", sortable: false, width: "92px",
+            render: (row) => {
+                const c = AFFECTED_CLASS[row.classification] || AFFECTED_CLASS.be_exit;
+                return <Pill tone={c.tone}>{c.label}</Pill>;
+            },
+        },
+        { key: "id", label: "Trade", render: (row) => <span className="font-code text-[11px] text-[hsl(var(--text-1))]">{row.id || "—"}</span> },
+        { key: "obId", label: "OB", render: (row) => <span className="font-code text-[11px] text-[hsl(var(--text-2))]">{row.obId || "—"}</span> },
+        { key: "direction", label: "Dir", render: (row) => <span className="font-ui text-[11px] text-[hsl(var(--text-2))]">{row.direction || "—"}</span> },
+        { key: "structure", label: "Struct", render: (row) => <span className="font-ui text-[11px] text-[hsl(var(--text-2))]">{row.structure || "—"}</span> },
+        { key: "session", label: "Session", render: (row) => <span className="font-ui text-[11px] text-[hsl(var(--text-2))]">{row.session || "—"}</span> },
+        { key: "entryTime", label: "Entry", render: (row) => <span className="font-code text-[10.5px] text-[hsl(var(--text-2))]">{fmtTimeShort(row.entryTime)}</span> },
+        { key: "originalR", label: "Orig R", align: "right", render: (row) => row.originalR != null ? <ColoredR value={row.originalR} /> : <span className="text-[hsl(var(--text-2))]">—</span> },
+        { key: "beR", label: "BE R", align: "right", render: (row) => row.beR != null ? <ColoredR value={row.beR} /> : <span className="text-[hsl(var(--text-2))]">—</span> },
+        { key: "deltaR", label: "Δ R", align: "right", render: (row) => row.deltaR != null ? <ColoredR value={row.deltaR} /> : <span className="text-[hsl(var(--text-2))]">—</span> },
+        {
+            key: "map", label: "", sortable: false, width: "96px",
+            render: (row) => (
+                <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onViewOnMap(row); }}
+                    className="row-chip row-chip-muted hover:row-chip-primary text-[10.5px]"
+                    title="Open this trade on the Strategy Map with the BE overlay"
+                >
+                    View on Map
+                </button>
+            ),
+        },
+    ];
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export function BreakevenTab({
     trades, candles, activeRun, activeRunId,
     beResults, beTradesByMode, executionMode,
-    isBaselineView = true, resultViewLabel,
+    entryVariantKey = "baseline", resultViewLabel,
 }) {
-    // BE Exact Replay maps (BE-FRONTEND-INTEGRATION Phase H). When the backend
-    // exported exact scenarios for this run we prefer them per arm+trigger and
-    // fall back to the client-side candle-walk REPLAY otherwise.
+    // BE Exact Replay maps (BE-FRONTEND-INTEGRATION P2 · variant-aware). Storage
+    // is nested beResults/beTradesByMode[mode][entryVariantKey][beKey]. EXACT is
+    // resolved per the CURRENT result view's entry variant; a variant NEVER
+    // falls back to baseline BE. Anything without exact BE for the current view
+    // uses the client-side candle-walk REPLAY on that view's own trades.
     const beResultsMap     = beResults     ?? activeRun?.beResults     ?? EMPTY_BE_MAP;
     const beTradesByModeMap = beTradesByMode ?? activeRun?.beTradesByMode ?? EMPTY_BE_MAP;
     const beExecutionMode  = executionMode ?? activeRun?.primaryVariant ?? null;
+    const beEntryVariantKey = entryVariantKey || "baseline";
+    const viewLabel = resultViewLabel || (beEntryVariantKey === "baseline" ? "Baseline" : beEntryVariantKey);
 
-    // Backend BE is simulated on the BASELINE entry trade set only — the exported
-    // be_results / trades_*__be_*.csv carry no entry-model context. So EXACT is
-    // only valid while the active result view IS baseline. For any non-baseline
-    // variant (Triggered Edge, Penetration, FFT, directional, …) we must NOT show
-    // baseline BE as that variant's EXACT result; we fall back to REPLAY computed
-    // on the variant's own trades. (Variant-aware exact BE is a planned Phase 2.)
-    const exactAllowed = isBaselineView !== false;
-    const beDataPresent = React.useMemo(
+    // Does the CURRENT result view (its entry variant) have backend exact BE?
+    const beDataPresentAnywhere = React.useMemo(
         () => hasAnyExactBe(beResultsMap, beTradesByModeMap),
         [beResultsMap, beTradesByModeMap],
     );
-    const hasExact = beDataPresent && exactAllowed;
+    const hasExact = React.useMemo(
+        () => entryVariantHasExact(beResultsMap, beTradesByModeMap, {
+            executionMode: beExecutionMode, entryVariantKey: beEntryVariantKey,
+        }),
+        [beResultsMap, beTradesByModeMap, beExecutionMode, beEntryVariantKey],
+    );
     // ── All hooks unconditionally before any early return ─────────────────
 
     // Candle loading (mirrors useRetestData pattern).
@@ -293,25 +345,24 @@ export function BreakevenTab({
     // without guesswork. Cheap, read-only, fires when the run/selection changes.
     React.useEffect(() => {
         const d = describeBeAvailability(beResultsMap, beTradesByModeMap, {
-            executionMode: beExecutionMode, triggerBasis, armLevelR,
+            executionMode: beExecutionMode, entryVariantKey: beEntryVariantKey, triggerBasis, armLevelR,
         });
         const resolved = resolveBeScenarioSource({
-            armLevelR, triggerBasis, executionMode: beExecutionMode,
+            armLevelR, triggerBasis, executionMode: beExecutionMode, entryVariantKey: beEntryVariantKey,
             beResults: beResultsMap, beTradesByMode: beTradesByModeMap,
         });
         // eslint-disable-next-line no-console
-        console.groupCollapsed(`[BE] ${resolved.source} · run=${activeRunId ?? "?"} · ${triggerBasis} ${armLevelR}R`);
+        console.groupCollapsed(`[BE] ${resolved.source} · run=${activeRunId ?? "?"} · view=${beEntryVariantKey} · ${triggerBasis} ${armLevelR}R`);
         // eslint-disable-next-line no-console
         console.info({
             activeRunId,
             executionModePassed: beExecutionMode,
             resolvedExecutionMode: d.resolvedExecutionMode,
-            isBaselineView,
-            exactAllowed,
-            resultViewLabel,
+            entryVariantKey: beEntryVariantKey,
+            resultViewLabel: viewLabel,
+            entryHasExact: d.entryHasExact,
+            availableEntryVariantKeys: d.availableEntryVariantKeys,
             hasAnyExact: d.hasAnyExact,
-            beResultsExecutionModes: d.beResultsExecutionModes,
-            beTradesExecutionModes: d.beTradesExecutionModes,
             beResultsScenarioKeys: d.beResultsScenarioKeys,
             beTradesScenarioKeys: d.beTradesScenarioKeys,
             requestedKey: d.requestedKey,
@@ -321,7 +372,7 @@ export function BreakevenTab({
         });
         // eslint-disable-next-line no-console
         console.groupEnd();
-    }, [activeRunId, armLevelR, triggerBasis, beExecutionMode, beResultsMap, beTradesByModeMap, exactAllowed, isBaselineView, resultViewLabel]);
+    }, [activeRunId, armLevelR, triggerBasis, beExecutionMode, beEntryVariantKey, beResultsMap, beTradesByModeMap, viewLabel]);
 
     // Fast check only — no candle walking, safe to run synchronously.
     const availability = React.useMemo(
@@ -352,19 +403,19 @@ export function BreakevenTab({
             if (cancelled) return;
             const baseline = computeBaseline(trades);
             const result = ARM_LEVELS.map((arm) => {
-                // Prefer backend EXACT for this arm + trigger — but ONLY on the
-                // baseline result view (backend BE is baseline-only). On a variant
-                // view, skip the resolver entirely and use REPLAY on its trades.
-                const resolved = exactAllowed
-                    ? resolveBeScenarioSource({
-                        armLevelR: arm,
-                        triggerBasis,
-                        executionMode: beExecutionMode,
-                        beResults: beResultsMap,
-                        beTradesByMode: beTradesByModeMap,
-                        baseline,
-                    })
-                    : { source: "REPLAY" };
+                // Prefer backend EXACT for this arm + trigger, matched to the
+                // CURRENT result view's entry variant. The resolver never
+                // substitutes baseline BE for a variant view; it returns REPLAY
+                // when the current view has no matching exact scenario.
+                const resolved = resolveBeScenarioSource({
+                    armLevelR: arm,
+                    triggerBasis,
+                    executionMode: beExecutionMode,
+                    entryVariantKey: beEntryVariantKey,
+                    beResults: beResultsMap,
+                    beTradesByMode: beTradesByModeMap,
+                    baseline,
+                });
                 if (resolved.source === "EXACT") {
                     return { armLevelR: arm, summary: resolved.summary, source: "EXACT", scenarioKey: resolved.scenarioKey };
                 }
@@ -391,13 +442,53 @@ export function BreakevenTab({
             if (typeof cancelIdleCallback !== "undefined") cancelIdleCallback(handle);
             else clearTimeout(handle);
         };
-    }, [trades, candles, triggerBasis, hasExact, exactAllowed, beResultsMap, beTradesByModeMap, beExecutionMode]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [trades, candles, triggerBasis, hasExact, beEntryVariantKey, beResultsMap, beTradesByModeMap, beExecutionMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Must be before any early return (hooks rule).
     const tableColumns = React.useMemo(
         () => buildTableColumns(armLevelR, setArmLevelR),
         [armLevelR],
     );
+
+    // ── Affected-trade list (Protection Lab → Break-even) ─────────────────
+    // EXACT-only for V1. Resolves the SELECTED arm + trigger for the current
+    // result view's entry variant, then lists trades the BE stop actually fired
+    // on (loss saved / winner cut / neutral BE exit when unpaired).
+    const navigate = useNavigate();
+    const [affFilter, setAffFilter] = React.useState("all"); // all | loss_saved | winner_cut
+    const selectedBeScenario = React.useMemo(() => {
+        if (!hasExact) return null;
+        return resolveBeScenarioSource({
+            armLevelR, triggerBasis, executionMode: beExecutionMode, entryVariantKey: beEntryVariantKey,
+            beResults: beResultsMap, beTradesByMode: beTradesByModeMap,
+        });
+    }, [hasExact, armLevelR, triggerBasis, beExecutionMode, beEntryVariantKey, beResultsMap, beTradesByModeMap]);
+    const affectedRows = React.useMemo(() => {
+        if (selectedBeScenario?.source !== "EXACT" || !Array.isArray(selectedBeScenario.trades)) return [];
+        return buildBeAffectedTrades({
+            beTrades: selectedBeScenario.trades,
+            baselineTrades: trades,
+            scenario: { armLevelR, triggerBasis, beScenarioKey: selectedBeScenario.scenarioKey, stopBufferR: 0, delayCandles: 0 },
+        });
+    }, [selectedBeScenario, trades, armLevelR, triggerBasis]);
+    const affectedCounts = React.useMemo(() => ({
+        all: affectedRows.length,
+        loss_saved: affectedRows.filter((r) => r.classification === "loss_saved").length,
+        winner_cut: affectedRows.filter((r) => r.classification === "winner_cut").length,
+    }), [affectedRows]);
+    const affectedFiltered = React.useMemo(() => (
+        affFilter === "all" ? affectedRows : affectedRows.filter((r) => r.classification === affFilter)
+    ), [affectedRows, affFilter]);
+    const onViewBeTradeOnMap = React.useCallback((row) => {
+        setFocusedBeTrade({
+            runId: activeRunId,
+            tradeId: row.baseTradeId || row.id,
+            beArmLevel: armLevelR,
+            beTriggerBasis: triggerBasis,
+        });
+        navigate("/strategy-map");
+    }, [activeRunId, armLevelR, triggerBasis, navigate]);
+    const affectedColumns = React.useMemo(() => buildAffectedColumns(onViewBeTradeOnMap), [onViewBeTradeOnMap]);
 
     // ── Gate: three-state candle resolution ──────────────────────────────
     //
@@ -536,6 +627,11 @@ export function BreakevenTab({
             )}>
                 <div className="flex items-center gap-2 mb-2 flex-wrap">
                     <Pill tone={isExact ? "success" : "secondary"}>{isExact ? "EXACT TIER" : "REPLAY TIER"}</Pill>
+                    {/* Which result view the BE data belongs to — never implies a
+                        variant has exact data when it does not. */}
+                    <Pill tone={isExact ? "success" : "muted"}>
+                        {isExact ? `BE data: ${viewLabel}` : `BE data: REPLAY fallback · ${viewLabel}`}
+                    </Pill>
                     <span className="text-[12px] font-ui font-semibold text-[hsl(var(--text-1))]">
                         {isExact
                             ? "backend exact replay · 1-minute execution · spread / news / conflict handled"
@@ -559,19 +655,14 @@ export function BreakevenTab({
                     </div>
                 ) : (
                 <div className="flex flex-col gap-1.5">
-                    {!hasExact && beDataPresent && !exactAllowed && (
+                    {!hasExact && (
                         <p className="text-[11px] font-ui text-[hsl(var(--text-1))] leading-relaxed">
-                            <span className="font-semibold">Backend EXACT Break-even covers the baseline entry model.</span>{" "}
-                            You&apos;re viewing {resultViewLabel ? `“${resultViewLabel}”` : "a non-baseline result view"},
-                            so this tab shows REPLAY computed on that variant&apos;s trades. Switch to the Baseline result
-                            view for EXACT, or see the roadmap — variant-aware exact BE is planned.
-                        </p>
-                    )}
-                    {!hasExact && !beDataPresent && (
-                        <p className="text-[11px] font-ui text-[hsl(var(--text-1))] leading-relaxed">
-                            <span className="font-semibold">Backend EXACT results not generated for this run.</span>{" "}
-                            Enable BE scenarios in Strategy Builder to generate exact results. Showing frontend
-                            REPLAY fallback in the meantime.
+                            <span className="font-semibold">Backend EXACT results were not generated for this result view.</span>{" "}
+                            Showing frontend REPLAY fallback for {viewLabel ? `“${viewLabel}”` : "this view"}, computed on its
+                            own trades.{" "}
+                            {beDataPresentAnywhere
+                                ? "Other result views in this run do have exact BE — switch view, or re-run with “All entry variants” to cover this one."
+                                : "Enable BE scenarios in Strategy Builder to generate exact results."}
                         </p>
                     )}
                     <p className="text-[11px] font-ui text-[hsl(var(--text-2))] leading-relaxed">
@@ -790,6 +881,56 @@ export function BreakevenTab({
                         Missing-path trades use the original realized R. Zero-length windows
                         (fill and exit in same 15-min bar) cannot be walked.
                     </Note>
+                </NeonPanel>
+            )}
+
+            {/* ── 6b. Trades affected by BE (EXACT only) ──────────────────── */}
+            {isExact && (
+                <NeonPanel
+                    title="Trades affected by BE"
+                    action={<Pill tone="success">EXACT · {armLevelR}R {triggerBasis === "wick" ? "Wick" : "Close"}</Pill>}
+                >
+                    <div className="flex flex-col gap-3">
+                        <div className="flex items-center gap-2 flex-wrap">
+                            {[
+                                { key: "all", label: `All affected (${affectedCounts.all})` },
+                                { key: "loss_saved", label: `Loss Saved (${affectedCounts.loss_saved})` },
+                                { key: "winner_cut", label: `Winner Cut (${affectedCounts.winner_cut})` },
+                            ].map((t) => (
+                                <button
+                                    key={t.key}
+                                    type="button"
+                                    onClick={() => setAffFilter(t.key)}
+                                    className={cn(
+                                        "px-3 py-1.5 rounded-[4px] border text-[11px] font-ui font-semibold transition-colors",
+                                        affFilter === t.key
+                                            ? "bg-[hsl(var(--accent-primary)/0.16)] border-[hsl(var(--accent-primary)/0.5)] text-[hsl(var(--accent-primary))]"
+                                            : "bg-[hsl(var(--panel-2)/0.4)] border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))] hover:text-[hsl(var(--text))]",
+                                    )}
+                                >
+                                    {t.label}
+                                </button>
+                            ))}
+                        </div>
+                        {affectedFiltered.length ? (
+                            <DataTable
+                                columns={affectedColumns}
+                                rows={affectedFiltered}
+                                rowKey="id"
+                                onRowClick={(row) => onViewBeTradeOnMap(row)}
+                                defaultSortKey={null}
+                            />
+                        ) : (
+                            <div className="py-3 text-[11.5px] font-ui text-[hsl(var(--text-2))]">
+                                No {affFilter === "all" ? "BE-affected" : affFilter === "loss_saved" ? "loss-saved" : "winner-cut"} trades at {armLevelR}R {triggerBasis}.
+                            </div>
+                        )}
+                        <Note>
+                            Trades where the BE stop fired. Loss Saved / Winner Cut are vs this view&apos;s no-BE
+                            baseline; unpaired rows show neutral BE Exit. Click a row or “View on Map” to inspect it
+                            on the Strategy Map with the BE overlay. Sorted by largest |Δ R| first.
+                        </Note>
+                    </div>
                 </NeonPanel>
             )}
 

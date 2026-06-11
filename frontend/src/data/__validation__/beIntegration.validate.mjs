@@ -1,25 +1,27 @@
-// beIntegration.validate.mjs — validation suite for BE-FRONTEND-INTEGRATION.
+// beIntegration.validate.mjs — BE import + variant-aware resolution (P2).
 //
-// Covers the EXACT-import + resolution wiring:
-//   1. BE file detection runs BEFORE the protection catch-all.
-//   2. BE files parse into executionMode / scenarioKey / trigger / arm.
-//   3. beResolve key formatting + tolerant matching (0.5 ⇄ 0p50, 1 ⇄ 1p00).
-//   4. resolveBeScenarioSource → EXACT when a scenario matches, REPLAY otherwise.
-//   5. buildExactBeSummary shape (matches buildBeScenarioSummary consumers).
-//   6. Central BE_EXIT classification (WIN/LOSS/BREAKEVEN by be_exit_r).
-//   7. Existing WIN / LOSS / BREAKEVEN / PROTECTION_EXIT / NEWS_FLATTEN unchanged.
-//   8. Old bundles (no BE data) resolve to REPLAY and never crash.
+// Storage is nested: beResults / beTradesByMode [mode][entryVariantKey][beKey].
+// Old flat bundles ([mode][beKey]) normalise to entryVariantKey "baseline".
 //
-// Run from frontend/ (Node ≥ 22 ESM):
-//   node src/data/__validation__/beIntegration.validate.mjs
+// Covers:
+//   §1  BE file detection precedes the protection catch-all (baseline + variant).
+//   §2  beTradeFileInfo parses executionMode / entryVariantKey / beKey / arm / trigger.
+//   §3  beResolve key helpers + decimal tolerance.
+//   §4  normalizeBeResults: flat→baseline, nested as-is, mixed.
+//   §5  Resolve baseline EXACT (nested).
+//   §6  Resolve variant EXACT (nested) for the matching result view.
+//   §7  INTEGRITY: variant requested but only baseline exists → REPLAY / no_matching_variant.
+//   §8  buildExactBeSummary shape.
+//   §9  Central BE_EXIT classification + regression.
+//   §10 Old flat bundle end-to-end (normalize → resolve baseline EXACT).
+//   §11 describeBeAvailability variant fields.
+//   §12 Old bundles / empty maps safe.
 //
-// Exits non-zero if any assertion fails. All fixtures hand-built.
+// Run from frontend/:  node src/data/__validation__/beIntegration.validate.mjs
 
 import babel from "@babel/core";
 import fs    from "fs";
 
-// Load an ESM source file as CommonJS. Nested relative imports resolve to {} —
-// fine here because the functions under test have no cross-module dependency.
 function loadCjs(absPath) {
     const src = fs.readFileSync(absPath, "utf8");
     const { code } = babel.transformSync(src, {
@@ -28,17 +30,16 @@ function loadCjs(absPath) {
         babelrc: false, configFile: false,
     });
     const mod = { exports: {} };
-    // eslint-disable-next-line no-new-func
     new Function("require", "module", "exports", code)(() => ({}), mod, mod.exports);
     return mod.exports;
 }
 
-const { detectFileKind, beTradeFileInfo } = loadCjs("src/data/importer.js");
+const { detectFileKind, beTradeFileInfo, normalizeBeResults } = loadCjs("src/data/importer.js");
 const { classifyTrade } = loadCjs("src/data/tradeClassification.js");
 const {
     formatArmToken, beScenarioKey, parseBeScenarioKey,
-    findBeScenario, buildExactBeSummary, resolveBeScenarioSource, hasAnyExactBe,
-    describeBeAvailability,
+    findBeScenario, buildExactBeSummary, resolveBeScenarioSource,
+    hasAnyExactBe, entryVariantHasExact, describeBeAvailability,
 } = loadCjs("src/data/beResolve.js");
 
 let failures = 0;
@@ -47,218 +48,135 @@ const ok = (cond, msg) => {
     else { failures++; console.error(`  ✗ FAIL: ${msg}`); }
 };
 const approx = (a, b, eps = 0.02) => Math.abs(Number(a) - Number(b)) <= eps;
+const VKEY = "entry_triggered_edge_25p0_d2";
 
 // ─────────────────────────────────────────────────────────────────────────────
 console.log("\n§1  BE file detection precedes protection catch-all");
-// ─────────────────────────────────────────────────────────────────────────────
-ok(detectFileKind("trades_single_position__be_wick_0p50R.csv") === "trades_be",
-    "wick BE file → trades_be");
-ok(detectFileKind("trades_allow_multi_position__be_close_1p00R.csv") === "trades_be",
-    "close BE file → trades_be");
-ok(detectFileKind("trades_one_per_direction__be_wick_0p75R.csv") === "trades_be",
-    "one_per_direction BE file → trades_be");
-ok(detectFileKind("trades_single_position__penetration_50.csv") === "trades_protected",
-    "protection file still → trades_protected (unchanged)");
-ok(detectFileKind("trades_single_position__entry_triggered_edge_25p0.csv") === "trades_entry",
-    "entry file still → trades_entry (unchanged)");
-ok(detectFileKind("trades_single_position.csv") === "trades_single_position",
-    "plain variant file still → trades_single_position (unchanged)");
+ok(detectFileKind("trades_single_position__be_wick_0p50R.csv") === "trades_be", "baseline wick BE → trades_be");
+ok(detectFileKind(`trades_single_position__${VKEY}__be_wick_0p50R.csv`) === "trades_be", "variant BE → trades_be");
+ok(detectFileKind("trades_single_position__penetration_50.csv") === "trades_protected", "protection unchanged");
+ok(detectFileKind("trades_single_position__entry_triggered_edge_25p0.csv") === "trades_entry", "entry unchanged");
 
 // ─────────────────────────────────────────────────────────────────────────────
-console.log("\n§2  beTradeFileInfo parsing");
-// ─────────────────────────────────────────────────────────────────────────────
-const info = beTradeFileInfo("trades_single_position__be_wick_0p50R.csv");
-ok(info && info.executionMode === "single_position", "executionMode parsed");
-ok(info && info.scenarioKey === "be_wick_0p50R", "scenarioKey preserved verbatim");
-ok(info && info.triggerBasis === "wick", "triggerBasis parsed");
-ok(info && approx(info.armLevelR, 0.5), "armLevelR parsed = 0.5");
-const info2 = beTradeFileInfo("trades_allow_multi_position__be_close_1p00R.csv");
-ok(info2 && approx(info2.armLevelR, 1.0) && info2.triggerBasis === "close", "1p00R close parsed = 1.0");
-ok(beTradeFileInfo("trades_single_position__penetration_50.csv") === null,
-    "protection file does NOT match beTradeFileInfo");
+console.log("\n§2  beTradeFileInfo parsing (baseline + variant)");
+const b = beTradeFileInfo("trades_single_position__be_wick_0p50R.csv");
+ok(b && b.executionMode === "single_position", "baseline executionMode");
+ok(b && b.entryVariantKey === "baseline", "baseline entryVariantKey = baseline");
+ok(b && b.scenarioKey === "be_wick_0p50R" && approx(b.armLevelR, 0.5), "baseline scenarioKey + arm");
+const v = beTradeFileInfo(`trades_single_position__${VKEY}__be_close_1p00R.csv`);
+ok(v && v.entryVariantKey === VKEY, "variant entryVariantKey parsed");
+ok(v && v.scenarioKey === "be_close_1p00R" && v.triggerBasis === "close" && approx(v.armLevelR, 1.0), "variant scenarioKey + trigger + arm");
+ok(beTradeFileInfo("trades_single_position__penetration_50.csv") === null, "protection file → null");
 
 // ─────────────────────────────────────────────────────────────────────────────
 console.log("\n§3  beResolve key helpers");
-// ─────────────────────────────────────────────────────────────────────────────
-ok(formatArmToken(0.5) === "0p50", "formatArmToken 0.5 → 0p50");
-ok(formatArmToken(1) === "1p00", "formatArmToken 1 → 1p00");
-ok(formatArmToken(0.75) === "0p75", "formatArmToken 0.75 → 0p75");
-ok(formatArmToken(2) === "2p00", "formatArmToken 2 → 2p00");
-ok(beScenarioKey("wick", 0.5) === "be_wick_0p50R", "beScenarioKey wick/0.5");
-ok(beScenarioKey("close", 1) === "be_close_1p00R", "beScenarioKey close/1");
-const pk = parseBeScenarioKey("be_close_1p00R");
-ok(pk && pk.triggerBasis === "close" && approx(pk.armLevelR, 1.0), "parseBeScenarioKey round-trip");
-const pk2 = parseBeScenarioKey("be_wick_0p50r"); // lowercase r tolerated
-ok(pk2 && pk2.triggerBasis === "wick" && approx(pk2.armLevelR, 0.5), "parseBeScenarioKey lowercase r");
+ok(formatArmToken(0.5) === "0p50" && formatArmToken(1) === "1p00", "formatArmToken");
+ok(beScenarioKey("wick", 0.5) === "be_wick_0p50R", "beScenarioKey");
+ok(parseBeScenarioKey("be_wick_0p5R")?.armLevelR === 0.5, "parse single-decimal 0p5 → 0.5");
 
 // ─────────────────────────────────────────────────────────────────────────────
-console.log("\n§4  findBeScenario + resolveBeScenarioSource");
-// ─────────────────────────────────────────────────────────────────────────────
-const beTrades = [
+console.log("\n§4  normalizeBeResults (dual-shape)");
+const flatRaw = { single_position: { be_wick_0p50R: { net_r: 0 }, be_close_0p50R: { net_r: 1 } } };
+const flatNorm = normalizeBeResults(flatRaw);
+ok(!!flatNorm.single_position.baseline, "flat → nested under baseline");
+ok("be_wick_0p50R" in flatNorm.single_position.baseline, "flat be keys preserved under baseline");
+ok(!("be_wick_0p50R" in flatNorm.single_position), "flat be keys not left at entry level");
+const nestedRaw = { single_position: { baseline: { be_wick_0p50R: {} }, [VKEY]: { be_wick_0p50R: {} } } };
+const nestedNorm = normalizeBeResults(nestedRaw);
+ok("baseline" in nestedNorm.single_position && VKEY in nestedNorm.single_position, "nested kept as-is");
+ok(normalizeBeResults(undefined) && Object.keys(normalizeBeResults(undefined)).length === 0, "undefined → {}");
+
+// ── Shared nested fixtures ──────────────────────────────────────────────────
+const beTradesBaseline = [
     { id: "t1", net_r: 1.0, outcome: "WIN" },
-    { id: "t2", net_r: 0.0, outcome: "BE_EXIT", be_exit_r: 0, be_exit_reason: "be_stop", be_triggered: true },
-    { id: "t3", net_r: -1.0, outcome: "LOSS", be_exit_reason: "never_armed" },
-    { id: "t4", net_r: 0.0, outcome: "BE_EXIT", be_exit_r: 0, be_exit_reason: "be_stop", be_triggered: true },
+    { id: "t2", net_r: 0.0, outcome: "BE_EXIT", be_exit_r: 0, be_triggered: true },
+    { id: "t3", net_r: -1.0, outcome: "LOSS" },
 ];
-const beResults = {
-    single_position: {
-        be_wick_0p50R: {
-            be_scenario_key: "be_wick_0p50R", be_arm_level_r: 0.5, be_trigger_basis: "wick",
-            be_exit_count: 2, losses_saved: 1, winners_cut: 0,
-            loser_r_saved: 1.0, winner_r_cost: 0.0, efficiency_ratio: null,
-            delta_net_r: 1.0, filled_trades: 4, net_r: 0.0,
-        },
-    },
-};
-const beTradesByMode = { single_position: { be_wick_0p50R: beTrades } };
-
-const found = findBeScenario(beResults, beTradesByMode, { executionMode: "single_position", triggerBasis: "wick", armLevelR: 0.5 });
-ok(found && found.scenarioKey === "be_wick_0p50R", "findBeScenario matches exact key");
-ok(found && Array.isArray(found.trades) && found.trades.length === 4, "findBeScenario returns trades");
-
-// Tolerant match: number 0.5 against stored token form.
-const foundTol = findBeScenario(beResults, beTradesByMode, { executionMode: "single_position", triggerBasis: "wick", armLevelR: 0.50 });
-ok(!!foundTol, "tolerant arm match 0.50 ⇄ 0p50");
-
-// Execution mode auto-resolution when not provided (single mode present).
-const foundAuto = findBeScenario(beResults, beTradesByMode, { triggerBasis: "wick", armLevelR: 0.5 });
-ok(!!foundAuto && foundAuto.executionMode === "single_position", "executionMode auto-resolved");
-
-const resExact = resolveBeScenarioSource({
-    armLevelR: 0.5, triggerBasis: "wick", executionMode: "single_position",
-    beResults, beTradesByMode, baseline: { netR: -1.0, maxDrawdown: -1.0, profitFactor: 1.0, worstLossStreak: 1 },
-});
-ok(resExact.source === "EXACT", "resolve → EXACT when scenario present");
-ok(resExact.scenarioKey === "be_wick_0p50R", "EXACT carries scenarioKey");
-
-const resReplay = resolveBeScenarioSource({
-    armLevelR: 2.0, triggerBasis: "wick", executionMode: "single_position",
-    beResults, beTradesByMode,
-});
-ok(resReplay.source === "REPLAY", "resolve → REPLAY for an un-exported arm");
-ok(resReplay.summary === null && resReplay.trades === null, "REPLAY carries no EXACT summary/trades");
-
-// Different trigger with no matching scenario → REPLAY.
-const resTrig = resolveBeScenarioSource({
-    armLevelR: 0.5, triggerBasis: "close", executionMode: "single_position",
-    beResults, beTradesByMode,
-});
-ok(resTrig.source === "REPLAY", "trigger mismatch → REPLAY");
+const beTradesVariant = [
+    { id: "x1", net_r: 0.0, outcome: "BE_EXIT", be_exit_r: 0, be_triggered: true },
+    { id: "x2", net_r: 2.0, outcome: "WIN" },
+];
+const beResults = { single_position: {
+    baseline: { be_wick_0p50R: { be_exit_count: 1, losses_saved: 1, loser_r_saved: 1.0, delta_net_r: 1.0, filled_trades: 3, net_r: 0.0 } },
+    [VKEY]:   { be_wick_0p50R: { be_exit_count: 1, losses_saved: 0, winners_cut: 0, delta_net_r: 0.5, filled_trades: 2, net_r: 2.0 } },
+} };
+const beTradesByMode = { single_position: {
+    baseline: { be_wick_0p50R: beTradesBaseline },
+    [VKEY]:   { be_wick_0p50R: beTradesVariant },
+} };
 
 // ─────────────────────────────────────────────────────────────────────────────
-console.log("\n§5  buildExactBeSummary shape");
-// ─────────────────────────────────────────────────────────────────────────────
-const exSum = resExact.summary;
-ok(approx(exSum.netR, 0.0), "EXACT netR computed from trades (1+0-1+0=0)");
-ok(exSum.coveragePct === 100, "EXACT coveragePct = 100");
-ok(exSum.sameCandleAmbiguousCount === 0, "EXACT sameCandleAmbiguousCount = 0");
-ok(exSum.missingPathCount === 0, "EXACT missingPathCount = 0");
-ok(exSum.beExitCount === 2, "EXACT beExitCount from summary");
-ok(exSum.lossesSaved === 1, "EXACT lossesSaved from summary");
-ok(approx(exSum.loserRSaved, 1.0), "EXACT loserRSaved from summary");
-ok(approx(exSum.deltaNetR, 1.0), "EXACT deltaNetR from summary");
-ok(exSum.replayedCount === 4, "EXACT replayedCount = filled_trades");
-ok(typeof exSum.winnerRCost === "number", "EXACT winnerRCost defaulted to number (no NaN)");
-
-// Summary recomputes from trades when backend summary absent.
-const exSumNoRaw = buildExactBeSummary(beTrades, null, { netR: -1.0 });
-ok(approx(exSumNoRaw.netR, 0.0), "buildExactBeSummary works with null backend summary");
-ok(exSumNoRaw.beExitCount === 2, "beExitCount falls back to computed (be_triggered)");
-ok(approx(exSumNoRaw.deltaNetR, 1.0), "deltaNetR falls back to netR - baseline");
+console.log("\n§5  Resolve baseline EXACT (nested)");
+const rBase = resolveBeScenarioSource({ armLevelR: 0.5, triggerBasis: "wick", executionMode: "single_position", entryVariantKey: "baseline", beResults, beTradesByMode });
+ok(rBase.source === "EXACT", "baseline view → EXACT");
+ok(rBase.entryVariantKey === "baseline", "EXACT carries entryVariantKey baseline");
+ok(approx(rBase.summary.netR, 0.0), "baseline netR from its trades (1+0-1)");
+// Null entry key defaults to baseline.
+ok(resolveBeScenarioSource({ armLevelR: 0.5, triggerBasis: "wick", executionMode: "single_position", beResults, beTradesByMode }).source === "EXACT",
+    "null entryVariantKey defaults to baseline EXACT");
 
 // ─────────────────────────────────────────────────────────────────────────────
-console.log("\n§6  Central BE_EXIT classification");
-// ─────────────────────────────────────────────────────────────────────────────
-ok(classifyTrade({ outcome: "BE_EXIT", be_exit_r: 0, entry: "2025-01-01T00:00:00Z" }) === "BREAKEVEN",
-    "BE_EXIT @ be_exit_r 0 → BREAKEVEN");
-ok(classifyTrade({ outcome: "BE_EXIT", be_exit_r: 1.2, entry: "x" }) === "WIN",
-    "BE_EXIT @ be_exit_r +1.2 → WIN");
-ok(classifyTrade({ outcome: "BE_EXIT", be_exit_r: -0.8, entry: "x" }) === "LOSS",
-    "BE_EXIT @ be_exit_r -0.8 → LOSS");
-// Mangled importer label "Be_exit" must still classify correctly via normalize.
-ok(classifyTrade({ outcome: "Be_exit", be_exit_r: 0, entry: "x" }) === "BREAKEVEN",
-    "legacy mangled 'Be_exit' still → BREAKEVEN");
-// be_exit_r absent → falls back to row R.
-ok(classifyTrade({ outcome: "BE_EXIT", net_r: -0.5, entry: "x" }) === "LOSS",
-    "BE_EXIT with no be_exit_r falls back to net_r");
+console.log("\n§6  Resolve variant EXACT (nested)");
+const rVar = resolveBeScenarioSource({ armLevelR: 0.5, triggerBasis: "wick", executionMode: "single_position", entryVariantKey: VKEY, beResults, beTradesByMode });
+ok(rVar.source === "EXACT", "variant view → EXACT");
+ok(rVar.entryVariantKey === VKEY, "EXACT carries variant key");
+ok(approx(rVar.summary.netR, 2.0), "variant netR from VARIANT trades (0+2), NOT baseline");
+ok(rVar.summary.netR !== rBase.summary.netR, "variant summary differs from baseline summary");
 
 // ─────────────────────────────────────────────────────────────────────────────
-console.log("\n§7  Existing classification unchanged (regression)");
+console.log("\n§7  INTEGRITY: baseline BE never substituted for a variant");
+const onlyBaseline = { single_position: { baseline: { be_wick_0p50R: { net_r: 0 } } } };
+const onlyBaselineTrades = { single_position: { baseline: { be_wick_0p50R: beTradesBaseline } } };
+const rMissing = resolveBeScenarioSource({ armLevelR: 0.5, triggerBasis: "wick", executionMode: "single_position", entryVariantKey: VKEY, beResults: onlyBaseline, beTradesByMode: onlyBaselineTrades });
+ok(rMissing.source === "REPLAY", "variant requested + only baseline exists → REPLAY (not EXACT)");
+ok(rMissing.reason === "no_matching_variant", "reason = no_matching_variant");
+ok(rMissing.summary === null && rMissing.trades === null, "no baseline data leaked into variant result");
+// But the baseline view of that same run still resolves EXACT.
+ok(resolveBeScenarioSource({ armLevelR: 0.5, triggerBasis: "wick", executionMode: "single_position", entryVariantKey: "baseline", beResults: onlyBaseline, beTradesByMode: onlyBaselineTrades }).source === "EXACT",
+    "baseline view of same run still EXACT");
+// Arm not exported for an existing variant → no_matching_scenario (not no_matching_variant).
+ok(resolveBeScenarioSource({ armLevelR: 2.0, triggerBasis: "wick", executionMode: "single_position", entryVariantKey: VKEY, beResults, beTradesByMode }).reason === "no_matching_scenario",
+    "variant present, arm absent → no_matching_scenario");
+
 // ─────────────────────────────────────────────────────────────────────────────
+console.log("\n§8  buildExactBeSummary shape");
+ok(rBase.summary.coveragePct === 100 && rBase.summary.sameCandleAmbiguousCount === 0, "EXACT coverage 100, ambig 0");
+ok(rBase.summary.lossesSaved === 1 && approx(rBase.summary.loserRSaved, 1.0), "EXACT reads losses_saved/loser_r_saved from summary");
+ok(typeof rBase.summary.winnerRCost === "number", "winnerRCost numeric (no NaN)");
+
+// ─────────────────────────────────────────────────────────────────────────────
+console.log("\n§9  Central BE_EXIT classification + regression");
+ok(classifyTrade({ outcome: "BE_EXIT", be_exit_r: 0, entry: "x" }) === "BREAKEVEN", "BE_EXIT 0 → BREAKEVEN");
+ok(classifyTrade({ outcome: "BE_EXIT", be_exit_r: 1.2, entry: "x" }) === "WIN", "BE_EXIT +R → WIN");
+ok(classifyTrade({ outcome: "BE_EXIT", be_exit_r: -0.8, entry: "x" }) === "LOSS", "BE_EXIT -R → LOSS");
 ok(classifyTrade({ outcome: "WIN", r: 2, entry: "x" }) === "WIN", "WIN unchanged");
-ok(classifyTrade({ outcome: "LOSS", r: -1, entry: "x" }) === "LOSS", "LOSS unchanged");
-ok(classifyTrade({ outcome: "", r: 0, entry: "x" }) === "BREAKEVEN", "flat r → BREAKEVEN unchanged");
-ok(classifyTrade({ outcome: "PROTECTION_EXIT", r: 0.4, entry: "x" }) === "WIN", "PROTECTION_EXIT +R → WIN unchanged");
-ok(classifyTrade({ outcome: "NEWS_FLATTEN", r: 0.3, entry: "x" }) === "NEWS_FLATTEN_WIN", "NEWS_FLATTEN +R unchanged");
-ok(classifyTrade({ outcome: "UNFILLED" }) === "UNFILLED", "UNFILLED unchanged");
+ok(classifyTrade({ outcome: "PROTECTION_EXIT", r: 0.4, entry: "x" }) === "WIN", "PROTECTION_EXIT unchanged");
 
 // ─────────────────────────────────────────────────────────────────────────────
-console.log("\n§8  Old bundles (no BE data) safe");
-// ─────────────────────────────────────────────────────────────────────────────
-ok(hasAnyExactBe({}, {}) === false, "hasAnyExactBe empty → false");
-ok(hasAnyExactBe(undefined, undefined) === false, "hasAnyExactBe undefined → false");
-const resOld = resolveBeScenarioSource({ armLevelR: 0.5, triggerBasis: "wick", beResults: {}, beTradesByMode: {} });
-ok(resOld.source === "REPLAY", "empty maps → REPLAY (no crash)");
-ok(hasAnyExactBe(beResults, beTradesByMode) === true, "hasAnyExactBe true when scenarios present");
+console.log("\n§10  Old flat bundle end-to-end");
+// An old bundle: flat be_results + flat-keyed trades (importer would route a
+// no-token file under "baseline", and normalizeBeResults nests the summary).
+const oldResults = normalizeBeResults({ single_position: { be_wick_0p50R: { net_r: 0, losses_saved: 1, loser_r_saved: 1.0 } } });
+const oldTrades = { single_position: { baseline: { be_wick_0p50R: beTradesBaseline } } };
+const rOld = resolveBeScenarioSource({ armLevelR: 0.5, triggerBasis: "wick", executionMode: "single_position", entryVariantKey: "baseline", beResults: oldResults, beTradesByMode: oldTrades });
+ok(rOld.source === "EXACT", "old flat bundle → baseline EXACT after normalize");
+ok(rOld.summary.lossesSaved === 1, "old flat summary fields preserved through normalize");
 
 // ─────────────────────────────────────────────────────────────────────────────
-console.log("\n§9  Decimal-form tolerance (DIAGNOSTIC: 0p5 ⇄ 0p50, 1p0 ⇄ 1p00)");
-// ─────────────────────────────────────────────────────────────────────────────
-const sd1 = parseBeScenarioKey("be_wick_0p5R");
-ok(sd1 && approx(sd1.armLevelR, 0.5), "parse single-decimal be_wick_0p5R → 0.5");
-const sd2 = parseBeScenarioKey("be_wick_1p0R");
-ok(sd2 && approx(sd2.armLevelR, 1.0), "parse single-decimal be_wick_1p0R → 1.0");
-
-// Backend exported with SINGLE-decimal keys; UI requests 0.5 / 1.
-const beResultsSD = {
-    single_position: {
-        be_wick_0p5R: { be_exit_count: 1, losses_saved: 1, net_r: 0.0, delta_net_r: 0.5 },
-        be_close_1p0R: { be_exit_count: 0, net_r: 0.0 },
-    },
-};
-const beTradesSD = {
-    single_position: {
-        be_wick_0p5R: [{ id: "a", net_r: 0.0, outcome: "BE_EXIT", be_exit_r: 0, be_triggered: true }],
-        be_close_1p0R: [{ id: "b", net_r: 1.0, outcome: "WIN" }],
-    },
-};
-const rSD = resolveBeScenarioSource({ armLevelR: 0.5, triggerBasis: "wick", executionMode: "single_position", beResults: beResultsSD, beTradesByMode: beTradesSD });
-ok(rSD.source === "EXACT", "UI 0.5 matches backend single-decimal be_wick_0p5R");
-const rSD2 = resolveBeScenarioSource({ armLevelR: 1, triggerBasis: "close", executionMode: "single_position", beResults: beResultsSD, beTradesByMode: beTradesSD });
-ok(rSD2.source === "EXACT", "UI 1 matches backend single-decimal be_close_1p0R");
+console.log("\n§11  describeBeAvailability variant fields");
+const dVar = describeBeAvailability(beResults, beTradesByMode, { executionMode: "single_position", entryVariantKey: VKEY, triggerBasis: "wick", armLevelR: 0.5 });
+ok(dVar.entryHasExact === true, "describe: variant has exact");
+ok(dVar.availableEntryVariantKeys.includes("baseline") && dVar.availableEntryVariantKeys.includes(VKEY), "describe lists available entry variant keys");
+ok(dVar.requestedKey === "be_wick_0p50R", "describe requested key");
+const dMissing = describeBeAvailability(onlyBaseline, onlyBaselineTrades, { executionMode: "single_position", entryVariantKey: VKEY });
+ok(dMissing.entryHasExact === false, "describe: missing variant → entryHasExact false");
+ok(entryVariantHasExact(beResults, beTradesByMode, { executionMode: "single_position", entryVariantKey: "baseline" }) === true, "entryVariantHasExact baseline true");
 
 // ─────────────────────────────────────────────────────────────────────────────
-console.log("\n§10  Cross-form lookup (summary key form ≠ trades key form)");
-// ─────────────────────────────────────────────────────────────────────────────
-// Summary stored under "be_wick_0p5R", trades under "be_wick_0p50R". The fix
-// must resolve each map independently so trades are NOT dropped.
-const beResultsX = { single_position: { be_wick_0p5R: { be_exit_count: 2, losses_saved: 1, net_r: -0.3, delta_net_r: 0.7 } } };
-const beTradesX = { single_position: { be_wick_0p50R: [
-    { id: "x1", net_r: -1.0, outcome: "LOSS" },
-    { id: "x2", net_r: 0.0, outcome: "BE_EXIT", be_exit_r: 0, be_triggered: true },
-    { id: "x3", net_r: 0.7, outcome: "WIN" },
-] } };
-const rX = resolveBeScenarioSource({ armLevelR: 0.5, triggerBasis: "wick", executionMode: "single_position", beResults: beResultsX, beTradesByMode: beTradesX });
-ok(rX.source === "EXACT", "cross-form → EXACT");
-ok(Array.isArray(rX.trades) && rX.trades.length === 3, "cross-form keeps trades (bug fix)");
-ok(approx(rX.summary.netR, -0.3), "cross-form netR computed from trades (-1+0+0.7)");
-ok(rX.summary.lossesSaved === 1, "cross-form reads lossesSaved from summary");
+console.log("\n§12  Old bundles / empty maps safe");
+ok(hasAnyExactBe({}, {}) === false, "empty → false");
+ok(hasAnyExactBe(beResults, beTradesByMode) === true, "nested present → true");
+ok(resolveBeScenarioSource({ armLevelR: 0.5, triggerBasis: "wick", beResults: {}, beTradesByMode: {} }).reason === "no_be_data", "empty → no_be_data");
 
-// ─────────────────────────────────────────────────────────────────────────────
-console.log("\n§11  Resolver reason codes (diagnostic surface)");
-// ─────────────────────────────────────────────────────────────────────────────
-ok(resolveBeScenarioSource({ armLevelR: 0.5, triggerBasis: "wick", beResults: {}, beTradesByMode: {} }).reason === "no_be_data",
-    "empty run → reason no_be_data");
-ok(resolveBeScenarioSource({ armLevelR: 2.0, triggerBasis: "wick", executionMode: "single_position", beResults, beTradesByMode }).reason === "no_matching_scenario",
-    "data present, arm absent → reason no_matching_scenario");
-ok(resolveBeScenarioSource({ armLevelR: 0.5, triggerBasis: "wick", executionMode: "single_position", beResults, beTradesByMode }).reason === "matched",
-    "match → reason matched");
-
-const desc = describeBeAvailability(beResults, beTradesByMode, { executionMode: "single_position", triggerBasis: "wick", armLevelR: 0.5 });
-ok(desc.resolvedExecutionMode === "single_position", "describe resolves execution mode");
-ok(desc.beTradesScenarioKeys.includes("be_wick_0p50R"), "describe lists trade scenario keys");
-ok(desc.requestedKey === "be_wick_0p50R", "describe reports requested key");
-
-// ─────────────────────────────────────────────────────────────────────────────
 console.log(`\n${failures === 0 ? "✅ ALL PASS" : `❌ ${failures} FAILURE(S)`}\n`);
 process.exit(failures === 0 ? 0 : 1);

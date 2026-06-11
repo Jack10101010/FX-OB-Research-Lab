@@ -503,6 +503,9 @@ export function buildBeConfig(cfg) {
     )];
 
     const delay = BE_DELAY_CHOICES.includes(Number(cfg.beDelayCandles)) ? Number(cfg.beDelayCandles) : 0;
+    // Variant selection (P2): only "baseline" (default) or "all" are exposed.
+    // Anything else is coerced to "baseline" — we never silently send "all".
+    const beVariants = cfg.beVariants === "all" ? "all" : "baseline";
 
     return {
         be_enabled: true,
@@ -510,6 +513,7 @@ export function buildBeConfig(cfg) {
         be_trigger_bases: triggers.length ? triggers : ["wick"],
         be_stop_buffer_r: 0.0,
         be_delay_candles: delay,
+        be_variants: beVariants,
     };
 }
 
@@ -824,6 +828,8 @@ export function buildRunConfigLoadReport(current, run) {
     applyFirstPresent(patch, source, "beTriggerBases",  ["be_trigger_bases", "beTriggerBases"],
         (v) => (Array.isArray(v) ? v.map((t) => String(t).toLowerCase()).filter((t) => t === "wick" || t === "close") : null));
     applyFirstPresent(patch, source, "beDelayCandles",  ["be_delay_candles", "beDelayCandles"], toNumber);
+    applyFirstPresent(patch, source, "beVariants",      ["be_variants", "beVariants"],
+        (v) => (v === "all" || (Array.isArray(v) && v.some((k) => k && k !== "baseline")) ? "all" : "baseline"));
 
     applyFirstPresent(patch, source, "entryResearchExports",       ["entry_models", "entryModels"],                                                   mapConfigEntryResearchExports);
     applyFirstPresent(patch, source, "entryPenetrationThresholds", ["entry_penetration_thresholds", "entryPenetrationThresholds"],                    mapConfigEntryThresholds);

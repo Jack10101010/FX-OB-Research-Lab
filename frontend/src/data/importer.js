@@ -909,17 +909,53 @@ function entryTradeFileInfo(name) {
 // otherwise swallow BE files into protectionTradesByMode (Phase 0 audit risk #1).
 export function beTradeFileInfo(name) {
     const file = String(name || "").split(/[\\/]/).pop();
+    // Variant-aware (P2): an optional entry-variant key may sit between the
+    // execution mode and the be_ segment:
+    //   trades_{mode}__be_wick_0p50R.csv                         → baseline
+    //   trades_{mode}__{entry_variant_key}__be_wick_0p50R.csv    → variant
+    // The be_ segment never starts an entry key, so the non-greedy optional
+    // group can't swallow it.
     const m = file.match(
-        /^trades_(single_position|allow_multi_position|one_per_direction)__(be_(wick|close)_(\d+)p(\d+)R?)\.csv$/i
+        /^trades_(single_position|allow_multi_position|one_per_direction)__(?:(.+?)__)?(be_(wick|close)_(\d+)p(\d+)R?)\.csv$/i
     );
     if (!m) return null;
-    const armLevelR = Number(`${parseInt(m[4], 10)}.${m[5]}`);
+    const armLevelR = Number(`${parseInt(m[5], 10)}.${m[6]}`);
     return {
         executionMode: m[1].toLowerCase(),
-        scenarioKey: m[2],                 // canonical backend form, e.g. "be_wick_0p50R"
-        triggerBasis: m[3].toLowerCase(),  // "wick" | "close"
+        entryVariantKey: m[2] ? m[2].toLowerCase() : "baseline",  // old shape ⇒ baseline
+        scenarioKey: m[3],                 // canonical backend form, e.g. "be_wick_0p50R"
+        triggerBasis: m[4].toLowerCase(),  // "wick" | "close"
         armLevelR: Number.isFinite(armLevelR) ? armLevelR : null,
     };
+}
+
+// Normalise summary.json `be_results` into the canonical nested shape
+//   beResults[executionMode][entryVariantKey][beScenarioKey] = summary
+// Accepts BOTH backend shapes (BE-FRONTEND-INTEGRATION P2):
+//   • old flat  : be_results[mode][beKey]            → nested under "baseline"
+//   • new nested: be_results[mode][entryKey][beKey]  → kept as-is
+// A be-scenario key (be_wick_…/be_close_…) at the entry level marks the flat
+// shape; anything else is treated as an entry-variant key. Raw summary objects
+// are preserved untouched. Old bundles therefore keep working unchanged.
+export function normalizeBeResults(raw) {
+    if (!raw || typeof raw !== "object") return {};
+    const isBeKey = (k) => /^be_(wick|close)_/i.test(k);
+    const out = {};
+    for (const [mode, byKey] of Object.entries(raw)) {
+        if (!byKey || typeof byKey !== "object") continue;
+        out[mode] = out[mode] || {};
+        for (const [k, v] of Object.entries(byKey)) {
+            if (isBeKey(k)) {
+                // Flat (legacy) baseline summary → nest under "baseline".
+                out[mode].baseline = out[mode].baseline || {};
+                out[mode].baseline[k] = v;
+            } else {
+                // Already nested: k is an entry-variant key, v is {beKey: summary}.
+                out[mode][k] = v;
+            }
+        }
+    }
+    return out;
 }
 
 // ─────────────────────── Control file parser ───────────────────────
@@ -1222,21 +1258,24 @@ export async function ingestRunBundle(fileList) {
                 }
                 case "trades_be": {
                     // BE Exact Replay scenario trades. Routed into a nested
-                    // beTradesByMode[executionMode][scenarioKey] map — NEVER into
-                    // primary trades or protectionTradesByMode.
+                    // beTradesByMode[executionMode][entryVariantKey][scenarioKey]
+                    // map — NEVER into primary trades or protectionTradesByMode.
+                    // Old-shape files (no entry token) land under "baseline".
                     const info = beTradeFileInfo(f.name);
                     const parsed = parseCSV(text);
                     validateCsvHeaders(kind, f.name, parsed.headers, collected.validationErrors, collected.validationWarnings);
                     const t = parseTradesCSV(text);
                     const em = info.executionMode;
+                    const evk = info.entryVariantKey;
                     if (!collected.beTradesByMode[em]) collected.beTradesByMode[em] = {};
-                    collected.beTradesByMode[em][info.scenarioKey] = t;
+                    if (!collected.beTradesByMode[em][evk]) collected.beTradesByMode[em][evk] = {};
+                    collected.beTradesByMode[em][evk][info.scenarioKey] = t;
                     collected.beSourceFiles.push({
-                        name: f.name, kind, executionMode: em, scenarioKey: info.scenarioKey,
+                        name: f.name, kind, executionMode: em, entryVariantKey: evk, scenarioKey: info.scenarioKey,
                         triggerBasis: info.triggerBasis, armLevelR: info.armLevelR, rows: t.length,
                     });
                     collected.recognized.push({
-                        name: f.name, kind, executionMode: em, scenarioKey: info.scenarioKey, rows: t.length,
+                        name: f.name, kind, executionMode: em, entryVariantKey: evk, scenarioKey: info.scenarioKey, rows: t.length,
                     });
                     break;
                 }
@@ -1434,16 +1473,21 @@ export async function ingestRunBundle(fileList) {
     const protectionTradesByMode = Object.fromEntries(
         Object.entries(collected.protectionTradesByMode).map(([mode, trades]) => [mode, enrichTradesWithOrderBlocks(trades, obLookup, pipSize)]),
     );
-    // BE Exact Replay trades — nested executionMode → scenarioKey, enriched
-    // identically to protection/entry trades so downstream consumers see the
-    // same OB-derived fields. Kept entirely separate from protectionTradesByMode.
+    // BE Exact Replay trades — nested executionMode → entryVariantKey →
+    // scenarioKey, enriched identically to protection/entry trades. Kept
+    // entirely separate from protectionTradesByMode.
     const beTradesByMode = Object.fromEntries(
-        Object.entries(collected.beTradesByMode).map(([executionMode, byScenario]) => [
+        Object.entries(collected.beTradesByMode).map(([executionMode, byEntry]) => [
             executionMode,
             Object.fromEntries(
-                Object.entries(byScenario).map(([scenarioKey, trades]) => [
-                    scenarioKey,
-                    enrichTradesWithOrderBlocks(trades, obLookup, pipSize),
+                Object.entries(byEntry).map(([entryVariantKey, byScenario]) => [
+                    entryVariantKey,
+                    Object.fromEntries(
+                        Object.entries(byScenario).map(([scenarioKey, trades]) => [
+                            scenarioKey,
+                            enrichTradesWithOrderBlocks(trades, obLookup, pipSize),
+                        ]),
+                    ),
                 ]),
             ),
         ]),
@@ -1610,7 +1654,7 @@ export async function ingestRunBundle(fileList) {
         // scenarioKey. beResults carries the backend summary.json `be_results`
         // verbatim (raw fields preserved); beTradesByMode carries the per-scenario
         // enriched trade rows. Old bundles → {} for both.
-        beResults: sm.be_results || {},
+        beResults: normalizeBeResults(sm.be_results),
         beTradesByMode,
         beSourceFiles: collected.beSourceFiles,
         directionalResults: {

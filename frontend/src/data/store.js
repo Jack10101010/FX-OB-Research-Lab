@@ -992,6 +992,10 @@ function buildDerived() {
         FOCUSED_FFT_EVENT: state.focusedFftEvent,
         setFocusedFftEvent,
         clearFocusedFftEvent,
+        // One-shot BE focus handoff (Protection Lab → Strategy Map); transient.
+        FOCUSED_BE_TRADE: state.focusedBeTrade,
+        setFocusedBeTrade,
+        clearFocusedBeTrade,
         // Results Basis axis (Phase RB-1) — exposed for future consumers; no
         // page reads these yet, so this is inert.
         RESULTS_BASIS: state.resultsBasis,
@@ -1670,6 +1674,21 @@ export function setFocusedFftEvent(event) {
 export function clearFocusedFftEvent() {
     if (state.focusedFftEvent == null) return;
     state = { ...state, focusedFftEvent: null };
+    notify();
+}
+
+// ── One-shot BE focus handoff (Protection Lab → Strategy Map) ────────────────
+// Transient cross-page channel (NOT persisted), same pattern as the FFT focus.
+// Carries { runId, tradeId, beArmLevel, beTriggerBasis }. The Strategy Map
+// consumer selects the trade, enables BE verification + the scenario, then clears.
+export function setFocusedBeTrade(event) {
+    state = { ...state, focusedBeTrade: event || null };
+    notify();
+}
+
+export function clearFocusedBeTrade() {
+    if (state.focusedBeTrade == null) return;
+    state = { ...state, focusedBeTrade: null };
     notify();
 }
 

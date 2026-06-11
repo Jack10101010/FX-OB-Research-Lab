@@ -89,38 +89,52 @@ function matchKeyInList(keys, wantKey, triggerBasis, armLevelR) {
     return null;
 }
 
+const obj = (x) => (x && typeof x === "object" ? x : {});
+
+/** Resolve the entry-variant key to look up. Null/empty ⇒ "baseline". */
+function wantedEntryKey(entryVariantKey) {
+    const k = String(entryVariantKey || "").trim();
+    return k || "baseline";
+}
+
 /**
- * Find a backend scenario matching the selection.
+ * Find a backend scenario matching the selection — variant-aware.
  *
- * The scenario summary (summary.json `be_results`) and the scenario trades
- * (trades_*__be_*.csv) are matched INDEPENDENTLY against their own key sets, so
- * a decimal-form mismatch between the two sources (e.g. summary "be_wick_0p5R"
- * vs CSV "be_wick_0p50R") never drops the trades.
+ * Storage is nested: beResults[mode][entryVariantKey][beKey] and
+ * beTradesByMode[mode][entryVariantKey][beKey]. Resolution order:
+ *   1. execution mode
+ *   2. entry-variant key — EXACT match only. A requested variant NEVER falls
+ *      back to baseline (integrity rule). Null/empty entryVariantKey ⇒ baseline.
+ *   3. be-scenario key tolerance (0p5 ⇄ 0p50, etc.), summary + trades matched
+ *      independently so a decimal-form mismatch can't drop the trades.
  *
- * @returns { executionMode, scenarioKey, summaryRaw, trades } | null
+ * @returns { executionMode, entryVariantKey, scenarioKey, summaryRaw, trades } | null
  */
 export function findBeScenario(beResults, beTradesByMode, selection = {}) {
-    const { executionMode, triggerBasis, armLevelR } = selection;
-    const results = beResults && typeof beResults === "object" ? beResults : {};
-    const tradesMap = beTradesByMode && typeof beTradesByMode === "object" ? beTradesByMode : {};
+    const { executionMode, entryVariantKey, triggerBasis, armLevelR } = selection;
+    const results = obj(beResults);
+    const tradesMap = obj(beTradesByMode);
 
     const em = resolveExecutionMode([results, tradesMap], executionMode);
     if (!em) return null;
 
-    const resByKey = results[em] && typeof results[em] === "object" ? results[em] : {};
-    const tradesByKey = tradesMap[em] && typeof tradesMap[em] === "object" ? tradesMap[em] : {};
+    const wantEntry = wantedEntryKey(entryVariantKey);
+    // EXACT entry match only — no variant→baseline fallback.
+    const resInner = obj(obj(results[em])[wantEntry]);
+    const tradesInner = obj(obj(tradesMap[em])[wantEntry]);
+    if (!Object.keys(resInner).length && !Object.keys(tradesInner).length) return null;
 
     const wantKey = beScenarioKey(triggerBasis, armLevelR);
-    const summaryKey = matchKeyInList(Object.keys(resByKey), wantKey, triggerBasis, armLevelR);
-    const tradesKey  = matchKeyInList(Object.keys(tradesByKey), wantKey, triggerBasis, armLevelR);
+    const summaryKey = matchKeyInList(Object.keys(resInner), wantKey, triggerBasis, armLevelR);
+    const tradesKey  = matchKeyInList(Object.keys(tradesInner), wantKey, triggerBasis, armLevelR);
 
-    const trades = tradesKey && Array.isArray(tradesByKey[tradesKey]) ? tradesByKey[tradesKey] : null;
-    const summaryRaw = summaryKey ? (resByKey[summaryKey] ?? null) : null;
+    const trades = tradesKey && Array.isArray(tradesInner[tradesKey]) ? tradesInner[tradesKey] : null;
+    const summaryRaw = summaryKey ? (resInner[summaryKey] ?? null) : null;
 
     // Require at least one of trades / summary to consider EXACT available.
     if (!trades && !summaryRaw) return null;
 
-    return { executionMode: em, scenarioKey: summaryKey || tradesKey, summaryRaw, trades };
+    return { executionMode: em, entryVariantKey: wantEntry, scenarioKey: summaryKey || tradesKey, summaryRaw, trades };
 }
 
 // ── number helpers ──────────────────────────────────────────────────────────
@@ -251,21 +265,34 @@ export function resolveBeScenarioSource({
     armLevelR,
     triggerBasis,
     executionMode,
+    entryVariantKey,
     beResults,
     beTradesByMode,
     baseline = null,
 } = {}) {
-    const found = findBeScenario(beResults, beTradesByMode, { executionMode, triggerBasis, armLevelR });
+    const found = findBeScenario(beResults, beTradesByMode, { executionMode, entryVariantKey, triggerBasis, armLevelR });
     if (!found) {
-        const reason = !hasAnyExactBe(beResults, beTradesByMode)
-            ? "no_be_data"          // run has no backend BE scenarios at all
-            : "no_matching_scenario"; // BE data exists but not for this arm/trigger/mode
-        return { source: "REPLAY", scenarioKey: null, executionMode: executionMode ?? null, summary: null, trades: null, summaryRaw: null, reason };
+        // Reason precedence: no BE data at all → variant not present (baseline
+        // BE is NOT substituted) → variant present but arm/trigger missing.
+        let reason;
+        if (!hasAnyExactBe(beResults, beTradesByMode)) {
+            reason = "no_be_data";
+        } else if (!entryVariantHasExact(beResults, beTradesByMode, { executionMode, entryVariantKey })) {
+            reason = "no_matching_variant";
+        } else {
+            reason = "no_matching_scenario";
+        }
+        return {
+            source: "REPLAY", scenarioKey: null, executionMode: executionMode ?? null,
+            entryVariantKey: wantedEntryKey(entryVariantKey),
+            summary: null, trades: null, summaryRaw: null, reason,
+        };
     }
     return {
         source: "EXACT",
         scenarioKey: found.scenarioKey,
         executionMode: found.executionMode,
+        entryVariantKey: found.entryVariantKey,
         summary: buildExactBeSummary(found.trades, found.summaryRaw, baseline),
         trades: found.trades,
         summaryRaw: found.summaryRaw,
@@ -273,30 +300,47 @@ export function resolveBeScenarioSource({
     };
 }
 
+/** True when the given entry-variant key has at least one exact BE scenario. */
+export function entryVariantHasExact(beResults, beTradesByMode, { executionMode, entryVariantKey } = {}) {
+    const results = obj(beResults);
+    const tradesMap = obj(beTradesByMode);
+    const em = resolveExecutionMode([results, tradesMap], executionMode);
+    if (!em) return false;
+    const wantEntry = wantedEntryKey(entryVariantKey);
+    return Object.keys(obj(obj(results[em])[wantEntry])).length > 0
+        || Object.keys(obj(obj(tradesMap[em])[wantEntry])).length > 0;
+}
+
 /**
  * Diagnostic snapshot of the BE data available on a run + the keys a selection
  * would look for. Pure; used by the BreakevenTab console diagnostic and tests.
  */
-export function describeBeAvailability(beResults, beTradesByMode, { executionMode, triggerBasis, armLevelR } = {}) {
-    const results = beResults && typeof beResults === "object" ? beResults : {};
-    const tradesMap = beTradesByMode && typeof beTradesByMode === "object" ? beTradesByMode : {};
+export function describeBeAvailability(beResults, beTradesByMode, { executionMode, entryVariantKey, triggerBasis, armLevelR } = {}) {
+    const results = obj(beResults);
+    const tradesMap = obj(beTradesByMode);
     const em = resolveExecutionMode([results, tradesMap], executionMode);
-    const resByKey = em && results[em] && typeof results[em] === "object" ? results[em] : {};
-    const tradesByKey = em && tradesMap[em] && typeof tradesMap[em] === "object" ? tradesMap[em] : {};
+    const wantEntry = wantedEntryKey(entryVariantKey);
+    const resByEntry = em ? obj(results[em]) : {};
+    const tradesByEntry = em ? obj(tradesMap[em]) : {};
+    const entryHasExact = entryVariantHasExact(results, tradesMap, { executionMode, entryVariantKey });
     return {
         hasAnyExact: hasAnyExactBe(results, tradesMap),
         beResultsExecutionModes: Object.keys(results),
         beTradesExecutionModes: Object.keys(tradesMap),
         resolvedExecutionMode: em,
-        beResultsScenarioKeys: Object.keys(resByKey),
-        beTradesScenarioKeys: Object.keys(tradesByKey),
+        requestedEntryVariantKey: wantEntry,
+        entryHasExact,
+        availableEntryVariantKeys: [...new Set([...Object.keys(resByEntry), ...Object.keys(tradesByEntry)])],
+        beResultsScenarioKeys: Object.keys(obj(resByEntry[wantEntry])),
+        beTradesScenarioKeys: Object.keys(obj(tradesByEntry[wantEntry])),
         requestedKey: beScenarioKey(triggerBasis, armLevelR),
     };
 }
 
-/** True when any EXACT BE scenario exists for the given run maps. */
+/** True when any EXACT BE scenario exists for the given run maps (3-level nesting). */
 export function hasAnyExactBe(beResults, beTradesByMode) {
     const has = (m) => !!(m && typeof m === "object"
-        && Object.values(m).some((byKey) => byKey && typeof byKey === "object" && Object.keys(byKey).length));
+        && Object.values(m).some((byEntry) => byEntry && typeof byEntry === "object"
+            && Object.values(byEntry).some((byBe) => byBe && typeof byBe === "object" && Object.keys(byBe).length)));
     return has(beResults) || has(beTradesByMode);
 }

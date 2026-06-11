@@ -11,6 +11,9 @@ import { NeonInput, NeonSelect, Segment, NeonButton, FilterToggle } from "@/comp
 import { Pill } from "@/components/lab/DataTable";
 import { CandleChart } from "@/components/lab/CandleChart";
 import { IntrabarInspector } from "@/components/lab/IntrabarInspector";
+import { BeVerificationPanel } from "@/components/lab/protection/BeVerificationPanel";
+import { resolveBeScenarioSource, entryVariantHasExact } from "@/data/beResolve";
+import { buildBreakEvenTimeline, pairBaselineTrade } from "@/data/protectionTimeline";
 import { compactTimeframe, formatRunDateRange, getRunDisplayName, loadCandlesForRun, reloadFullRunFromSidecar, rehydrateRunCandles, useDataset } from "@/data/store";
 import { setActiveRunId, setScenario, setSelectedTradeVariant } from "@/data/store";
 import { FolderKanban, Search, AlertTriangle } from "lucide-react";
@@ -155,7 +158,7 @@ function saveStrategyMapUi(settings) {
 }
 
 export default function StrategyMap() {
-    const { CANDLES, OB_BOXES, OB_BOXES_ENRICHED, TRADE_MARKERS, RUNS, activeRunId, getRunData, ACTIVE_TRADE_VARIANT, candleLoadStatus, SCENARIO, FOCUSED_FFT_EVENT, clearFocusedFftEvent } = useDataset();
+    const { CANDLES, OB_BOXES, OB_BOXES_ENRICHED, TRADE_MARKERS, RUNS, activeRunId, getRunData, ACTIVE_TRADE_VARIANT, candleLoadStatus, SCENARIO, FOCUSED_FFT_EVENT, clearFocusedFftEvent, FOCUSED_BE_TRADE, clearFocusedBeTrade } = useDataset();
     const [initialUi] = useState(loadStrategyMapUi);
     const resizeRef = useRef(null);
     const candleLoadAttemptedRef = useRef(new Set());
@@ -202,6 +205,10 @@ export default function StrategyMap() {
     const [tradeDirectionFilter, setTradeDirectionFilter] = useState("All");
     const [tradeStructureFilter, setTradeStructureFilter] = useState("All");
     const [selectedTradeId, setSelectedTradeId] = useState(null);
+    // ── BE visual verification (P1) ───────────────────────────────────────────
+    const [showBeVerification, setShowBeVerification] = useState(false);
+    const [beArm, setBeArm] = useState(0.5);
+    const [beTrigger, setBeTrigger] = useState("wick");
     const [showRunInfo, setShowRunInfo] = useState(false);
     const [fullRunLoading, setFullRunLoading] = useState(false);
     const [fullRunError, setFullRunError] = useState("");
@@ -426,6 +433,26 @@ export default function StrategyMap() {
         }
         clearFocusedFftEvent(); // overlays are ready — clear whether matched or not
     }, [FOCUSED_FFT_EVENT, runId, triggeredEdgeOverlays]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // ── One-shot BE focus handoff from Protection Lab → Break-even trade list ──
+    // Selects the matching trade, enables BE verification, and applies the same
+    // arm + trigger scenario. Waits for trades to resolve before clearing.
+    useEffect(() => {
+        const evt = FOCUSED_BE_TRADE;
+        if (!evt || evt.runId !== runId) return;
+        if (!activeTrades.length) return; // trades not built yet — retry next render
+        if (evt.beArmLevel != null && Number.isFinite(Number(evt.beArmLevel))) setBeArm(Number(evt.beArmLevel));
+        if (evt.beTriggerBasis === "wick" || evt.beTriggerBasis === "close") setBeTrigger(evt.beTriggerBasis);
+        setShowBeVerification(true);
+        const want = rrLookupKey(evt.tradeId);
+        const match = activeTrades.find((t) => (
+            t.id === evt.tradeId
+            || rrLookupKey(t.id) === want
+            || rrLookupKey(t.displayTradeId) === want
+        ));
+        if (match) setSelectedTradeId(match.id);
+        clearFocusedBeTrade();
+    }, [FOCUSED_BE_TRADE, runId, activeTrades]); // eslint-disable-line react-hooks/exhaustive-deps
     const runStats = isDirectionalMode
         ? buildRunStats(
             directionalTrades,
@@ -686,6 +713,42 @@ export default function StrategyMap() {
         )) || null;
     }, [selectedTradeId, triggeredEdgeOverlays]);
 
+    // ── BE visual verification (P1) ───────────────────────────────────────────
+    // Resolve exact BE for the CURRENT result view only (never baseline-for-variant).
+    const beEntryVariantKey = resultViewUniverse?.sourceKey || "baseline";
+    const beResultViewLabel = resultViewUniverse?.label || "Baseline";
+    const beExecutionMode = resultViewUniverse?.variant || bundle?.primaryVariant || null;
+    const beExactAvailable = useMemo(
+        () => entryVariantHasExact(bundle?.beResults, bundle?.beTradesByMode, {
+            executionMode: beExecutionMode, entryVariantKey: beEntryVariantKey,
+        }),
+        [bundle, beExecutionMode, beEntryVariantKey],
+    );
+    // The BE scenario trade set for the selected arm + trigger of the current view.
+    const beScenario = useMemo(() => {
+        if (!beExactAvailable) return null;
+        return resolveBeScenarioSource({
+            armLevelR: beArm, triggerBasis: beTrigger,
+            executionMode: beExecutionMode, entryVariantKey: beEntryVariantKey,
+            beResults: bundle?.beResults, beTradesByMode: bundle?.beTradesByMode,
+        });
+    }, [beExactAvailable, beArm, beTrigger, beExecutionMode, beEntryVariantKey, bundle]);
+    // Selected trade's matching BE row + its no-BE baseline (the selected trade).
+    const beTimeline = useMemo(() => {
+        if (!showBeVerification || !selectedTrade || beScenario?.source !== "EXACT") return null;
+        const beTrade = pairBaselineTrade(selectedTrade, beScenario.trades)
+            || (Array.isArray(beScenario.trades)
+                ? beScenario.trades.find((t) => t.id === selectedTrade.id) : null);
+        if (!beTrade) return null;
+        return buildBreakEvenTimeline({
+            beTrade,
+            baselineTrade: selectedTrade,
+            scenario: { armLevelR: beArm, triggerBasis: beTrigger, beScenarioKey: beScenario.scenarioKey, stopBufferR: 0, delayCandles: 0 },
+        });
+    }, [showBeVerification, selectedTrade, beScenario, beArm, beTrigger]);
+    const beVerification = showBeVerification && beTimeline ? beTimeline.geometry : null;
+    const beScenarioLabel = `${beArm}R ${beTrigger === "wick" ? "Wick" : "Close"}`;
+
     return (
         <div className="pb-12">
             <LabRunHero
@@ -859,6 +922,51 @@ export default function StrategyMap() {
                             )}
                         </div>
                     )}
+                    {/* ── BE visual verification picker (P1) ─────────────────── */}
+                    <div className="mb-3 rounded-[6px] border border-[hsl(var(--accent-secondary)/0.3)] bg-[hsl(var(--accent-secondary)/0.04)] px-3 py-2">
+                        <div className="flex items-center gap-3 flex-wrap">
+                            {beExactAvailable ? (
+                                <>
+                                    <Toggle
+                                        label="Show BE verification"
+                                        checked={showBeVerification}
+                                        onChange={setShowBeVerification}
+                                        dot="secondary"
+                                        title="Overlay backend exact break-even arm/stop/exit for the selected trade."
+                                    />
+                                    <span className="text-[10.5px] font-ui uppercase tracking-[0.06em] text-muted-lab">Arm</span>
+                                    <Segment
+                                        options={[0.25, 0.5, 0.75, 1.0, 1.5, 2.0].map((a) => ({ value: a, label: `${a}R` }))}
+                                        value={beArm}
+                                        onChange={(v) => setBeArm(Number(v))}
+                                    />
+                                    <span className="text-[10.5px] font-ui uppercase tracking-[0.06em] text-muted-lab">Trigger</span>
+                                    <Segment
+                                        options={[{ value: "wick", label: "Wick" }, { value: "close", label: "Close" }]}
+                                        value={beTrigger}
+                                        onChange={setBeTrigger}
+                                    />
+                                    <Pill tone="secondary">BE data: {beResultViewLabel}</Pill>
+                                    {showBeVerification && beScenario?.source === "EXACT" && beScenario.scenarioKey == null && (
+                                        <Pill tone="warning">No {beScenarioLabel} scenario exported</Pill>
+                                    )}
+                                </>
+                            ) : (
+                                <>
+                                    <span className="text-[10.5px] font-ui uppercase tracking-[0.06em] text-muted-lab">BE Verification</span>
+                                    <span className="text-[11px] font-ui text-[hsl(var(--text-2))]">
+                                        No exact BE data for this result view. Generate BE scenarios for this variant in Strategy Builder.
+                                    </span>
+                                </>
+                            )}
+                        </div>
+                        {showBeVerification && beExactAvailable && (
+                            <p className="mt-1.5 text-[10.5px] font-ui text-[hsl(var(--text-2))]">
+                                Visualising backend exact BE data for {beResultViewLabel}. Click a trade to inspect its arm / stop / exit.
+                                {candlesAreCoarse ? " BE events are from 1-minute execution; the chart may display aggregated candles." : ""}
+                            </p>
+                        )}
+                    </div>
                     <div className="relative">
                         <CandleChart
                             key={`${showTradeList ? "with-trades" : "full-width"}-${displayTf}`}
@@ -881,6 +989,7 @@ export default function StrategyMap() {
                             showSessionHighlights={showSessions}
                             selectedTradeId={selectedTradeId}
                             highlightObId={selectedOverlay?.obId ?? null}
+                            beVerification={beVerification}
                             height={chartHeight}
                             triggeredEdgeOverlays={triggeredEdgeOverlays}
                             showTriggeredEdgeLevels={showTriggeredEdgeLevels}
@@ -918,6 +1027,16 @@ export default function StrategyMap() {
                                 sourceIsFine={!candlesAreCoarse}
                                 medianCandleGapSec={medianCandleGapSec}
                                 onClose={() => setSelectedTradeId(null)}
+                            />
+                        )}
+                        {showBeVerification && beTimeline && (
+                            <BeVerificationPanel
+                                timeline={beTimeline}
+                                resultViewLabel={beResultViewLabel}
+                                scenarioLabel={beScenarioLabel}
+                                source="EXACT"
+                                coarseCandles={candlesAreCoarse}
+                                onClose={() => setShowBeVerification(false)}
                             />
                         )}
                         {selectedOverlay && (
