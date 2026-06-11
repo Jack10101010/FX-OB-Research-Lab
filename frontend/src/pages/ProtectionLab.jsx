@@ -653,6 +653,12 @@ export default function ProtectionLab() {
                         <MetricChip label="Profit Factor" value={p.profitFactor != null ? String(p.profitFactor) : "—"} sub="Σ wins ÷ Σ losses" tone={p.profitFactor != null && p.profitFactor >= 1.5 ? "success" : p.profitFactor != null && p.profitFactor < 1 ? "danger" : "muted"} icon={BarChart2} />
                         <MetricChip label="Max DD"        value={p.maxDD !== 0 ? fmtR(p.maxDD) : "—"} sub="worst equity dip" tone={p.maxDD < -2 ? "danger" : p.maxDD < 0 ? "warning" : "muted"} icon={AlertTriangle} />
                     </div>
+                    {/* Break-even section — the BE-adjusted results below, clearly
+                        separated from the model/variant headline KPIs above. */}
+                    <div className="mb-1.5 pt-1 border-t border-[hsl(var(--border-soft)/0.3)] flex items-baseline gap-x-2 text-[9px] font-ui uppercase tracking-[0.12em] text-[hsl(var(--text-2)/0.8)]">
+                        <span>Break-even Results</span>
+                        <span className="text-[hsl(var(--text-2)/0.6)] normal-case tracking-normal">Candle-replay break-even escape vs the above</span>
+                    </div>
                     <BreakevenTab
                         trades={trades}
                         candles={candles}
@@ -1677,7 +1683,11 @@ function buildProtection(trades) {
     const wins = list.filter(isWin).length;
     const losses = list.filter(isLoss).length;
     const rawNet = list.reduce((s, t) => s + rOf(t), 0);
-    const winRate = n ? (wins / n) * 100 : 0;
+    // Win rate over DECIDED trades (wins + losses), matching Run Detail's KPI —
+    // NOT wins / total (which counts flats/cancelled/unfilled in the denominator
+    // and understated the rate, e.g. 24/99 = 24.2% instead of 24/56 = 42.9%).
+    const decided = wins + losses;
+    const winRate = decided ? (wins / decided) * 100 : 0;
     const expectancy = n ? rawNet / n : 0;
 
     const breachKnown = list.filter((t) => t?.ob_fully_breached === true || t?.ob_fully_breached === false || Number.isFinite(Number(t?.max_ob_penetration_pct))).length;
@@ -1784,11 +1794,13 @@ function summarizeTradeSet(trades) {
     const wins = list.filter((trade) => rMulti(trade) > 0).length;
     const losses = list.filter((trade) => rMulti(trade) < 0).length;
     const netR = list.reduce((sum, trade) => sum + rMulti(trade), 0);
+    const decided = wins + losses;
     return {
         n,
         wins,
         losses,
-        winRate: n ? (wins / n) * 100 : 0,
+        // Win rate over decided trades (wins + losses) to match Run Detail, not wins / total.
+        winRate: decided ? (wins / decided) * 100 : 0,
         netR: round1(netR),
         expectancy: n ? netR / n : 0,
         maxDD: maxDrawdownR(list),
