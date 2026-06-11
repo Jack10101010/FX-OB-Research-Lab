@@ -18,6 +18,9 @@ import {
 } from "@/data/beReplay";
 import { resolveBeScenarioSource, hasAnyExactBe, entryVariantHasExact, describeBeAvailability } from "@/data/beResolve";
 import { buildBeAffectedTrades } from "@/data/protectionTimeline";
+import { buildSelectiveBeUniverse } from "@/data/selectiveBeUniverse";
+import { summarizeTradeSanity } from "@/data/tradeClassification";
+import { BeAffectedTradesCard } from "@/components/lab/protection/BeAffectedTradesCard";
 import { useDataset, setFocusedBeTrade } from "@/data/store";
 import { useNavigate } from "react-router-dom";
 import { ShieldAlert, AlertTriangle, TrendingUp, BarChart2, Hash, Activity, Loader2, FlaskConical, Circle, CheckCircle2 } from "lucide-react";
@@ -212,51 +215,286 @@ function buildTableColumns(armLevelR, setArmLevelR) {
     ];
 }
 
-// ── Affected-trade list column definitions ──────────────────────────────────────
+// ── Selective BE cohort panel ───────────────────────────────────────────────────
 
-const AFFECTED_CLASS = {
-    loss_saved: { label: "Loss Saved", tone: "success" },
-    winner_cut: { label: "Winner Cut", tone: "danger" },
-    be_exit:    { label: "BE Exit",    tone: "muted" },
-};
-function fmtTimeShort(t) {
-    if (!t) return "—";
-    const s = String(t).replace("T", " ").replace(/\+00:00$|Z$/, "");
-    return s.length > 16 ? s.slice(5, 16) : s;
+function CohortChips({ label, options, selected, onToggle }) {
+    return (
+        <div className="flex items-center gap-2 flex-wrap">
+            <span className="w-[64px] shrink-0 text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--text-2))]">{label}</span>
+            {options.map((opt) => {
+                const active = selected.includes(opt);
+                return (
+                    <button
+                        key={opt}
+                        type="button"
+                        onClick={() => onToggle(opt)}
+                        className={cn(
+                            "px-2.5 py-1 rounded-[4px] border text-[10.5px] font-ui transition-colors",
+                            active
+                                ? "bg-[hsl(var(--accent-primary)/0.16)] border-[hsl(var(--accent-primary)/0.5)] text-[hsl(var(--accent-primary))]"
+                                : "bg-[hsl(var(--panel-2)/0.4)] border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))] hover:text-[hsl(var(--text))]",
+                        )}
+                    >
+                        {opt}
+                    </button>
+                );
+            })}
+        </div>
+    );
 }
 
-function buildAffectedColumns(onViewOnMap) {
-    return [
-        {
-            key: "classification", label: "Result", sortable: false, width: "92px",
-            render: (row) => {
-                const c = AFFECTED_CLASS[row.classification] || AFFECTED_CLASS.be_exit;
-                return <Pill tone={c.tone}>{c.label}</Pill>;
-            },
-        },
-        { key: "id", label: "Trade", render: (row) => <span className="font-code text-[11px] text-[hsl(var(--text-1))]">{row.id || "—"}</span> },
-        { key: "obId", label: "OB", render: (row) => <span className="font-code text-[11px] text-[hsl(var(--text-2))]">{row.obId || "—"}</span> },
-        { key: "direction", label: "Dir", render: (row) => <span className="font-ui text-[11px] text-[hsl(var(--text-2))]">{row.direction || "—"}</span> },
-        { key: "structure", label: "Struct", render: (row) => <span className="font-ui text-[11px] text-[hsl(var(--text-2))]">{row.structure || "—"}</span> },
-        { key: "session", label: "Session", render: (row) => <span className="font-ui text-[11px] text-[hsl(var(--text-2))]">{row.session || "—"}</span> },
-        { key: "entryTime", label: "Entry", render: (row) => <span className="font-code text-[10.5px] text-[hsl(var(--text-2))]">{fmtTimeShort(row.entryTime)}</span> },
-        { key: "originalR", label: "Orig R", align: "right", render: (row) => row.originalR != null ? <ColoredR value={row.originalR} /> : <span className="text-[hsl(var(--text-2))]">—</span> },
-        { key: "beR", label: "BE R", align: "right", render: (row) => row.beR != null ? <ColoredR value={row.beR} /> : <span className="text-[hsl(var(--text-2))]">—</span> },
-        { key: "deltaR", label: "Δ R", align: "right", render: (row) => row.deltaR != null ? <ColoredR value={row.deltaR} /> : <span className="text-[hsl(var(--text-2))]">—</span> },
-        {
-            key: "map", label: "", sortable: false, width: "96px",
-            render: (row) => (
-                <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); onViewOnMap(row); }}
-                    className="row-chip row-chip-muted hover:row-chip-primary text-[10.5px]"
-                    title="Open this trade on the Strategy Map with the BE overlay"
-                >
-                    View on Map
-                </button>
-            ),
-        },
+// Shared formatters for the selective-BE comparison primitives.
+const fmtBeR   = (v) => (v == null || !Number.isFinite(Number(v)) ? "—" : `${v >= 0 ? "+" : ""}${(Math.round(v * 100) / 100).toFixed(2)}R`);
+const fmtBePct = (v) => (v == null ? "—" : `${Math.round(v)}%`);
+const fmtBePf  = (v) => (v == null ? "—" : v === Infinity ? "∞" : (Math.round(v * 100) / 100).toFixed(2));
+// Δ is selective − original; sign convention is uniform: positive Δ = improvement
+// (netR/WR/PF up; maxDrawdownR is ≤ 0, so a less-negative dip is a positive Δ).
+const beDeltaTone = (d) => (d == null ? "text-[hsl(var(--text-2))]" : d > 0 ? "text-[hsl(var(--success))]" : d < 0 ? "text-[hsl(var(--danger))]" : "text-[hsl(var(--text-2))]");
+const fmtBeDeltaR = (d) => (d == null ? "—" : `${d >= 0 ? "+" : ""}${(Math.round(d * 100) / 100).toFixed(2)}R`);
+
+/** Compact universe column — core metrics only (Original Run / Selective BE Applied). */
+function BeStatRow({ k, v, vTone }) {
+    return (
+        <div className="flex items-center justify-between py-0.5">
+            <span className="text-[10px] font-ui text-[hsl(var(--text-2))]">{k}</span>
+            <span className={cn("text-[11.5px] font-num tabular-nums", vTone || "text-[hsl(var(--text-1))]")}>{v}</span>
+        </div>
+    );
+}
+
+function UniverseCol({ title, subtitle, tone = "muted", s, breakdown = null, titleAttr, footer = null }) {
+    if (!s) return null;
+    const headTone = tone === "success" ? "text-[hsl(var(--success))]" : tone === "primary" ? "text-[hsl(var(--accent-primary))]" : "text-[hsl(var(--text-1))]";
+    return (
+        <div className="flex-1 min-w-0 rounded-[4px] border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.3)] px-3 py-2">
+            <div className={cn("text-[11px] font-ui font-semibold", headTone)} title={titleAttr}>{title}</div>
+            {subtitle && <div className="text-[9px] font-ui text-[hsl(var(--text-2)/0.8)]">{subtitle}</div>}
+            <div className="mt-1.5">
+                <BeStatRow k="Net R" v={fmtBeR(s.netR)} vTone={s.netR >= 0 ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]"} />
+                <BeStatRow k="Win Rate" v={fmtBePct(s.winRate)} />
+                <BeStatRow k="Profit Factor" v={fmtBePf(s.profitFactor)} />
+                <BeStatRow k="Max DD" v={fmtBeR(s.maxDrawdownR)} vTone="text-[hsl(var(--danger))]" />
+                <BeStatRow k="Trades" v={String(s.performanceTrades ?? s.total ?? "—")} />
+                {breakdown && (
+                    <div className="mt-1 border-t border-[hsl(var(--border-soft)/0.6)] pt-1">
+                        <BeStatRow k="Wins / Losses" v={`${s.wins ?? 0} / ${s.losses ?? 0}`} />
+                        <BeStatRow k="Long / Short" v={`${breakdown.longs ?? 0} / ${breakdown.shorts ?? 0}`} />
+                        <BeStatRow k="CHoCH / BOS" v={`${breakdown.choch ?? 0} / ${breakdown.bos ?? 0}`} />
+                    </div>
+                )}
+                {footer}
+            </div>
+        </div>
+    );
+}
+
+/** Prominent Difference card — selective-vs-original. The panel's headline answer. */
+function DifferenceCard({ o, sel, affected, lossesSaved, winnersCut, title = "Difference vs Original", titleAttr }) {
+    if (!o || !sel) return null;
+    const dNetR = sel.netR - o.netR;
+    const dWR   = (o.winRate == null || sel.winRate == null) ? null : sel.winRate - o.winRate;
+    const bothPfFinite = Number.isFinite(o.profitFactor) && Number.isFinite(sel.profitFactor);
+    const dPF   = bothPfFinite ? sel.profitFactor - o.profitFactor : null;
+    const dDD   = (o.maxDrawdownR == null || sel.maxDrawdownR == null) ? null : sel.maxDrawdownR - o.maxDrawdownR;
+    const Big = ({ k, v, tone }) => (
+        <div className="flex flex-col">
+            <span className="text-[9.5px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--text-2))]">{k}</span>
+            <span className={cn("text-[15px] font-num tabular-nums font-semibold", tone)}>{v}</span>
+        </div>
+    );
+    const Small = ({ k, v, tone }) => (
+        <div className="flex items-center justify-between py-0.5">
+            <span className="text-[10px] font-ui text-[hsl(var(--text-2))]">{k}</span>
+            <span className={cn("text-[11.5px] font-num tabular-nums", tone || "text-[hsl(var(--text-1))]")}>{v}</span>
+        </div>
+    );
+    const dWRs = dWR == null ? "—" : `${dWR >= 0 ? "+" : ""}${Math.round(dWR)}%`;
+    const dPFs = dPF == null ? "—" : `${dPF >= 0 ? "+" : ""}${(Math.round(dPF * 100) / 100).toFixed(2)}`;
+    return (
+        <div className="flex-1 min-w-0 rounded-[6px] border-2 border-[hsl(var(--accent-primary)/0.5)] bg-[hsl(var(--accent-primary)/0.06)] px-3.5 py-2.5">
+            <div className="text-[11px] font-ui font-semibold text-[hsl(var(--accent-primary))] mb-2" title={titleAttr}>{title}</div>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-2 mb-2">
+                <Big k="Δ Net R"         v={fmtBeDeltaR(dNetR)} tone={beDeltaTone(dNetR)} />
+                <Big k="Δ Win Rate"      v={dWRs}               tone={beDeltaTone(dWR)} />
+                <Big k="Δ Profit Factor" v={dPFs}               tone={beDeltaTone(dPF)} />
+                <Big k="Δ Max DD"        v={fmtBeDeltaR(dDD)}   tone={beDeltaTone(dDD)} />
+            </div>
+            <div className="border-t border-[hsl(var(--border-soft))] pt-1.5">
+                <Small k="Trades affected" v={String(affected ?? 0)} />
+                <Small k="Losses saved"   v={lossesSaved == null ? "—" : String(lossesSaved)} tone="text-[hsl(var(--success))]" />
+                <Small k="Winners cut"    v={winnersCut == null ? "—" : String(winnersCut)} tone="text-[hsl(var(--danger))]" />
+            </div>
+        </div>
+    );
+}
+
+/** Secondary Global BE reference strip — de-emphasized; not the main comparison. */
+function GlobalBeReferenceStrip({ g, o, lossesSaved, winnersCut }) {
+    if (!g || !o) return null;
+    const dNetR = g.netR - o.netR;
+    const Cell = ({ k, v, tone }) => (
+        <div className="flex flex-col">
+            <span className="text-[9px] font-ui uppercase tracking-[0.05em] text-[hsl(var(--text-2)/0.8)]">{k}</span>
+            <span className={cn("text-[11.5px] font-num tabular-nums", tone || "text-[hsl(var(--text-2))]")}>{v}</span>
+        </div>
+    );
+    return (
+        <div className="rounded-[4px] border border-[hsl(var(--border-soft)/0.7)] bg-[hsl(var(--panel-2)/0.2)] px-3 py-2">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+                <span className="text-[10px] font-ui font-semibold uppercase tracking-[0.05em] text-[hsl(var(--text-2))]">Global BE reference</span>
+                <div className="flex items-center gap-4 flex-wrap">
+                    <Cell k="Net R" v={fmtBeR(g.netR)} tone={g.netR >= 0 ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]"} />
+                    <Cell k="Δ Net R vs Original" v={fmtBeDeltaR(dNetR)} tone={beDeltaTone(dNetR)} />
+                    <Cell k="Losses saved" v={lossesSaved == null ? "—" : String(lossesSaved)} />
+                    <Cell k="Winners cut" v={winnersCut == null ? "—" : String(winnersCut)} />
+                </div>
+            </div>
+            <p className="mt-1 text-[9.5px] font-ui text-[hsl(var(--text-2)/0.75)]">Global BE is shown only as a reference.</p>
+        </div>
+    );
+}
+
+/** Card 3 — the filtered cohort WITH BE applied, vs the same cohort's no-BE result. */
+function CohortBeCard({ title, titleAttr, s, filteredOriginal, lossesSaved, winnersCut, beExits }) {
+    if (!s) return null;
+    const dNetR = filteredOriginal ? s.netR - filteredOriginal.netR : null;
+    return (
+        <div className="flex-1 min-w-0 rounded-[4px] border border-[hsl(var(--success)/0.35)] bg-[hsl(var(--success)/0.05)] px-3 py-2">
+            <div className="text-[11px] font-ui font-semibold text-[hsl(var(--success))]" title={titleAttr}>{title}</div>
+            <div className="text-[9px] font-ui text-[hsl(var(--text-2)/0.8)]">Cohort · with BE</div>
+            <div className="mt-1.5">
+                <BeStatRow k="Net R" v={fmtBeR(s.netR)} vTone={s.netR >= 0 ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]"} />
+                <BeStatRow k="Win Rate" v={fmtBePct(s.winRate)} />
+                <BeStatRow k="Profit Factor" v={fmtBePf(s.profitFactor)} />
+                <BeStatRow k="Max DD" v={fmtBeR(s.maxDrawdownR)} vTone="text-[hsl(var(--danger))]" />
+                <BeStatRow k="Trades" v={String(s.performanceTrades ?? s.total ?? "—")} />
+                <div className="mt-1 border-t border-[hsl(var(--border-soft)/0.6)] pt-1">
+                    <BeStatRow k="Losses saved" v={lossesSaved == null ? "—" : String(lossesSaved)} vTone="text-[hsl(var(--success))]" />
+                    <BeStatRow k="Winners cut" v={winnersCut == null ? "—" : String(winnersCut)} vTone="text-[hsl(var(--danger))]" />
+                    <BeStatRow k="BE exits" v={beExits == null ? "—" : String(beExits)} />
+                    <BeStatRow k="Δ Net R vs cohort" v={dNetR == null ? "—" : fmtBeDeltaR(dNetR)} vTone={beDeltaTone(dNetR)} />
+                </div>
+            </div>
+        </div>
+    );
+}
+
+/** Human label for the active cohort filter, e.g. "Long + CHoCH" or "All Trades". */
+function cohortLabelText(beCohorts) {
+    const parts = [
+        ...(beCohorts.directions || []),
+        ...(beCohorts.structures || []),
+        ...(beCohorts.sessions || []),
     ];
+    return parts.length ? parts.join(" + ") : "All Trades";
+}
+
+function SelectiveBeCohortPanel({ beCohorts, toggleCohort, resetCohorts, cohortsActive, compare, selective, globalCounts, scenarioLabel }) {
+    if (!compare) return null;
+    const o = compare.original;
+    const g = compare.globalBe;
+    const sel = compare.selective;
+    const fo = compare.filteredOriginal;
+    const fp = compare.filteredProtected;
+    const cohortName = cohortLabelText(beCohorts);
+    const matched = selective?.summary.sampleSize ?? 0;
+    const total = selective?.meta?.total ?? 0;
+    return (
+        <NeonPanel
+            title="Apply BE to Cohorts"
+            action={
+                <div className="flex items-center gap-1.5 flex-wrap">
+                    <Pill tone="muted">Filtered {matched} / {total}</Pill>
+                    <Pill tone="muted">BE affected {selective?.applied ?? 0}</Pill>
+                    <Pill tone="success">Saved {selective?.summary.lossesSaved ?? 0}</Pill>
+                    <Pill tone="danger">Cut {selective?.summary.winnersCut ?? 0}</Pill>
+                    <Pill tone="warning">EXPLORATORY</Pill>
+                </div>
+            }
+        >
+            <div className="flex flex-col gap-3">
+                <CohortChips label="Direction" options={["Long", "Short"]} selected={beCohorts.directions} onToggle={(v) => toggleCohort("directions", v)} />
+                <CohortChips label="Structure" options={["CHoCH", "BOS"]} selected={beCohorts.structures} onToggle={(v) => toggleCohort("structures", v)} />
+                <CohortChips label="Session" options={["Asia", "London", "London Lull", "New York", "Outside"]} selected={beCohorts.sessions} onToggle={(v) => toggleCohort("sessions", v)} />
+                <div className="flex items-center gap-3 flex-wrap">
+                    <button type="button" onClick={resetCohorts} className="row-chip row-chip-muted text-[10.5px]">Reset to All</button>
+                    <span className="text-[10px] font-ui text-[hsl(var(--text-2)/0.8)]">No chips selected in a group = all of that group. Scenario: {scenarioLabel}.</span>
+                </div>
+
+                {/* Copy — what the filters do */}
+                <p className="text-[10.5px] font-ui text-[hsl(var(--text-2))] leading-snug">
+                    Filters decide which trades receive BE. All other trades stay as originally traded.
+                </p>
+
+                {/* Visual story breadcrumb */}
+                <div className="flex items-center gap-1.5 flex-wrap text-[10px] font-ui text-[hsl(var(--text-2))]">
+                    <span>Original Full Run</span><span className="text-[hsl(var(--text-2)/0.4)]">→</span>
+                    <span>{cohortName === "All Trades" ? "Filtered Cohort" : cohortName}</span><span className="text-[hsl(var(--text-2)/0.4)]">→</span>
+                    <span>Cohort With BE</span><span className="text-[hsl(var(--text-2)/0.4)]">→</span>
+                    <span className="font-semibold text-[hsl(var(--accent-primary))]">Full Run Impact</span>
+                </div>
+
+                {/* Cards 1–3: Original Full Run · Original {cohort} · {cohort} With BE */}
+                <div className="flex gap-3 flex-wrap lg:flex-nowrap items-stretch">
+                    <UniverseCol
+                        title="Original Full Run" subtitle="Exactly as traded · no BE" tone="muted" s={o}
+                        breakdown={compare.fullBreakdown}
+                        titleAttr="The run exactly as originally traded. No BE applied."
+                    />
+                    <UniverseCol
+                        title={`Original ${cohortName}`} subtitle="Filtered cohort · no BE" tone="muted" s={fo}
+                        breakdown={compare.filteredBreakdown}
+                        titleAttr="Only the trades matching your filters, before BE."
+                    />
+                    <CohortBeCard
+                        title={`${cohortName} With BE`}
+                        titleAttr="The same filtered trades, but using the selected BE scenario where available."
+                        s={fp}
+                        filteredOriginal={fo}
+                        lossesSaved={selective?.summary.lossesSaved}
+                        winnersCut={selective?.summary.winnersCut}
+                        beExits={selective?.summary.beExits}
+                    />
+                </div>
+
+                {/* Card 4: Full Run Impact (the headline) */}
+                <div className="flex">
+                    <DifferenceCard
+                        title="Full Run Impact"
+                        titleAttr="The full original run with BE applied only to the filtered cohort. All other trades stay unchanged."
+                        o={o}
+                        sel={sel}
+                        affected={selective?.applied ?? 0}
+                        lossesSaved={selective?.summary.lossesSaved}
+                        winnersCut={selective?.summary.winnersCut}
+                    />
+                </div>
+                <p className="text-[10px] font-ui text-[hsl(var(--text-2)/0.85)] leading-snug">
+                    Full Run Impact = the full original run with BE applied only to the filtered cohort; every other trade stays unchanged.
+                </p>
+
+                {/* Cohort counts + warnings */}
+                <div className="flex items-center gap-3 flex-wrap text-[11px] font-ui text-[hsl(var(--text-2))]">
+                    {!cohortsActive && <Pill tone="muted">All trades (= Global BE)</Pill>}
+                    {selective?.summary.lowSample && <Pill tone="warning">Low sample</Pill>}
+                    {selective?.warnings?.includes("unmatched_be") && <Pill tone="warning">{selective.skippedMissingBe} missing BE → kept original</Pill>}
+                </div>
+
+                {/* Secondary reference — Global BE (not the main comparison) */}
+                <GlobalBeReferenceStrip
+                    g={g}
+                    o={o}
+                    lossesSaved={globalCounts?.lossesSaved}
+                    winnersCut={globalCounts?.winnersCut}
+                />
+
+                <Note tone="warning">
+                    Selective BE is exploratory. Cohort slicing is prone to overfitting — always check sample
+                    size and the selective-vs-global delta. Validate on separate runs before treating it as a rule.
+                </Note>
+            </div>
+        </NeonPanel>
+    );
 }
 
 // ── Main export ───────────────────────────────────────────────────────────────
@@ -455,7 +693,6 @@ export function BreakevenTab({
     // result view's entry variant, then lists trades the BE stop actually fired
     // on (loss saved / winner cut / neutral BE exit when unpaired).
     const navigate = useNavigate();
-    const [affFilter, setAffFilter] = React.useState("all"); // all | loss_saved | winner_cut
     const selectedBeScenario = React.useMemo(() => {
         if (!hasExact) return null;
         return resolveBeScenarioSource({
@@ -471,14 +708,6 @@ export function BreakevenTab({
             scenario: { armLevelR, triggerBasis, beScenarioKey: selectedBeScenario.scenarioKey, stopBufferR: 0, delayCandles: 0 },
         });
     }, [selectedBeScenario, trades, armLevelR, triggerBasis]);
-    const affectedCounts = React.useMemo(() => ({
-        all: affectedRows.length,
-        loss_saved: affectedRows.filter((r) => r.classification === "loss_saved").length,
-        winner_cut: affectedRows.filter((r) => r.classification === "winner_cut").length,
-    }), [affectedRows]);
-    const affectedFiltered = React.useMemo(() => (
-        affFilter === "all" ? affectedRows : affectedRows.filter((r) => r.classification === affFilter)
-    ), [affectedRows, affFilter]);
     const onViewBeTradeOnMap = React.useCallback((row) => {
         setFocusedBeTrade({
             runId: activeRunId,
@@ -488,7 +717,39 @@ export function BreakevenTab({
         });
         navigate("/strategy-map");
     }, [activeRunId, armLevelR, triggerBasis, navigate]);
-    const affectedColumns = React.useMemo(() => buildAffectedColumns(onViewBeTradeOnMap), [onViewBeTradeOnMap]);
+
+    // ── Selective BE (apply BE to cohorts) — EXACT only, current view scoped ──
+    const [beCohorts, setBeCohorts] = React.useState({ directions: [], structures: [], sessions: [] });
+    const toggleCohort = React.useCallback((dim, value) => {
+        setBeCohorts((c) => {
+            const cur = c[dim] || [];
+            const next = cur.includes(value) ? cur.filter((x) => x !== value) : [...cur, value];
+            return { ...c, [dim]: next };
+        });
+    }, []);
+    const resetCohorts = React.useCallback(() => setBeCohorts({ directions: [], structures: [], sessions: [] }), []);
+    const cohortsActive = beCohorts.directions.length || beCohorts.structures.length || beCohorts.sessions.length;
+    const selectiveBe = React.useMemo(() => {
+        if (selectedBeScenario?.source !== "EXACT" || !Array.isArray(selectedBeScenario.trades)) return null;
+        return buildSelectiveBeUniverse({
+            originalTrades: trades,
+            beTrades: selectedBeScenario.trades,
+            filters: beCohorts,
+            scenario: { beScenarioKey: selectedBeScenario.scenarioKey },
+        });
+    }, [selectedBeScenario, trades, beCohorts]);
+    const beCompare = React.useMemo(() => {
+        if (selectedBeScenario?.source !== "EXACT") return null;
+        return {
+            original: summarizeTradeSanity(trades),                                          // Card 1: full run, no BE
+            filteredOriginal: selectiveBe ? summarizeTradeSanity(selectiveBe.filteredOriginalTrades) : null,   // Card 2: cohort, no BE
+            filteredProtected: selectiveBe ? summarizeTradeSanity(selectiveBe.filteredProtectedTrades) : null, // Card 3: cohort, with BE
+            selective: selectiveBe ? summarizeTradeSanity(selectiveBe.trades) : null,         // Card 4 basis: full run, BE on cohort
+            globalBe: summarizeTradeSanity(selectedBeScenario.trades || []),                  // reference: BE on all
+            fullBreakdown: selectiveBe?.meta?.fullBreakdown ?? null,
+            filteredBreakdown: selectiveBe?.meta?.filteredBreakdown ?? null,
+        };
+    }, [selectedBeScenario, trades, selectiveBe]);
 
     // ── Gate: three-state candle resolution ──────────────────────────────
     //
@@ -886,52 +1147,31 @@ export function BreakevenTab({
 
             {/* ── 6b. Trades affected by BE (EXACT only) ──────────────────── */}
             {isExact && (
-                <NeonPanel
-                    title="Trades affected by BE"
-                    action={<Pill tone="success">EXACT · {armLevelR}R {triggerBasis === "wick" ? "Wick" : "Close"}</Pill>}
-                >
-                    <div className="flex flex-col gap-3">
-                        <div className="flex items-center gap-2 flex-wrap">
-                            {[
-                                { key: "all", label: `All affected (${affectedCounts.all})` },
-                                { key: "loss_saved", label: `Loss Saved (${affectedCounts.loss_saved})` },
-                                { key: "winner_cut", label: `Winner Cut (${affectedCounts.winner_cut})` },
-                            ].map((t) => (
-                                <button
-                                    key={t.key}
-                                    type="button"
-                                    onClick={() => setAffFilter(t.key)}
-                                    className={cn(
-                                        "px-3 py-1.5 rounded-[4px] border text-[11px] font-ui font-semibold transition-colors",
-                                        affFilter === t.key
-                                            ? "bg-[hsl(var(--accent-primary)/0.16)] border-[hsl(var(--accent-primary)/0.5)] text-[hsl(var(--accent-primary))]"
-                                            : "bg-[hsl(var(--panel-2)/0.4)] border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))] hover:text-[hsl(var(--text))]",
-                                    )}
-                                >
-                                    {t.label}
-                                </button>
-                            ))}
-                        </div>
-                        {affectedFiltered.length ? (
-                            <DataTable
-                                columns={affectedColumns}
-                                rows={affectedFiltered}
-                                rowKey="id"
-                                onRowClick={(row) => onViewBeTradeOnMap(row)}
-                                defaultSortKey={null}
-                            />
-                        ) : (
-                            <div className="py-3 text-[11.5px] font-ui text-[hsl(var(--text-2))]">
-                                No {affFilter === "all" ? "BE-affected" : affFilter === "loss_saved" ? "loss-saved" : "winner-cut"} trades at {armLevelR}R {triggerBasis}.
-                            </div>
-                        )}
-                        <Note>
-                            Trades where the BE stop fired. Loss Saved / Winner Cut are vs this view&apos;s no-BE
-                            baseline; unpaired rows show neutral BE Exit. Click a row or “View on Map” to inspect it
-                            on the Strategy Map with the BE overlay. Sorted by largest |Δ R| first.
-                        </Note>
-                    </div>
-                </NeonPanel>
+                <BeAffectedTradesCard
+                    rows={affectedRows}
+                    headerRight={<Pill tone="success">EXACT · {armLevelR}R {triggerBasis === "wick" ? "Wick" : "Close"}</Pill>}
+                    actionLabel="View on Map"
+                    onAction={onViewBeTradeOnMap}
+                    scenarioSuffix={` at ${armLevelR}R ${triggerBasis}`}
+                    note={<>Trades where the BE stop fired. Loss Saved / Winner Cut are vs this view&apos;s no-BE baseline; unpaired rows show neutral BE Exit. Click a row or “View on Map” to inspect it on the Strategy Map with the BE overlay. Sorted by largest |Δ R| first.</>}
+                />
+            )}
+
+            {/* ── 6c. Selective BE — apply BE to cohorts (EXACT only) ──────── */}
+            {isExact && beCompare && (
+                <SelectiveBeCohortPanel
+                    beCohorts={beCohorts}
+                    toggleCohort={toggleCohort}
+                    resetCohorts={resetCohorts}
+                    cohortsActive={cohortsActive}
+                    compare={beCompare}
+                    selective={selectiveBe}
+                    globalCounts={{
+                        lossesSaved: affectedRows.filter((r) => r.classification === "loss_saved").length,
+                        winnersCut: affectedRows.filter((r) => r.classification === "winner_cut").length,
+                    }}
+                    scenarioLabel={`${armLevelR}R ${triggerBasis === "wick" ? "Wick" : "Close"}`}
+                />
             )}
 
             {/* ── 7. Research methodology disclosure (collapsible) ─────────── */}

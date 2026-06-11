@@ -12,8 +12,9 @@ import { Pill } from "@/components/lab/DataTable";
 import { CandleChart } from "@/components/lab/CandleChart";
 import { IntrabarInspector } from "@/components/lab/IntrabarInspector";
 import { BeVerificationPanel } from "@/components/lab/protection/BeVerificationPanel";
+import { BeAffectedTradesCard } from "@/components/lab/protection/BeAffectedTradesCard";
 import { resolveBeScenarioSource, entryVariantHasExact } from "@/data/beResolve";
-import { buildBreakEvenTimeline, pairBaselineTrade } from "@/data/protectionTimeline";
+import { buildBreakEvenTimeline, pairBaselineTrade, buildBeAffectedTrades } from "@/data/protectionTimeline";
 import { compactTimeframe, formatRunDateRange, getRunDisplayName, loadCandlesForRun, reloadFullRunFromSidecar, rehydrateRunCandles, useDataset } from "@/data/store";
 import { setActiveRunId, setScenario, setSelectedTradeVariant } from "@/data/store";
 import { FolderKanban, Search, AlertTriangle } from "lucide-react";
@@ -748,6 +749,33 @@ export default function StrategyMap() {
     }, [showBeVerification, selectedTrade, beScenario, beArm, beTrigger]);
     const beVerification = showBeVerification && beTimeline ? beTimeline.geometry : null;
     const beScenarioLabel = `${beArm}R ${beTrigger === "wick" ? "Wick" : "Close"}`;
+    // OB ids whose BE stop fired in the selected scenario — highlighted + Debug-labelled.
+    const beAffectedObIds = useMemo(() => {
+        if (!showBeVerification || beScenario?.source !== "EXACT" || !Array.isArray(beScenario.trades)) return [];
+        const ids = [];
+        for (const t of beScenario.trades) {
+            const reason = String(t.be_exit_reason ?? t.beExitReason ?? "").toLowerCase();
+            const triggered = t.be_triggered === true || t.beTriggered === true || reason === "be_stop";
+            if (!triggered) continue;
+            const ob = t.obId ?? t.displayObId ?? t.ob_id;
+            if (ob != null && ob !== "") ids.push(ob);
+        }
+        return ids;
+    }, [showBeVerification, beScenario]);
+    // Affected-trade rows for the shared list card (same card as the BE page).
+    const beAffectedRows = useMemo(() => {
+        if (beScenario?.source !== "EXACT" || !Array.isArray(beScenario.trades)) return [];
+        return buildBeAffectedTrades({
+            beTrades: beScenario.trades,
+            baselineTrades: activeTrades,
+            scenario: { armLevelR: beArm, triggerBasis: beTrigger, beScenarioKey: beScenario.scenarioKey, stopBufferR: 0, delayCandles: 0 },
+        });
+    }, [beScenario, activeTrades, beArm, beTrigger]);
+    const onSelectBeAffectedRow = (row) => {
+        const id = row?.baseTradeId || row?.id;
+        if (id) setSelectedTradeId(id);
+    };
+    const beListActive = showBeVerification && beExactAvailable;
 
     return (
         <div className="pb-12">
@@ -990,6 +1018,8 @@ export default function StrategyMap() {
                             selectedTradeId={selectedTradeId}
                             highlightObId={selectedOverlay?.obId ?? null}
                             beVerification={beVerification}
+                            beAffectedObIds={beAffectedObIds}
+                            beVerificationActive={showBeVerification && beExactAvailable}
                             height={chartHeight}
                             triggeredEdgeOverlays={triggeredEdgeOverlays}
                             showTriggeredEdgeLevels={showTriggeredEdgeLevels}
@@ -1021,33 +1051,68 @@ export default function StrategyMap() {
                         />
                         {selectedTrade && (
                             <IntrabarInspector
+                                key={`be-insp-${selectedTrade?.displayObId || selectedTrade?.obId || selectedTrade?.id || "none"}`}
                                 selectedTrade={selectedTrade}
                                 triggeredEdgeOverlay={selectedTriggeredEdge}
                                 sourceCandles={sourceCandles}
                                 sourceIsFine={!candlesAreCoarse}
                                 medianCandleGapSec={medianCandleGapSec}
+                                beVerification={beVerification}
+                                pipSize={Number(runConfig?.pip_size) || 0.0001}
                                 onClose={() => setSelectedTradeId(null)}
                             />
                         )}
-                        {showBeVerification && beTimeline && (
-                            <BeVerificationPanel
-                                timeline={beTimeline}
-                                resultViewLabel={beResultViewLabel}
-                                scenarioLabel={beScenarioLabel}
-                                source="EXACT"
-                                coarseCandles={candlesAreCoarse}
-                                onClose={() => setShowBeVerification(false)}
-                            />
-                        )}
-                        {selectedOverlay && (
-                            <LifecycleDetailPanel
-                                overlay={selectedOverlay}
-                                trades={activeTrades}
-                                onClose={() => setSelectedOverlay(null)}
-                                showFftDebug={showFftDebug}
-                                runConfig={runConfig}
-                            />
-                        )}
+                        {/* During BE debug: trade list on the LEFT (50%); BE
+                            Verification (top) + original lifecycle/debug (below)
+                            stacked on the RIGHT (50%). Outside BE debug the panels
+                            render full-width exactly as before. */}
+                        {(() => {
+                            // The original debug (lifecycle) panel: explicit overlay
+                            // selection, or — while BE-debugging — auto-derived from
+                            // the selected trade so it stays visible.
+                            const lifecycleOverlay = selectedOverlay || (showBeVerification ? selectedTriggeredEdge : null);
+                            const panels = (
+                                <>
+                                    {showBeVerification && beTimeline && (
+                                        <BeVerificationPanel
+                                            timeline={beTimeline}
+                                            resultViewLabel={beResultViewLabel}
+                                            scenarioLabel={beScenarioLabel}
+                                            source="EXACT"
+                                            coarseCandles={candlesAreCoarse}
+                                            onClose={() => setShowBeVerification(false)}
+                                        />
+                                    )}
+                                    {lifecycleOverlay && (
+                                        <LifecycleDetailPanel
+                                            overlay={lifecycleOverlay}
+                                            trades={activeTrades}
+                                            onClose={() => setSelectedOverlay(null)}
+                                            showFftDebug={showFftDebug}
+                                            runConfig={runConfig}
+                                        />
+                                    )}
+                                </>
+                            );
+                            if (!beListActive) return panels;
+                            return (
+                                <div className="flex gap-3 items-start">
+                                    <div className="w-1/2 min-w-0 flex flex-col gap-3">
+                                        {panels}
+                                    </div>
+                                    <div className="w-1/2 min-w-0">
+                                        <BeAffectedTradesCard
+                                            rows={beAffectedRows}
+                                            headerRight={<Pill tone="success">EXACT · {beArm}R {beTrigger === "wick" ? "Wick" : "Close"}</Pill>}
+                                            actionLabel="Inspect"
+                                            onAction={onSelectBeAffectedRow}
+                                            scenarioSuffix={` at ${beArm}R ${beTrigger}`}
+                                            note={<>Trades where the BE stop fired. Click a row to select it on the map and show its BE overlay. Sorted by largest |Δ R| first.</>}
+                                        />
+                                    </div>
+                                </div>
+                            );
+                        })()}
                     </div>
                     <button
                         type="button"

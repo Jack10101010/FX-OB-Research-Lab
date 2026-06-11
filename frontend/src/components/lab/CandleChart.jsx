@@ -272,6 +272,11 @@ export function CandleChart({
     // draws BE arm/stop + entry/SL/TP price lines and arm/exit markers for the
     // selected trade. Null ⇒ no BE overlay (existing behavior unchanged).
     beVerification = null,
+    // BE-affected OB highlight (Protection Lab debugging): when beVerificationActive,
+    // every OB id in beAffectedObIds gets a thin blue border + a clickable "Debug"
+    // label (below bullish / above bearish OBs).
+    beAffectedObIds = [],
+    beVerificationActive = false,
     rrTools = [],
     newsEvents = [],
     sessionRanges = [],
@@ -319,6 +324,17 @@ export function CandleChart({
     // Treat selectedTradeId OR highlightObId as "selected" — single selection path,
     // no second visual language. highlightObId drives the FFT map-link focus highlight.
     const selectedKey = obLookupKey(selectedTradeId) ?? obLookupKey(highlightObId);
+    // Normalised set of BE-affected OB ids (highlight + Debug label when active).
+    const beAffectedObKeySet = useMemo(() => {
+        const s = new Set();
+        if (beVerificationActive) {
+            for (const id of (beAffectedObIds || [])) {
+                const k = obLookupKey(id);
+                if (k != null) s.add(k);
+            }
+        }
+        return s;
+    }, [beVerificationActive, beAffectedObIds]);
     const tradeByObKey = useMemo(() => {
         const map = new Map();
         for (const t of trades || []) {
@@ -1470,6 +1486,8 @@ export function CandleChart({
                     const selectable = obIsSelectable(o);
                     const obKey = obLookupKey(o.tradeId || o.displayTradeId || o.linkedTradeId || o.obId || o.ob_id || o.id);
                     const selected = !!(selectedKey != null && obKey != null && obKey === selectedKey);
+                    const obOnlyKey = obLookupKey(o.obId ?? o.ob_id ?? o.id);
+                    const beAffected = beAffectedObKeySet.size > 0 && obOnlyKey != null && beAffectedObKeySet.has(obOnlyKey);
                     return (
                         <OrderBlockOverlay
                             key={o.id}
@@ -1479,7 +1497,10 @@ export function CandleChart({
                             showObLabels={showObLabels}
                             showObDetails={showObDetails}
                             selected={selected}
+                            beAffected={beAffected}
+                            suppressSelectionStyle={beVerificationActive}
                             onClick={selectable ? () => handleObClick(o) : undefined}
+                            onDebugClick={beAffected && selectable ? () => handleObClick(o) : undefined}
                         />
                     );
                 })}
@@ -1733,18 +1754,31 @@ function obDetailsContent(ob) {
     return { idText, dirText, statusText, rText, cancelDisplay, structDisplay };
 }
 
-function OrderBlockOverlay({ ob, debugIndex = 0, debugOverlays = false, showObLabels = false, showObDetails = false, selected = false, onClick }) {
+function OrderBlockOverlay({ ob, debugIndex = 0, debugOverlays = false, showObLabels = false, showObDetails = false, selected = false, beAffected = false, suppressSelectionStyle = false, onClick, onDebugClick }) {
     const visual = resolveObVisual(ob);
     const interactive = !!onClick;
-    const selectionRing = selected
+    // In BE verification mode we suppress the chunky 3px selection border + glow
+    // (the thin BE-affected border + BE price lines are the verification cue).
+    const showSelection = selected && !suppressSelectionStyle;
+    const selectionRing = showSelection
         ? "0 0 0 3px rgba(56, 189, 248, 1), 0 0 12px 2px rgba(56, 189, 248, 0.6)"
         : "none";
-    const borderColor = selected ? "rgba(56, 189, 248, 0.98)" : visual.border;
+    // BE-affected OBs get a thin blue border (≈30% thinner than the 3px selected
+    // border → 2px). Selected styling still wins when both apply (unless suppressed).
+    const borderColor = (showSelection || beAffected) ? "rgba(56, 189, 248, 0.98)" : visual.border;
+    const borderWidth = showSelection ? 3 : beAffected ? 2 : 1;
+    // Bullish OBs label below the box, bearish above — close to the outer edge.
+    const bullish = (() => {
+        const s = String(ob.side ?? ob.direction ?? "").toLowerCase();
+        if (s.startsWith("bear") || s.startsWith("short") || s === "sell") return false;
+        return true;
+    })();
 
     return (
         <div
             data-testid={`ob-overlay-${ob.id}`}
             data-selected={selected ? "true" : "false"}
+            data-be-affected={beAffected ? "true" : "false"}
             className="absolute"
             onClick={interactive ? (e) => { e.stopPropagation(); onClick(); } : undefined}
             title={interactive ? "Click to inspect this trade" : undefined}
@@ -1754,13 +1788,34 @@ function OrderBlockOverlay({ ob, debugIndex = 0, debugOverlays = false, showObLa
                 top: ob.top,
                 height: ob.height,
                 background: visual.fill,
-                border: `${selected ? 3 : 1}px solid ${borderColor}`,
+                border: `${borderWidth}px solid ${borderColor}`,
                 boxShadow: selectionRing,
-                zIndex: selected ? 30 : 12,
+                zIndex: showSelection ? 30 : beAffected ? 18 : 12,
                 pointerEvents: interactive ? "auto" : "none",
                 cursor: interactive ? "pointer" : "default",
             }}
         >
+            {beAffected && onDebugClick && (
+                <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onDebugClick(); }}
+                    className="absolute left-1/2 text-[9px] font-ui font-semibold px-1.5 py-[1px] rounded-[3px]"
+                    style={{
+                        ...(bullish
+                            ? { top: "100%", transform: "translate(-50%, 3px)" }
+                            : { bottom: "100%", transform: "translate(-50%, -3px)" }),
+                        color: "#fff",
+                        background: "rgba(56, 189, 248, 0.95)",
+                        pointerEvents: "auto",
+                        cursor: "pointer",
+                        whiteSpace: "nowrap",
+                        zIndex: 40,
+                    }}
+                    title="Open BE debug for this trade"
+                >
+                    BE Debug
+                </button>
+            )}
             {showObLabels && !showObDetails && (
                 <span
                     className="absolute top-0.5 left-1 text-[8.5px] font-code px-1 leading-[11px]"

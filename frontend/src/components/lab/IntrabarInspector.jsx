@@ -19,10 +19,13 @@ import { createChart, CrosshairMode } from "lightweight-charts";
 import { X, Pin } from "lucide-react";
 
 const INSPECTOR_POS_KEY = "fxob_strategy_map_inspector_pos_v1";
-const DEFAULT_LEAD_MIN = 15;
-const DEFAULT_TRAIL_MIN = 30;
-const INSPECTOR_WIDTH = 360;
-const INSPECTOR_HEIGHT = 260;
+const INSPECTOR_VIEW_KEY = "fxob_strategy_map_inspector_view_v1";
+const DEFAULT_LEAD_MIN = 65;   // +50 lead candles (1m) vs the original 15
+const DEFAULT_TRAIL_MIN = 80;  // +50 trail candles (1m) vs the original 30
+const INSPECTOR_WIDTH = 360;   // default width; resizable via the corner handle
+const INSPECTOR_HEIGHT = 260;  // default height; resizable via the corner handle
+const MIN_INSPECTOR_WIDTH = 280;
+const MIN_INSPECTOR_HEIGHT = 200;
 const HEADER_HEIGHT = 22;
 const STATUS_HEIGHT = 16;
 const FOOTER_HEIGHT = 28;
@@ -113,6 +116,35 @@ function savePos(pos) {
     }
 }
 
+// ── Per-OB view persistence ─────────────────────────────────────────────────
+// Remembers the magnifier view (lead/trail/size/BE-lines) PER order block, keyed
+// by OB id. Re-opening the same OB restores its view; a different OB loads its
+// own saved view or defaults.
+function loadViewMap() {
+    try {
+        const raw = localStorage.getItem(INSPECTOR_VIEW_KEY);
+        const parsed = raw ? JSON.parse(raw) : {};
+        return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+        return {};
+    }
+}
+function loadView(obKey) {
+    if (!obKey) return null;
+    const v = loadViewMap()[obKey];
+    return v && typeof v === "object" ? v : null;
+}
+function saveView(obKey, view) {
+    if (!obKey) return;
+    try {
+        const map = loadViewMap();
+        map[obKey] = view;
+        localStorage.setItem(INSPECTOR_VIEW_KEY, JSON.stringify(map));
+    } catch {
+        // ignore
+    }
+}
+
 // Slice a sorted-by-time candle array. Uses binary search above 50k candles,
 // linear filter otherwise (the typical Strategy Map run is under that).
 function sliceCandlesByTime(candles, windowStart, windowEnd) {
@@ -165,13 +197,34 @@ export function IntrabarInspector({
     sourceIsFine,
     medianCandleGapSec,
     onClose,
+    beVerification = null,   // optional BE geometry from StrategyMap: { beArmPrice, beStopPrice, beArmTime, beExitTime, armLevelR }
+    pipSize = 0.0001,        // for stage-line wick clipping
 }) {
     const wrapperRef = useRef(null);
     const dragRef = useRef(null);
+    const resizeRef = useRef(null);
     const [position, setPosition] = useState(loadPos);
     const [pinned, setPinned] = useState(false); // visual toggle in Phase 1; behavior reserved for Phase 2
-    const [leadMinutes, setLeadMinutes] = useState(DEFAULT_LEAD_MIN);
-    const [trailMinutes, setTrailMinutes] = useState(DEFAULT_TRAIL_MIN);
+    // Per-OB persisted view: re-opening the same OB restores lead/trail/size/BE-lines.
+    // (The component is keyed by OB in StrategyMap, so these lazy initializers read
+    // the right OB's saved view once on mount.)
+    const obViewKey = String(selectedTrade?.displayObId || selectedTrade?.obId || selectedTrade?.id || "");
+    const [leadMinutes, setLeadMinutes] = useState(() => loadView(obViewKey)?.lead ?? DEFAULT_LEAD_MIN);
+    const [trailMinutes, setTrailMinutes] = useState(() => loadView(obViewKey)?.trail ?? DEFAULT_TRAIL_MIN);
+    const [size, setSize] = useState(() => {
+        const v = loadView(obViewKey);
+        return (v?.width && v?.height) ? { width: v.width, height: v.height } : { width: INSPECTOR_WIDTH, height: INSPECTOR_HEIGHT };
+    });
+    // BE lines default ON so they show immediately when debugging a BE trade.
+    const [showBeLines, setShowBeLines] = useState(() => loadView(obViewKey)?.showBeLines ?? true);
+
+    // Persist this OB's view whenever it changes.
+    useEffect(() => {
+        if (!obViewKey) return;
+        saveView(obViewKey, { lead: leadMinutes, trail: trailMinutes, width: size.width, height: size.height, showBeLines });
+    }, [obViewKey, leadMinutes, trailMinutes, size, showBeLines]);
+    const chartHeight = Math.max(120, size.height - HEADER_HEIGHT - STATUS_HEIGHT - FOOTER_HEIGHT);
+    const beAvailable = !!(beVerification && (beVerification.beArmPrice != null || beVerification.beStopPrice != null));
 
     // Compute initial right-aligned position if none was persisted.
     // Also clamp a stale persisted position back into the visible area (e.g.
@@ -240,6 +293,50 @@ export function IntrabarInspector({
         document.body.style.userSelect = "none";
     };
 
+    // Corner resize handlers (drag bottom-right to grow/shrink the panel).
+    useEffect(() => {
+        const onMove = (e) => {
+            if (!resizeRef.current) return;
+            const dx = e.clientX - resizeRef.current.startX;
+            const dy = e.clientY - resizeRef.current.startY;
+            const parent = wrapperRef.current?.offsetParent;
+            const parentW = parent?.clientWidth || 1200;
+            const parentH = parent?.clientHeight || 900;
+            const maxW = Math.max(MIN_INSPECTOR_WIDTH, parentW - (resizeRef.current.left || 0) - 4);
+            const maxH = Math.max(MIN_INSPECTOR_HEIGHT, parentH - (resizeRef.current.top || 0) - 4);
+            const width = Math.max(MIN_INSPECTOR_WIDTH, Math.min(maxW, resizeRef.current.startW + dx));
+            const height = Math.max(MIN_INSPECTOR_HEIGHT, Math.min(maxH, resizeRef.current.startH + dy));
+            setSize({ width, height });
+        };
+        const onUp = () => {
+            if (!resizeRef.current) return;
+            resizeRef.current = null;
+            document.body.style.cursor = "";
+            document.body.style.userSelect = "";
+        };
+        window.addEventListener("mousemove", onMove);
+        window.addEventListener("mouseup", onUp);
+        return () => {
+            window.removeEventListener("mousemove", onMove);
+            window.removeEventListener("mouseup", onUp);
+        };
+    }, []);
+
+    const startResize = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        resizeRef.current = {
+            startX: e.clientX,
+            startY: e.clientY,
+            startW: size.width,
+            startH: size.height,
+            left: position?.left || 0,
+            top: position?.top || 0,
+        };
+        document.body.style.cursor = "nwse-resize";
+        document.body.style.userSelect = "none";
+    };
+
     // ESC closes the inspector.
     useEffect(() => {
         const onKey = (e) => {
@@ -296,6 +393,26 @@ export function IntrabarInspector({
     }), [triggeredEdgeOverlay, selectedTrade]);
 
     // Header bits
+    // When BE lines are toggled on (and BE geometry is available), add the BE
+    // arm + stop price levels and the BE arm/exit time markers to the magnifier.
+    const displayLevels = useMemo(() => {
+        if (!showBeLines || !beAvailable) return levels;
+        return {
+            ...levels,
+            beArmPrice: numericOrNull(beVerification.beArmPrice),
+            beStopPrice: numericOrNull(beVerification.beStopPrice),
+            beArmLabel: beVerification.armLevelR != null ? `BE arm ${beVerification.armLevelR}R` : "BE arm",
+        };
+    }, [showBeLines, beAvailable, levels, beVerification]);
+    const displayEvents = useMemo(() => {
+        if (!showBeLines || !beAvailable) return events;
+        return {
+            ...events,
+            beArmTime: normalizeChartTimestamp(beVerification.beArmTime),
+            beExitTime: normalizeChartTimestamp(beVerification.beExitTime),
+        };
+    }, [showBeLines, beAvailable, events, beVerification]);
+
     const tradeIdLabel = String(selectedTrade?.displayTradeId || selectedTrade?.id || "—");
     const obIdLabel = String(selectedTrade?.displayObId || selectedTrade?.obId || triggeredEdgeOverlay?.obId || "—");
     const rawDirection = String(triggeredEdgeOverlay?.direction || selectedTrade?.direction || "");
@@ -322,8 +439,8 @@ export function IntrabarInspector({
         position: "absolute",
         top: position.top,
         left: position.left,
-        width: INSPECTOR_WIDTH,
-        height: isUnavailable ? (HEADER_HEIGHT + 56) : INSPECTOR_HEIGHT,
+        width: size.width,
+        height: isUnavailable ? (HEADER_HEIGHT + 56) : size.height,
         zIndex: 30,
         background: "rgba(248, 250, 252, 0.98)",
         border: "1px solid rgba(15, 23, 42, 0.22)",
@@ -359,19 +476,41 @@ export function IntrabarInspector({
                 <>
                     <MiniChart
                         candles={slicedCandles}
-                        levels={levels}
-                        events={events}
+                        levels={displayLevels}
+                        events={displayEvents}
                         direction={direction}
                         windowStart={windowStart}
                         windowEnd={windowEnd}
+                        chartHeight={chartHeight}
+                        pipSize={pipSize}
                     />
                     <Footer
                         leadMinutes={leadMinutes}
                         trailMinutes={trailMinutes}
                         onLead={setLeadMinutes}
                         onTrail={setTrailMinutes}
+                        beAvailable={beAvailable}
+                        showBeLines={showBeLines}
+                        onToggleBeLines={() => setShowBeLines((v) => !v)}
                     />
                 </>
+            )}
+            {!isUnavailable && (
+                <div
+                    onMouseDown={startResize}
+                    title="Drag to resize"
+                    style={{
+                        position: "absolute",
+                        right: 0,
+                        bottom: 0,
+                        width: 14,
+                        height: 14,
+                        cursor: "nwse-resize",
+                        zIndex: 40,
+                        // subtle corner grip
+                        background: "linear-gradient(135deg, transparent 50%, rgba(15,23,42,0.35) 50%)",
+                    }}
+                />
             )}
         </div>
     );
@@ -475,7 +614,7 @@ function UnavailableMessage({ medianCandleGapSec }) {
     );
 }
 
-function Footer({ leadMinutes, trailMinutes, onLead, onTrail }) {
+function Footer({ leadMinutes, trailMinutes, onLead, onTrail, beAvailable = false, showBeLines = false, onToggleBeLines }) {
     const wrap = {
         height: FOOTER_HEIGHT,
         display: "flex",
@@ -501,7 +640,7 @@ function Footer({ leadMinutes, trailMinutes, onLead, onTrail }) {
     const clamp = (v) => {
         const n = Math.round(Number(v));
         if (!isFinite(n)) return 1;
-        return Math.max(1, Math.min(240, n));
+        return Math.max(1, Math.min(600, n));
     };
     return (
         <div style={wrap}>
@@ -509,18 +648,40 @@ function Footer({ leadMinutes, trailMinutes, onLead, onTrail }) {
             <input
                 type="number"
                 min={1}
-                max={240}
+                max={600}
                 value={leadMinutes}
                 onChange={(e) => onLead(clamp(e.target.value))}
                 style={inputStyle}
             />
             <span>min</span>
+            {beAvailable && (
+                <button
+                    type="button"
+                    onClick={onToggleBeLines}
+                    title="Toggle break-even arm / stop lines + arm/exit markers"
+                    style={{
+                        marginLeft: 8,
+                        height: 18,
+                        padding: "0 7px",
+                        fontSize: 10,
+                        fontFamily: UI_FONT,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        borderRadius: 3,
+                        border: `1px solid ${showBeLines ? "rgba(56,189,248,0.9)" : "rgba(148,163,184,0.6)"}`,
+                        background: showBeLines ? "rgba(56,189,248,0.18)" : "rgba(255,255,255,0.9)",
+                        color: showBeLines ? "rgba(8,47,73,0.95)" : "rgba(71,85,105,0.9)",
+                    }}
+                >
+                    BE lines
+                </button>
+            )}
             <span style={{ flex: 1 }} />
             <span>Trail</span>
             <input
                 type="number"
                 min={1}
-                max={240}
+                max={600}
                 value={trailMinutes}
                 onChange={(e) => onTrail(clamp(e.target.value))}
                 style={inputStyle}
@@ -534,18 +695,22 @@ function Footer({ leadMinutes, trailMinutes, onLead, onTrail }) {
 // MiniChart — second lightweight-charts instance
 // ─────────────────────────────────────────────────────────────────────────────
 
-function MiniChart({ candles, levels, events, direction, windowStart, windowEnd }) {
+function MiniChart({ candles, levels, events, direction, windowStart, windowEnd, chartHeight = CHART_HEIGHT, pipSize = 0.0001 }) {
     const containerRef = useRef(null);
     const chartRef = useRef(null);
     const seriesRef = useRef(null);
     const [overlayKey, setOverlayKey] = useState(0);
+    // Keep the latest chart height available to the mount-time ResizeObserver
+    // closure (which only runs the create effect once).
+    const chartHeightRef = useRef(chartHeight);
+    chartHeightRef.current = chartHeight;
 
     useLayoutEffect(() => {
         if (!containerRef.current) return undefined;
         const width = Math.max(1, containerRef.current.clientWidth || 1);
         const chart = createChart(containerRef.current, {
             width,
-            height: CHART_HEIGHT,
+            height: chartHeightRef.current,
             layout: {
                 background: { color: "rgba(248, 250, 252, 1)" },
                 textColor: "rgba(71, 85, 105, 0.86)",
@@ -592,7 +757,7 @@ function MiniChart({ candles, levels, events, direction, windowStart, windowEnd 
         const ro = new ResizeObserver(() => {
             if (!containerRef.current || !chartRef.current) return;
             const w = containerRef.current.clientWidth;
-            if (w > 0) chartRef.current.applyOptions({ width: w, height: CHART_HEIGHT });
+            if (w > 0) chartRef.current.applyOptions({ width: w, height: chartHeightRef.current });
             repaint();
         });
         ro.observe(containerRef.current);
@@ -604,6 +769,17 @@ function MiniChart({ candles, levels, events, direction, windowStart, windowEnd 
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+
+    // Apply height (and width) when the panel is resized.
+    useEffect(() => {
+        const chart = chartRef.current;
+        const el = containerRef.current;
+        if (!chart || !el) return;
+        const w = Math.max(1, el.clientWidth || 1);
+        chart.applyOptions({ width: w, height: chartHeight });
+        chart.timeScale().fitContent();
+        setOverlayKey((k) => k + 1);
+    }, [chartHeight]);
 
     useEffect(() => {
         const series = seriesRef.current;
@@ -646,13 +822,15 @@ function MiniChart({ candles, levels, events, direction, windowStart, windowEnd 
         direction,
         windowStart,
         windowEnd,
+        candles,
+        pipSize,
         // overlayKey participates as a dep so React re-runs render after time-scale moves.
         // eslint-disable-next-line no-unused-vars
         _key: overlayKey,
     });
 
     return (
-        <div style={{ position: "relative", width: "100%", height: CHART_HEIGHT, overflow: "hidden" }}>
+        <div style={{ position: "relative", width: "100%", height: chartHeight, overflow: "hidden" }}>
             <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
             <div
                 className="pointer-events-none"
@@ -704,10 +882,11 @@ function MiniChart({ candles, levels, events, direction, windowStart, windowEnd 
                 {overlays.markers.map((m) => (
                     <div
                         key={m.id}
+                        title={m.title}
                         style={{
                             position: "absolute",
-                            top: 0,
-                            height: "100%",
+                            top: m.top ?? 0,
+                            height: m.height ?? "100%",
                             left: m.x,
                             width: 1,
                             borderLeft: `1px solid ${m.color}`,
@@ -716,7 +895,7 @@ function MiniChart({ candles, levels, events, direction, windowStart, windowEnd 
                         <span
                             style={{
                                 position: "absolute",
-                                top: 1,
+                                ...(m.labelAtTop === false ? { bottom: 1 } : { top: 1 }),
                                 left: 2,
                                 fontSize: 7.5,
                                 fontFamily: MONO_FONT,
@@ -725,6 +904,7 @@ function MiniChart({ candles, levels, events, direction, windowStart, windowEnd 
                                 padding: "0 2px",
                                 whiteSpace: "nowrap",
                             }}
+                            title={m.title}
                         >
                             {m.label}
                         </span>
@@ -750,7 +930,7 @@ function MiniChart({ candles, levels, events, direction, windowStart, windowEnd 
     );
 }
 
-function computeOverlays({ chart, series, container, levels, events, direction, windowStart, windowEnd }) {
+function computeOverlays({ chart, series, container, levels, events, direction, windowStart, windowEnd, candles = [], pipSize = 0.0001 }) {
     if (!chart || !series || !container) {
         return { obBand: null, lines: [], markers: [] };
     }
@@ -758,6 +938,21 @@ function computeOverlays({ chart, series, container, levels, events, direction, 
     const maxH = bounds.height || CHART_HEIGHT;
     const maxW = bounds.width || 1;
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+    // Candle lookup for stage-line clipping: find the candle that contains an
+    // event time (largest candle time ≤ t).
+    const sortedCandles = (candles || [])
+        .map((c) => ({ t: candleTimeOf(c), high: Number(c.h ?? c.high), low: Number(c.l ?? c.low) }))
+        .filter((c) => c.t != null && isFinite(c.high) && isFinite(c.low))
+        .sort((a, b) => a.t - b.t);
+    const candleAt = (t) => {
+        let match = null;
+        for (const c of sortedCandles) {
+            if (c.t > t) break;
+            match = c;
+        }
+        return match;
+    };
 
     let obBand = null;
     if (levels.obTop != null && levels.obBot != null) {
@@ -789,18 +984,25 @@ function computeOverlays({ chart, series, container, levels, events, direction, 
     pushLine("entry", levels.entryPrice, "Entry", "rgba(34, 197, 94, 0.92)");
     pushLine("stop", levels.stopPrice, "Stop", "rgba(220, 38, 38, 0.85)");
     if (levels.tpPrice != null) pushLine("tp", levels.tpPrice, "TP", "rgba(34, 197, 94, 0.55)");
+    // BE lines (only present when the BE-lines toggle is on).
+    if (levels.beArmPrice != null) pushLine("beArm", levels.beArmPrice, levels.beArmLabel || "BE arm", "rgba(245, 158, 11, 0.95)");
+    if (levels.beStopPrice != null) pushLine("beStop", levels.beStopPrice, "BE stop", "rgba(56, 189, 248, 0.95)");
 
+    // [color, label, title] — title is the plain-English explanation (tooltip).
     const eventColors = {
-        obDetectionTime:   ["rgba(107, 114, 128, 0.85)", "DET"],
-        tappedTime:        ["rgba(99, 102, 241, 0.9)",   "TAP"],
-        triggerTime:       ["rgba(245, 158, 11, 0.95)",  "TRIG"],
-        armedAt:           ["rgba(234, 179, 8, 0.95)",   "ARM"],
-        fillTime:          ["rgba(34, 197, 94, 0.95)",   "FILL"],
-        edgeRevisitTime:   ["rgba(6, 182, 212, 0.9)",    "REV"],
-        retraceCancelTime: ["rgba(220, 38, 38, 0.9)",    "RETR"],
-        exitTime:          ["rgba(139, 92, 246, 0.9)",   "EXIT"],
-        invalidationTime:  ["rgba(220, 38, 38, 0.95)",   "INV"],
+        obDetectionTime:   ["rgba(107, 114, 128, 0.85)", "DET",     "OB detected"],
+        tappedTime:        ["rgba(99, 102, 241, 0.9)",   "TAP",     "Price tapped the OB edge"],
+        triggerTime:       ["rgba(245, 158, 11, 0.95)",  "TRIG",    "Trigger crossed (penetration threshold)"],
+        armedAt:           ["rgba(234, 179, 8, 0.95)",   "ARM",     "Entry order armed"],
+        fillTime:          ["rgba(34, 197, 94, 0.95)",   "FILL",    "Trade filled (entry)"],
+        edgeRevisitTime:   ["rgba(6, 182, 212, 0.9)",    "REVISIT", "Edge revisit — price returned to the OB edge after triggering"],
+        retraceCancelTime: ["rgba(220, 38, 38, 0.9)",    "RETRACE", "Retrace cancel — setup cancelled after pulling back"],
+        exitTime:          ["rgba(139, 92, 246, 0.9)",   "EXIT",    "Trade exit"],
+        invalidationTime:  ["rgba(220, 38, 38, 0.95)",   "INVALID", "OB invalidated before entry"],
+        beArmTime:         ["rgba(245, 158, 11, 0.95)",  "BE ARM",  "Break-even armed (reached arm level)"],
+        beExitTime:        ["rgba(56, 189, 248, 0.95)",  "BE EXIT", "Break-even stop hit"],
     };
+    const isBull = direction === "bull";
     const markers = [];
     Object.entries(events).forEach(([key, t]) => {
         if (t == null) return;
@@ -808,8 +1010,25 @@ function computeOverlays({ chart, series, container, levels, events, direction, 
         if (windowEnd != null && t > windowEnd) return;
         const x = chart.timeScale().timeToCoordinate(t);
         if (x == null) return;
-        const [color, label] = eventColors[key] || ["rgba(71, 85, 105, 0.9)", key];
-        markers.push({ id: `${key}-${t}`, x: clamp(x, 0, maxW), color, label });
+        const [color, label, title] = eventColors[key] || ["rgba(71, 85, 105, 0.9)", key, key];
+        // Stage line geometry: for BEARISH OBs the line drops from the chart top
+        // to a pip ABOVE the event candle's high; for BULLISH OBs it rises from
+        // the bottom to a pip BELOW the event candle's low. Falls back to full
+        // height if the candle/coordinate can't be resolved.
+        let top = 0;
+        let height = maxH;
+        let labelAtTop = true;
+        const candle = candleAt(t);
+        if (candle) {
+            if (!isBull) {
+                const yBound = series.priceToCoordinate(candle.high + pipSize);
+                if (yBound != null) { top = 0; height = Math.max(2, clamp(yBound, 0, maxH)); labelAtTop = true; }
+            } else {
+                const yBound = series.priceToCoordinate(candle.low - pipSize);
+                if (yBound != null) { const b = clamp(yBound, 0, maxH); top = b; height = Math.max(2, maxH - b); labelAtTop = false; }
+            }
+        }
+        markers.push({ id: `${key}-${t}`, x: clamp(x, 0, maxW), color, label, title, top, height, labelAtTop });
     });
 
     return { obBand, lines, markers };
