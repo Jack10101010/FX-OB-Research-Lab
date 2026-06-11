@@ -10,6 +10,7 @@ import {
     compactTimeframe,
 } from "@/data/store";
 import { useMasterControls } from "@/components/masterControls/MasterControlsContext";
+import { PlaybookTrigger } from "@/components/lab/playbook/PlaybookTrigger";
 
 export function TopBar() {
     const navigate = useNavigate();
@@ -32,6 +33,7 @@ export function TopBar() {
                     />
                 </div>
                 <div className="flex-1" />
+                <PlaybookTrigger />
                 <button
                     type="button"
                     data-testid="topbar-master-controls"

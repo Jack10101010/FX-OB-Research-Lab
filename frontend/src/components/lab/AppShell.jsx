@@ -5,6 +5,8 @@ import AppBlueprintBackground from "./AppBlueprintBackground";
 import { MasterControlsProvider, useMasterControls } from "@/components/masterControls/MasterControlsContext";
 import { MasterControlsDrawer } from "@/components/masterControls/MasterControlsDrawer";
 import { GlobalPreviewBanner } from "@/components/masterControls/GlobalPreviewBanner";
+import { RunPlaybookProvider } from "@/components/lab/playbook/RunPlaybookProvider";
+import { RunAnalysisPlaybookDrawer } from "@/components/lab/playbook/RunAnalysisPlaybookDrawer";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 /**
@@ -39,6 +41,8 @@ function AppShellLayout({ children }) {
                 </main>
             </div>
             <MasterControlsDrawer />
+            {/* Run Analysis Playbook — global, independent of Master Controls. */}
+            <RunAnalysisPlaybookDrawer />
         </div>
     );
 }
@@ -50,7 +54,9 @@ export function AppShell({ children }) {
         // their own provider to override delay locally.
         <TooltipProvider delayDuration={150} skipDelayDuration={300}>
             <MasterControlsProvider>
-                <AppShellLayout>{children}</AppShellLayout>
+                <RunPlaybookProvider>
+                    <AppShellLayout>{children}</AppShellLayout>
+                </RunPlaybookProvider>
             </MasterControlsProvider>
         </TooltipProvider>
     );
