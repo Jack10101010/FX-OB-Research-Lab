@@ -8,9 +8,11 @@ import { downloadCsv }         from "../analytics/entryAnalytics";
 import { isFiniteNumber, num } from "../analytics/entryFormatters";
 import { makeDomainBackend }   from "@/data/backendDomainSync";
 
-// DURABLE MIRROR (STORAGE Phase 1): localStorage stays the instant cache; the
-// promotion shortlist is mirrored to backend/data/entry_promotion.json and
-// union-merged on boot (by `mode`; the newer `addedAt` wins). Backend optional.
+// DURABLE MIRROR (STORAGE Phase 1 + 1B): localStorage stays the instant cache;
+// the promotion shortlist is mirrored to backend/data/entry_promotion.json and
+// union-merged on boot (by `mode`). Conflicts resolve by the newer `updatedAt`
+// (bumped on every decision/note edit), falling back to `addedAt` for legacy
+// records that predate updatedAt. Backend optional.
 const STORAGE_KEY = "fxob_entry_promotion_v1";
 
 function loadShortlist() {
@@ -27,8 +29,14 @@ function saveShortlist(list) {
     } catch {}
 }
 
+// Conflict-resolution timestamp (ms). Prefer `updatedAt` (bumped on every edit);
+// fall back to `addedAt` for legacy records that predate updatedAt; 0 if absent.
+function promotionTime(s) {
+    return (Date.parse(s && s.updatedAt) || Date.parse(s && s.addedAt) || 0);
+}
+
 // Merge rule: union by `mode` (the unique key); on a conflict the newer
-// `addedAt` wins, falling back to the local entry when timestamps are equal/absent.
+// `updatedAt` wins (addedAt fallback), keeping local on an exact tie.
 function mergePromotion(local, remote) {
     const la = Array.isArray(local) ? local : [];
     const ra = Array.isArray(remote) ? remote : [];
@@ -37,9 +45,7 @@ function mergePromotion(local, remote) {
         if (!s || typeof s !== "object" || !s.mode) continue;
         const prev = byMode.get(s.mode);
         if (!prev) { byMode.set(s.mode, s); continue; }
-        const pt = Date.parse(prev.addedAt || "") || 0;
-        const st = Date.parse(s.addedAt || "") || 0;
-        if (st >= pt) byMode.set(s.mode, s);
+        if (promotionTime(s) >= promotionTime(prev)) byMode.set(s.mode, s);
     }
     return [...byMode.values()];
 }
@@ -83,20 +89,23 @@ export function PromotionDesk({ exactRows }) {
         const row = (exactRows || []).find(r => r.mode === mode);
         if (!row) return;
         const meta = PLANNED_ENTRY_MODES.find(m => m.mode === mode);
+        const now = new Date().toISOString();
         const entry = {
             mode,
             label:    row.label || mode,
             family:   meta?.family || row.family || "—",
             decision: "pending",
             note:     "",
-            addedAt:  new Date().toISOString(),
+            addedAt:  now,
+            updatedAt: now,
             row,
         };
         persist([entry, ...shortlist]);
     }
 
     const handleDecision = useCallback((mode, decision) => {
-        persist(shortlist.map(s => s.mode === mode ? { ...s, decision } : s));
+        const now = new Date().toISOString();
+        persist(shortlist.map(s => s.mode === mode ? { ...s, decision, updatedAt: now } : s));
     }, [shortlist]);
 
     const handleRemove = useCallback((mode) => {
@@ -105,7 +114,8 @@ export function PromotionDesk({ exactRows }) {
     }, [shortlist]);
 
     const handleNoteChange = useCallback((mode, note) => {
-        persist(shortlist.map(s => s.mode === mode ? { ...s, note } : s));
+        const now = new Date().toISOString();
+        persist(shortlist.map(s => s.mode === mode ? { ...s, note, updatedAt: now } : s));
     }, [shortlist]);
 
     function handleExport() {
