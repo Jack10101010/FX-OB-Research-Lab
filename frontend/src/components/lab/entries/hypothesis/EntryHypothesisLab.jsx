@@ -1,10 +1,14 @@
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { Pill }      from "@/components/lab/DataTable";
 import { cn }        from "@/lib/utils";
 import { PLANNED_ENTRY_MODES } from "../analytics/entryRegistry";
 import { downloadCsv }         from "../analytics/entryAnalytics";
+import { makeDomainBackend }   from "@/data/backendDomainSync";
 
+// DURABLE MIRROR (STORAGE Phase 1): localStorage stays the instant cache; the
+// hypotheses list is mirrored to backend/data/entry_hypotheses.json and union-
+// merged on boot (by hypothesis id; the newer `updatedAt` wins). Backend optional.
 const STORAGE_KEY = "fxob_entry_hypotheses_v1";
 
 const STATUS_META = {
@@ -29,8 +33,38 @@ function loadHypotheses() {
 }
 
 function saveHypotheses(list) {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); } catch {}
+    try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+        try { hypothesesBackend.scheduleSync(); } catch { /* backend optional */ }
+    } catch {}
 }
+
+// Merge rule: union by hypothesis id; on an id conflict the newer `updatedAt`
+// wins. Items without an id (legacy) are kept as-is.
+function mergeHypotheses(local, remote) {
+    const la = Array.isArray(local) ? local : [];
+    const ra = Array.isArray(remote) ? remote : [];
+    const byId = new Map();
+    const noId = [];
+    for (const h of [...ra, ...la]) {            // local last so it wins ties pre-timestamp
+        if (!h || typeof h !== "object") continue;
+        if (!h.id) { noId.push(h); continue; }
+        const prev = byId.get(h.id);
+        if (!prev) { byId.set(h.id, h); continue; }
+        const pt = Date.parse(prev.updatedAt || prev.createdAt || "") || 0;
+        const ht = Date.parse(h.updatedAt || h.createdAt || "") || 0;
+        if (ht >= pt) byId.set(h.id, h);
+    }
+    return [...byId.values(), ...noId];
+}
+
+const hypothesesBackend = makeDomainBackend({
+    domain: "entry_hypotheses",
+    loadLocal: loadHypotheses,
+    saveLocal: saveHypotheses,
+    merge: mergeHypotheses,
+});
+hypothesesBackend.kickoff();
 
 // ─── Add / Edit Form ──────────────────────────────────────────────────────────
 
@@ -187,6 +221,9 @@ export function EntryHypothesisLab() {
     const [editing,    setEditing]    = useState(null);
     const [filterStatus, setFilterStatus] = useState("all");
     const [search,       setSearch]       = useState("");
+
+    // Refresh from the cache when the durable backend hydrates new data in.
+    useEffect(() => hypothesesBackend.subscribe(() => setHypotheses(loadHypotheses())), []);
 
     function persist(list) {
         setHypotheses(list);

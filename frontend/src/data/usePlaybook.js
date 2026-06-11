@@ -7,7 +7,7 @@
  * @param {string|null} runId  the run whose checklist we own (null → safe empty).
  */
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
     PLAYBOOK_SECTIONS,
     PLAYBOOK_DECISIONS,
@@ -17,6 +17,7 @@ import {
 import {
     loadPlaybook,
     savePlaybook,
+    subscribePlaybook,
     getRun,
     withStep,
     withSectionCollapsed,
@@ -27,6 +28,9 @@ import {
 
 export function usePlaybook(runId) {
     const [state, setState] = useState(() => loadPlaybook());
+
+    // Refresh from the cache when the durable backend hydrates new data in.
+    useEffect(() => subscribePlaybook(() => setState(loadPlaybook())), []);
 
     // Apply a new whole-state object: update React + persist.
     const apply = useCallback((next) => {

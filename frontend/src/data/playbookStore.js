@@ -10,7 +10,14 @@
  *
  * localStorage is accessed through try/catch and a presence check, so this
  * module imports and runs safely under node (validator) where it is absent.
+ *
+ * DURABLE MIRROR (STORAGE Phase 1): localStorage stays the instant cache; every
+ * save is mirrored to backend/data/playbook.json via the generic domain-sync
+ * helper, and on boot the backend copy is union-merged into the cache. Backend
+ * is optional — when it's down this module behaves exactly as before.
  */
+
+import { makeDomainBackend } from "./backendDomainSync";
 
 export const PLAYBOOK_LS_KEY = "fxob_playbook_v1";
 export const PLAYBOOK_VERSION = 1;
@@ -156,8 +163,46 @@ export function savePlaybook(state) {
     if (!ls) return false;
     try {
         ls.setItem(PLAYBOOK_LS_KEY, JSON.stringify(normalizeState(state)));
+        // Mirror to the durable backend (best-effort, debounced).
+        try { playbookBackend.scheduleSync(); } catch { /* backend optional */ }
         return true;
     } catch {
         return false;
     }
 }
+
+// ── Durable backend mirror (STORAGE Phase 1) ──────────────────────────────────
+// Merge rule: union by runId; checked steps and section-collapse flags are
+// unioned (any `true` on either side wins — never un-checks); the decision and
+// updatedAt follow the side with the newer updatedAt.
+export function mergePlaybookStates(localRaw, remoteRaw) {
+    const local = normalizeState(localRaw);
+    const remote = normalizeState(remoteRaw);
+    const byRun = {};
+    const ids = new Set([...Object.keys(local.byRun), ...Object.keys(remote.byRun)]);
+    for (const runId of ids) {
+        const l = local.byRun[runId];
+        const r = remote.byRun[runId];
+        if (!l) { byRun[runId] = r; continue; }
+        if (!r) { byRun[runId] = l; continue; }
+        const steps = { ...r.steps, ...l.steps };       // union of `true` flags
+        const sections = { ...r.sections, ...l.sections };
+        const lt = Date.parse(l.updatedAt || "") || 0;
+        const rt = Date.parse(r.updatedAt || "") || 0;
+        const newerDecision = rt > lt ? (r.decision ?? l.decision) : (l.decision ?? r.decision);
+        const updatedAt = (rt > lt ? r.updatedAt : l.updatedAt) || l.updatedAt || r.updatedAt || null;
+        byRun[runId] = { steps, sections, decision: newerDecision || null, updatedAt };
+    }
+    return { version: PLAYBOOK_VERSION, byRun };
+}
+
+const playbookBackend = makeDomainBackend({
+    domain: "playbook",
+    loadLocal: loadPlaybook,
+    saveLocal: savePlaybook,
+    merge: mergePlaybookStates,
+    isEmpty: (s) => Object.keys(normalizeState(s).byRun).length === 0,
+});
+
+export const subscribePlaybook = playbookBackend.subscribe;
+playbookBackend.kickoff();

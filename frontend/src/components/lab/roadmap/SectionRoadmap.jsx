@@ -7,11 +7,11 @@
 // Standard pattern for the platform — every major lab/section can own its roadmap
 // so ideas stay attached to the feature they belong to (no single giant global list).
 
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { Map as MapIcon, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { getRoadmap, setRoadmapStatus, ROADMAP_STATUSES, ROADMAP_NEXT_STATUS } from "@/data/roadmapStore";
+import { getRoadmap, setRoadmapStatus, subscribeRoadmaps, ROADMAP_STATUSES, ROADMAP_NEXT_STATUS } from "@/data/roadmapStore";
 
 const STATUS_TONE = {
     idea:        "text-[hsl(var(--text-2))] border-[hsl(var(--border-soft))]",
@@ -23,6 +23,9 @@ const STATUS_TONE = {
 export function SectionRoadmap({ sectionKey, label = "Roadmap" }) {
     const [open, setOpen] = useState(false);
     const [tick, setTick] = useState(0); // bump to re-read after a status change
+
+    // Re-read when the durable backend hydrates new overrides into the cache.
+    useEffect(() => subscribeRoadmaps(() => setTick((t) => t + 1)), []);
 
     const rm = useMemo(() => getRoadmap(sectionKey), [sectionKey, tick]);
     const cycle = useCallback((id, cur) => {

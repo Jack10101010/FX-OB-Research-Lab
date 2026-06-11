@@ -8,6 +8,12 @@
 // status } }) so that new seed items added in code automatically appear, and the
 // user's status changes survive reloads. Degrades gracefully if localStorage is
 // unavailable.
+//
+// DURABLE MIRROR (STORAGE Phase 1): localStorage stays the instant cache; the
+// overrides map is mirrored to backend/data/section_roadmaps.json and union-
+// merged on boot. Backend optional — down = unchanged behavior.
+
+import { makeDomainBackend } from "./backendDomainSync";
 
 const STORAGE_KEY = "fxob_section_roadmaps_v1";
 
@@ -134,6 +140,7 @@ function readOverrides() {
 function writeOverrides(obj) {
     try {
         if (typeof localStorage !== "undefined") localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
+        try { roadmapBackend.scheduleSync(); } catch { /* backend optional */ }
     } catch {
         /* ignore quota / unavailable */
     }
@@ -162,3 +169,34 @@ export function setRoadmapStatus(sectionKey, itemId, status) {
     all[sectionKey] = section;
     writeOverrides(all);
 }
+
+// ── Durable backend mirror (STORAGE Phase 1) ──────────────────────────────────
+// Merge rule: union by sectionKey, then by itemId. There are no per-item
+// timestamps, so a same-item conflict prefers the LOCAL value (the machine the
+// user is actively on); a fresh browser with empty local correctly takes the
+// backend copy via the empty-side rule. Invalid statuses are dropped.
+export function mergeRoadmapOverrides(local, remote) {
+    const safe = (o) => (o && typeof o === "object") ? o : {};
+    const l = safe(local), r = safe(remote);
+    const out = {};
+    for (const sk of new Set([...Object.keys(l), ...Object.keys(r)])) {
+        const ls = safe(l[sk]), rs = safe(r[sk]);
+        const merged = {};
+        for (const id of new Set([...Object.keys(ls), ...Object.keys(rs)])) {
+            const val = (id in ls) ? ls[id] : rs[id]; // conflict → prefer local
+            if (VALID.has(val)) merged[id] = val;
+        }
+        if (Object.keys(merged).length) out[sk] = merged;
+    }
+    return out;
+}
+
+const roadmapBackend = makeDomainBackend({
+    domain: "section_roadmaps",
+    loadLocal: readOverrides,
+    saveLocal: writeOverrides,
+    merge: mergeRoadmapOverrides,
+});
+
+export const subscribeRoadmaps = roadmapBackend.subscribe;
+roadmapBackend.kickoff();

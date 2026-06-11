@@ -84,6 +84,71 @@ def _write_projects_file(projects: Dict[str, Any]) -> str:
     return updated_at
 
 
+# ── Generic per-domain JSON storage (STORAGE Phase 1) ─────────────────────────
+# The same durable-on-disk pattern as projects, generalized to a small allowlist
+# of research domains. Each domain maps to backend/data/{domain}.json holding the
+# payload the frontend localStorage cache also holds. The allowlist is the ONLY
+# source of file names — the {domain} path param is never used to build a path
+# until it has been checked against this set, so arbitrary paths can't be reached.
+#
+# localStorage stays the instant cache/fallback; these files are the durable
+# local mirror (and the future SQLite migration will sit behind this same API).
+STORAGE_DOMAINS = {
+    "playbook",
+    "entry_hypotheses",
+    "entry_promotion",
+    "section_roadmaps",
+    "configs",
+}
+
+
+def _atomic_write_json(path: Path, document: Any, prefix: str) -> None:
+    """Serialize `document` to `path` atomically (temp file in same dir + replace)."""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=str(DATA_DIR), prefix=prefix, suffix='.tmp')
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as fh:
+            json.dump(document, fh, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, path)
+    finally:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            pass
+
+
+def _domain_file(domain: str) -> Path:
+    # Caller MUST have validated `domain` against STORAGE_DOMAINS first.
+    return DATA_DIR / f"{domain}.json"
+
+
+def _read_domain(domain: str) -> Any:
+    """Return the stored payload for a domain, or None if absent/unreadable."""
+    path = _domain_file(domain)
+    try:
+        if not path.exists():
+            return None
+        raw = path.read_text(encoding='utf-8')
+        if not raw.strip():
+            return None
+        data = json.loads(raw)
+        # Wrapped {"version","updatedAt","payload"} document → return inner payload.
+        if isinstance(data, dict) and 'payload' in data:
+            return data['payload']
+        return data
+    except Exception as exc:
+        logger.warning("Failed reading domain %s: %s", domain, exc)
+        return None
+
+
+def _write_domain(domain: str, payload: Any) -> str:
+    updated_at = datetime.now(timezone.utc).isoformat()
+    document = {"version": 1, "domain": domain, "updatedAt": updated_at, "payload": payload}
+    _atomic_write_json(_domain_file(domain), document, prefix=f'.{domain}-')
+    return updated_at
+
+
 # Create the main app without a prefix
 app = FastAPI()
 
@@ -110,6 +175,12 @@ class ProjectsPayload(BaseModel):
     projects: Dict[str, Any] = Field(default_factory=dict)
 
 
+class StoragePayload(BaseModel):
+    # Arbitrary per-domain payload (object or array) mirroring the frontend's
+    # localStorage value for that domain.
+    payload: Any = None
+
+
 # ── Routes ──────────────────────────────────────────────────────────────────
 @api_router.get("/")
 async def root():
@@ -131,6 +202,24 @@ async def put_projects(payload: ProjectsPayload):
         raise HTTPException(status_code=400, detail="`projects` must be an object map")
     updated_at = _write_projects_file(projects)
     return {"ok": True, "count": len(projects), "updatedAt": updated_at}
+
+
+@api_router.get("/storage/{domain}")
+async def get_storage_domain(domain: str):
+    """Return the durable payload for an allowlisted research domain from disk."""
+    if domain not in STORAGE_DOMAINS:
+        raise HTTPException(status_code=404, detail=f"Unknown storage domain: {domain}")
+    payload = _read_domain(domain)
+    return {"domain": domain, "payload": payload, "exists": payload is not None}
+
+
+@api_router.put("/storage/{domain}")
+async def put_storage_domain(domain: str, body: StoragePayload):
+    """Replace the on-disk payload for an allowlisted research domain (atomic write)."""
+    if domain not in STORAGE_DOMAINS:
+        raise HTTPException(status_code=404, detail=f"Unknown storage domain: {domain}")
+    updated_at = _write_domain(domain, body.payload)
+    return {"ok": True, "domain": domain, "updatedAt": updated_at}
 
 
 @api_router.post("/status", response_model=StatusCheck)

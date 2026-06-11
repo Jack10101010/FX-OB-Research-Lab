@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import { NeonPanel }       from "@/components/lab/NeonPanel";
 import { Pill }            from "@/components/lab/DataTable";
 import { cn }              from "@/lib/utils";
@@ -6,7 +6,11 @@ import { PromotionCard }   from "./PromotionCard";
 import { PLANNED_ENTRY_MODES } from "../analytics/entryRegistry";
 import { downloadCsv }         from "../analytics/entryAnalytics";
 import { isFiniteNumber, num } from "../analytics/entryFormatters";
+import { makeDomainBackend }   from "@/data/backendDomainSync";
 
+// DURABLE MIRROR (STORAGE Phase 1): localStorage stays the instant cache; the
+// promotion shortlist is mirrored to backend/data/entry_promotion.json and
+// union-merged on boot (by `mode`; the newer `addedAt` wins). Backend optional.
 const STORAGE_KEY = "fxob_entry_promotion_v1";
 
 function loadShortlist() {
@@ -17,8 +21,36 @@ function loadShortlist() {
 }
 
 function saveShortlist(list) {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); } catch {}
+    try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+        try { promotionBackend.scheduleSync(); } catch { /* backend optional */ }
+    } catch {}
 }
+
+// Merge rule: union by `mode` (the unique key); on a conflict the newer
+// `addedAt` wins, falling back to the local entry when timestamps are equal/absent.
+function mergePromotion(local, remote) {
+    const la = Array.isArray(local) ? local : [];
+    const ra = Array.isArray(remote) ? remote : [];
+    const byMode = new Map();
+    for (const s of [...ra, ...la]) {            // local last → wins ties pre-timestamp
+        if (!s || typeof s !== "object" || !s.mode) continue;
+        const prev = byMode.get(s.mode);
+        if (!prev) { byMode.set(s.mode, s); continue; }
+        const pt = Date.parse(prev.addedAt || "") || 0;
+        const st = Date.parse(s.addedAt || "") || 0;
+        if (st >= pt) byMode.set(s.mode, s);
+    }
+    return [...byMode.values()];
+}
+
+const promotionBackend = makeDomainBackend({
+    domain: "entry_promotion",
+    loadLocal: loadShortlist,
+    saveLocal: saveShortlist,
+    merge: mergePromotion,
+});
+promotionBackend.kickoff();
 
 const DECISION_FILTER_OPTS = [
     { key: "all",       label: "All" },
@@ -32,6 +64,9 @@ export function PromotionDesk({ exactRows }) {
     const [shortlist,  setShortlist]  = useState(() => loadShortlist());
     const [filter,     setFilter]     = useState("all");
     const [sortKey,    setSortKey]    = useState("netR");
+
+    // Refresh from the cache when the durable backend hydrates new data in.
+    useEffect(() => promotionBackend.subscribe(() => setShortlist(loadShortlist())), []);
 
     function persist(list) {
         setShortlist(list);
