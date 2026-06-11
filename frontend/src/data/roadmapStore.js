@@ -27,7 +27,61 @@ export const ROADMAP_NEXT_STATUS = {
 };
 
 // Seed defaults per section. Each item: { id, label, status, note? }.
+// Optional per-section extras (backward compatible — older sections ignore them):
+//   labels:   { [statusKey]: columnLabel } — per-section column naming
+//   findings: [{ id, stat, runId?, status: "requires_validation" | "validated" }]
+//             — key research findings shown above the columns (read-only).
 export const ROADMAP_SEEDS = {
+    "retest-lab": {
+        title: "Retest Lab Roadmap",
+        labels: { idea: "Future Research", planned: "Planned", in_progress: "Active", complete: "Shipped" },
+        items: [
+            // ── Shipped ──
+            { id: "edge-discovery", label: "Edge Discovery", status: "complete" },
+            { id: "retest-intelligence", label: "Retest Intelligence", status: "complete" },
+            { id: "session-matrix", label: "Session Matrix", status: "complete" },
+            { id: "origin-candle", label: "Origin Candle Analysis", status: "complete" },
+            { id: "hold-taxonomy", label: "Window Hold / Reaction Success Taxonomy", status: "complete" },
+            { id: "v2-engine", label: "Continuous Invalidation Engine (v2)", status: "complete" },
+            { id: "v21-death-quality", label: "Death Quality Metrics (v2.1)", status: "complete" },
+            { id: "monetization", label: "Monetization Before Death", status: "complete" },
+            { id: "lux-port", label: "Lux Exporter Port (v2.1)", status: "complete" },
+            // ── Active ──
+            { id: "cross-run-validation", label: "Cross-Run Validation", status: "in_progress",
+              note: "Reproduce hold/eventual-failure/monetization numbers on ≥2 more runs before findings graduate." },
+            // ── Planned (actual unfinished work) ──
+            { id: "e2e-validation", label: "Retest Lab End-to-End Validation", status: "planned",
+              note: "Import the regenerated v2.1 backend artifact · verify Backend Computed mode, OB Outcomes + Monetization panels, and v1/v2/v2.1 version-badge behavior." },
+            { id: "fx-lux-parity-sync", label: "FX ↔ Lux Retest Parity Sync", status: "planned",
+              note: "Port Lux monetization aggregates (rr_capture/tti_buckets/median R) back into the FX staged tracker, restore staged↔deployed byte-parity, re-run parity fixtures." },
+            { id: "docs-findings-sync", label: "Docs / Findings Sync", status: "planned",
+              note: "DECISIONS + WORKSTREAMS + FINDINGS entries for v2/v2.1; findings graduate only after cross-run validation." },
+            { id: "death-quality-default-review", label: "Death Quality Default Review", status: "planned",
+              note: "Review soft-kill definition, confirm-TF behavior (5m/15m/1h sensitivity), buffer-sensitivity findings (median TTI 66m→229m at 5p) — decide whether defaults stay unchanged." },
+            // ── Future Research ──
+            { id: "target-optimization", label: "Target Optimization", status: "idea",
+              note: "MFE after retest by retest number · session · origin candle type · death-quality cohort · structure type → optimal fixed targets + target expectancy." },
+            { id: "revival-analysis", label: "Revival Analysis", status: "idea",
+              note: "Time kill→re-hold · time kill→next reaction · revival quality vs the zone's original reaction quality." },
+            { id: "death-quality-funnel", label: "Death Quality Funnel (Soft / Confirmed / Decisive / Abandoned)", status: "idea",
+              note: "v2.2 tier model from OB-DEATH-QUALITY-AUDIT-1 (~20% of first kills are decisive). Kaplan-Meier lifecycle curves ride on this as the visualization layer, not a separate item." },
+            { id: "multi-kill-tracking", label: "Multi-Kill Lifecycle Tracking", status: "idea" },
+            { id: "zone-lifecycle", label: "Zone Lifecycle Modelling", status: "idea" },
+            { id: "cost-adjusted-monetization", label: "Cost-Adjusted Monetization", status: "idea",
+              note: "Spread-adjusted + fee-adjusted R capture; realistic target expectancy (de-idealize 1R = zone width)." },
+            { id: "multi-pair-validation", label: "Multi-Pair Validation", status: "idea",
+              note: "EURUSD · GBPUSD · JPY pair sanity checks · pip-size robustness audit for R units." },
+            { id: "rr-capture-optimization", label: "RR Capture Optimization", status: "idea" },
+            { id: "tti-optimization", label: "Time-To-Invalidation Optimization", status: "idea" },
+        ],
+        findings: [
+            { id: "f-eventual-failure", stat: "Eventual Failure ≈ 98% of touched zones — rate saturates under every definition; time-to-death is the axis", runId: "20260606_084116", status: "requires_validation" },
+            { id: "f-confirmed-kill", stat: "Confirmed Kill 63.4% of deaths (15m close) — ⅓ of deaths are 1-minute noise", runId: "20260606_084116", status: "requires_validation" },
+            { id: "f-reheld", stat: "Re-Held After Kill 79.6% within 60m — most nominal deaths re-hold", runId: "20260606_084116", status: "requires_validation" },
+            { id: "f-median-mfe", stat: "Median MFE Before Death ≈ 1.6R (touched OBs, idealized R)", runId: "20260606_084116", status: "requires_validation" },
+            { id: "f-rr-capture", stat: "RR Capture: 1R 64% · 2R 47% · 5R 27% — and unchanged when measured from R1", runId: "20260606_084116", status: "requires_validation" },
+        ],
+    },
     "distance-to-stop": {
         title: "Distance to Stop Roadmap",
         items: [
@@ -87,7 +141,8 @@ export function getRoadmap(sectionKey) {
         ...it,
         status: VALID.has(overrides[it.id]) ? overrides[it.id] : it.status,
     }));
-    return { title: seed.title, sectionKey, items };
+    // labels/findings are optional per-section extras (read-only, no overrides).
+    return { title: seed.title, sectionKey, items, labels: seed.labels || {}, findings: seed.findings || [] };
 }
 
 // Persist a single item's status override.

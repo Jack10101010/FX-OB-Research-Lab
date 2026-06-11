@@ -16,6 +16,7 @@ import { Field, Segment, HeroBadge, NeonButton } from "@/components/lab/controls
 import { TermTip, TooltipProvider } from "@/components/lab/TermTip";
 import { Repeat2, ShieldCheck, ShieldAlert, Activity, Timer, Hourglass, Boxes, AlertTriangle, Loader2, TrendingUp, TrendingDown, Trophy, Lightbulb } from "lucide-react";
 import { RETEST_DIMENSION_GROUPS } from "@/data/obRetestResearch";
+import { SectionRoadmap } from "@/components/lab/roadmap/SectionRoadmap";
 import { useRetestData, RETEST_STATUS } from "./useRetestData";
 
 // ── formatting helpers ──────────────────────────────────────────────────────────
@@ -173,6 +174,9 @@ function BasisBanner({ candleCount, meta, summary, source }) {
             {summary && <HeroBadge tone="muted">{summary.totalRetests} retest events</HeroBadge>}
             <span className="text-[10.5px] text-muted-lab ml-1">
                 Rates are window-based (see Window Hold %); open (right-censored) retests are excluded.
+            </span>
+            <span className="ml-auto">
+                <SectionRoadmap sectionKey="retest-lab" />
             </span>
         </div>
     );
