@@ -6,7 +6,6 @@ import { MetricChip } from "@/components/lab/MetricChip";
 import { EquityCurveV2, MiniLine } from "@/components/lab/EquityCurve";
 import { DataTable, Pill } from "@/components/lab/DataTable";
 import { NeonButton, NeonInput, NeonSelect, FilterToggle } from "@/components/lab/controls";
-import { RunConfigStrip } from "@/components/lab/RunConfigStrip";
 import { TradeSanityCard } from "@/components/lab/TradeSanityCard";
 import { compactTimeframe, formatRunDateRange, getRunDisplayName, reloadFullRunFromSidecar, updateRunBundle, useDataset } from "@/data/store";
 import { setActiveRunId, setSelectedTradeVariant, setFocusedFftEvent } from "@/data/store";

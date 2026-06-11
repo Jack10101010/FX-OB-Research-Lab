@@ -9,7 +9,6 @@ import { useTradeUniverse } from "@/data/useTradeUniverse";
 import ResearchResultViewBanner from "@/components/lab/ResearchResultViewBanner";
 import { buildBannerRunIdentity } from "@/components/lab/researchBanner/bannerRun";
 import { LabRunHero } from "@/components/lab/LabRunHero";
-import { RunConfigStrip } from "@/components/lab/RunConfigStrip";
 import { WorkspaceTabBar } from "../entries/shared/WorkspaceTabBar";
 import { useFailuresWorkspace, FAILURES_TABS, applyFilter } from "./shared/useFailuresWorkspace";
 import { FailuresCohortFilter } from "./global/FailuresCohortFilter";
@@ -158,8 +157,6 @@ export function FailuresWorkspace() {
                 description="Failure forensics across losing trades, invalidation patterns, sessions, streaks, and prevention candidates."
                 className="mt-4 mb-0"
             />
-
-            <RunConfigStrip run={activeRun} dense />
 
             {/* RESEARCH-RESULT-VIEW-BANNER Phase 5: read-only RunDetail-style banner.
                 Hero (LabRunHero) above carries run identity; same universe the failures
