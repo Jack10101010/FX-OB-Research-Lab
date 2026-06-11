@@ -68,7 +68,35 @@ function resolveExecutionMode(maps, requested) {
 }
 
 /**
+ * Find the key in `keys` that matches the selection — first by exact (case-
+ * insensitive) equality with the canonical wanted key, then by parsed
+ * (triggerBasis, armLevelR) equivalence. The parse path makes matching tolerant
+ * of decimal-form differences (0p5 ⇄ 0p50, 1p0 ⇄ 1p00).
+ */
+function matchKeyInList(keys, wantKey, triggerBasis, armLevelR) {
+    const trig = String(triggerBasis || "").toLowerCase();
+    const arm = Number(armLevelR);
+    for (const k of keys) {
+        if (wantKey && k.toLowerCase() === wantKey.toLowerCase()) return k;
+    }
+    for (const k of keys) {
+        const parsed = parseBeScenarioKey(k);
+        if (parsed && parsed.triggerBasis === trig
+            && parsed.armLevelR != null && Math.abs(parsed.armLevelR - arm) < ARM_EPS) {
+            return k;
+        }
+    }
+    return null;
+}
+
+/**
  * Find a backend scenario matching the selection.
+ *
+ * The scenario summary (summary.json `be_results`) and the scenario trades
+ * (trades_*__be_*.csv) are matched INDEPENDENTLY against their own key sets, so
+ * a decimal-form mismatch between the two sources (e.g. summary "be_wick_0p5R"
+ * vs CSV "be_wick_0p50R") never drops the trades.
+ *
  * @returns { executionMode, scenarioKey, summaryRaw, trades } | null
  */
 export function findBeScenario(beResults, beTradesByMode, selection = {}) {
@@ -83,28 +111,16 @@ export function findBeScenario(beResults, beTradesByMode, selection = {}) {
     const tradesByKey = tradesMap[em] && typeof tradesMap[em] === "object" ? tradesMap[em] : {};
 
     const wantKey = beScenarioKey(triggerBasis, armLevelR);
-    const allKeys = new Set([...Object.keys(resByKey), ...Object.keys(tradesByKey)]);
+    const summaryKey = matchKeyInList(Object.keys(resByKey), wantKey, triggerBasis, armLevelR);
+    const tradesKey  = matchKeyInList(Object.keys(tradesByKey), wantKey, triggerBasis, armLevelR);
 
-    let matchKey = null;
-    for (const k of allKeys) {
-        if (wantKey && k.toLowerCase() === wantKey.toLowerCase()) { matchKey = k; break; }
-        const parsed = parseBeScenarioKey(k);
-        if (parsed
-            && parsed.triggerBasis === String(triggerBasis || "").toLowerCase()
-            && parsed.armLevelR != null
-            && Math.abs(parsed.armLevelR - Number(armLevelR)) < ARM_EPS) {
-            matchKey = k;
-            break;
-        }
-    }
-    if (!matchKey) return null;
+    const trades = tradesKey && Array.isArray(tradesByKey[tradesKey]) ? tradesByKey[tradesKey] : null;
+    const summaryRaw = summaryKey ? (resByKey[summaryKey] ?? null) : null;
 
-    const trades = Array.isArray(tradesByKey[matchKey]) ? tradesByKey[matchKey] : null;
-    const summaryRaw = resByKey[matchKey] ?? null;
     // Require at least one of trades / summary to consider EXACT available.
     if (!trades && !summaryRaw) return null;
 
-    return { executionMode: em, scenarioKey: matchKey, summaryRaw, trades };
+    return { executionMode: em, scenarioKey: summaryKey || tradesKey, summaryRaw, trades };
 }
 
 // ── number helpers ──────────────────────────────────────────────────────────
@@ -241,7 +257,10 @@ export function resolveBeScenarioSource({
 } = {}) {
     const found = findBeScenario(beResults, beTradesByMode, { executionMode, triggerBasis, armLevelR });
     if (!found) {
-        return { source: "REPLAY", scenarioKey: null, executionMode: executionMode ?? null, summary: null, trades: null, summaryRaw: null };
+        const reason = !hasAnyExactBe(beResults, beTradesByMode)
+            ? "no_be_data"          // run has no backend BE scenarios at all
+            : "no_matching_scenario"; // BE data exists but not for this arm/trigger/mode
+        return { source: "REPLAY", scenarioKey: null, executionMode: executionMode ?? null, summary: null, trades: null, summaryRaw: null, reason };
     }
     return {
         source: "EXACT",
@@ -250,6 +269,28 @@ export function resolveBeScenarioSource({
         summary: buildExactBeSummary(found.trades, found.summaryRaw, baseline),
         trades: found.trades,
         summaryRaw: found.summaryRaw,
+        reason: "matched",
+    };
+}
+
+/**
+ * Diagnostic snapshot of the BE data available on a run + the keys a selection
+ * would look for. Pure; used by the BreakevenTab console diagnostic and tests.
+ */
+export function describeBeAvailability(beResults, beTradesByMode, { executionMode, triggerBasis, armLevelR } = {}) {
+    const results = beResults && typeof beResults === "object" ? beResults : {};
+    const tradesMap = beTradesByMode && typeof beTradesByMode === "object" ? beTradesByMode : {};
+    const em = resolveExecutionMode([results, tradesMap], executionMode);
+    const resByKey = em && results[em] && typeof results[em] === "object" ? results[em] : {};
+    const tradesByKey = em && tradesMap[em] && typeof tradesMap[em] === "object" ? tradesMap[em] : {};
+    return {
+        hasAnyExact: hasAnyExactBe(results, tradesMap),
+        beResultsExecutionModes: Object.keys(results),
+        beTradesExecutionModes: Object.keys(tradesMap),
+        resolvedExecutionMode: em,
+        beResultsScenarioKeys: Object.keys(resByKey),
+        beTradesScenarioKeys: Object.keys(tradesByKey),
+        requestedKey: beScenarioKey(triggerBasis, armLevelR),
     };
 }
 

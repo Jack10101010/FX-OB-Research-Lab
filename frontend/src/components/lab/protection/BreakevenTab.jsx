@@ -16,7 +16,7 @@ import {
     buildBeScenarioSummary,
     beReplayAvailability,
 } from "@/data/beReplay";
-import { resolveBeScenarioSource, hasAnyExactBe } from "@/data/beResolve";
+import { resolveBeScenarioSource, hasAnyExactBe, describeBeAvailability } from "@/data/beResolve";
 import { useDataset } from "@/data/store";
 import { ShieldAlert, AlertTriangle, TrendingUp, BarChart2, Hash, Activity, Loader2, FlaskConical, Circle, CheckCircle2 } from "lucide-react";
 
@@ -274,6 +274,39 @@ export function BreakevenTab({ trades, candles, activeRun, activeRunId, beResult
     const [armLevelR, setArmLevelR]       = React.useState(DEFAULT_ARM);
     const [triggerBasis, setTriggerBasis] = React.useState(DEFAULT_TRIGGER);
 
+    // ── BE EXACT diagnostic ───────────────────────────────────────────────
+    // Logs exactly why the tab is showing EXACT or REPLAY for the current run +
+    // selection, so a "why no EXACT?" can be answered from the browser console
+    // without guesswork. Cheap, read-only, fires when the run/selection changes.
+    React.useEffect(() => {
+        const d = describeBeAvailability(beResultsMap, beTradesByModeMap, {
+            executionMode: beExecutionMode, triggerBasis, armLevelR,
+        });
+        const resolved = resolveBeScenarioSource({
+            armLevelR, triggerBasis, executionMode: beExecutionMode,
+            beResults: beResultsMap, beTradesByMode: beTradesByModeMap,
+        });
+        // eslint-disable-next-line no-console
+        console.groupCollapsed(`[BE] ${resolved.source} · run=${activeRunId ?? "?"} · ${triggerBasis} ${armLevelR}R`);
+        // eslint-disable-next-line no-console
+        console.info({
+            activeRunId,
+            executionModePassed: beExecutionMode,
+            resolvedExecutionMode: d.resolvedExecutionMode,
+            hasAnyExact: d.hasAnyExact,
+            beResultsExecutionModes: d.beResultsExecutionModes,
+            beTradesExecutionModes: d.beTradesExecutionModes,
+            beResultsScenarioKeys: d.beResultsScenarioKeys,
+            beTradesScenarioKeys: d.beTradesScenarioKeys,
+            requestedKey: d.requestedKey,
+            source: resolved.source,
+            reason: resolved.reason,
+            matchedScenarioKey: resolved.scenarioKey,
+        });
+        // eslint-disable-next-line no-console
+        console.groupEnd();
+    }, [activeRunId, armLevelR, triggerBasis, beExecutionMode, beResultsMap, beTradesByModeMap]);
+
     // Fast check only — no candle walking, safe to run synchronously.
     const availability = React.useMemo(
         () => beReplayAvailability(trades, candles),
@@ -493,6 +526,13 @@ export function BreakevenTab({ trades, candles, activeRun, activeRunId, beResult
                     </div>
                 ) : (
                 <div className="flex flex-col gap-1.5">
+                    {!hasExact && (
+                        <p className="text-[11px] font-ui text-[hsl(var(--text-1))] leading-relaxed">
+                            <span className="font-semibold">Backend EXACT results not found for this run.</span>{" "}
+                            Showing frontend REPLAY fallback. Re-run the backtest with break-even enabled
+                            (and re-import the bundle) to see exact 1-minute results.
+                        </p>
+                    )}
                     <p className="text-[11px] font-ui text-[hsl(var(--text-2))] leading-relaxed">
                         <span className="font-semibold text-[hsl(var(--text-1))]">Candle-resolution replay:</span>{" "}
                         arm/exit detection uses 15-min OHLC bars. Not tick-level.

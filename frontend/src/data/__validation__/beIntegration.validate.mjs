@@ -38,6 +38,7 @@ const { classifyTrade } = loadCjs("src/data/tradeClassification.js");
 const {
     formatArmToken, beScenarioKey, parseBeScenarioKey,
     findBeScenario, buildExactBeSummary, resolveBeScenarioSource, hasAnyExactBe,
+    describeBeAvailability,
 } = loadCjs("src/data/beResolve.js");
 
 let failures = 0;
@@ -199,6 +200,64 @@ ok(hasAnyExactBe(undefined, undefined) === false, "hasAnyExactBe undefined → f
 const resOld = resolveBeScenarioSource({ armLevelR: 0.5, triggerBasis: "wick", beResults: {}, beTradesByMode: {} });
 ok(resOld.source === "REPLAY", "empty maps → REPLAY (no crash)");
 ok(hasAnyExactBe(beResults, beTradesByMode) === true, "hasAnyExactBe true when scenarios present");
+
+// ─────────────────────────────────────────────────────────────────────────────
+console.log("\n§9  Decimal-form tolerance (DIAGNOSTIC: 0p5 ⇄ 0p50, 1p0 ⇄ 1p00)");
+// ─────────────────────────────────────────────────────────────────────────────
+const sd1 = parseBeScenarioKey("be_wick_0p5R");
+ok(sd1 && approx(sd1.armLevelR, 0.5), "parse single-decimal be_wick_0p5R → 0.5");
+const sd2 = parseBeScenarioKey("be_wick_1p0R");
+ok(sd2 && approx(sd2.armLevelR, 1.0), "parse single-decimal be_wick_1p0R → 1.0");
+
+// Backend exported with SINGLE-decimal keys; UI requests 0.5 / 1.
+const beResultsSD = {
+    single_position: {
+        be_wick_0p5R: { be_exit_count: 1, losses_saved: 1, net_r: 0.0, delta_net_r: 0.5 },
+        be_close_1p0R: { be_exit_count: 0, net_r: 0.0 },
+    },
+};
+const beTradesSD = {
+    single_position: {
+        be_wick_0p5R: [{ id: "a", net_r: 0.0, outcome: "BE_EXIT", be_exit_r: 0, be_triggered: true }],
+        be_close_1p0R: [{ id: "b", net_r: 1.0, outcome: "WIN" }],
+    },
+};
+const rSD = resolveBeScenarioSource({ armLevelR: 0.5, triggerBasis: "wick", executionMode: "single_position", beResults: beResultsSD, beTradesByMode: beTradesSD });
+ok(rSD.source === "EXACT", "UI 0.5 matches backend single-decimal be_wick_0p5R");
+const rSD2 = resolveBeScenarioSource({ armLevelR: 1, triggerBasis: "close", executionMode: "single_position", beResults: beResultsSD, beTradesByMode: beTradesSD });
+ok(rSD2.source === "EXACT", "UI 1 matches backend single-decimal be_close_1p0R");
+
+// ─────────────────────────────────────────────────────────────────────────────
+console.log("\n§10  Cross-form lookup (summary key form ≠ trades key form)");
+// ─────────────────────────────────────────────────────────────────────────────
+// Summary stored under "be_wick_0p5R", trades under "be_wick_0p50R". The fix
+// must resolve each map independently so trades are NOT dropped.
+const beResultsX = { single_position: { be_wick_0p5R: { be_exit_count: 2, losses_saved: 1, net_r: -0.3, delta_net_r: 0.7 } } };
+const beTradesX = { single_position: { be_wick_0p50R: [
+    { id: "x1", net_r: -1.0, outcome: "LOSS" },
+    { id: "x2", net_r: 0.0, outcome: "BE_EXIT", be_exit_r: 0, be_triggered: true },
+    { id: "x3", net_r: 0.7, outcome: "WIN" },
+] } };
+const rX = resolveBeScenarioSource({ armLevelR: 0.5, triggerBasis: "wick", executionMode: "single_position", beResults: beResultsX, beTradesByMode: beTradesX });
+ok(rX.source === "EXACT", "cross-form → EXACT");
+ok(Array.isArray(rX.trades) && rX.trades.length === 3, "cross-form keeps trades (bug fix)");
+ok(approx(rX.summary.netR, -0.3), "cross-form netR computed from trades (-1+0+0.7)");
+ok(rX.summary.lossesSaved === 1, "cross-form reads lossesSaved from summary");
+
+// ─────────────────────────────────────────────────────────────────────────────
+console.log("\n§11  Resolver reason codes (diagnostic surface)");
+// ─────────────────────────────────────────────────────────────────────────────
+ok(resolveBeScenarioSource({ armLevelR: 0.5, triggerBasis: "wick", beResults: {}, beTradesByMode: {} }).reason === "no_be_data",
+    "empty run → reason no_be_data");
+ok(resolveBeScenarioSource({ armLevelR: 2.0, triggerBasis: "wick", executionMode: "single_position", beResults, beTradesByMode }).reason === "no_matching_scenario",
+    "data present, arm absent → reason no_matching_scenario");
+ok(resolveBeScenarioSource({ armLevelR: 0.5, triggerBasis: "wick", executionMode: "single_position", beResults, beTradesByMode }).reason === "matched",
+    "match → reason matched");
+
+const desc = describeBeAvailability(beResults, beTradesByMode, { executionMode: "single_position", triggerBasis: "wick", armLevelR: 0.5 });
+ok(desc.resolvedExecutionMode === "single_position", "describe resolves execution mode");
+ok(desc.beTradesScenarioKeys.includes("be_wick_0p50R"), "describe lists trade scenario keys");
+ok(desc.requestedKey === "be_wick_0p50R", "describe reports requested key");
 
 // ─────────────────────────────────────────────────────────────────────────────
 console.log(`\n${failures === 0 ? "✅ ALL PASS" : `❌ ${failures} FAILURE(S)`}\n`);
