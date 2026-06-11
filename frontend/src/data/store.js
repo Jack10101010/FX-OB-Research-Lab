@@ -20,6 +20,7 @@ import {
 import { buildTradesByObId, deriveOBLifecycle } from "./obLifecycle";
 import { ingestRunBundle } from "./importer";
 import { getRunBundleByRunId, getRunCandlesByRunId } from "./sidecarClient";
+import { fetchProjectsFromBackend, saveProjectsToBackend } from "./projectsBackend";
 import { summarizeTradeClassifications } from "./tradeClassification";
 // Phase RB-1 — Results Basis foundation. The store owns the canonical
 // `resultsBasis` + `accountSettings` slices (the "how are trades measured?"
@@ -2275,6 +2276,99 @@ function persistProjects() {
     } catch {
         // Project metadata is intentionally small; if persistence fails, keep session state.
     }
+    // Mirror to the durable on-disk backend store (best-effort, debounced). The
+    // localStorage write above stays the instant, offline-safe cache; this push
+    // is what makes saved insights survive browser-data clears.
+    scheduleBackendProjectsSync();
+}
+
+// ── Durable backend mirror for projects/insights ─────────────────────────────
+// The full projects map is mirrored to backend/server.py (/api/projects → a
+// projects.json on disk). Writes are debounced to coalesce bursts; failures are
+// non-fatal (the backend is optional — the app still runs from localStorage).
+let backendSyncTimer = null;
+const BACKEND_SYNC_DEBOUNCE_MS = 800;
+
+function scheduleBackendProjectsSync() {
+    if (typeof window === "undefined") return;
+    if (backendSyncTimer) clearTimeout(backendSyncTimer);
+    const snapshot = state.projects;
+    backendSyncTimer = setTimeout(() => {
+        backendSyncTimer = null;
+        saveProjectsToBackend(snapshot).catch(() => {
+            // Backend not running / unreachable — localStorage remains the source
+            // of truth and the next change will retry. No user-facing error.
+        });
+    }, BACKEND_SYNC_DEBOUNCE_MS);
+}
+
+// Merge two projects maps without losing data from either side. Used on boot so
+// insights created offline (localStorage-only) and insights already persisted on
+// disk both survive. Findings are unioned by id; project metadata follows the
+// most-recently-updated side.
+function mergeProjectsMaps(localProjects = {}, remoteProjects = {}) {
+    const merged = {};
+    const ids = new Set([...Object.keys(localProjects || {}), ...Object.keys(remoteProjects || {})]);
+    for (const id of ids) {
+        const local = localProjects[id];
+        const remote = remoteProjects[id];
+        if (!local) { merged[id] = remote; continue; }
+        if (!remote) { merged[id] = local; continue; }
+
+        // Union findings by id (newest-first order preserved by createdAt sort).
+        const byId = new Map();
+        for (const f of [...(remote.findings || []), ...(local.findings || [])]) {
+            if (f && f.id && !byId.has(f.id)) byId.set(f.id, f);
+        }
+        const findings = Array.from(byId.values()).sort((a, b) => {
+            const ta = Date.parse(a?.createdAt || "") || 0;
+            const tb = Date.parse(b?.createdAt || "") || 0;
+            return tb - ta;
+        });
+
+        // Scalar metadata: prefer the side with the newer updatedAt.
+        const localTime = Date.parse(local.updatedAt || "") || 0;
+        const remoteTime = Date.parse(remote.updatedAt || "") || 0;
+        const base = remoteTime > localTime ? { ...local, ...remote } : { ...remote, ...local };
+        merged[id] = { ...base, findings };
+    }
+    return merged;
+}
+
+function projectsMapsDiffer(a = {}, b = {}) {
+    try {
+        return JSON.stringify(a) !== JSON.stringify(b);
+    } catch {
+        return true;
+    }
+}
+
+// One-shot boot hydration: pull the durable on-disk projects, merge with what
+// localStorage already loaded, and converge both sides. Safe no-op when the
+// backend is down. Exported for explicit/test invocation; also auto-runs once
+// at module load (see bottom of file).
+let projectsHydrated = false;
+export async function hydrateProjectsFromBackend() {
+    if (projectsHydrated) return;
+    projectsHydrated = true;
+    let remote;
+    try {
+        remote = await fetchProjectsFromBackend();
+    } catch {
+        return; // backend optional / not running
+    }
+    const merged = mergeProjectsMaps(state.projects, remote || {});
+    const changedLocally = projectsMapsDiffer(state.projects, merged);
+    if (changedLocally) {
+        state = { ...state, projects: merged };
+        try { localStorage.setItem(LS_PROJECTS, JSON.stringify(merged)); } catch { /* noop */ }
+        notify();
+    }
+    // Push the converged map back so the disk file gains any offline-created
+    // findings (only when the merge added something the backend didn't have).
+    if (projectsMapsDiffer(remote || {}, merged)) {
+        saveProjectsToBackend(merged).catch(() => { /* retry on next change */ });
+    }
 }
 
 function persistScenario() {
@@ -2399,4 +2493,7 @@ async function hydrateRunsFromIndexedDB() {
 // bundles merge in as they load.
 if (typeof window !== "undefined") {
     Promise.resolve().then(() => hydrateRunsFromIndexedDB().catch(() => { /* best-effort */ }));
+    // Pull the durable on-disk projects/insights and merge with localStorage so
+    // saved insights survive browser-data clears. No-op if the backend is down.
+    Promise.resolve().then(() => hydrateProjectsFromBackend().catch(() => { /* best-effort */ }));
 }

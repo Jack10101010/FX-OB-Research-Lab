@@ -1,0 +1,3 @@
+# Durable local projects/insights store (runtime data, not source)
+data/
+projects.json
