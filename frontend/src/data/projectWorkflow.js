@@ -143,6 +143,7 @@ export function classifyFindingSource(finding) {
     if (finding?.source === "table_compare") return "table_compare";
     if (finding?.source === "edge_explorer") return "edge_explorer";
     if (finding?.source === "comparison") return "comparison";
+    if (finding?.source === "run_review") return "run_review";
     if (finding?.source === "run_workspace") return "run_workspace";
     return "manual";
 }
@@ -150,6 +151,7 @@ export function classifyFindingSource(finding) {
 export const FINDING_SOURCE_FILTERS = [
     { value: "all", label: "All" },
     { value: "manual", label: "Manual" },
+    { value: "run_review", label: "Run Review" },
     { value: "run_workspace", label: "Run Workspace" },
     { value: "table_compare", label: "Table Compare" },
     { value: "edge_explorer", label: "Edge Explorer" },

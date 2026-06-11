@@ -54,7 +54,7 @@ export default function Insights() {
     }, [PROJECTS]);
 
     const sourceCounts = useMemo(() => {
-        const c = { all: 0, manual: 0, run_workspace: 0, table_compare: 0, edge_explorer: 0, comparison: 0 };
+        const c = { all: 0, manual: 0, run_review: 0, run_workspace: 0, table_compare: 0, edge_explorer: 0, comparison: 0 };
         for (const f of allFindings) {
             c.all += 1;
             c[classifyFindingSource(f)] += 1;

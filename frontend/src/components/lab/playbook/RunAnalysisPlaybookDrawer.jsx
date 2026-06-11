@@ -13,15 +13,21 @@
  * checklist state via usePlaybook(activeRunId) → persists, survives nav / close /
  * refresh / run-switch. Shortcut links navigate WITHOUT closing the panel.
  *
- * Scope (Phase 2A): no insight saving, no Insights integration, no analytics.
+ * Scope (Phase 2B): adds an "Add Insight" capture control in the sticky header
+ * that writes a finding into the existing per-project Insights store
+ * (addProjectFinding + buildResearchFindingPayload, source "run_review"). No
+ * analytics, importer, Master Controls, or lab-calculation changes; checklist
+ * persistence and progress are untouched.
  */
 
 import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Check, ChevronDown, ChevronRight, ArrowUpRight, RotateCcw, PanelRight, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, ArrowUpRight, RotateCcw, PanelRight, X, Lightbulb } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
-import { useDataset } from "@/data/store";
+import { useDataset, addProjectFinding } from "@/data/store";
+import { buildResearchFindingPayload } from "@/data/projectWorkflow";
+import { useRunVariant } from "@/data/useRunVariant";
 import { buildBannerRunIdentity } from "@/components/lab/researchBanner/bannerRun";
 import { usePlaybook } from "@/data/usePlaybook";
 import { useRunPlaybook } from "./RunPlaybookProvider";
@@ -31,14 +37,14 @@ const PANEL_WIDTH = 440;
 // ── Step checkbox row ─────────────────────────────────────────────────────────
 function StepRow({ step, checked, onToggle, onNavigate }) {
     return (
-        <div className="flex items-start gap-2.5 py-1.5">
+        <div className="flex items-start gap-3 py-2">
             <button
                 type="button"
                 role="checkbox"
                 aria-checked={checked}
                 onClick={onToggle}
                 className={cn(
-                    "mt-px shrink-0 w-4 h-4 rounded-[3px] border flex items-center justify-center transition-colors",
+                    "mt-0.5 shrink-0 w-4 h-4 rounded-[3px] border flex items-center justify-center transition-colors",
                     checked
                         ? "border-[hsl(var(--accent-primary)/0.7)] bg-[hsl(var(--accent-primary)/0.18)] text-[hsl(var(--accent-primary))]"
                         : "border-[hsl(var(--border-soft))] hover:border-[hsl(var(--accent-primary)/0.5)]",
@@ -50,7 +56,7 @@ function StepRow({ step, checked, onToggle, onNavigate }) {
                 <span
                     onClick={onToggle}
                     className={cn(
-                        "text-[12px] font-ui leading-snug cursor-pointer",
+                        "text-[12.5px] font-ui leading-relaxed cursor-pointer",
                         checked ? "text-[hsl(var(--text-2)/0.7)] line-through" : "text-[hsl(var(--text-1))]",
                     )}
                 >
@@ -60,7 +66,7 @@ function StepRow({ step, checked, onToggle, onNavigate }) {
                     <button
                         type="button"
                         onClick={onNavigate}
-                        className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-ui border border-[hsl(var(--border-soft))] clip-bevel-sm text-[hsl(var(--text-2))] hover:border-[hsl(var(--accent-primary)/0.5)] hover:text-[hsl(var(--accent-primary))] transition-colors whitespace-nowrap"
+                        className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-ui border border-[hsl(var(--accent-primary)/0.35)] bg-[hsl(var(--accent-primary)/0.06)] clip-bevel-sm text-[hsl(var(--accent-primary)/0.9)] hover:border-[hsl(var(--accent-primary)/0.6)] hover:text-[hsl(var(--accent-primary))] transition-colors whitespace-nowrap"
                     >
                         {step.shortcut.label}
                         <ArrowUpRight className="w-2.5 h-2.5" />
@@ -109,9 +115,14 @@ function DecisionGroup({ decisions, value, onSelect }) {
 
 export function RunAnalysisPlaybookDrawer() {
     const { isOpen, setOpen, close, docked, toggleDock } = useRunPlaybook();
-    const { ACTIVE_RUN, activeRunId, getRunData } = useDataset();
+    const { ACTIVE_RUN, activeRunId, getRunData, ACTIVE_PROJECT, activeProjectId } = useDataset();
     const navigate = useNavigate();
     const [confirmReset, setConfirmReset] = useState(false);
+
+    // ── Add Insight (Phase 2B) ───────────────────────────────────────────────
+    const [insightOpen, setInsightOpen] = useState(false);
+    const [insightText, setInsightText] = useState("");
+    const [savedFlash, setSavedFlash] = useState(false);
 
     const runBundle = activeRunId && getRunData ? getRunData(activeRunId) : null;
     const runIdentity = useMemo(
@@ -119,11 +130,46 @@ export function RunAnalysisPlaybookDrawer() {
         [runBundle, ACTIVE_RUN],
     );
 
+    // Result View / Position Variant context for the captured insight (read-only).
+    const { resultView, universe } = useRunVariant(activeRunId);
+
     const {
         sections, decisions, decision, progress,
         toggleStep, setDecision, setSectionCollapsed, resetRun,
         isChecked, isCollapsed,
     } = usePlaybook(activeRunId);
+
+    // Safe project resolution: active project → run's project → last-active project.
+    const insightProjectId = ACTIVE_PROJECT?.id || runBundle?.projectId || activeProjectId || null;
+    const decisionLabel = decisions?.find((d) => d.id === decision)?.label || null;
+    const canSaveInsight = Boolean(insightProjectId) && insightText.trim().length > 0;
+
+    const handleSaveInsight = () => {
+        if (!canSaveInsight) return;
+        const runName = runIdentity?.name || runIdentity?.id || "Run";
+        const payload = buildResearchFindingPayload({
+            source: "run_review",
+            type: "finding",
+            title: `Run review — ${runName}`,
+            note: insightText.trim(),
+            runId: activeRunId,
+            tag: decision || undefined,
+            universeKey: resultView || universe?.universeType || undefined,
+            metaExtra: {
+                resultView: universe?.label || resultView || null,
+                positionVariant: universe?.variant || null,
+                decision: decision || null,
+                decisionLabel,
+            },
+        });
+        const entry = addProjectFinding(insightProjectId, payload);
+        if (entry) {
+            setInsightText("");
+            setInsightOpen(false);
+            setSavedFlash(true);
+            window.setTimeout(() => setSavedFlash(false), 2200);
+        }
+    };
 
     const sectionStats = useMemo(() => sections.map((sec) => {
         const steps = sec.steps || [];
@@ -203,6 +249,73 @@ export function RunAnalysisPlaybookDrawer() {
 
             {activeRunId && (
                 <>
+                    {/* Add Insight — sticky-header capture (Phase 2B). Lives above the
+                        scroll area so it's reachable without scrolling. */}
+                    <div className="px-5 pt-3 pb-1">
+                        {!insightOpen ? (
+                            <div className="flex items-center justify-between gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setInsightOpen(true)}
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[10.5px] font-ui uppercase tracking-wider border border-[hsl(var(--accent-primary)/0.4)] bg-[hsl(var(--accent-primary)/0.06)] text-[hsl(var(--accent-primary))] clip-bevel-sm hover:bg-[hsl(var(--accent-primary)/0.12)] transition-colors"
+                                >
+                                    <Lightbulb className="w-3 h-3" />
+                                    Add Insight
+                                </button>
+                                {savedFlash && (
+                                    <span className="inline-flex items-center gap-1 text-[10.5px] font-ui text-[hsl(var(--success))]">
+                                        <Check className="w-3 h-3" />
+                                        Insight saved
+                                    </span>
+                                )}
+                            </div>
+                        ) : (
+                            <div className="clip-bevel-sm border border-[hsl(var(--accent-primary)/0.35)] bg-[hsl(var(--panel-2)/0.4)] p-2.5">
+                                <div className="flex items-center justify-between mb-1.5">
+                                    <span className="text-[9px] font-ui uppercase tracking-[0.14em] text-[hsl(var(--accent-primary))]">Capture Insight</span>
+                                    {decisionLabel && (
+                                        <span className="text-[9.5px] font-ui text-[hsl(var(--text-2)/0.8)]">Outcome: {decisionLabel}</span>
+                                    )}
+                                </div>
+                                <textarea
+                                    autoFocus
+                                    rows={3}
+                                    value={insightText}
+                                    onChange={(e) => setInsightText(e.target.value)}
+                                    placeholder="Capture what you found from this review…"
+                                    className="w-full resize-none bg-transparent outline-none text-[12px] font-ui leading-relaxed text-[hsl(var(--text-1))] placeholder:text-[hsl(var(--text-2)/0.55)]"
+                                />
+                                {!insightProjectId && (
+                                    <div className="mt-1 text-[10.5px] font-ui text-[hsl(var(--warning))] leading-snug">
+                                        Assign this run to a project to save insights.
+                                    </div>
+                                )}
+                                <div className="mt-2 flex items-center justify-end gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => { setInsightOpen(false); setInsightText(""); }}
+                                        className="px-2 py-1 text-[10px] font-ui uppercase tracking-wider border border-[hsl(var(--border-soft))] text-muted-lab clip-bevel-sm hover:text-white transition-colors"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleSaveInsight}
+                                        disabled={!canSaveInsight}
+                                        className={cn(
+                                            "px-2.5 py-1 text-[10px] font-ui uppercase tracking-wider border clip-bevel-sm transition-colors",
+                                            canSaveInsight
+                                                ? "border-[hsl(var(--accent-primary)/0.6)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.1)] hover:bg-[hsl(var(--accent-primary)/0.18)]"
+                                                : "border-[hsl(var(--border-soft))] text-[hsl(var(--text-2)/0.45)] cursor-not-allowed",
+                                        )}
+                                    >
+                                        Save Insight
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
                     {/* Current Stage card */}
                     <div className="mx-5 mt-4 mb-1 clip-bevel-sm border border-[hsl(var(--accent-primary)/0.4)] bg-[hsl(var(--accent-primary)/0.05)] px-4 py-3">
                         <div className="flex items-baseline justify-between gap-2">
@@ -228,27 +341,31 @@ export function RunAnalysisPlaybookDrawer() {
                     </div>
 
                     {/* Sections (scrollable) */}
-                    <div className="flex-1 overflow-y-auto scrollbar-thin px-5 py-3 flex flex-col gap-1">
+                    <div className="flex-1 overflow-y-auto scrollbar-thin px-5 py-3 flex flex-col gap-2">
                         {sections.map((sec, i) => {
                             const collapsed = isCollapsed(sec.id);
                             const stat = sectionStats[i];
+                            const isCurrent = i === currentIndex;
                             return (
-                                <div key={sec.id} className="border-b border-[hsl(var(--border-soft)/0.25)] pb-1.5">
+                                <div key={sec.id} className="border-b border-[hsl(var(--border-soft)/0.25)] pb-2">
                                     <button
                                         type="button"
                                         onClick={() => setSectionCollapsed(sec.id, !collapsed)}
-                                        className="w-full flex items-center gap-2 py-2 text-left"
+                                        className={cn(
+                                            "w-full flex items-center gap-2 py-2.5 text-left rounded-[3px] transition-colors",
+                                            isCurrent && "bg-[hsl(var(--accent-primary)/0.06)] px-2 -mx-2",
+                                        )}
                                     >
                                         {collapsed ? <ChevronRight className="w-3.5 h-3.5 text-[hsl(var(--text-2))] shrink-0" /> : <ChevronDown className="w-3.5 h-3.5 text-[hsl(var(--text-2))] shrink-0" />}
                                         <span className={cn(
-                                            "flex-1 text-[12px] font-ui font-semibold uppercase tracking-[0.04em]",
-                                            i === currentIndex ? "text-[hsl(var(--accent-primary))]" : "text-[hsl(var(--text-1))]",
+                                            "flex-1 text-[12.5px] font-ui font-semibold uppercase tracking-[0.05em]",
+                                            isCurrent ? "text-[hsl(var(--accent-primary))]" : "text-[hsl(var(--text-1))]",
                                         )}>
                                             {sec.title}
                                         </span>
                                         {!sec.isDecision && (
                                             <span className={cn(
-                                                "text-[10px] font-num tabular-nums",
+                                                "text-[10px] font-num tabular-nums shrink-0",
                                                 stat.complete ? "text-[hsl(var(--success))]" : "text-[hsl(var(--text-2)/0.7)]",
                                             )}>
                                                 {stat.done}/{stat.total}
@@ -269,6 +386,11 @@ export function RunAnalysisPlaybookDrawer() {
                                                         onNavigate={() => handleShortcut(step.shortcut?.to)}
                                                     />
                                                 ))
+                                            )}
+                                            {sec.branchHint && (
+                                                <div className="mt-2 pl-1 text-[10.5px] font-ui italic text-[hsl(var(--text-2)/0.7)] leading-snug">
+                                                    {sec.branchHint}
+                                                </div>
                                             )}
                                         </div>
                                     )}
@@ -307,7 +429,9 @@ export function RunAnalysisPlaybookDrawer() {
                                 Reset Playbook
                             </button>
                         )}
-                        <span className="text-[9.5px] font-ui text-[hsl(var(--text-2)/0.5)]">Add Insight · Phase 2B</span>
+                        <span className="text-[9.5px] font-ui text-[hsl(var(--text-2)/0.5)]">
+                            {progress.done}/{progress.total} checks · decision excluded
+                        </span>
                     </div>
                 </>
             )}
