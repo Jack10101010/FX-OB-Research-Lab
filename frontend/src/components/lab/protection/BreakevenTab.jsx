@@ -494,6 +494,19 @@ export function BreakevenTab({ trades, candles, activeRun, activeRunId, beResult
     return (
         <div className="flex flex-col gap-4 pb-8">
 
+            {/* ── 0. Break-even headline KPIs — mirror the model/variant strip above
+                   so the BE-adjusted result sits directly under it for comparison. */}
+            {s && (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                    <MetricChip label="BE Net R"      value={s.netR != null ? fmtR(s.netR) : "—"} sub={`${armLevelR}R arm · break-even`} tone={s.netR >= 0 ? "primary" : "danger"} icon={TrendingUp} />
+                    <MetricChip label="Δ Net R"       value={s.deltaNetR != null ? fmtR(s.deltaNetR) : "—"} sub="vs no-BE baseline" tone={s.deltaNetR >= 0 ? "success" : "danger"} icon={Activity} />
+                    <MetricChip label="Profit Factor" value={s.profitFactor != null ? String(s.profitFactor) : "—"} sub="break-even adjusted" tone={s.profitFactor != null && s.profitFactor >= 1.5 ? "success" : s.profitFactor != null && s.profitFactor < 1 ? "danger" : "muted"} icon={BarChart2} />
+                    <MetricChip label="Max DD"        value={s.maxDrawdown != null ? fmtR(s.maxDrawdown) : "—"} sub="worst equity dip" tone={s.maxDrawdown < -2 ? "danger" : s.maxDrawdown < 0 ? "warning" : "muted"} icon={AlertTriangle} />
+                    <MetricChip label="Losses Saved"  value={String(s.lossesSaved)} sub={`+${rnd2(s.loserRSaved).toFixed(1)}R recovered`} tone="success" icon={ShieldAlert} />
+                    <MetricChip label="Winners Cut"   value={String(s.winnersCut)} sub={`-${rnd2(s.winnerRCost).toFixed(1)}R cost`} tone="danger" icon={TrendingUp} />
+                </div>
+            )}
+
             {/* ── 1. Confidence banner — EXACT or REPLAY tier ─────────────── */}
             <div className={cn(
                 "rounded-[6px] border px-4 py-3",
