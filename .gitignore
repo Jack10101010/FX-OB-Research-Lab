@@ -98,3 +98,9 @@ credentials.json
 # Local audit exports / scratch validation
 RESEARCH_PLATFORM_AUDIT.pdf
 frontend/.sp*.cjs
+
+# macOS metadata
+._*
+
+# FUSE temp files
+.fuse_hidden*
