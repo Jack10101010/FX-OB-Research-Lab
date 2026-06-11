@@ -90,10 +90,10 @@ function RunSwitcher() {
     const { RUNS, activeRunId } = useDataset();
     const runs = RUNS || [];
     const active = runs.find((r) => r.id === activeRunId) || null;
-    const label = active ? getRunDisplayName(active) : "No Active Run";
+    const label = active ? getRunDisplayName(active) : "No Run";
 
     const options = [
-        { id: null, label: "No Active Run", sub: "Clear selection" },
+        { id: null, label: "No Run", sub: "Clear selection" },
         ...runs.map((r) => {
             const tf = compactTimeframe(r.detectionTf);
             const sub = [r.symbol, tf, r.projectName && r.projectName !== "Unassigned" ? r.projectName : null]
@@ -107,7 +107,7 @@ function RunSwitcher() {
         <Switcher
             testId="topbar-run-switcher"
             icon={Activity}
-            kicker="Active Run"
+            kicker="Run"
             value={label}
             tone="primary"
             empty={!active}

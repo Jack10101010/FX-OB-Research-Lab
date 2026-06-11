@@ -30,7 +30,7 @@ export function CurrentResultViewPanel({
     return (
         <div className="px-3 py-2">
             <div className="text-[10px] font-semibold font-ui uppercase tracking-[0.1em] text-[hsl(var(--text-2))] mb-1">
-                Current Result View
+                Current View
             </div>
             {/* Dominant view label */}
             <div className={[

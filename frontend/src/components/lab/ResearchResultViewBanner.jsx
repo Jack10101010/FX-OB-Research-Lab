@@ -17,7 +17,7 @@
  * Lens. The Arm C0/C1 double-count + FILL_MODE_COERCED warnings flow through the
  * CurrentResultViewPanel only.
  *
- * Terminology is locked: the lens is "Result View"; axis-1 is "Position Variant".
+ * Terminology (Phase 14 Wave 1): the lens is "Model" under the "View" header; axis-1 is "Position Mode".
  *
  * The `interactive` / `resultViewOptions` / `onResultViewChange` props are RESERVED
  * for a future switching phase — accepted here but unused (the banner stays static).
@@ -123,7 +123,7 @@ export default function ResearchResultViewBanner({
         <div className="px-4 py-3">
             {showRunIdentity && run && <BannerRunIdentity run={run} />}
             <div className="text-[10px] font-semibold font-ui uppercase tracking-[0.1em] text-[hsl(var(--text-2))] mb-2">
-                Result View
+                View
             </div>
             <div className="flex flex-wrap items-center gap-2 mb-2">
                 <Field label="Model">
@@ -141,7 +141,7 @@ export default function ResearchResultViewBanner({
                 )}
             </div>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 pt-2 border-t border-[hsl(var(--border-soft)/0.25)]">
-                <Field label="Position Variant">
+                <Field label="Position Mode">
                     <Pill tone="muted">{universe.variant || "Primary"}</Pill>
                 </Field>
                 {run?.basisLabel && (

@@ -9,9 +9,9 @@
  * the canonical store scenario via `useRunVariant`). Pull it out of RunDetail so
  * Strategy Map / Hypothesis Lab can adopt the exact same surface in a later phase.
  *
- * User-facing terminology (locked, RUN-VARIANT-HEADER-AUDIT-1 §7):
- *   • the lens itself stays "Result View"
- *   • axis-1 (the exported position slice) is labelled "Position Variant"
+ * User-facing terminology (Phase 14 Wave 1; was Result View / Position Variant):
+ *   • the lens is labelled "Model" (umbrella header "View")
+ *   • axis-1 (the exported position slice) is labelled "Position Mode"
  *
  * The Arm C0 / Arm C1 double-count warning is surfaced unchanged — this component
  * never merges fill modes; it only displays the resolver's warnings.
@@ -325,7 +325,7 @@ export default function ResearchRunHeader({
                                         })()}
                                         {/* Scope chips */}
                                         <div className="flex flex-wrap items-center gap-2 mt-2.5 pt-2 border-t border-[hsl(var(--border-soft)/0.25)]">
-                                            <ScopeRow label="Position Variant">
+                                            <ScopeRow label="Position Mode">
                                                 <Pill tone="muted">{scopeChip.variantLabel || "Primary"}</Pill>
                                             </ScopeRow>
                                             <ScopeRow label="Basis">

@@ -107,9 +107,9 @@ export function TradeUniverseBadge({
                     value={isScenario ? "Scenario trades" : "Baseline reference"}
                     tone={isScenario ? "success" : "muted"}
                 />
-                <BadgeCell label="Result View" value={universe.label || "—"} />
+                <BadgeCell label="Model" value={universe.label || "—"} />
                 {universe.variant && (
-                    <BadgeCell label="Position Variant" value={universe.variant} />
+                    <BadgeCell label="Position Mode" value={universe.variant} />
                 )}
                 {/* Source CSV is the most useful field for debugging "why are
                     the numbers different than I expected" but it's also the
