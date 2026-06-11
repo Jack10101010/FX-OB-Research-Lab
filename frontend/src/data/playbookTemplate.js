@@ -1,95 +1,98 @@
 /**
- * playbookTemplate — static decision-tree checklist for the Run Analysis Playbook
- * (RUN-ANALYSIS-PLAYBOOK Phase 1). Pure data, no React, no imports.
+ * playbookTemplate — the Run Analysis Playbook decision tree (V2).
+ * Pure data, no React, no imports.
  *
- * Section + step IDs are STABLE strings: persisted completion state is keyed by
- * these ids, so editing labels/order here never orphans a user's saved progress
- * (unknown saved ids are ignored; new ids default unchecked).
+ * V2 reframes the checklist into a true research FUNNEL — verify → judge → find
+ * the bleed → isolate → form the fix → stress-test → decide — with action-oriented
+ * section names and "find the X" step wording (RUN-ANALYSIS-PLAYBOOK-WORKFLOW-AUDIT-1).
  *
- * `shortcut` (optional) on a step: { label, to } where `to` is an in-app route.
+ * Section IDs are STABLE across V1→V2 (collapse-state + Current-Stage logic keyed
+ * by them survive). Step IDs are reused where the concept is unchanged (saved checks
+ * survive); reworded steps keep their id, genuinely new steps get new ids, and a few
+ * V1 duplicates were dropped (their stale saved ids are simply ignored on load).
+ *
+ * `shortcut` (optional): { label, to } where `to` is an in-app route.
  */
 
 export const PLAYBOOK_SECTIONS = [
     {
         id: "context",
-        title: "Confirm Data Context",
+        title: "Verify the Setup",
         steps: [
-            { id: "context.correct_run", label: "Am I looking at the correct run?", shortcut: { label: "Run Workspace", to: "/runs/active" } },
-            { id: "context.correct_result_view", label: "Correct Result View?" },
-            { id: "context.correct_position_variant", label: "Correct Position Variant?" },
-            { id: "context.correct_date_range", label: "Correct date range?" },
-            { id: "context.enough_trades", label: "Enough trades to trust this result?" },
+            { id: "context.correct_run", label: "Confirm you're on the right run", shortcut: { label: "Run Workspace", to: "/runs/active" } },
+            { id: "context.correct_result_view", label: "Confirm the Result View" },
+            { id: "context.correct_position_variant", label: "Confirm the Position Variant" },
+            { id: "context.correct_date_range", label: "Confirm the date range" },
+            { id: "context.enough_trades", label: "Enough trades to trust this?" },
         ],
     },
     {
         id: "performance",
-        title: "High-Level Performance Check",
+        title: "Judge the Headline",
         steps: [
-            { id: "performance.net_r_positive", label: "Is Net R positive?" },
-            { id: "performance.win_rate_healthy", label: "Is win rate healthy?" },
+            { id: "performance.net_r_positive", label: "Is Net R clearly positive?" },
+            { id: "performance.win_rate_healthy", label: "Is the win rate healthy?" },
             { id: "performance.profit_factor_ok", label: "Is profit factor acceptable?" },
             { id: "performance.max_dd_survivable", label: "Is max drawdown survivable?" },
-            { id: "performance.expectancy_positive", label: "Is expectancy positive?" },
-            { id: "performance.enough_decided", label: "Based on enough decided trades?" },
+            { id: "performance.expectancy_positive", label: "Is expectancy positive per trade?" },
+            { id: "performance.enough_decided", label: "Enough decided trades behind it?" },
         ],
-        // Non-blocking UI hint after this section (rendered by the drawer, not enforced).
-        branchHint: "Bad stats → Weakness Discovery · Good → Robustness · Mixed → Segmentation",
+        // Non-blocking UI hint (rendered by the drawer, not enforced).
+        branchHint: "Weak → Find Where It Bleeds · Strong → Stress-Test It · Mixed → Isolate the Pattern",
     },
     {
         id: "weakness",
-        title: "Trade Quality / Weakness Discovery",
+        title: "Find Where It Bleeds",
         steps: [
-            { id: "weakness.losses_by_session", label: "Losses concentrated in a session?", shortcut: { label: "Session Lab", to: "/session-lab" } },
-            { id: "weakness.losses_by_structure", label: "Losses concentrated in CHoCH or BOS?", shortcut: { label: "Strategy Map", to: "/strategy-map" } },
-            { id: "weakness.losses_by_direction", label: "Losses concentrated by direction?" },
-            { id: "weakness.losses_by_fillmode", label: "Losses concentrated by fill mode / Result View?" },
-            { id: "weakness.fast_stopouts", label: "Are fast stop-outs common?", shortcut: { label: "Failures Lab", to: "/failures-lab" } },
-            { id: "weakness.false_losers", label: "Are false losers present?", shortcut: { label: "Failures Lab", to: "/failures-lab" } },
-            { id: "weakness.distance_clues", label: "Distance-to-stop / MFE / MAE clues?", shortcut: { label: "Failures Lab", to: "/failures-lab" } },
+            { id: "weakness.losses_by_session", label: "Find the session/hour causing the most damage", shortcut: { label: "Session Lab", to: "/session-lab" } },
+            { id: "weakness.losses_by_structure", label: "Find which structure (BOS / CHoCH) underperforms", shortcut: { label: "Strategy Map", to: "/strategy-map" } },
+            { id: "weakness.losses_by_direction", label: "Find the weaker direction (long vs short)" },
+            // Protection DIAGNOSIS — before proposing a protection fix in "Form the Fix".
+            { id: "weakness.protection_diagnosis", label: "Are losers recoverable or hard-invalidated?", shortcut: { label: "Protection Lab", to: "/protection-lab" } },
+            { id: "weakness.fast_stopouts", label: "Gauge fast stop-outs & false losers", shortcut: { label: "Failures Lab", to: "/failures-lab" } },
+            { id: "weakness.winner_quality", label: "Are winners leaving R on the table? (MFE / giveback)", shortcut: { label: "Failures Lab", to: "/failures-lab" } },
+            { id: "weakness.concentration", label: "Is performance concentrated in a few trades or periods?" },
         ],
     },
     {
         id: "segmentation",
-        title: "Segmentation / Pattern Discovery",
+        title: "Isolate the Pattern",
         steps: [
-            { id: "segmentation.session", label: "Check session performance", shortcut: { label: "Session Lab", to: "/session-lab" } },
-            { id: "segmentation.direction", label: "Check direction performance", shortcut: { label: "Strategy Map", to: "/strategy-map" } },
-            { id: "segmentation.structure", label: "Check structure type (BOS / CHoCH)" },
-            { id: "segmentation.entry_model", label: "Check entry model", shortcut: { label: "Entries Lab", to: "/entries-lab" } },
-            { id: "segmentation.result_view", label: "Check Result View / variant" },
-            { id: "segmentation.regime", label: "Check time period / regime (if available)" },
-            { id: "segmentation.ob_quality", label: "Check OB quality / lifecycle context", shortcut: { label: "Order Block Lab", to: "/order-block-lab" } },
+            { id: "segmentation.session", label: "Isolate the strongest & weakest slice", shortcut: { label: "Session Lab", to: "/session-lab" } },
+            { id: "segmentation.direction", label: "Cross-cut: direction × structure × model", shortcut: { label: "Strategy Map", to: "/strategy-map" } },
+            { id: "segmentation.entry_model", label: "Compare entry models", shortcut: { label: "Entries Lab", to: "/entries-lab" } },
+            { id: "segmentation.result_view", label: "Test Result View / fill-mode sensitivity" },
+            { id: "segmentation.ob_quality", label: "Use OB quality / lifecycle as a filter input", shortcut: { label: "Order Block Lab", to: "/order-block-lab" } },
+            { id: "segmentation.segment_sample", label: "Enough trades in each slice to trust it?" },
         ],
     },
     {
         id: "improvement",
-        title: "Improvement Hypothesis",
+        title: "Form the Fix",
         steps: [
-            { id: "improvement.filter_idea", label: "What filter might remove bad trades?", shortcut: { label: "Hypothesis Lab", to: "/hypothesis-lab" } },
-            { id: "improvement.protection_idea", label: "What protection rule might reduce damage?", shortcut: { label: "Protection Lab", to: "/protection-lab" } },
-            { id: "improvement.entry_idea", label: "What entry rule might improve timing?" },
-            { id: "improvement.exclude_segment", label: "What session / direction / model to exclude?" },
-            { id: "improvement.needs_new_backtest", label: "What requires a new backtest?" },
+            { id: "improvement.filter_idea", label: "Define a filter to remove the bad trades", shortcut: { label: "Hypothesis Lab", to: "/hypothesis-lab" } },
+            { id: "improvement.protection_idea", label: "Define a protection rule (arm level / BE)", shortcut: { label: "Protection Lab", to: "/protection-lab" } },
+            { id: "improvement.entry_idea", label: "Define an entry / timing improvement" },
+            { id: "improvement.exclude_segment", label: "Decide what to exclude (session / direction / model)" },
+            { id: "improvement.needs_new_backtest", label: "Note what needs a new backtest" },
         ],
     },
     {
         id: "robustness",
-        title: "Robustness / Validation",
+        title: "Stress-Test It",
         steps: [
-            { id: "robustness.holds_date_ranges", label: "Does the edge hold across date ranges?" },
-            { id: "robustness.holds_across_runs", label: "Does it hold across runs?", shortcut: { label: "Comparison Lab", to: "/comparison" } },
-            { id: "robustness.holds_walk_forward", label: "Does it hold in walk-forward?", shortcut: { label: "Walk-Forward", to: "/walk-forward" } },
-            { id: "robustness.monte_carlo_ruin", label: "Does Monte Carlo expose ruin risk?", shortcut: { label: "Monte Carlo", to: "/monte-carlo" } },
-            { id: "robustness.regime_dependent", label: "Is performance regime-dependent?" },
-            { id: "robustness.sample_size", label: "Is the sample size enough?" },
+            { id: "robustness.holds_date_ranges", label: "Survives other date ranges / out-of-sample?" },
+            { id: "robustness.holds_across_runs", label: "Holds across runs?", shortcut: { label: "Comparison Lab", to: "/comparison" } },
+            { id: "robustness.holds_walk_forward", label: "Survives walk-forward (weakest fold)?", shortcut: { label: "Walk-Forward", to: "/walk-forward" } },
+            { id: "robustness.monte_carlo_ruin", label: "Monte Carlo ruin risk acceptable?", shortcut: { label: "Monte Carlo", to: "/monte-carlo" } },
+            { id: "robustness.regime_dependent", label: "Is it regime-dependent?" },
+            { id: "robustness.sample_size", label: "Overall sample big enough to trust?" },
         ],
     },
     {
         id: "decision",
-        title: "Decision Outcome",
-        // The decision section has no checkable steps — it is a single-select outcome
-        // plus the "Add insight" action (built in the UI phase). Steps stays empty so
-        // progress math is unaffected by the decision.
+        title: "Decide & Log",
+        // No checkable steps — single-select outcome only; excluded from progress.
         steps: [],
         isDecision: true,
     },
