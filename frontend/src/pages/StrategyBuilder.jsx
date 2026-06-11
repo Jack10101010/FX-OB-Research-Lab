@@ -127,9 +127,38 @@ export default function StrategyBuilder() {
         shortTriggeredEdgeThreshold: 25,
         shortTriggeredEdgeDelays: [0, 1],
         monteCarlo: false,
+        // ── Break-even Exact Replay (BE-FRONTEND-INTEGRATION) ─────────────────
+        // ON by default with the FULL standard set so every run auto-generates the
+        // exact scenarios the Break-even page displays (6 arms × wick/close). The
+        // backend emits trades_*__be_*.csv + be_results; Protection Lab → Break-even
+        // shows EXACT (baseline entry model) instead of REPLAY. Toggle off to skip
+        // the extra passes. NOTE: backend BE is currently computed on the BASELINE
+        // trade set only — see the Break-even tab note for non-baseline views.
+        beEnabled: true,
+        beArmLevels: [0.25, 0.5, 0.75, 1.0, 1.5, 2.0],
+        beTriggerBases: ["wick", "close"],
+        beDelayCandles: 0,
         };
     });
     const set = (k) => (v) => setCfg((c) => ({ ...c, [k]: v }));
+
+    // ── Break-even multi-select toggles ───────────────────────────────────────
+    const toggleBeArm = (level) => setCfg((c) => {
+        const cur = Array.isArray(c.beArmLevels) ? c.beArmLevels : [];
+        const next = cur.includes(level) ? cur.filter((x) => x !== level) : [...cur, level];
+        return { ...c, beArmLevels: next.sort((a, b) => a - b) };
+    });
+    const toggleBeTrigger = (t) => setCfg((c) => {
+        const cur = Array.isArray(c.beTriggerBases) ? c.beTriggerBases : [];
+        const next = cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t];
+        // Never allow zero triggers — fall back to wick.
+        return { ...c, beTriggerBases: next.length ? next : ["wick"] };
+    });
+    const BE_ARM_CHOICES = [0.25, 0.5, 0.75, 1.0, 1.5, 2.0];
+    const beScenarioCount = cfg.beEnabled
+        ? (Array.isArray(cfg.beArmLevels) ? cfg.beArmLevels.length : 0)
+          * (Array.isArray(cfg.beTriggerBases) ? cfg.beTriggerBases.length : 0)
+        : 0;
 
     // ── Preset manager (localStorage: fxob_configs) ─────────────────
     const { presets, save, remove, duplicate, load, names } = usePresets();
@@ -774,6 +803,73 @@ export default function StrategyBuilder() {
                                         </div>
                                     </div>
                                 </div>
+                            </div>
+
+                            {/* ── Advanced Protection · Break-even Exact Replay ───────────── */}
+                            <div className="border border-[hsl(var(--accent-secondary)/0.3)] bg-gradient-to-b from-[hsl(var(--accent-secondary)/0.04)] to-transparent clip-bevel-sm p-3">
+                                <div className="flex items-center justify-between gap-3">
+                                    <div>
+                                        <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Generate Break-even exact scenarios</div>
+                                        <div className="text-[10.5px] text-muted-lab">Auto-generates the BE scenarios used by Protection Lab (6 arms × wick/close). On by default; toggle off to skip the extra passes. Computed on the baseline entry model.</div>
+                                    </div>
+                                    <NeonToggle checked={cfg.beEnabled} onChange={set("beEnabled")} testId="bld-be-toggle" />
+                                </div>
+                                {cfg.beEnabled && (
+                                    <div className="mt-3 flex flex-col gap-3">
+                                        <div>
+                                            <div className="control-label mb-2 text-[11px] font-ui uppercase tracking-wider text-muted-lab">Arm Levels (R)</div>
+                                            <div className="flex flex-wrap gap-2">
+                                                {BE_ARM_CHOICES.map((level) => (
+                                                    <button
+                                                        key={level}
+                                                        type="button"
+                                                        onClick={() => toggleBeArm(level)}
+                                                        className={`clip-bevel-sm px-2.5 py-1 text-[11px] font-num border transition-colors ${
+                                                            cfg.beArmLevels?.includes(level)
+                                                                ? "border-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.15)] text-white"
+                                                                : "border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:border-[hsl(var(--accent-secondary))]"
+                                                        }`}
+                                                    >
+                                                        {level}R
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <div className="control-label mb-2 text-[11px] font-ui uppercase tracking-wider text-muted-lab">Trigger Basis</div>
+                                            <div className="flex flex-wrap gap-2">
+                                                {[{ v: "wick", l: "Wick" }, { v: "close", l: "Close" }].map(({ v, l }) => (
+                                                    <button
+                                                        key={v}
+                                                        type="button"
+                                                        onClick={() => toggleBeTrigger(v)}
+                                                        className={`clip-bevel-sm px-2.5 py-1 text-[11px] font-ui border transition-colors ${
+                                                            cfg.beTriggerBases?.includes(v)
+                                                                ? "border-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.15)] text-white"
+                                                                : "border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:border-[hsl(var(--accent-secondary))]"
+                                                        }`}
+                                                    >
+                                                        {l}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <div className="control-label mb-2 text-[11px] font-ui uppercase tracking-wider text-muted-lab">Delay (candles after arm)</div>
+                                            <Segment
+                                                options={[{ value: 0, label: "0" }, { value: 1, label: "+1" }, { value: 2, label: "+2" }]}
+                                                value={cfg.beDelayCandles}
+                                                onChange={(v) => set("beDelayCandles")(Number(v))}
+                                            />
+                                        </div>
+                                        <div className="text-[10.5px] text-muted-lab">
+                                            Stop buffer fixed at 0R (exact entry) for now.{" "}
+                                            {cfg.beArmLevels?.length && cfg.beTriggerBases?.length
+                                                ? `${beScenarioCount} extra simulation pass${beScenarioCount === 1 ? "" : "es"} (${cfg.beArmLevels.length} arm${cfg.beArmLevels.length === 1 ? "" : "s"} × ${cfg.beTriggerBases.length} trigger${cfg.beTriggerBases.length === 1 ? "" : "s"}).`
+                                                : "Select at least one arm level and trigger basis."}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                     </>
                 </NeonPanel>

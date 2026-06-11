@@ -212,17 +212,30 @@ function buildTableColumns(armLevelR, setArmLevelR) {
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
-export function BreakevenTab({ trades, candles, activeRun, activeRunId, beResults, beTradesByMode, executionMode }) {
+export function BreakevenTab({
+    trades, candles, activeRun, activeRunId,
+    beResults, beTradesByMode, executionMode,
+    isBaselineView = true, resultViewLabel,
+}) {
     // BE Exact Replay maps (BE-FRONTEND-INTEGRATION Phase H). When the backend
     // exported exact scenarios for this run we prefer them per arm+trigger and
     // fall back to the client-side candle-walk REPLAY otherwise.
     const beResultsMap     = beResults     ?? activeRun?.beResults     ?? EMPTY_BE_MAP;
     const beTradesByModeMap = beTradesByMode ?? activeRun?.beTradesByMode ?? EMPTY_BE_MAP;
     const beExecutionMode  = executionMode ?? activeRun?.primaryVariant ?? null;
-    const hasExact = React.useMemo(
+
+    // Backend BE is simulated on the BASELINE entry trade set only — the exported
+    // be_results / trades_*__be_*.csv carry no entry-model context. So EXACT is
+    // only valid while the active result view IS baseline. For any non-baseline
+    // variant (Triggered Edge, Penetration, FFT, directional, …) we must NOT show
+    // baseline BE as that variant's EXACT result; we fall back to REPLAY computed
+    // on the variant's own trades. (Variant-aware exact BE is a planned Phase 2.)
+    const exactAllowed = isBaselineView !== false;
+    const beDataPresent = React.useMemo(
         () => hasAnyExactBe(beResultsMap, beTradesByModeMap),
         [beResultsMap, beTradesByModeMap],
     );
+    const hasExact = beDataPresent && exactAllowed;
     // ── All hooks unconditionally before any early return ─────────────────
 
     // Candle loading (mirrors useRetestData pattern).
@@ -293,6 +306,9 @@ export function BreakevenTab({ trades, candles, activeRun, activeRunId, beResult
             activeRunId,
             executionModePassed: beExecutionMode,
             resolvedExecutionMode: d.resolvedExecutionMode,
+            isBaselineView,
+            exactAllowed,
+            resultViewLabel,
             hasAnyExact: d.hasAnyExact,
             beResultsExecutionModes: d.beResultsExecutionModes,
             beTradesExecutionModes: d.beTradesExecutionModes,
@@ -305,7 +321,7 @@ export function BreakevenTab({ trades, candles, activeRun, activeRunId, beResult
         });
         // eslint-disable-next-line no-console
         console.groupEnd();
-    }, [activeRunId, armLevelR, triggerBasis, beExecutionMode, beResultsMap, beTradesByModeMap]);
+    }, [activeRunId, armLevelR, triggerBasis, beExecutionMode, beResultsMap, beTradesByModeMap, exactAllowed, isBaselineView, resultViewLabel]);
 
     // Fast check only — no candle walking, safe to run synchronously.
     const availability = React.useMemo(
@@ -336,15 +352,19 @@ export function BreakevenTab({ trades, candles, activeRun, activeRunId, beResult
             if (cancelled) return;
             const baseline = computeBaseline(trades);
             const result = ARM_LEVELS.map((arm) => {
-                // Prefer backend EXACT for this arm + trigger when available.
-                const resolved = resolveBeScenarioSource({
-                    armLevelR: arm,
-                    triggerBasis,
-                    executionMode: beExecutionMode,
-                    beResults: beResultsMap,
-                    beTradesByMode: beTradesByModeMap,
-                    baseline,
-                });
+                // Prefer backend EXACT for this arm + trigger — but ONLY on the
+                // baseline result view (backend BE is baseline-only). On a variant
+                // view, skip the resolver entirely and use REPLAY on its trades.
+                const resolved = exactAllowed
+                    ? resolveBeScenarioSource({
+                        armLevelR: arm,
+                        triggerBasis,
+                        executionMode: beExecutionMode,
+                        beResults: beResultsMap,
+                        beTradesByMode: beTradesByModeMap,
+                        baseline,
+                    })
+                    : { source: "REPLAY" };
                 if (resolved.source === "EXACT") {
                     return { armLevelR: arm, summary: resolved.summary, source: "EXACT", scenarioKey: resolved.scenarioKey };
                 }
@@ -371,7 +391,7 @@ export function BreakevenTab({ trades, candles, activeRun, activeRunId, beResult
             if (typeof cancelIdleCallback !== "undefined") cancelIdleCallback(handle);
             else clearTimeout(handle);
         };
-    }, [trades, candles, triggerBasis, hasExact, beResultsMap, beTradesByModeMap, beExecutionMode]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [trades, candles, triggerBasis, hasExact, exactAllowed, beResultsMap, beTradesByModeMap, beExecutionMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Must be before any early return (hooks rule).
     const tableColumns = React.useMemo(
@@ -539,11 +559,19 @@ export function BreakevenTab({ trades, candles, activeRun, activeRunId, beResult
                     </div>
                 ) : (
                 <div className="flex flex-col gap-1.5">
-                    {!hasExact && (
+                    {!hasExact && beDataPresent && !exactAllowed && (
                         <p className="text-[11px] font-ui text-[hsl(var(--text-1))] leading-relaxed">
-                            <span className="font-semibold">Backend EXACT results not found for this run.</span>{" "}
-                            Showing frontend REPLAY fallback. Re-run the backtest with break-even enabled
-                            (and re-import the bundle) to see exact 1-minute results.
+                            <span className="font-semibold">Backend EXACT Break-even covers the baseline entry model.</span>{" "}
+                            You&apos;re viewing {resultViewLabel ? `“${resultViewLabel}”` : "a non-baseline result view"},
+                            so this tab shows REPLAY computed on that variant&apos;s trades. Switch to the Baseline result
+                            view for EXACT, or see the roadmap — variant-aware exact BE is planned.
+                        </p>
+                    )}
+                    {!hasExact && !beDataPresent && (
+                        <p className="text-[11px] font-ui text-[hsl(var(--text-1))] leading-relaxed">
+                            <span className="font-semibold">Backend EXACT results not generated for this run.</span>{" "}
+                            Enable BE scenarios in Strategy Builder to generate exact results. Showing frontend
+                            REPLAY fallback in the meantime.
                         </p>
                     )}
                     <p className="text-[11px] font-ui text-[hsl(var(--text-2))] leading-relaxed">
@@ -807,9 +835,9 @@ export function BreakevenTab({ trades, candles, activeRun, activeRunId, beResult
                 </div>
             </NeonPanel>
 
-            {/* ── 8. Planned Research: Dynamic Stop Reduction ──────────────── */}
+            {/* ── 8. Planned Research: Dynamic Risk Reduction / Partial Stop Tightening ── */}
             <NeonPanel
-                title="Planned Research · Dynamic Stop Reduction"
+                title="Planned Research · Dynamic Risk Reduction / Partial Stop Tightening"
                 collapsible
                 defaultCollapsed
                 action={

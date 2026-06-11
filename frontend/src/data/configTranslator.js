@@ -474,6 +474,45 @@ export const LOAD_FIELD_LABELS = {
 //     Translates frontend cfg state → POST body for /runs.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ── Break-even Exact Replay config (BE-FRONTEND-INTEGRATION) ─────────────────
+// Builds the backend BE fields from the frontend cfg state. When the toggle is
+// OFF (or no valid arm levels remain after sanitising), it emits ONLY
+// { be_enabled: false } so a normal run is byte-identical to pre-BE behavior.
+// Invariant: never send be_enabled:true with empty be_arm_levels.
+export const BE_ARM_LEVEL_CHOICES = [0.25, 0.5, 0.75, 1.0, 1.5, 2.0];
+export const BE_TRIGGER_CHOICES = ["wick", "close"];
+export const BE_DELAY_CHOICES = [0, 1, 2];
+
+export function buildBeConfig(cfg) {
+    if (!cfg || !cfg.beEnabled) return { be_enabled: false };
+
+    const arms = [...new Set(
+        (Array.isArray(cfg.beArmLevels) ? cfg.beArmLevels : [])
+            .map(Number)
+            .filter((n) => Number.isFinite(n) && n > 0),
+    )].sort((a, b) => a - b);
+
+    // Guard: enabled toggle but no valid arm levels → do NOT send an invalid
+    // payload; fall back to disabled so the backend skips BE entirely.
+    if (!arms.length) return { be_enabled: false };
+
+    const triggers = [...new Set(
+        (Array.isArray(cfg.beTriggerBases) ? cfg.beTriggerBases : [])
+            .map((t) => String(t).toLowerCase())
+            .filter((t) => t === "wick" || t === "close"),
+    )];
+
+    const delay = BE_DELAY_CHOICES.includes(Number(cfg.beDelayCandles)) ? Number(cfg.beDelayCandles) : 0;
+
+    return {
+        be_enabled: true,
+        be_arm_levels: arms,
+        be_trigger_bases: triggers.length ? triggers : ["wick"],
+        be_stop_buffer_r: 0.0,
+        be_delay_candles: delay,
+    };
+}
+
 export function buildBacktesterConfig(cfg) {
     const allowedSessions = Boolean(cfg.sessionFilter) ? selectedAllowedSessions(cfg) : [];
 
@@ -642,6 +681,11 @@ export function buildBacktesterConfig(cfg) {
             short_entry_penetration_thresholds: cfg.shortEntryModel === "entry_penetration" ? [Number(cfg.shortPenetrationPct ?? 25)] : [],
         } : {}),
         protection_modes:           ["baseline"],
+        // ── Break-even Exact Replay ────────────────────────────────────────────
+        // Emits be_enabled:false when the toggle is off (normal run unchanged);
+        // when on, adds be_arm_levels / be_trigger_bases / be_stop_buffer_r /
+        // be_delay_candles so the backend generates trades_*__be_*.csv + be_results.
+        ...buildBeConfig(cfg),
         session_filter_enabled:     Boolean(cfg.sessionFilter),
         allowed_sessions:           allowedSessions,
         news_blackout_enabled:      Boolean(cfg.newsBlackout),
@@ -770,6 +814,16 @@ export function buildRunConfigLoadReport(current, run) {
     applyFirstPresent(patch, source, "spread",     ["spread", "spread_pips",    "spreadPips"],   toNumber);
     applyFirstPresent(patch, source, "slippage",   ["slippage", "slippage_pips", "slippagePips"], toNumber);
     applyFirstPresent(patch, source, "commission", ["commission_r_per_trade", "commission", "commission_per_trade"], toNumber);
+
+    // ── Break-even Exact Replay round-trip ────────────────────────────────────
+    // Reloading a BE run restores the Strategy Builder toggles so a re-run
+    // regenerates the same scenarios.
+    applyFirstPresent(patch, source, "beEnabled",       ["be_enabled", "beEnabled"], toBool);
+    applyFirstPresent(patch, source, "beArmLevels",     ["be_arm_levels", "beArmLevels"],
+        (v) => (Array.isArray(v) ? v.map(Number).filter((n) => Number.isFinite(n) && n > 0) : null));
+    applyFirstPresent(patch, source, "beTriggerBases",  ["be_trigger_bases", "beTriggerBases"],
+        (v) => (Array.isArray(v) ? v.map((t) => String(t).toLowerCase()).filter((t) => t === "wick" || t === "close") : null));
+    applyFirstPresent(patch, source, "beDelayCandles",  ["be_delay_candles", "beDelayCandles"], toNumber);
 
     applyFirstPresent(patch, source, "entryResearchExports",       ["entry_models", "entryModels"],                                                   mapConfigEntryResearchExports);
     applyFirstPresent(patch, source, "entryPenetrationThresholds", ["entry_penetration_thresholds", "entryPenetrationThresholds"],                    mapConfigEntryThresholds);

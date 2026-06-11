@@ -666,7 +666,13 @@ export default function ProtectionLab() {
                         activeRunId={activeRunId}
                         beResults={activeRun?.beResults}
                         beTradesByMode={activeRun?.beTradesByMode}
-                        executionMode={activeRun?.primaryVariant}
+                        executionMode={universe?.variant || activeRun?.primaryVariant}
+                        // Backend BE is computed on the BASELINE trade set only.
+                        // EXACT is therefore valid only when the active result view
+                        // is baseline; non-baseline variants fall back to REPLAY so
+                        // baseline BE is never mislabelled as the variant's BE.
+                        isBaselineView={universe?.universeType !== "scenario"}
+                        resultViewLabel={universe?.label}
                     />
                 </div>
             )}
