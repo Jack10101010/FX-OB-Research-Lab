@@ -3,7 +3,23 @@
 Human-readable companion to `frontend/src/data/researchGlossary.js` (the in-app source of
 truth for tooltips). Keep the two consistent; the code file wins for exact UI copy.
 
-*Last updated: 2026-06-07.*
+*Last updated: 2026-06-11.*
+
+## Phase 14 run vocabulary (Wave 1)
+
+> UI display terms. Internal identifiers (`resultView`, `positionVariant`, `scenario`) are unchanged.
+> See `DECISIONS.md` D-010.
+
+- **Run** — the one completed backtest currently in focus (TopBar; empty state = "No Run").
+- **View** — umbrella for how the Run is sliced: **Model + Position Mode**. The banner header.
+- **Current View** — the view a page is presently showing (the dominant right-hand panel).
+- **Model** — which entry-model family/threshold/fill-mode the view uses (was "Result View" as a
+  dimension label). Distinct from "Entry Model" (the selector toggle).
+- **Position Mode** — how concurrent positions are counted (single / one-per-direction / allow-multi;
+  was "Position Variant").
+- **Preview** — the single composer-driven, reversible projection of a Run (Phase 13; see D-009).
+- *Deprecated (display):* **Active Run** → Run · **Result View** → Model/View · **Position Variant**
+  → Position Mode · bare **Variant** → qualify as Model or Position Mode.
 
 ## Fill state (at arm)
 

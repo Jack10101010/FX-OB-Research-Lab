@@ -6,7 +6,7 @@ Groomed by ChatGPT. Priority: P1 (next up) · P2 (soon) · P3 (later).
 > sequence it moves to `ROADMAP.md` (use `/promote`); not-yet-ready thoughts live in
 > `IDEA_CAPTURE.md`. Don't list the same item as "active" in both backlog and roadmap.
 
-*Last updated: 2026-06-10.*
+*Last updated: 2026-06-11.*
 
 ## P1
 
@@ -29,6 +29,12 @@ Groomed by ChatGPT. Priority: P1 (next up) · P2 (soon) · P3 (later).
 > `b3a200e`; was stale-listed here as "active next build".)*
 
 ## P2
+
+- **Phase 14 Wave 2 — residual terminology sweep** *(Owner: Claude · follows D-010 / Wave 1
+  commit `e9d03aa`)* — finish the display-string sweep outside the shared banner cluster:
+  Strategy Map ScenarioSelector "VARIANT" badge → Position Mode; `ProtectionLab.jsx` "selected
+  Result View" sentence → View/Model; and remaining page-level "Result View" / "Position Variant"
+  strings. Display-only; no identifier or persisted-key changes (per D-010 scope).
 
 - **Distance & Occupation-Depth Research** *(Priority: Medium · Owner: Codex (backend export +
   importer) → Claude (classification + UI) · likely its OWN workstream once unblocked)* — research

@@ -10,6 +10,22 @@ Append-only. Newest at top. Each entry: what we decided, why, and the consequenc
 
 ---
 
+### D-010 · Phase 14 Wave 1 — research run terminology
+Display-only terminology alignment with the Phase 14 conceptual model. **Decided renames:**
+Active Run → **Run**; Result View → **Model** (when used as the dimension label); Current Result
+View → **Current View** (panel/header); Result View → **View** (when used as the umbrella/grouping);
+Position Variant → **Position Mode**. **View** is the umbrella over **Model + Position Mode**.
+**Why:** after D-009 made Preview singular, this reduces run/model terminology friction and aligns
+the UI vocabulary with the Phase 14 model (Run · View · Preview · Comparison · Project), while keeping
+all data identifiers unchanged. **Scope:** display strings only — no persisted-key changes, no internal
+identifier changes (`resultView` / `positionVariant` / `scenario` / `BASELINE_VIEW` untouched), no
+ScenarioSelector change, no Baseline rename. **Evidence:** commit `e9d03aa`; live smoke test PASS
+(TopBar Run/No Run; banners Current View / View / Model / Position Mode; TradeUniverseBadge Model /
+Position Mode; Playbook "Confirm the Model" / "Confirm the Position Mode" with saved state intact,
+proving step IDs unchanged). **Consequence:** Phase 14 is NOT complete — this is Wave 1 only.
+**Deferred to Wave 2:** Strategy Map ScenarioSelector "VARIANT" badge; `ProtectionLab.jsx` "selected
+Result View" sentence; the "Baseline" overload; Scenario naming / making **View** a grouped control.
+
 ### D-009 · Phase 13 — one composer-driven preview (five lenses collapsed)
 Master Controls' five parallel preview paths (cost / filter / FFT / RR + the composed lens) are replaced
 by a single path: `composePreviewBundle` is the sole preview builder, driven by ONE preview state machine,
