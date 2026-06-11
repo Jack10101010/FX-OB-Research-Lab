@@ -177,6 +177,15 @@ export function composePreviewBundle(sourceBundle, input = {}) {
         stages.filter.sessionActive = !!predicate.sessionActive;
         stages.filter.structDirActive = !!predicate.structDirActive;
         stages.filter.directionActive = !!predicate.directionActive;
+        // Phase 13 parity: carry a describeFilters-shaped summary so the unified
+        // preview card can render the same filter detail the old single-kind filter
+        // block showed (mirrors buildFilteredBundle's meta.filters shape). Display
+        // metadata only — it does not affect the transform.
+        stages.filter.filters = {
+            sessions: predicate.sessionActive ? predicate.sessionSet : "all",
+            structureDirs: predicate.structDirActive ? predicate.structDirSet : "all",
+            direction: predicate.directionActive ? predicate.directionMode : "both",
+        };
     }
 
     // ── Stage C: RR ──

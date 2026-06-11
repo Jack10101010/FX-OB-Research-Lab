@@ -20,10 +20,12 @@ import { REGISTRY_BY_KEY, highestRerunTierForKeys } from "@/data/configRegistry"
 import { buildRunConfigLoadReport, getDefaultBuilderConfig, buildBacktesterConfig } from "@/data/configTranslator";
 import { startSidecarRun, getSidecarRun, getSidecarRunBundle, cancelSidecarRun } from "@/data/sidecarClient";
 import { ingestRunBundle } from "@/data/importer";
-import { isCostOnlyDirty, rescoreCostsForBundle, buildRescoredBundle, COST_KEYS } from "./costRescore";
-import { isFilterOnlyDirty, buildTradePredicate, buildFilteredBundle, FILTER_KEYS } from "./tradeFilter";
-import { buildFftPreviewBundle } from "./controlSwap";
-import { canRescoreRr, rescoreRrForBundle, buildRrPreviewBundle } from "./rrRescore";
+// Phase 13: the composer is the single preview build path. The four single-kind
+// builders (buildRescoredBundle / buildFilteredBundle / buildFftPreviewBundle /
+// buildRrPreviewBundle) are no longer invoked here — only COST_KEYS / FILTER_KEYS
+// (for dirty-set classification) remain imported.
+import { COST_KEYS } from "./costRescore";
+import { FILTER_KEYS } from "./tradeFilter";
 import { composePreviewBundle } from "./previewComposer";
 
 // The single config key that drives the FFT preview lens (Phase 10B).
@@ -31,66 +33,16 @@ const FFT_DRAFT_KEY = "triggeredEdgeCancelOnFirstFailedTag";
 // The single config key that drives the RR preview lens (Phase 11C).
 const RR_DRAFT_KEY = "rr";
 
-// Signature of a cost-only rescore (run id + cost values). Used so a manually-cleared
-// temporary bundle isn't immediately rebuilt until the cost config or run changes.
-function lensSignature(runId, cfg) {
-    return JSON.stringify({
-        runId: runId || null,
-        spread: cfg?.spread ?? null,
-        slippage: cfg?.slippage ?? null,
-        commission: cfg?.commission ?? null,
-    });
-}
-
-// Signature of a filter-only change (run id + the filter-relevant config fields). Used
-// so a manually-cleared temporary filter bundle isn't rebuilt until the filter config
-// or run changes (Phase 10A).
-function filterSignature(runId, cfg) {
-    return JSON.stringify({
-        runId: runId || null,
-        sessionFilter: cfg?.sessionFilter ?? null,
-        london: cfg?.london ?? null,
-        lull: cfg?.lull ?? null,
-        newYork: cfg?.newYork ?? null,
-        asia: cfg?.asia ?? null,
-        outside: cfg?.outside ?? null,
-        bosLong: cfg?.bosLong ?? null,
-        bosShort: cfg?.bosShort ?? null,
-        chochLong: cfg?.chochLong ?? null,
-        chochShort: cfg?.chochShort ?? null,
-        direction: cfg?.direction ?? null,
-    });
-}
-
-// Signature of an FFT-only change (run id + the FFT field). Used so a manually-cleared
-// temporary FFT bundle isn't rebuilt until the FFT toggle or run changes (Phase 10B).
-function fftSignature(runId, cfg) {
-    return JSON.stringify({
-        runId: runId || null,
-        [FFT_DRAFT_KEY]: cfg?.[FFT_DRAFT_KEY] ?? null,
-    });
-}
-
-// Signature of an RR-only change (run id + the RR multiple). Used so a manually-cleared
-// temporary RR bundle isn't rebuilt until the RR value or run changes (Phase 11C).
-function rrSignature(runId, cfg) {
-    return JSON.stringify({
-        runId: runId || null,
-        [RR_DRAFT_KEY]: cfg?.[RR_DRAFT_KEY] ?? null,
-    });
-}
-
-// ─── Phase 12B-2 — composed preview ──────────────────────────────────────────
-// The composed preview (previewComposer) combines the four instant transforms
-// (Swap → Filter → RR → Cost) into ONE bundle. It covers the MIXED case the four
-// single-kind lenses above cannot: more than one instant stage dirty at once
-// (e.g. filter + cost, RR + cost, filter + FFT). Single-kind dirty sets are still
-// handled by their dedicated lens, so this never fights them.
+// ─── Phase 13 — single composer-driven preview ───────────────────────────────
+// The composer (previewComposer) is now the SOLE preview build path. It combines
+// the four instant transforms (Swap → Filter → RR → Cost) into ONE bundle and
+// handles every dirty-set size from a single stage kind up to all four. The old
+// per-kind signatures/build-effects/lenses (cost / filter / FFT / RR) have been
+// removed; only the unified composed signature below survives.
 //
-// The full set of instant-previewable draft keys (union of the four lens key-sets).
-// A dirty set is composer-eligible only when EVERY dirty field is in here AND at
-// least two distinct stage kinds are dirty. stopBuffer / entryBuffer and any
-// backend-tier field are intentionally absent (they need a real rerun).
+// The full set of instant-previewable draft keys (union of the four stage key-sets).
+// A dirty set is composer-eligible only when EVERY dirty field is in here. stopBuffer /
+// entryBuffer and any backend-tier field are intentionally absent (they need a rerun).
 const COMPOSED_INSTANT_KEYS = new Set([
     ...COST_KEYS,
     ...FILTER_KEYS,
@@ -219,30 +171,14 @@ const MasterControlsContext = createContext({
     previewIsStale:       false,
     // Promotion — Phase 4C
     promotePreview:       () => {},
-    // Temporary cost-rescored bundle — Phase 7B (context-only; not stored/applied)
-    localRescoreBundle:      null,
-    clearLocalRescoreBundle: () => {},
     // Preview lens — Phase 8B (apply the temporary bundle to the whole app, read-only)
     previewLens:             null,
-    applyLocalRescoreLens:   () => {},
     exitPreviewLens:         () => {},
-    // Temporary instant-filter bundle — Phase 10A (session / structure / direction)
-    localFilterBundle:       null,
-    clearLocalFilterBundle:  () => {},
-    applyLocalFilterLens:    () => {},
-    // Temporary FFT ON/OFF preview bundle — Phase 10B (control-trade universe swap)
-    localFftBundle:          null,
-    fftPreviewUnavailable:   false,
-    clearFftPreview:         () => {},
-    applyFftPreviewLens:     () => {},
-    // Temporary RR preview bundle — Phase 11C (stop-anchored RR rescore)
-    localRrBundle:           null,
-    rrPreviewUnavailable:    false,
-    clearRrPreview:          () => {},
-    applyRrPreviewLens:      () => {},
-    // Composed preview bundle — Phase 12B-2 (mixed instant stages in one bundle)
+    // Composed preview — Phase 13 (the SOLE preview path: cost / filter / FFT / RR / mixed,
+    // composed into one bundle and applied via the single "preview" lens)
     composedPreviewResult:   null,
     localComposedBundle:     null,
+    composedLabel:           "",
     clearComposedPreview:    () => {},
     applyComposedPreviewLens: () => {},
 });
@@ -284,45 +220,13 @@ export function MasterControlsProvider({ children }) {
     // active-run change so a superseded import never writes a stale "done".
     const importJobRef = useRef(null);
 
-    // ── Phase 7B — temporary cost-rescored bundle ───────────────────────────
-    // A bundle-shaped object built from the Phase 7A cost rescore. Held in context
-    // ONLY — never added to the store / run list, never persisted, never promoted.
-    // It is the bridge toward a future Preview Lens (Phase 8); no page reads it yet.
-    const [localRescoreBundle, setLocalRescoreBundle] = useState(null);
-    // Signature the user manually dismissed, so the auto-build effect doesn't rebuild
-    // the same bundle until the cost config / run changes.
-    const lensSuppressRef = useRef("");
-
-    // ── Phase 10A — temporary instant-filter bundle ─────────────────────────
-    // A bundle-shaped object built by filtering the active run's trades (session /
-    // structure / direction). Held in context ONLY — never stored / persisted /
-    // promoted. Applied to the app via the same Preview Lens as the cost rescore.
-    const [localFilterBundle, setLocalFilterBundle] = useState(null);
-    const filterSuppressRef = useRef("");
-
-    // ── Phase 10B — temporary FFT ON/OFF preview bundle ─────────────────────
-    // A bundle-shaped object that swaps the triggered-edge scenarios for their
-    // FFT-OFF control counterparts. Held in context ONLY — never stored / persisted.
-    // `fftPreviewUnavailable` (Phase 12C-1) is true when the FFT toggle is the sole
-    // dirty field but no ON→OFF control swap is possible, so the drawer can explain
-    // instead of silently rendering nothing.
-    const [localFftBundle, setLocalFftBundle] = useState(null);
-    const [fftPreviewUnavailable, setFftPreviewUnavailable] = useState(false);
-    const fftSuppressRef = useRef("");
-
-    // ── Phase 11C — temporary RR preview bundle ─────────────────────────────
-    // A bundle-shaped object that re-targets every trade to a new RR multiple using
-    // the backend's stop-anchored excursion fields. Held in context ONLY — never
-    // stored / persisted. `rrPreviewUnavailable` is true when RR is being edited but
-    // the run lacks the required fields (old bundles), so the drawer can explain.
-    const [localRrBundle, setLocalRrBundle] = useState(null);
-    const [rrPreviewUnavailable, setRrPreviewUnavailable] = useState(false);
-    const rrSuppressRef = useRef("");
-
-    // ── Phase 12B-2 — composed preview (mixed instant stages) ───────────────
+    // ── Phase 13 — single composed preview state ────────────────────────────
     // Full result of composePreviewBundle ({ bundle, ok, appliedStages, stages, … }).
-    // Built ONLY when the dirty set spans ≥2 instant stage kinds (the case the four
-    // single lenses don't cover). Held in context ONLY — never stored / persisted.
+    // The composer is the SOLE preview build path now: this one state serves cost /
+    // filter / FFT / RR and any mixed combination. Held in context ONLY — never added
+    // to the store / run list, never persisted, never promoted. `composedSuppressRef`
+    // holds a signature the user manually dismissed, so the auto-build effect doesn't
+    // rebuild the same preview until one of the instant fields or the run changes.
     const [composedPreviewResult, setComposedPreviewResult] = useState(null);
     const composedSuppressRef = useRef("");
 
@@ -331,16 +235,6 @@ export function MasterControlsProvider({ children }) {
         setDraftConfigState(null);
         setPreview(EMPTY_PREVIEW);
         importJobRef.current = null;
-        setLocalRescoreBundle(null);
-        lensSuppressRef.current = "";
-        setLocalFilterBundle(null);
-        filterSuppressRef.current = "";
-        setLocalFftBundle(null);
-        setFftPreviewUnavailable(false);
-        fftSuppressRef.current = "";
-        setLocalRrBundle(null);
-        setRrPreviewUnavailable(false);
-        rrSuppressRef.current = "";
         setComposedPreviewResult(null);
         composedSuppressRef.current = "";
     }, [activeRunId]);
@@ -460,16 +354,6 @@ export function MasterControlsProvider({ children }) {
      */
     const resetDraft = useCallback(() => {
         setDraftConfigState(null);
-        setLocalRescoreBundle(null);
-        lensSuppressRef.current = "";
-        setLocalFilterBundle(null);
-        filterSuppressRef.current = "";
-        setLocalFftBundle(null);
-        setFftPreviewUnavailable(false);
-        fftSuppressRef.current = "";
-        setLocalRrBundle(null);
-        setRrPreviewUnavailable(false);
-        rrSuppressRef.current = "";
         setComposedPreviewResult(null);
         composedSuppressRef.current = "";
     }, []);
@@ -524,54 +408,8 @@ export function MasterControlsProvider({ children }) {
     const clearPreview = useCallback(() => {
         importJobRef.current = null;
         setPreview(EMPTY_PREVIEW);
-        setLocalRescoreBundle(null);
-        setLocalFilterBundle(null);
-        setLocalFftBundle(null);
-        setFftPreviewUnavailable(false);
-        setLocalRrBundle(null);
-        setRrPreviewUnavailable(false);
         setComposedPreviewResult(null);
     }, []);
-
-    /**
-     * Manually dismiss the temporary cost-rescored bundle (drawer "Clear" button).
-     * Suppresses the auto-build effect for the current rescore so it does not pop back
-     * immediately; suppression lifts when the cost config or active run changes.
-     */
-    const clearLocalRescoreBundle = useCallback(() => {
-        lensSuppressRef.current = lensSignature(activeRunId, effectiveConfig);
-        setLocalRescoreBundle(null);
-    }, [activeRunId, effectiveConfig]);
-
-    /**
-     * Manually dismiss the temporary instant-filter bundle (drawer "Clear" button).
-     * Suppresses the auto-build effect for this exact filter so it does not pop back
-     * immediately; suppression lifts when the filter config or active run changes.
-     */
-    const clearLocalFilterBundle = useCallback(() => {
-        filterSuppressRef.current = filterSignature(activeRunId, effectiveConfig);
-        setLocalFilterBundle(null);
-    }, [activeRunId, effectiveConfig]);
-
-    /**
-     * Manually dismiss the temporary FFT preview bundle (drawer "Clear" button).
-     * Suppresses the auto-build effect for this exact FFT toggle until it or the
-     * active run changes.
-     */
-    const clearFftPreview = useCallback(() => {
-        fftSuppressRef.current = fftSignature(activeRunId, effectiveConfig);
-        setLocalFftBundle(null);
-        setFftPreviewUnavailable(false);
-    }, [activeRunId, effectiveConfig]);
-
-    /**
-     * Manually dismiss the temporary RR preview bundle (drawer "Clear" button).
-     * Suppresses the auto-build effect for this exact RR until it or the run changes.
-     */
-    const clearRrPreview = useCallback(() => {
-        rrSuppressRef.current = rrSignature(activeRunId, effectiveConfig);
-        setLocalRrBundle(null);
-    }, [activeRunId, effectiveConfig]);
 
     /**
      * Manually dismiss the temporary composed bundle (drawer "Clear" button).
@@ -623,12 +461,6 @@ export function MasterControlsProvider({ children }) {
         // Neutralise any in-flight import so it cannot write a stale "done" after cancel.
         importJobRef.current = null;
         setPreview(EMPTY_PREVIEW);
-        setLocalRescoreBundle(null);
-        setLocalFilterBundle(null);
-        setLocalFftBundle(null);
-        setFftPreviewUnavailable(false);
-        setLocalRrBundle(null);
-        setRrPreviewUnavailable(false);
         setComposedPreviewResult(null);
     }, [preview.status, preview.job]);
 
@@ -745,159 +577,11 @@ export function MasterControlsProvider({ children }) {
         return JSON.stringify(preview.snapshotConfig) !== JSON.stringify(effectiveConfig);
     }, [preview.status, preview.snapshotConfig, effectiveConfig]);
 
-    // ── Phase 7B build effect — keep localRescoreBundle in sync with the cost rescore ─
-    // Builds the temporary bundle when the dirty set is cost-only AND an exact rescore
-    // is available; clears it otherwise. This is the SOLE writer of localRescoreBundle
-    // (plus the explicit resets above), so it covers every reset rule: active-run change,
-    // resetDraft, dirty fields no longer cost-only, and exact-rescore-unavailable.
-    // It never touches the store, addRunBundle, or persistence.
-    useEffect(() => {
-        const costOnly = highestRerunTier === "frontend_rescore" && isCostOnlyDirty(dirtyFieldList);
-        if (!costOnly || !effectiveConfig || !activeRunId) {
-            lensSuppressRef.current = "";
-            setLocalRescoreBundle(null);
-            return;
-        }
-        // Respect a manual dismissal of this exact rescore.
-        if (lensSuppressRef.current === lensSignature(activeRunId, effectiveConfig)) return;
-
-        const costs = {
-            spread: effectiveConfig.spread,
-            slippage: effectiveConfig.slippage,
-            commission: effectiveConfig.commission,
-        };
-        // Phase 12C-1: compose from the RAW persisted run (lens-immune), matching the
-        // filter / FFT / RR / composed builders. Cost rescore is gross-anchored so this
-        // is behaviour-preserving; it just removes the getRunData divergence.
-        const sourceBundle = getRawRunData(activeRunId);
-        const result = sourceBundle ? rescoreCostsForBundle(sourceBundle, costs) : null;
-        if (!result || !result.ok || !result.exact) {
-            setLocalRescoreBundle(null);
-            return;
-        }
-        setLocalRescoreBundle(buildRescoredBundle(sourceBundle, result, {
-            costs,
-            dirtyFields: dirtyFieldList,
-            rerunTier: highestRerunTier,
-        }));
-    }, [activeRunId, dirtyFieldList, effectiveConfig, highestRerunTier]); // eslint-disable-line react-hooks/exhaustive-deps
-
-    // ── Phase 10A build effect — keep localFilterBundle in sync with the filter draft ─
-    // Builds the temporary filtered bundle when the dirty set is filter-only (session /
-    // structure / direction, all instant_filter tier) AND the resulting predicate is an
-    // actual restriction; clears it otherwise. Sole writer of localFilterBundle (plus the
-    // explicit resets above). Filters the RAW run bundle (lens-immune via getRawRunData)
-    // so it never compounds with an already-applied lens. No store writes, no persistence.
-    useEffect(() => {
-        const filterOnly = highestRerunTier === "instant_filter" && isFilterOnlyDirty(dirtyFieldList);
-        if (!filterOnly || !effectiveConfig || !activeRunId) {
-            filterSuppressRef.current = "";
-            setLocalFilterBundle(null);
-            return;
-        }
-        // Respect a manual dismissal of this exact filter.
-        if (filterSuppressRef.current === filterSignature(activeRunId, effectiveConfig)) return;
-
-        const predicate = buildTradePredicate(effectiveConfig);
-        if (!predicate.active) {
-            setLocalFilterBundle(null);
-            return;
-        }
-        const sourceBundle = getRawRunData(activeRunId);
-        if (!sourceBundle) {
-            setLocalFilterBundle(null);
-            return;
-        }
-        setLocalFilterBundle(buildFilteredBundle(sourceBundle, predicate, {
-            dirtyFields: dirtyFieldList,
-            rerunTier: highestRerunTier,
-        }));
-    }, [activeRunId, dirtyFieldList, effectiveConfig, highestRerunTier]); // eslint-disable-line react-hooks/exhaustive-deps
-
-    // ── Phase 10B build effect — keep localFftBundle in sync with the FFT toggle ──
-    // Builds the temporary FFT-OFF bundle when the ONLY dirty field is the FFT toggle
-    // and an ON→OFF control swap is available; clears it otherwise. Sole writer of
-    // localFftBundle (plus the explicit resets above). Builds from the RAW run bundle
-    // (lens-immune) so it never compounds with an already-applied lens. buildFftPreviewBundle
-    // returns null for no-op / unavailable (already OFF, no controls, no covered scenario),
-    // which collapses to "no block shown". No store writes, no persistence.
-    useEffect(() => {
-        const fftOnly = dirtyFieldList.length === 1 && dirtyFields.has(FFT_DRAFT_KEY);
-        if (!fftOnly || !effectiveConfig || !activeRunId) {
-            fftSuppressRef.current = "";
-            setLocalFftBundle(null);
-            setFftPreviewUnavailable(false);
-            return;
-        }
-        const sourceBundle = getRawRunData(activeRunId);
-        if (!sourceBundle) {
-            setLocalFftBundle(null);
-            setFftPreviewUnavailable(false);
-            return;
-        }
-        // buildFftPreviewBundle returns null for no-op / unavailable (already OFF, OFF→ON,
-        // no controls, no covered scenario). Phase 12C-1: surface that as an explicit
-        // "unavailable" state instead of silently rendering nothing.
-        const bundle = buildFftPreviewBundle(sourceBundle, {
-            fftEnabled: Boolean(effectiveConfig[FFT_DRAFT_KEY]),
-        });
-        if (!bundle) {
-            setLocalFftBundle(null);
-            setFftPreviewUnavailable(true);
-            return;
-        }
-        setFftPreviewUnavailable(false);
-        // Respect a manual dismissal of this exact FFT toggle.
-        if (fftSuppressRef.current === fftSignature(activeRunId, effectiveConfig)) return;
-        setLocalFftBundle(bundle);
-    }, [activeRunId, dirtyFieldList, effectiveConfig]); // eslint-disable-line react-hooks/exhaustive-deps
-
-    // ── Phase 11C build effect — keep localRrBundle in sync with the RR target ───
-    // Builds the stop-anchored RR preview when the ONLY dirty field is `rr` AND the run
-    // carries the excursion fields. When `rr` is dirty but the fields are absent (old
-    // bundles), it sets `rrPreviewUnavailable` so the drawer can explain instead of
-    // silently doing nothing. Builds from the RAW run bundle (lens-immune). Sole writer
-    // of localRrBundle (plus the explicit resets above). No store writes, no persistence.
-    useEffect(() => {
-        const rrOnly = dirtyFieldList.length === 1 && dirtyFields.has(RR_DRAFT_KEY);
-        if (!rrOnly || !effectiveConfig || !activeRunId) {
-            rrSuppressRef.current = "";
-            setLocalRrBundle(null);
-            setRrPreviewUnavailable(false);
-            return;
-        }
-        const sourceBundle = getRawRunData(activeRunId);
-        if (!sourceBundle) {
-            setLocalRrBundle(null);
-            setRrPreviewUnavailable(false);
-            return;
-        }
-        if (!canRescoreRr(sourceBundle)) {
-            // RR edited but this run predates the Phase 11A export → unavailable.
-            setLocalRrBundle(null);
-            setRrPreviewUnavailable(true);
-            return;
-        }
-        setRrPreviewUnavailable(false);
-        if (rrSuppressRef.current === rrSignature(activeRunId, effectiveConfig)) return;
-
-        const rrResult = rescoreRrForBundle(sourceBundle, { rr: effectiveConfig[RR_DRAFT_KEY] });
-        if (!rrResult.ok) {
-            setLocalRrBundle(null);
-            return;
-        }
-        setLocalRrBundle(buildRrPreviewBundle(sourceBundle, rrResult, {
-            rr: effectiveConfig[RR_DRAFT_KEY],
-            dirtyFields: dirtyFieldList,
-            rerunTier: highestRerunTier,
-        }));
-    }, [activeRunId, dirtyFieldList, effectiveConfig, highestRerunTier]); // eslint-disable-line react-hooks/exhaustive-deps
-
-    // ── Phase 12B-2 build effect — keep composedPreviewResult in sync (mixed only) ─
-    // Builds the composed preview ONLY when the dirty set is fully instant AND spans ≥2
-    // stage kinds (cost / filter / FFT / RR) — the case none of the four single lenses
-    // above handle (each requires its own kind exclusively). For single-kind dirty sets
-    // this stays null, leaving those lenses untouched. Composes from the RAW run bundle
+    // ── Phase 13 build effect — keep composedPreviewResult in sync (the SOLE path) ─
+    // Builds the composed preview whenever the dirty set is fully instant (every dirty
+    // field is in COMPOSED_INSTANT_KEYS), for ANY number of dirty stage kinds — one
+    // (cost-only / filter-only / FFT-only / RR-only) through all four. This single effect
+    // replaces the four former per-kind build effects. Composes from the RAW run bundle
     // (lens-immune) so it never compounds with an already-applied lens. Passes ONLY the
     // dirty stages' inputs, so a non-dirty stage is never spuriously applied. The composer
     // degrades per stage (unavailable RR/cost/FFT are skipped, not fatal). No store writes,
@@ -908,11 +592,10 @@ export function MasterControlsProvider({ children }) {
         const filterDirty = dirtyFieldList.some((k) => FILTER_KEYS.includes(k));
         const fftDirty    = dirtyFields.has(FFT_DRAFT_KEY);
         const rrDirty     = dirtyFields.has(RR_DRAFT_KEY);
-        const stageKinds  = [costDirty, filterDirty, fftDirty, rrDirty].filter(Boolean).length;
         const instantOnly = dirtyFieldList.length > 0
             && dirtyFieldList.every((k) => COMPOSED_INSTANT_KEYS.has(k));
 
-        if (!instantOnly || stageKinds < 2 || !effectiveConfig || !activeRunId) {
+        if (!instantOnly || !effectiveConfig || !activeRunId) {
             composedSuppressRef.current = "";
             setComposedPreviewResult(null);
             return;
@@ -945,140 +628,12 @@ export function MasterControlsProvider({ children }) {
     // notify() (it subscribes through useDataset above), so this read stays fresh.
     const previewLens = getPreviewLens();
 
-    /** Apply the temporary cost-rescored bundle as a read-only Preview Lens. */
-    const applyLocalRescoreLens = useCallback(() => {
-        if (!localRescoreBundle || !activeRunId) return;
-        setPreviewLens({
-            sourceRunId: activeRunId,
-            bundle: localRescoreBundle,
-            mode: "local_rescore",
-            label: "Cost",
-        });
-    }, [localRescoreBundle, activeRunId]);
-
-    /** Exit the Preview Lens. Leaves draft + localRescoreBundle intact. */
+    /** Exit the Preview Lens. Leaves the draft + composed preview intact. */
     const exitPreviewLens = useCallback(() => {
         clearPreviewLens();
     }, []);
 
-    // Keep OUR lens in sync with localRescoreBundle: re-push when the bundle changes, and
-    // exit when the rescore goes away (non-cost-dirty / unavailable / reset / run switch).
-    // Only manages the "local_rescore" lens; never touches a lens of another mode.
-    useEffect(() => {
-        const lens = getPreviewLens();
-        if (!lens || lens.mode !== "local_rescore") return;
-        if (!localRescoreBundle || !activeRunId || lens.sourceRunId !== activeRunId) {
-            clearPreviewLens();
-            return;
-        }
-        if (lens.bundle !== localRescoreBundle) {
-            setPreviewLens({
-                sourceRunId: activeRunId,
-                bundle: localRescoreBundle,
-                mode: "local_rescore",
-                label: "Cost",
-            });
-        }
-    }, [localRescoreBundle, activeRunId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-    // ── Phase 10A — apply the temporary filtered bundle via the same store lens ─
-    /** Apply the temporary instant-filter bundle as a read-only Preview Lens. */
-    const applyLocalFilterLens = useCallback(() => {
-        if (!localFilterBundle || !activeRunId) return;
-        setPreviewLens({
-            sourceRunId: activeRunId,
-            bundle: localFilterBundle,
-            mode: "instant_filter",
-            label: "Filter",
-        });
-    }, [localFilterBundle, activeRunId]);
-
-    // Keep OUR filter lens in sync with localFilterBundle, mirroring the cost lens above.
-    // Only manages the "instant_filter" lens — never touches a lens of another mode, so a
-    // cost lens and a filter lens can't fight: each sync clears/repushes only its own kind,
-    // and applying one mode overwrites the single store lens cleanly.
-    useEffect(() => {
-        const lens = getPreviewLens();
-        if (!lens || lens.mode !== "instant_filter") return;
-        if (!localFilterBundle || !activeRunId || lens.sourceRunId !== activeRunId) {
-            clearPreviewLens();
-            return;
-        }
-        if (lens.bundle !== localFilterBundle) {
-            setPreviewLens({
-                sourceRunId: activeRunId,
-                bundle: localFilterBundle,
-                mode: "instant_filter",
-                label: "Filter",
-            });
-        }
-    }, [localFilterBundle, activeRunId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-    // ── Phase 10B — apply the temporary FFT-OFF bundle via the same store lens ───
-    /** Apply the temporary FFT preview bundle as a read-only Preview Lens. */
-    const applyFftPreviewLens = useCallback(() => {
-        if (!localFftBundle || !activeRunId) return;
-        setPreviewLens({
-            sourceRunId: activeRunId,
-            bundle: localFftBundle,
-            mode: "fft_swap",
-            label: "FFT OFF",
-        });
-    }, [localFftBundle, activeRunId]);
-
-    // Keep OUR FFT lens in sync with localFftBundle, mirroring the cost/filter lenses.
-    // Only manages the "fft_swap" lens — never touches a lens of another mode, so the
-    // cost, filter and FFT lenses can't fight: each sync clears/repushes only its own
-    // kind, and applying one mode overwrites the single store lens cleanly.
-    useEffect(() => {
-        const lens = getPreviewLens();
-        if (!lens || lens.mode !== "fft_swap") return;
-        if (!localFftBundle || !activeRunId || lens.sourceRunId !== activeRunId) {
-            clearPreviewLens();
-            return;
-        }
-        if (lens.bundle !== localFftBundle) {
-            setPreviewLens({
-                sourceRunId: activeRunId,
-                bundle: localFftBundle,
-                mode: "fft_swap",
-                label: "FFT OFF",
-            });
-        }
-    }, [localFftBundle, activeRunId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-    // ── Phase 11C — apply the temporary RR preview bundle via the same store lens ─
-    /** Apply the temporary RR-re-targeted bundle as a read-only Preview Lens. */
-    const applyRrPreviewLens = useCallback(() => {
-        if (!localRrBundle || !activeRunId) return;
-        setPreviewLens({
-            sourceRunId: activeRunId,
-            bundle: localRrBundle,
-            mode: "rr_rescore",
-            label: `RR ${effectiveConfig?.[RR_DRAFT_KEY] ?? ""}`.trim(),
-        });
-    }, [localRrBundle, activeRunId, effectiveConfig]);
-
-    // Keep OUR RR lens in sync with localRrBundle, mirroring the cost/filter/FFT lenses.
-    // Only manages the "rr_rescore" lens — never touches a lens of another mode.
-    useEffect(() => {
-        const lens = getPreviewLens();
-        if (!lens || lens.mode !== "rr_rescore") return;
-        if (!localRrBundle || !activeRunId || lens.sourceRunId !== activeRunId) {
-            clearPreviewLens();
-            return;
-        }
-        if (lens.bundle !== localRrBundle) {
-            setPreviewLens({
-                sourceRunId: activeRunId,
-                bundle: localRrBundle,
-                mode: "rr_rescore",
-                label: `RR ${effectiveConfig?.[RR_DRAFT_KEY] ?? ""}`.trim(),
-            });
-        }
-    }, [localRrBundle, activeRunId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-    // ── Phase 12B-2 — derive the composed bundle + label from the result ─────────
+    // ── Phase 13 — derive the composed bundle + label from the result ────────────
     // The applyable bundle exists only when at least one stage applied (result.ok).
     // When nothing applied (e.g. every requested stage was unavailable) we keep the
     // result for its stage warnings but expose no bundle, so there is nothing to Apply.
@@ -1091,24 +646,24 @@ export function MasterControlsProvider({ children }) {
         [composedPreviewResult],
     );
 
-    /** Apply the temporary composed bundle as a read-only Preview Lens (mode "composed"). */
+    /** Apply the composed bundle as the single read-only Preview Lens (mode "preview"). */
     const applyComposedPreviewLens = useCallback(() => {
         if (!localComposedBundle || !activeRunId) return;
         setPreviewLens({
             sourceRunId: activeRunId,
             bundle: localComposedBundle,
-            mode: "composed",
+            mode: "preview",
             label: composedLabel,
         });
     }, [localComposedBundle, activeRunId, composedLabel]);
 
-    // Keep OUR composed lens in sync with localComposedBundle, mirroring the four lenses
-    // above. Only manages the "composed" lens — never touches a lens of another mode, so
-    // the composed lens and the four single-mode lenses can't fight: each sync clears /
-    // repushes only its own kind, and applying one mode overwrites the single store lens.
+    // Keep the single preview lens in sync with localComposedBundle. Phase 13: there is
+    // now ONE lens mode ("preview"); this effect manages it exclusively — re-pushing when
+    // the bundle changes and clearing it when the preview goes away (no longer instant-
+    // dirty / unavailable / reset / run switch).
     useEffect(() => {
         const lens = getPreviewLens();
-        if (!lens || lens.mode !== "composed") return;
+        if (!lens || lens.mode !== "preview") return;
         if (!localComposedBundle || !activeRunId || lens.sourceRunId !== activeRunId) {
             clearPreviewLens();
             return;
@@ -1117,7 +672,7 @@ export function MasterControlsProvider({ children }) {
             setPreviewLens({
                 sourceRunId: activeRunId,
                 bundle: localComposedBundle,
-                mode: "composed",
+                mode: "preview",
                 label: composedLabel,
             });
         }
@@ -1159,30 +714,13 @@ export function MasterControlsProvider({ children }) {
         previewIsStale,
         // Promotion — Phase 4C
         promotePreview,
-        // Temporary rescored bundle — Phase 7B
-        localRescoreBundle,
-        clearLocalRescoreBundle,
-        // Preview lens — Phase 8B
+        // Preview lens — Phase 8B / 13 (single composed preview applied app-wide)
         previewLens,
-        applyLocalRescoreLens,
         exitPreviewLens,
-        // Instant filter lens — Phase 10A
-        localFilterBundle,
-        clearLocalFilterBundle,
-        applyLocalFilterLens,
-        // FFT preview lens — Phase 10B
-        localFftBundle,
-        fftPreviewUnavailable,
-        clearFftPreview,
-        applyFftPreviewLens,
-        // RR preview lens — Phase 11C
-        localRrBundle,
-        rrPreviewUnavailable,
-        clearRrPreview,
-        applyRrPreviewLens,
-        // Composed preview lens — Phase 12B-2
+        // Composed preview — Phase 13 (the SOLE preview path: cost / filter / FFT / RR / mixed)
         composedPreviewResult,
         localComposedBundle,
+        composedLabel,
         clearComposedPreview,
         applyComposedPreviewLens,
     }), [
@@ -1212,22 +750,8 @@ export function MasterControlsProvider({ children }) {
         clearPreview,
         previewIsStale,
         promotePreview,
-        localRescoreBundle,
-        clearLocalRescoreBundle,
         previewLens,
-        applyLocalRescoreLens,
         exitPreviewLens,
-        localFilterBundle,
-        clearLocalFilterBundle,
-        applyLocalFilterLens,
-        localFftBundle,
-        fftPreviewUnavailable,
-        clearFftPreview,
-        applyFftPreviewLens,
-        localRrBundle,
-        rrPreviewUnavailable,
-        clearRrPreview,
-        applyRrPreviewLens,
         composedPreviewResult,
         localComposedBundle,
         clearComposedPreview,

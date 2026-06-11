@@ -10,8 +10,8 @@ import {
     fmtPreviewR,
     fmtPreviewDd,
 } from "./previewMetrics";
-import { isCostOnlyDirty, rescoreCostsForBundle } from "./costRescore";
-import { isFilterOnlyDirty } from "./tradeFilter";
+// Phase 13: the preview is built entirely by the composer in MasterControlsContext;
+// the drawer no longer rescore/filter-classifies locally. It just renders the result.
 
 // ─── Registry summary (static — computed once at module load) ────────────────
 
@@ -216,12 +216,10 @@ export function MasterControlsDrawer() {
         setDraftField, resetDraft,
         preview, startPreview, cancelPreview, clearPreview, previewIsStale,
         promotePreview,
-        localRescoreBundle, clearLocalRescoreBundle,
-        previewLens, applyLocalRescoreLens, exitPreviewLens,
-        localFilterBundle, clearLocalFilterBundle, applyLocalFilterLens,
-        localFftBundle, fftPreviewUnavailable, clearFftPreview, applyFftPreviewLens,
-        localRrBundle, rrPreviewUnavailable, clearRrPreview, applyRrPreviewLens,
-        composedPreviewResult, localComposedBundle, clearComposedPreview, applyComposedPreviewLens,
+        previewLens, exitPreviewLens,
+        // Phase 13 — the single composed preview (cost / filter / FFT / RR / mixed).
+        composedPreviewResult, localComposedBundle, composedLabel,
+        clearComposedPreview, applyComposedPreviewLens,
     } = useMasterControls();
     const { activeRunId } = useDataset();
 
@@ -247,66 +245,12 @@ export function MasterControlsDrawer() {
     const previewButtonLabel = rerunMeta?.buttonLabel || "Run Preview";
     const rerunTone = RERUN_TIER_TONE[highestRerunTier] || RERUN_TIER_TONE.backend_rescore;
 
-    // Phase 7A — instant cost-only rescore (frontend, no backend, no store).
-    // Shows a local panel when the ONLY dirty fields are spread/slippage/commission.
-    const costOnly = highestRerunTier === "frontend_rescore" && isCostOnlyDirty(dirtyFieldList);
-    // Is OUR cost-rescore lens currently applied to this run? (Phase 8B)
-    const lensActive = !!(
-        previewLens?.active
-        && previewLens.mode === "local_rescore"
-        && previewLens.sourceRunId === activeRunId
-    );
-    const costRescore = useMemo(() => {
-        if (!costOnly || !effectiveConfig || !activeRunId) return null;
-        const bundle = getRawRunData(activeRunId);
-        if (!bundle) return null;
-        const result = rescoreCostsForBundle(bundle, {
-            spread: effectiveConfig.spread,
-            slippage: effectiveConfig.slippage,
-            commission: effectiveConfig.commission,
-        });
-        return { active: extractPreviewMetrics(bundle), result };
-    }, [costOnly, effectiveConfig, activeRunId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-    // Phase 10A — instant filter (session / structure / direction). Shows a local
-    // block when the ONLY dirty fields are filter keys and a temp filtered bundle exists.
-    const filterOnly = highestRerunTier === "instant_filter" && isFilterOnlyDirty(dirtyFieldList);
-    // Is OUR instant-filter lens currently applied to this run?
-    const filterLensActive = !!(
-        previewLens?.active
-        && previewLens.mode === "instant_filter"
-        && previewLens.sourceRunId === activeRunId
-    );
-
-    // Phase 10B — instant FFT ON/OFF preview (control-trade swap). Shows a local block
-    // when the FFT toggle is dirty and an FFT-OFF swap bundle is available for this run.
-    const fftDirty = dirtyFields instanceof Set && dirtyFields.has("triggeredEdgeCancelOnFirstFailedTag");
-    const fftOnly = fftDirty && dirtyFieldList.length === 1;
-    const fftLensActive = !!(
-        previewLens?.active
-        && previewLens.mode === "fft_swap"
-        && previewLens.sourceRunId === activeRunId
-    );
-
-    // Phase 11C — stop-anchored RR preview. Shows a local block when the ONLY dirty
-    // field is `rr`; the block is "available" (temp bundle built) or "unavailable"
-    // (run predates the Phase 11A excursion export).
-    const rrOnly = dirtyFields instanceof Set && dirtyFields.has("rr") && dirtyFieldList.length === 1;
-    const rrLensActive = !!(
-        previewLens?.active
-        && previewLens.mode === "rr_rescore"
-        && previewLens.sourceRunId === activeRunId
-    );
-    const rrAfterMetrics = useMemo(
-        () => (localRrBundle ? extractPreviewMetrics(localRrBundle) : null),
-        [localRrBundle],
-    );
-
-    // Phase 12B-2 — composed preview (mixed instant stages). The context builds it only
-    // when ≥2 instant stage kinds are dirty, so its mere presence drives this block.
+    // Phase 13 — the composed preview is the SOLE preview. The context builds it for any
+    // instant dirty set (cost / filter / FFT / RR / mixed); its mere presence drives the
+    // single preview card below. Is the one preview lens applied to this run?
     const composedLensActive = !!(
         previewLens?.active
-        && previewLens.mode === "composed"
+        && previewLens.mode === "preview"
         && previewLens.sourceRunId === activeRunId
     );
 
@@ -559,206 +503,17 @@ export function MasterControlsDrawer() {
                             </div>
                         )}
 
-                        {/* Cost rescore — Phase 7A: instant, local, cost-only fast path.
-                            Pure frontend recompute — no sidecar, no store, no Strategy Map. */}
-                        {costOnly && <CostRescorePanel data={costRescore} />}
-
-                        {/* Temporary rescored bundle — Phase 7B. A bundle-shaped object built
-                            from the cost rescore, held in context only (NOT stored, NOT applied
-                            to any page yet). Bridge toward the Phase 8 Preview Lens. */}
-                        {localRescoreBundle && (
-                            <div className={`mt-2 rounded border px-3 py-2 ${
-                                lensActive
-                                    ? "border-[hsl(196_80%_55%/0.5)] bg-[hsl(196_80%_55%/0.10)]"
-                                    : "border-[hsl(196_80%_55%/0.25)] bg-[hsl(196_80%_55%/0.04)]"
-                            }`}>
-                                <div className="flex items-center justify-between gap-2">
-                                    <span className="text-[10px] font-semibold uppercase tracking-widest text-[hsl(196_80%_65%)]">
-                                        {lensActive ? "Applied to page preview" : "Temporary rescored bundle ready"}
-                                    </span>
-                                    <LensActionButtons
-                                        lensActive={lensActive}
-                                        onApply={applyLocalRescoreLens}
-                                        onExit={exitPreviewLens}
-                                        onClear={clearLocalRescoreBundle}
-                                        tone="cyan"
-                                    />
-                                </div>
-                                <p className="mt-1 text-[9px] text-muted-lab leading-snug">
-                                    {localRescoreBundle?.meta?.rescoreScope === "all_trade_sets"
-                                        ? "Scope: all available trade sets"
-                                        : "Scope: partial — some trade sets were not rescored"}
-                                </p>
-                                <p className="mt-0.5 text-[9px] text-muted-lab/70 leading-snug">
-                                    {lensActive
-                                        ? "The page is viewing temporary cost-rescored data — not saved."
-                                        : "Not saved · Not applied to page yet"}
-                                </p>
-                            </div>
-                        )}
-
-                        {/* Instant filter — Phase 10A. A temporary bundle whose trades are a
-                            subset (session / structure / direction). Same Preview Lens pipeline
-                            as the cost rescore; filter-only, never composed with cost. */}
-                        {filterOnly && localFilterBundle && (
-                            <div className={`mt-2 rounded border px-3 py-2 ${
-                                filterLensActive
-                                    ? "border-[hsl(var(--warning)/0.5)] bg-[hsl(var(--warning)/0.10)]"
-                                    : "border-[hsl(var(--warning)/0.28)] bg-[hsl(var(--warning)/0.05)]"
-                            }`}>
-                                <div className="flex items-center justify-between gap-2">
-                                    <span className="text-[10px] font-semibold uppercase tracking-widest text-[hsl(var(--warning))]">
-                                        {filterLensActive ? "Applied to page preview" : "Temporary filter bundle ready"}
-                                    </span>
-                                    <LensActionButtons
-                                        lensActive={filterLensActive}
-                                        onApply={applyLocalFilterLens}
-                                        onExit={exitPreviewLens}
-                                        onClear={clearLocalFilterBundle}
-                                        tone="warning"
-                                    />
-                                </div>
-                                <p className="mt-1 text-[10px] font-num tabular-nums text-[hsl(var(--text-1))]">
-                                    {fmtPreviewInt(localFilterBundle?.meta?.beforeCount)}
-                                    <span className="text-muted-lab"> → </span>
-                                    {fmtPreviewInt(localFilterBundle?.meta?.afterCount)} trades
-                                </p>
-                                <p className="mt-0.5 text-[9px] text-muted-lab leading-snug">
-                                    {describeFilters(localFilterBundle?.meta?.filters)}
-                                </p>
-                                <p className="mt-0.5 text-[9px] text-muted-lab/70 leading-snug">
-                                    {filterLensActive
-                                        ? "The page is viewing temporary filtered data — not saved."
-                                        : "Not saved · Not applied to page yet"}
-                                </p>
-                            </div>
-                        )}
-
-                        {/* Instant FFT ON/OFF — Phase 10B. Swaps the triggered-edge scenarios
-                            for their exported FFT-OFF control trades. Same Preview Lens pipeline;
-                            visible only on triggered-edge views (baseline is FFT-invariant). */}
-                        {fftDirty && localFftBundle && (
-                            <div className={`mt-2 rounded border px-3 py-2 ${
-                                fftLensActive
-                                    ? "border-[hsl(var(--warning)/0.5)] bg-[hsl(var(--warning)/0.10)]"
-                                    : "border-[hsl(var(--warning)/0.28)] bg-[hsl(var(--warning)/0.05)]"
-                            }`}>
-                                <div className="flex items-center justify-between gap-2">
-                                    <span className="text-[10px] font-semibold uppercase tracking-widest text-[hsl(var(--warning))]">
-                                        {fftLensActive ? "Applied to page preview" : "Temporary FFT bundle ready"}
-                                    </span>
-                                    <LensActionButtons
-                                        lensActive={fftLensActive}
-                                        onApply={applyFftPreviewLens}
-                                        onExit={exitPreviewLens}
-                                        onClear={clearFftPreview}
-                                        tone="warning"
-                                    />
-                                </div>
-                                <p className="mt-1 text-[10px] font-num text-[hsl(var(--text-1))]">
-                                    FFT ON <span className="text-muted-lab">→</span> FFT OFF
-                                </p>
-                                <p className="mt-0.5 text-[9px] text-muted-lab leading-snug">
-                                    {describeFftCoverage(localFftBundle?.meta)}
-                                </p>
-                                <p className="mt-0.5 text-[9px] text-muted-lab/70 leading-snug">
-                                    {fftLensActive
-                                        ? "The page is viewing temporary FFT-OFF data — not saved. Triggered-edge views only."
-                                        : "Not saved · Not applied to page yet"}
-                                </p>
-                            </div>
-                        )}
-
-                        {/* RR preview — Phase 11C (stop-anchored). Re-targets every trade to a
-                            new RR using the backend's mfeR / rIfNoTarget excursion fields. */}
-                        {rrOnly && localRrBundle && (
-                            <div className={`mt-2 rounded border px-3 py-2 ${
-                                rrLensActive
-                                    ? "border-[hsl(var(--warning)/0.5)] bg-[hsl(var(--warning)/0.10)]"
-                                    : "border-[hsl(var(--warning)/0.28)] bg-[hsl(var(--warning)/0.05)]"
-                            }`}>
-                                <div className="flex items-center justify-between gap-2">
-                                    <span className="text-[10px] font-semibold uppercase tracking-widest text-[hsl(var(--warning))]">
-                                        {rrLensActive ? "Applied to page preview" : "Temporary RR bundle ready"}
-                                    </span>
-                                    <LensActionButtons
-                                        lensActive={rrLensActive}
-                                        onApply={applyRrPreviewLens}
-                                        onExit={exitPreviewLens}
-                                        onClear={clearRrPreview}
-                                        tone="warning"
-                                    />
-                                </div>
-                                <p className="mt-1 text-[10px] font-num text-[hsl(var(--text-1))]">
-                                    RR {fmtCfgValue(activeConfig?.rr)} <span className="text-muted-lab">→</span> RR {fmtCfgValue(effectiveConfig?.rr)}
-                                </p>
-                                <p className="mt-0.5 text-[9px] font-num tabular-nums text-muted-lab leading-snug">
-                                    Trades {fmtPreviewInt(activeMetrics?.trades)}
-                                    <span className="text-muted-lab"> → </span>
-                                    {fmtPreviewInt(rrAfterMetrics?.trades)}
-                                    <span className="mx-1 text-[hsl(var(--border-mid))]">·</span>
-                                    Net R {fmtPreviewR(activeMetrics?.netR)}
-                                    <span className="text-muted-lab"> → </span>
-                                    {fmtPreviewR(rrAfterMetrics?.netR)}
-                                </p>
-                                <p className="mt-0.5 text-[9px] text-muted-lab leading-snug">
-                                    Model: Stop-anchored
-                                    {localRrBundle?.meta?.rescoreScope === "partial" ? " · partial (some trades lack excursion data)" : ""}
-                                </p>
-                                <p className="mt-0.5 text-[9px] text-[hsl(var(--warning)/0.85)] leading-snug">
-                                    {localRrBundle?.meta?.warning}
-                                </p>
-                                <p className="mt-0.5 text-[9px] text-muted-lab/70 leading-snug">
-                                    {rrLensActive
-                                        ? "The page is viewing temporary RR-re-targeted data — not saved."
-                                        : "Not saved · Not applied to page yet"}
-                                </p>
-                            </div>
-                        )}
-
-                        {/* RR preview unavailable — the run predates the Phase 11A excursion export. */}
-                        {rrOnly && !localRrBundle && rrPreviewUnavailable && (
-                            <div className="mt-2 rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel)/0.4)] px-3 py-2">
-                                <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-lab">
-                                    RR preview unavailable
-                                </span>
-                                <p className="mt-1 text-[9px] text-muted-lab leading-snug">
-                                    RR unavailable: this run has no stop-anchored excursion fields (mfeR / rIfNoTarget).
-                                    Re-run/export with the Phase 11A backtester, then re-import the bundle.
-                                </p>
-                                <p className="mt-0.5 text-[9px] text-muted-lab/70 leading-snug">
-                                    Backend Run Preview is still available below.
-                                </p>
-                            </div>
-                        )}
-
-                        {/* FFT preview unavailable — Phase 12C-1. The FFT toggle is the sole dirty
-                            field but no ON→OFF control swap is possible (already OFF, OFF→ON, or no
-                            paired controls). Previously this rendered nothing (silent); now explained. */}
-                        {fftOnly && !localFftBundle && fftPreviewUnavailable && (
-                            <div className="mt-2 rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel)/0.4)] px-3 py-2">
-                                <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-lab">
-                                    FFT preview unavailable
-                                </span>
-                                <p className="mt-1 text-[9px] text-muted-lab leading-snug">
-                                    FFT unavailable: this run has no paired FFT-OFF control trades. FFT preview is only
-                                    available for FFT ON → FFT OFF runs with exported controls.
-                                </p>
-                                <p className="mt-0.5 text-[9px] text-muted-lab/70 leading-snug">
-                                    Backend Run Preview is still available below.
-                                </p>
-                            </div>
-                        )}
-
-                        {/* Composed preview — Phase 12B-2. Shown when ≥2 instant stage kinds
-                            are dirty (filter + cost, RR + cost, filter + FFT, …) — the mixed
-                            case the four single-stage blocks above don't cover. One bundle,
-                            canonical order Swap → Filter → RR → Cost; unavailable stages are
-                            flagged but never block the others. */}
+                        {/* Preview — Phase 13. ONE composer-driven card for every instant
+                            change: cost-only, filter-only, FFT-only, RR-only, or any mixed
+                            combination. The context builds composedPreviewResult for all of
+                            them (canonical order Swap → Filter → RR → Cost); unavailable stages
+                            are flagged but never block the others. Replaces the five former
+                            single-kind blocks + two unavailable blocks. */}
                         {composedPreviewResult && (
                             <ComposedPreviewBlock
                                 result={composedPreviewResult}
                                 bundle={localComposedBundle}
+                                label={composedLabel}
                                 lensActive={composedLensActive}
                                 activeMetrics={activeMetrics}
                                 onApply={applyComposedPreviewLens}
@@ -1450,78 +1205,7 @@ function PreviewCompare({ activeMetrics, previewBundle }) {
     );
 }
 
-// ─── Cost rescore panel — Phase 7A (instant, local, display-only) ─────────────
-
-/**
- * Active-vs-rescored cost preview. `data` = { active, result } where `active` is
- * extractPreviewMetrics(activeBundle) and `result` is rescoreCostsForBundle(...).
- * Pure display: never mutates the store and never triggers a backend run.
- */
-function CostRescorePanel({ data }) {
-    if (!data || !data.result?.ok || !data.result?.exact) {
-        return (
-            <div className="mt-2 rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel)/0.3)] px-3 py-2.5">
-                <span className="text-[10px] font-semibold uppercase tracking-widest text-[hsl(196_80%_65%)]">
-                    Cost rescore (instant)
-                </span>
-                <p className="mt-1.5 text-[10px] text-[hsl(38_85%_55%)] leading-snug">
-                    Cost unavailable: exact cost rescore isn&apos;t possible for this run. Use Run Preview.
-                </p>
-            </div>
-        );
-    }
-
-    const a = data.active && data.active.ok ? data.active : {};
-    const r = data.result;
-    const newTrades = Array.isArray(r.trades) ? r.trades.length : null;
-
-    const dNetR  = compareDelta(r.netR, a.netR);
-    const dAvgR  = compareDelta(r.avgR, a.avgR);
-    const dMaxDd = (Number.isFinite(a.maxDd) && Number.isFinite(r.maxDd)) ? (a.maxDd - r.maxDd) : null;
-
-    const rows = [
-        { label: "Net R",    active: fmtPreviewR(a.netR),      preview: fmtPreviewR(r.netR),      delta: fmtPreviewR(dNetR),  tone: deltaTone(dNetR) },
-        { label: "Avg R",    active: fmtPreviewR(a.avgR),      preview: fmtPreviewR(r.avgR),      delta: fmtPreviewR(dAvgR),  tone: deltaTone(dAvgR) },
-        { label: "Max DD",   active: fmtPreviewDd(a.maxDd),    preview: fmtPreviewDd(r.maxDd),    delta: fmtPreviewR(dMaxDd), tone: deltaTone(dMaxDd) },
-        { label: "Win rate", active: fmtPreviewPct(a.winRate), preview: fmtPreviewPct(r.winRate), delta: "—",                 tone: undefined },
-        { label: "Trades",   active: fmtPreviewInt(a.trades),  preview: fmtPreviewInt(newTrades), delta: "—",                 tone: undefined },
-    ];
-
-    return (
-        <div className="mt-2 rounded border border-[hsl(196_80%_55%/0.3)] bg-[hsl(196_80%_55%/0.05)] px-3 py-2.5">
-            <div className="flex items-center gap-2">
-                <span className="text-[10px] font-semibold uppercase tracking-widest text-[hsl(196_80%_65%)]">
-                    Cost rescore (instant)
-                </span>
-                <span className="text-[8px] px-1 py-0.5 rounded border border-[hsl(196_80%_55%/0.4)] bg-[hsl(196_80%_55%/0.12)] text-[hsl(196_80%_65%)] font-semibold leading-none">
-                    LOCAL
-                </span>
-            </div>
-
-            <div className="mt-2 grid grid-cols-[auto_1fr_1fr_1fr] gap-x-2 gap-y-1 items-center">
-                <span className="text-[9px] uppercase tracking-wider text-muted-lab" />
-                <span className="text-[9px] uppercase tracking-wider text-muted-lab text-right">Active</span>
-                <span className="text-[9px] uppercase tracking-wider text-[hsl(196_80%_65%)] text-right">Rescored</span>
-                <span className="text-[9px] uppercase tracking-wider text-muted-lab text-right">Δ</span>
-
-                {rows.map((row) => (
-                    <CompareRow key={row.label} {...row} />
-                ))}
-            </div>
-
-            <p className="mt-2 pt-1.5 border-t border-[hsl(var(--border-soft))] text-[9px] text-muted-lab leading-snug">
-                Local cost-only rescore. No backend run. Win rate &amp; trades are unchanged by cost.
-            </p>
-            <p className="mt-1 text-[9px] text-muted-lab/70 leading-snug">
-                Active baseline uses the run&apos;s primary variant
-                {a.variant ? ` (${a.variant})` : ""}, raw R, and all rows. It may differ from the
-                page&apos;s selected scenario / Trade Sanity view.
-            </p>
-        </div>
-    );
-}
-
-// ─── Composed preview block — Phase 12B-2 (mixed instant stages) ──────────────
+// ─── Composed preview block — Phase 13 (single composer-driven preview) ───────
 
 const COMPOSED_STAGE_ORDER = ["fft", "filter", "rr", "cost"];
 const COMPOSED_STAGE_LABEL = { fft: "FFT", filter: "Filter", rr: "RR", cost: "Cost" };
@@ -1548,7 +1232,7 @@ function ComposedStageChip({ label, state }) {
  * and surfaces Apply / Exit / Clear. Never mutates the store. The "Active" column is
  * the raw run (activeMetrics); the "after" column is the composed bundle's metrics.
  */
-function ComposedPreviewBlock({ result, bundle, lensActive, activeMetrics, onApply, onExit, onClear }) {
+function ComposedPreviewBlock({ result, bundle, label, lensActive, activeMetrics, onApply, onExit, onClear }) {
     const after = useMemo(() => (bundle ? extractPreviewMetrics(bundle) : null), [bundle]);
     const stages = result?.stages || {};
     const warnings = Array.isArray(result?.warnings) ? result.warnings : [];
@@ -1563,6 +1247,22 @@ function ComposedPreviewBlock({ result, bundle, lensActive, activeMetrics, onApp
             return { key: s, label: COMPOSED_STAGE_LABEL[s], state };
         });
 
+    // Phase 13 parity: full active-vs-preview metric compare (matches the depth the
+    // old per-kind cost panel showed). Active = raw run; Preview = composed bundle.
+    const showMetrics = hasBundle && after?.ok && activeMetrics?.ok;
+    const a = showMetrics ? activeMetrics : {};
+    const r = showMetrics ? after : {};
+    const dNetR  = compareDelta(r.netR, a.netR);
+    const dAvgR  = compareDelta(r.avgR, a.avgR);
+    const dMaxDd = (Number.isFinite(a.maxDd) && Number.isFinite(r.maxDd)) ? (a.maxDd - r.maxDd) : null;
+    const metricRows = [
+        { label: "Net R",     active: fmtPreviewR(a.netR),      preview: fmtPreviewR(r.netR),      delta: fmtPreviewR(dNetR),  tone: deltaTone(dNetR) },
+        { label: "Avg R",     active: fmtPreviewR(a.avgR),      preview: fmtPreviewR(r.avgR),      delta: fmtPreviewR(dAvgR),  tone: deltaTone(dAvgR) },
+        { label: "Max DD",    active: fmtPreviewDd(a.maxDd),    preview: fmtPreviewDd(r.maxDd),    delta: fmtPreviewR(dMaxDd), tone: deltaTone(dMaxDd) },
+        { label: "Win rate",  active: fmtPreviewPct(a.winRate), preview: fmtPreviewPct(r.winRate), delta: "—",                 tone: undefined },
+        { label: "Trades",    active: fmtPreviewInt(a.trades),  preview: fmtPreviewInt(r.trades),  delta: "—",                 tone: undefined },
+    ];
+
     return (
         <div className={`mt-2 rounded border px-3 py-2 ${
             lensActive
@@ -1571,7 +1271,7 @@ function ComposedPreviewBlock({ result, bundle, lensActive, activeMetrics, onApp
         }`}>
             <div className="flex items-center justify-between gap-2">
                 <span className="text-[10px] font-semibold uppercase tracking-widest text-[hsl(var(--warning))]">
-                    {lensActive ? "Applied to page preview" : hasBundle ? "Composed preview ready" : "Composed preview"}
+                    {lensActive ? "Applied to page preview" : hasBundle ? "Preview ready" : "Preview"}
                 </span>
                 {hasBundle ? (
                     <LensActionButtons
@@ -1594,6 +1294,11 @@ function ComposedPreviewBlock({ result, bundle, lensActive, activeMetrics, onApp
                 )}
             </div>
 
+            {/* Unified preview label (e.g. "Composed · Filter + Cost", "Cost", "RR 5") */}
+            {label && (
+                <p className="mt-1 text-[9px] font-num text-[hsl(var(--text-1))] leading-snug">{label}</p>
+            )}
+
             {/* Per-stage chips in canonical order */}
             {chips.length > 0 && (
                 <div className="mt-1.5 flex flex-wrap items-center gap-1">
@@ -1603,16 +1308,30 @@ function ComposedPreviewBlock({ result, bundle, lensActive, activeMetrics, onApp
                 </div>
             )}
 
-            {/* Before → after metrics (raw run vs composed) */}
-            {hasBundle && after?.ok && activeMetrics?.ok && (
-                <p className="mt-1.5 text-[9px] font-num tabular-nums text-muted-lab leading-snug">
-                    Trades {fmtPreviewInt(activeMetrics.trades)}
-                    <span className="text-muted-lab"> → </span>
-                    {fmtPreviewInt(after.trades)}
-                    <span className="mx-1 text-[hsl(var(--border-mid))]">·</span>
-                    Net R {fmtPreviewR(activeMetrics.netR)}
-                    <span className="text-muted-lab"> → </span>
-                    {fmtPreviewR(after.netR)}
+            {/* Active vs preview metric compare (raw run vs composed) */}
+            {showMetrics && (
+                <div className="mt-1.5 grid grid-cols-[auto_1fr_1fr_1fr] gap-x-2 gap-y-1 items-center">
+                    <span className="text-[9px] uppercase tracking-wider text-muted-lab" />
+                    <span className="text-[9px] uppercase tracking-wider text-muted-lab text-right">Active</span>
+                    <span className="text-[9px] uppercase tracking-wider text-[hsl(var(--warning))] text-right">Preview</span>
+                    <span className="text-[9px] uppercase tracking-wider text-muted-lab text-right">Δ</span>
+                    {metricRows.map((row) => (
+                        <CompareRow key={row.label} {...row} />
+                    ))}
+                </div>
+            )}
+
+            {/* Filter detail — only when the filter stage applied (Phase 13 parity) */}
+            {stages.filter?.applied && stages.filter.filters && (
+                <p className="mt-1 text-[9px] text-muted-lab leading-snug">
+                    {describeFilters(stages.filter.filters)}
+                </p>
+            )}
+
+            {/* FFT coverage — only when the FFT stage applied (Phase 13 parity) */}
+            {stages.fft?.applied && (
+                <p className="mt-1 text-[9px] text-muted-lab leading-snug">
+                    {describeFftCoverage(stages.fft)}
                 </p>
             )}
 
