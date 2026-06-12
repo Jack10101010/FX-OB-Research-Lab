@@ -21,7 +21,9 @@ import { buildBeAffectedTrades } from "@/data/protectionTimeline";
 import { buildSelectiveBeUniverse } from "@/data/selectiveBeUniverse";
 import { summarizeTradeSanity } from "@/data/tradeClassification";
 import { BeAffectedTradesCard } from "@/components/lab/protection/BeAffectedTradesCard";
-import { useDataset, setFocusedBeTrade } from "@/data/store";
+import { useDataset, setFocusedBeTrade, setScenario } from "@/data/store";
+import { buildProtectionLabel } from "@/data/protectionLayers";
+import { familyFromKey, extractThreshold, fillModeFromKey } from "@/data/tradeUniverse";
 import { useNavigate } from "react-router-dom";
 import { ShieldAlert, AlertTriangle, TrendingUp, BarChart2, Hash, Activity, Loader2, FlaskConical, Circle, CheckCircle2 } from "lucide-react";
 
@@ -331,7 +333,10 @@ function DifferenceCard({ o, sel, affected, lossesSaved, winnersCut, title = "Di
     );
 }
 
-function SelectiveBeCohortPanel({ beCohorts, toggleCohort, resetCohorts, cohortsActive, compare, selective, globalCounts, scenarioLabel, triggerBasis, onSetTrigger }) {
+function SelectiveBeCohortPanel({
+    beCohorts, toggleCohort, resetCohorts, cohortsActive, compare, selective, globalCounts, scenarioLabel, triggerBasis, onSetTrigger,
+    onOpenAsResultView, openAsResultViewEnabled = false, activeProtectionLabel = null, onClearResultViewLayer,
+}) {
     if (!compare) return null;
     const o = compare.original;
     const sel = compare.selective;
@@ -353,6 +358,42 @@ function SelectiveBeCohortPanel({ beCohorts, toggleCohort, resetCohorts, cohorts
             }
         >
             <div className="flex flex-col gap-3">
+                {/* Active protected Result View banner — separate from the local
+                    preview below so the two are never conflated. */}
+                {activeProtectionLabel && (
+                    <div className="flex items-center gap-2 flex-wrap px-2.5 py-1.5 rounded-[4px] border border-[hsl(var(--accent-secondary)/0.5)] bg-[hsl(var(--accent-secondary)/0.1)]">
+                        <span className="text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))]">Active Result View</span>
+                        <span className="text-[11px] font-ui font-semibold text-[hsl(var(--text))]">{activeProtectionLabel}</span>
+                        <Pill tone="warning">EXPLORATORY</Pill>
+                        <span className="text-[10px] font-ui text-[hsl(var(--text-2)/0.8)]">Applied app-wide. The cards below are a separate local preview.</span>
+                        {onClearResultViewLayer && (
+                            <button type="button" onClick={onClearResultViewLayer} className="row-chip row-chip-muted text-[10.5px] ml-auto">Clear Result View Layer</button>
+                        )}
+                    </div>
+                )}
+                {/* Promotion: turn the local selective-BE preview into a global
+                    Result View. Gated on EXACT + ≥1 cohort filter + ≥1 trade. */}
+                <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                        type="button"
+                        onClick={onOpenAsResultView}
+                        disabled={!openAsResultViewEnabled}
+                        className={cn(
+                            "px-3 py-1 rounded-[4px] border text-[10.5px] font-ui font-semibold transition-colors",
+                            openAsResultViewEnabled
+                                ? "bg-[hsl(var(--accent-primary)/0.16)] border-[hsl(var(--accent-primary)/0.55)] text-[hsl(var(--accent-primary))] hover:bg-[hsl(var(--accent-primary)/0.24)] cursor-pointer"
+                                : "bg-[hsl(var(--panel-2)/0.3)] border-[hsl(var(--border-soft))] text-[hsl(var(--text-2)/0.5)] cursor-not-allowed",
+                        )}
+                        title={openAsResultViewEnabled
+                            ? "Apply this selective BE across the whole app (Run Detail, Strategy Map, labs) as an exploratory Result View."
+                            : "Select an EXACT BE scenario and at least one cohort that applies to ≥1 trade."}
+                    >
+                        Open as Result View
+                    </button>
+                    <span className="text-[10px] font-ui text-[hsl(var(--text-2)/0.75)]">
+                        Promotes the preview below to a global protected Result View. Does not silently apply global BE.
+                    </span>
+                </div>
                 <p className="text-[10.5px] font-ui text-[hsl(var(--text-2))] leading-snug">
                     Select where BE should be applied. The right card always starts as the original run, then only
                     the selected cohort is changed. No chips selected = no BE applied. Scenario: {scenarioLabel}.
@@ -485,7 +526,7 @@ export function BreakevenTab({
     // When candles live in IndexedDB the store delivers CANDLES=[] until
     // loadCandlesForRun() is called. We trigger it here and show a preparing
     // state instead of a false "candles not found" gate.
-    const { loadCandlesForRun } = useDataset();
+    const { loadCandlesForRun, SCENARIO } = useDataset();
     const [candleLoadState, setCandleLoadState] = React.useState("idle"); // idle|loading|ready|empty|failed
     const loadTokenRef = React.useRef(0);
 
@@ -703,6 +744,52 @@ export function BreakevenTab({
             filteredBreakdown: selectiveBe?.meta?.filteredBreakdown ?? null,
         };
     }, [selectedBeScenario, trades, selectiveBe]);
+
+    // ── PROTECTION-LAYER Phase 2 — "Open as Result View" promotion ────────────
+    // Promote the current selective-BE config into the global scenario as a
+    // break_even layer on top of the CURRENT base entry view, so every page reads
+    // the same protected universe.trades. We never silently apply global BE: the
+    // button is gated on EXACT + ≥1 cohort filter + ≥1 trade actually affected.
+    const baseEntryView = React.useMemo(() => {
+        const fam = familyFromKey(beEntryVariantKey);
+        if (!fam || fam === "baseline") return { family: "baseline", threshold: null, fillMode: null };
+        return { family: fam, threshold: extractThreshold(beEntryVariantKey), fillMode: fillModeFromKey(beEntryVariantKey) };
+    }, [beEntryVariantKey]);
+
+    const activeLayers = (SCENARIO?.runId === activeRunId && Array.isArray(SCENARIO?.layers)) ? SCENARIO.layers : [];
+    const activeProtectionLabel = activeLayers.length ? buildProtectionLabel(activeLayers[0]) : null;
+
+    const openAsResultViewEnabled = Boolean(
+        selectedBeScenario?.source === "EXACT"
+        && selectedBeScenario.scenarioKey
+        && cohortsActive
+        && selectiveBe && selectiveBe.applied > 0,
+    );
+
+    const onOpenAsResultView = React.useCallback(() => {
+        if (selectedBeScenario?.source !== "EXACT" || !selectedBeScenario.scenarioKey) return;
+        if (!cohortsActive || !(selectiveBe && selectiveBe.applied > 0)) return;
+        const layer = {
+            type: "break_even",
+            mode: "selective",
+            params: { beScenarioKey: selectedBeScenario.scenarioKey, armLevelR, triggerBasis },
+            filters: beCohorts,
+            exploratory: true,
+            label: `BE ${armLevelR}R ${triggerBasis === "wick" ? "Wick" : "Close"} · ${selectiveBe.selectedFilterLabel}`,
+        };
+        // Base entry view + layer set together (setScenario keeps layers because
+        // the patch carries them explicitly).
+        setScenario({
+            runId: activeRunId || null,
+            ...baseEntryView,
+            positionVariant: beExecutionMode,
+            layers: [layer],
+        });
+    }, [selectedBeScenario, cohortsActive, selectiveBe, armLevelR, triggerBasis, beCohorts, baseEntryView, beExecutionMode, activeRunId]);
+
+    const onClearResultViewLayer = React.useCallback(() => {
+        setScenario({ runId: activeRunId || null, layers: [] });
+    }, [activeRunId]);
 
     // ── Gate: three-state candle resolution ──────────────────────────────
     //
@@ -1126,6 +1213,10 @@ export function BreakevenTab({
                     scenarioLabel={`${armLevelR}R ${triggerBasis === "wick" ? "Wick" : "Close"}`}
                     triggerBasis={triggerBasis}
                     onSetTrigger={setTriggerBasis}
+                    onOpenAsResultView={onOpenAsResultView}
+                    openAsResultViewEnabled={openAsResultViewEnabled}
+                    activeProtectionLabel={activeProtectionLabel}
+                    onClearResultViewLayer={onClearResultViewLayer}
                 />
             )}
 

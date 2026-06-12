@@ -60,12 +60,17 @@ export function useRunVariant(runId) {
     // positionVariant here (orthogonal axis-1), so a lens change can't reset it.
     const setResultView = useCallback((next) => {
         if (!next || typeof next !== "object") return;
+        // PROTECTION-LAYER Phase 2 — forward `layers` when the caller supplies
+        // them (opening a protected Result View sets base view + layers together).
+        // When absent, setScenario's safety net clears layers because the base
+        // entry view changed.
         setScenario({
             runId: runId || null,
             family: next.family ?? "baseline",
             threshold: next.threshold ?? null,
             fillMode: next.fillMode ?? null,
             directionalStorageKey: next.directionalStorageKey ?? null,
+            ...(Array.isArray(next.layers) ? { layers: next.layers } : {}),
         });
     }, [runId]);
 

@@ -13,6 +13,7 @@ export const BASELINE_VIEW = Object.freeze({
     threshold: null,
     fillMode: null,
     directionalStorageKey: null,
+    layers: [],
 });
 
 /**
@@ -40,6 +41,9 @@ export function resolveResultViewFrom(scenario, runId, defaultView) {
             threshold: scenario.threshold ?? null,
             fillMode: scenario.fillMode ?? null,
             directionalStorageKey: scenario.directionalStorageKey ?? null,
+            // PROTECTION-LAYER Phase 2 — carry protection layers through so the
+            // protected universe survives Run Detail's Result View resolution.
+            layers: Array.isArray(scenario.layers) ? scenario.layers : [],
         };
     }
     return defaultView;
@@ -51,6 +55,28 @@ export function resolveResultViewFrom(scenario, runId, defaultView) {
  *
  * @param {object|null} primary  output of derivePrimaryResultView(bundle).
  */
+/**
+ * Merge a scenario patch with PROTECTION-LAYER Phase 2 layer-safety rules (pure;
+ * used by store.setScenario so the behaviour is unit-testable):
+ *   • patch carries `protection` (single-layer sugar) → promote to layers[] (or [] if invalid), strip `protection`.
+ *   • patch changes the base ENTRY view (family/threshold/fillMode/directional) WITHOUT
+ *     explicit `layers` → clear layers (a layer is only valid against its entry universe).
+ *   • otherwise → keep existing layers (orthogonal changes like positionVariant/runId).
+ * Layers are always sanitized to an array of valid {type} objects.
+ */
+export function applyScenarioPatchLayerSafety(current = {}, patch = {}) {
+    const next = { ...current, ...patch };
+    if ("protection" in patch) {
+        next.layers = (patch.protection && typeof patch.protection.type === "string") ? [patch.protection] : [];
+        delete next.protection;
+    } else {
+        const touchesEntryView = ["family", "threshold", "fillMode", "directionalStorageKey"].some((k) => k in patch);
+        if (touchesEntryView && !("layers" in patch)) next.layers = [];
+    }
+    next.layers = (Array.isArray(next.layers) ? next.layers : []).filter((l) => l && typeof l.type === "string");
+    return next;
+}
+
 export function normalizeDefaultView(primary) {
     if (!primary) return { ...BASELINE_VIEW };
     return {
@@ -58,5 +84,7 @@ export function normalizeDefaultView(primary) {
         threshold: primary.threshold ?? null,
         fillMode: primary.fillMode ?? null,
         directionalStorageKey: primary.directionalStorageKey ?? null,
+        // A freshly-derived default view never carries protection layers.
+        layers: [],
     };
 }

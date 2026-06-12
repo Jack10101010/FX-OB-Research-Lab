@@ -88,7 +88,12 @@ export default function ResearchResultViewBanner({
     if (!universe) return null;
 
     // ── Derive everything from the resolved universe ───────────────────────────
-    const isScenarioView = universe.universeType === "scenario";
+    const isProtectedView = universe.universeType === "protected_result";
+    const protectionLayer = isProtectedView ? universe.protection?.layers?.[0] : null;
+    // A protected universe's `scenario` still carries the BASE entry view, so the
+    // Model/Threshold/Fill cells describe the underlying entry universe; the
+    // protection layer is surfaced as its own strip below.
+    const isScenarioView = universe.universeType === "scenario" || isProtectedView;
     const family    = universe.scenario?.family ?? (isScenarioView ? "" : "baseline");
     const threshold = universe.scenario?.threshold ?? null;
     const fillMode  = universe.scenario?.fillMode ?? null;
@@ -163,6 +168,30 @@ export default function ResearchResultViewBanner({
                     </Field>
                 )}
             </div>
+            {/* Protection layer strip (PROTECTION-LAYER Phase 2) — only when a
+                protected Result View is active. */}
+            {isProtectedView && (
+                <div className="flex flex-wrap items-center gap-2 mt-2 pt-2 border-t border-[hsl(var(--border-soft)/0.25)]">
+                    <Field label="Protection">
+                        <Pill tone="secondary">{protectionLayer?.layerLabel || "Protection"}</Pill>
+                    </Field>
+                    <Pill tone="warning">EXPLORATORY</Pill>
+                    {protectionLayer && (
+                        <>
+                            <Pill tone="muted">Applied {protectionLayer.appliedCount ?? 0}</Pill>
+                            <Pill tone="success">Saved {protectionLayer.lossesSaved ?? 0}</Pill>
+                            <Pill tone="danger">Cut {protectionLayer.winnersCut ?? 0}</Pill>
+                            {protectionLayer.deltaNetR != null && (
+                                <Field label="Δ Net R">
+                                    <span className="text-[11px] font-num tabular-nums font-semibold text-[hsl(var(--text-2))]">
+                                        {protectionLayer.deltaNetR > 0 ? "+" : ""}{protectionLayer.deltaNetR}
+                                    </span>
+                                </Field>
+                            )}
+                        </>
+                    )}
+                </div>
+            )}
         </div>
     );
 

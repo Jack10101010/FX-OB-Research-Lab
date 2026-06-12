@@ -38,6 +38,11 @@ import {
     resolveHierarchy,
     selectTrades,
 } from "@/data/tradeUniverse";
+// PROTECTION-LAYER Phase 2 — Strategy Map parity. The map builds its own trade
+// list (this hook) but must agree with useTradeUniverse when protection layers
+// are active. Both call the SAME selectTrades for the base, then the SAME
+// applyProtectionLayers fold — so the resulting trades match by construction.
+import { applyProtectionLayers, normalizeLayers } from "@/data/protectionLayers";
 
 // ---------------------------------------------------------------------------
 // Low-level utilities (mirrors of private fns in StrategyMap.jsx)
@@ -83,6 +88,10 @@ function colorKeyForTradeOutcome(trade) {
     const cancelNorm = normalizeOutcome(trade.cancel_reason ?? trade.cancelReason ?? "");
     // INVALID / cancelled-before-entry → violet "done" key
     if (cancelledBefore || o === "invalid" || cancelNorm.includes("inval") || cancelNorm.includes("before_entry")) return "done";
+    // Protection-layer BE exit (PROTECTION-LAYER Phase 2): a row swapped in by a
+    // break_even layer carries protectionApplied + a BE outcome. Color it as BE
+    // so protected rows don't render as their original win/loss.
+    if (trade.protectionApplied || o === "be_exit" || o.includes("be_exit") || o === "be_stop") return "be";
     if (o.includes("win") || o === "tp") return "win";
     if (o.includes("loss") || o === "sl") return "loss";
     if (o === "be" || o.includes("breakeven")) return "be";
@@ -559,8 +568,22 @@ export function useResolvedScenario(scenario, bundle, fallbackState = {}) {
         selectTrades(canonicalKey, resolvedFillMode, bundle, baseVariantTrades)
     ), [canonicalKey, resolvedFillMode, bundle, baseVariantTrades]);
 
-    // trades === rawTrades (alias; future phases may add additional trade-level filters here)
-    const trades = rawTrades;
+    // Apply protection/qualification layers (PROTECTION-LAYER Phase 2). With no
+    // layers this is a no-op (trades === rawTrades) so existing Strategy Map
+    // behaviour is unchanged. With layers active, the map renders the SAME
+    // protected universe the rest of the app sees (no parallel BE). Variant /
+    // sourceKey come from the resolved base entry universe so BE stays
+    // variant-correct (EXACT-only, no baseline fallback — enforced in the layer).
+    const trades = useMemo(() => {
+        const layers = normalizeLayers(scenario || {});
+        if (!layers.length) return rawTrades;
+        const baseUniverse = {
+            trades: rawTrades,
+            variant: resolvedPositionVariant,
+            sourceKey: canonicalKey || "baseline",
+        };
+        return applyProtectionLayers({ baseUniverse, bundle, layers }).trades;
+    }, [rawTrades, scenario, resolvedPositionVariant, canonicalKey, bundle]);
 
     // ------------------------------------------------------------------
     // 7. OB enrichment

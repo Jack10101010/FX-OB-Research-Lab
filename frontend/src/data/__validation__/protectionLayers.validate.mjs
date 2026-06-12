@@ -135,6 +135,16 @@ console.log("\n§8  No mutation of base trades");
 ok(variantTrades[0].net_r === -1 && variantTrades[0].protectionApplied === undefined, "base trade object untouched after protected build");
 ok(beVariant[0].protectionApplied === undefined, "base BE trade object untouched");
 
+console.log("\n§9b Strategy-Map parity: map path (selectTrades→fold) == resolver protected trades");
+// Simulate exactly what useResolvedScenario now does: selectTrades for the base,
+// then applyProtectionLayers with the same layer the resolver received.
+const mapLayer = beLayer({ filters: { structures: ["choch"] } });
+const mapBase = { trades: selectTrades("entry_triggered_edge_25p0_d2", "d2", bundle, baselineTrades), variant: "single_position", sourceKey: "entry_triggered_edge_25p0_d2" };
+const mapFolded = applyProtectionLayers({ baseUniverse: mapBase, bundle, layers: [mapLayer] }).trades;
+const resolverProtected = resolveTradeUniverse({ bundle, scenario: { ...SC_TE, layers: [mapLayer] }, fallbackVariant: "single_position" }).trades;
+ok(mapFolded.length === resolverProtected.length && mapFolded.every((x, i) => x.id === resolverProtected[i].id), "map protected trade IDs == useTradeUniverse protected trade IDs");
+ok(mapFolded.filter((x) => x.protectionApplied).map((x) => x.id).join() === resolverProtected.filter((x) => x.protectionApplied).map((x) => x.id).join(), "map protectionApplied set matches resolver");
+
 console.log("\n§extra  Layer array form == single protection form");
 const uArr = resolveTradeUniverse({ bundle, scenario: { ...SC_TE, layers: [beLayer({ mode: "all" })] }, fallbackVariant: "single_position" });
 ok(uArr.universeType === "protected_result" && uArr.protection.layers[0].appliedCount === 3, "scenario.layers[] resolves same as scenario.protection");

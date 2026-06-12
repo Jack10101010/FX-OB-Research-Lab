@@ -13,6 +13,7 @@
 import {
     resolveResultViewFrom,
     normalizeDefaultView,
+    applyScenarioPatchLayerSafety,
     BASELINE_VIEW,
 } from "../runVariantResolve.js";
 
@@ -33,29 +34,67 @@ const TE_DEFAULT = { family: "triggered_edge", threshold: 50, fillMode: "next", 
 // ── normalizeDefaultView ────────────────────────────────────────────────────────
 eq("normalize(null) → baseline shape",
     normalizeDefaultView(null),
-    { family: "baseline", threshold: null, fillMode: null, directionalStorageKey: null });
+    { family: "baseline", threshold: null, fillMode: null, directionalStorageKey: null, layers: [] });
 eq("BASELINE_VIEW shape is stable", BASELINE_VIEW,
-    { family: "baseline", threshold: null, fillMode: null, directionalStorageKey: null });
+    { family: "baseline", threshold: null, fillMode: null, directionalStorageKey: null, layers: [] });
 eq("normalize fills missing fields with null",
     normalizeDefaultView({ family: "penetration", threshold: 25 }),
-    { family: "penetration", threshold: 25, fillMode: null, directionalStorageKey: null });
+    { family: "penetration", threshold: 25, fillMode: null, directionalStorageKey: null, layers: [] });
 
 // ── Adopt the store scenario when it targets this run ───────────────────────────
 eq("scenario targets run (triggered_edge) → adopt scenario, not default",
     resolveResultViewFrom(
         { runId: RUN, family: "triggered_edge", threshold: 25, fillMode: "same" },
         RUN, TE_DEFAULT),
-    { family: "triggered_edge", threshold: 25, fillMode: "same", directionalStorageKey: null });
+    { family: "triggered_edge", threshold: 25, fillMode: "same", directionalStorageKey: null, layers: [] });
 
 eq("explicit baseline for this run → adopt baseline (sticks, does NOT re-derive)",
     resolveResultViewFrom({ runId: RUN, family: "baseline" }, RUN, TE_DEFAULT),
-    { family: "baseline", threshold: null, fillMode: null, directionalStorageKey: null });
+    { family: "baseline", threshold: null, fillMode: null, directionalStorageKey: null, layers: [] });
 
 eq("directional scenario round-trips directionalStorageKey",
     resolveResultViewFrom(
         { runId: RUN, family: "directional", directionalStorageKey: "scn__longs_only" },
         RUN, TE_DEFAULT),
-    { family: "directional", threshold: null, fillMode: null, directionalStorageKey: "scn__longs_only" });
+    { family: "directional", threshold: null, fillMode: null, directionalStorageKey: "scn__longs_only", layers: [] });
+
+// ── PROTECTION-LAYER Phase 2 — layers carry + safety ────────────────────────────
+const BE_LAYER = { type: "break_even", mode: "selective", params: { beScenarioKey: "be_wick_1p00R" }, filters: { structures: ["choch"] }, exploratory: true };
+
+eq("protected scenario for this run → layers carried through",
+    resolveResultViewFrom({ runId: RUN, family: "triggered_edge", threshold: 25, fillMode: "d2", layers: [BE_LAYER] }, RUN, TE_DEFAULT),
+    { family: "triggered_edge", threshold: 25, fillMode: "d2", directionalStorageKey: null, layers: [BE_LAYER] });
+
+{
+    const r = applyScenarioPatchLayerSafety({ runId: RUN, family: "baseline", layers: [] }, { family: "triggered_edge", threshold: 25, fillMode: "d2", layers: [BE_LAYER] });
+    eq("Open-as-result-view: base view fields applied",
+        { runId: r.runId, family: r.family, threshold: r.threshold, fillMode: r.fillMode }, { runId: RUN, family: "triggered_edge", threshold: 25, fillMode: "d2" });
+    eq("Open-as-result-view: layers set together are preserved", r.layers, [BE_LAYER]);
+}
+
+eq("changing base entry view WITHOUT layers clears stale layers",
+    applyScenarioPatchLayerSafety({ runId: RUN, family: "triggered_edge", threshold: 25, fillMode: "d2", layers: [BE_LAYER] }, { family: "penetration", threshold: 10 }).layers,
+    []);
+
+eq("orthogonal change (positionVariant) keeps layers",
+    applyScenarioPatchLayerSafety({ runId: RUN, family: "triggered_edge", layers: [BE_LAYER] }, { positionVariant: "single_position" }).layers,
+    [BE_LAYER]);
+
+eq("explicit clear via layers:[] returns to base universe",
+    applyScenarioPatchLayerSafety({ runId: RUN, family: "triggered_edge", layers: [BE_LAYER] }, { layers: [] }).layers,
+    []);
+
+eq("protection sugar promotes to layers[] and strips protection key",
+    applyScenarioPatchLayerSafety({ runId: RUN, family: "triggered_edge", layers: [] }, { protection: BE_LAYER }),
+    { runId: RUN, family: "triggered_edge", layers: [BE_LAYER] });
+
+eq("invalid layers are sanitized out",
+    applyScenarioPatchLayerSafety({ layers: [] }, { layers: [BE_LAYER, { nope: 1 }, null] }).layers,
+    [BE_LAYER]);
+
+eq("old scenario with no layers key → layers default to []",
+    applyScenarioPatchLayerSafety({ runId: RUN, family: "triggered_edge" }, { threshold: 25, layers: undefined }).layers,
+    []);
 
 // ── Fall back to the supplied default otherwise (isolation preserved) ───────────
 eq("scenario for a DIFFERENT run → ignored, return default [isolation]",

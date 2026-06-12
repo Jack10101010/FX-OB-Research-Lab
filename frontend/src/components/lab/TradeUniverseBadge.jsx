@@ -96,16 +96,20 @@ export function TradeUniverseBadge({
 
     if (!universe) return null;
 
+    const isProtected = universe.universeType === "protected_result";
     const isScenario = universe.universeType === "scenario";
     const source = universe.sourceFile || universe.sourceKey || "—";
+    // Protected universes carry per-layer metadata; surface the first layer's
+    // impact (BE is the only layer type in Phase 2).
+    const layer0 = isProtected ? universe.protection?.layers?.[0] : null;
 
     return (
         <div className={`${OUTER_DEFAULT} ${className}`.trim()}>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border border-[hsl(var(--border-soft)/0.7)] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm px-2.5 py-1.5">
                 <BadgeCell
                     label="Universe"
-                    value={isScenario ? "Scenario trades" : "Baseline reference"}
-                    tone={isScenario ? "success" : "muted"}
+                    value={isProtected ? "Protected result" : isScenario ? "Scenario trades" : "Baseline reference"}
+                    tone={isProtected || isScenario ? "success" : "muted"}
                 />
                 <BadgeCell label="Model" value={universe.label || "—"} />
                 {universe.variant && (
@@ -119,6 +123,28 @@ export function TradeUniverseBadge({
                 )}
                 <BadgeCell label="Rows" value={`${universe.stats?.total ?? 0}`} subtle />
             </div>
+            {/* Protection layer strip: base view + layer + EXPLORATORY + impact. */}
+            {isProtected && (
+                <div className="flex flex-wrap items-center gap-2 text-[10px] font-ui">
+                    <span className="px-2 py-1 clip-bevel-sm border border-[hsl(var(--text-muted)/0.4)] text-[hsl(var(--text-2))]">
+                        Base: {universe.protection?.baseLabel || "—"}
+                    </span>
+                    <span className="px-2 py-1 clip-bevel-sm border border-[hsl(var(--accent-secondary)/0.5)] text-[hsl(var(--accent-secondary))]">
+                        Layer: {layer0?.layerLabel || "Protection"}
+                    </span>
+                    <span className="px-2 py-1 clip-bevel-sm border border-[hsl(var(--warning)/0.5)] text-[hsl(var(--warning))]">EXPLORATORY</span>
+                    {layer0 && (
+                        <>
+                            <span className="px-2 py-1 clip-bevel-sm border border-[hsl(var(--text-muted)/0.4)] text-[hsl(var(--text-2))]">Applied {layer0.appliedCount ?? 0}</span>
+                            <span className="px-2 py-1 clip-bevel-sm border border-[hsl(var(--accent-success)/0.45)] text-[hsl(var(--accent-success))]">Saved {layer0.lossesSaved ?? 0}</span>
+                            <span className="px-2 py-1 clip-bevel-sm border border-[hsl(var(--danger)/0.45)] text-[hsl(var(--danger))]">Cut {layer0.winnersCut ?? 0}</span>
+                            {layer0.deltaNetR != null && (
+                                <span className="px-2 py-1 clip-bevel-sm border border-[hsl(var(--text-muted)/0.4)] text-[hsl(var(--text-2))]">Δ Net R {layer0.deltaNetR > 0 ? "+" : ""}{layer0.deltaNetR}</span>
+                            )}
+                        </>
+                    )}
+                </div>
+            )}
             {resolvedWarnings.length > 0 && (
                 <div className="flex flex-wrap items-center gap-2 text-[10px] font-ui">
                     {resolvedWarnings.map((w) => (

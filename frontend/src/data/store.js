@@ -36,6 +36,7 @@ import {
     resolveBaselineUniverse,
     describeTradeUniverse,
 } from "./tradeUniverse";
+import { applyScenarioPatchLayerSafety } from "./runVariantResolve";
 
 const LS_KEY = "fxob_runs";
 const LS_RUN_INDEX = "fxob_runs_index_v1";
@@ -131,7 +132,26 @@ const DEFAULT_SCENARIO = {
     threshold: null,        // number | null  — e.g. 5, 10, 25 (penetration %)
     fillMode: null,         // 'same' | 'next' | 'both' | null  (triggered_edge only; null = both)
     directionalStorageKey: null, // string | null  — directional backend scenario key (family === 'directional')
+    // PROTECTION-LAYER Phase 2 — ordered protection/qualification layers applied
+    // on top of the resolved entry universe (e.g. break_even). [] = no protection
+    // (base entry universe unchanged). resolveTradeUniverse folds these into a
+    // "protected_result" universe. `protection` (single-layer sugar) is accepted
+    // on load for back-compat, but new writes use `layers`.
+    layers: [],             // Layer[] — see data/protectionLayers.js
 };
+
+// Normalize a persisted/loaded layers value: array of valid {type} layer objects,
+// with `protection` single-layer sugar promoted into the array. Old scenarios
+// (neither key) → []. Never throws.
+function normalizeScenarioLayers(saved) {
+    if (Array.isArray(saved?.layers)) {
+        return saved.layers.filter((l) => l && typeof l === "object" && typeof l.type === "string");
+    }
+    if (saved?.protection && typeof saved.protection === "object" && typeof saved.protection.type === "string") {
+        return [saved.protection];
+    }
+    return [];
+}
 
 function loadPersistedScenario(fallbackRunId) {
     try {
@@ -144,6 +164,7 @@ function loadPersistedScenario(fallbackRunId) {
                 threshold: typeof saved.threshold === "number" ? saved.threshold : null,
                 fillMode: typeof saved.fillMode === "string" ? saved.fillMode : null,
                 directionalStorageKey: typeof saved.directionalStorageKey === "string" ? saved.directionalStorageKey : null,
+                layers: normalizeScenarioLayers(saved),
             };
         }
     } catch { /* fall through */ }
@@ -1653,15 +1674,27 @@ export function setSelectedTradeVariant(variant) {
  */
 export function setScenario(patch) {
     if (!patch || typeof patch !== "object") return;
-    state = {
-        ...state,
-        scenario: {
-            ...state.scenario,
-            ...patch,
-        },
-    };
+    // Layer-safety merge (PROTECTION-LAYER Phase 2): changing the base entry view
+    // clears stale protection layers; `protection` sugar promotes to layers[];
+    // explicit `layers` (the "Open as Result View" path) is preserved. Pure rule
+    // lives in runVariantResolve.applyScenarioPatchLayerSafety (unit-tested).
+    state = { ...state, scenario: applyScenarioPatchLayerSafety(state.scenario, patch) };
     persistScenario();
     notify();
+}
+
+/**
+ * Set the active protection/qualification layers (PROTECTION-LAYER Phase 2).
+ * Pass a layer array (typically one BE layer). Non-array → cleared to [].
+ * Does not touch the base entry view (family/threshold/fillMode/variant).
+ */
+export function setScenarioLayers(layers) {
+    setScenario({ layers: Array.isArray(layers) ? layers.filter((l) => l && typeof l.type === "string") : [] });
+}
+
+/** Clear all protection layers, returning to the base entry universe. */
+export function clearScenarioLayers() {
+    setScenario({ layers: [] });
 }
 
 // ── One-shot FFT focus handoff (RunDetail drilldown → Strategy Map) ─────────
