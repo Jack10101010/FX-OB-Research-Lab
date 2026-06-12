@@ -64,6 +64,21 @@ function normLevels(arr) {
         .filter((n) => Number.isFinite(n) && n > 0);
 }
 /**
+ * Resolve the SINGLE effective "Arm Level Reached" from filters.
+ *   • filters.armLevel (number > 0)  → that level (preferred, single-select).
+ *   • filters.armLevels (array)      → backward compat: normalized to its LOWEST
+ *     value, which preserves the previous OR semantics (a trade matched if it
+ *     reached AT LEAST the lowest selected level). Reaching a higher level
+ *     implies the lower, so the lowest is the binding constraint.
+ *   • neither                        → null (no arm constraint).
+ */
+function effectiveArmLevel(filters = {}) {
+    const single = num(filters.armLevel);
+    if (single != null && single > 0) return single;
+    const arr = normLevels(filters.armLevels);
+    return arr.length ? Math.min(...arr) : null;
+}
+/**
  * Max favorable excursion (R) the ORIGINAL trade reached before reversing —
  * stop-anchored `mfe_r`. This is the cohort source for "Arm Level Reached":
  * it answers "how far did this trade move into profit", independent of the BE
@@ -94,6 +109,40 @@ export function cohortBreakdown(trades) {
 }
 
 /**
+ * Per-session attribution over a built selective universe's trades. Counts only
+ * protectionApplied (BE-swapped) rows, so the totals reconcile exactly with the
+ * universe summary: totals.affected === applied, totals.saved === lossesSaved,
+ * totals.cut === winnersCut, totals.deltaR === summary.deltaNetR (2dp). Pure.
+ *
+ * @param {object[]} universeTrades  the `.trades` of a buildSelectiveBeUniverse result
+ * @returns {{ rows: {session,affected,saved,cut,deltaR}[], totals: {affected,saved,cut,deltaR} }}
+ */
+export function buildSessionAttribution(universeTrades) {
+    const list = Array.isArray(universeTrades) ? universeTrades : [];
+    const bySession = new Map();
+    const totals = { affected: 0, saved: 0, cut: 0, deltaR: 0 };
+    for (const t of list) {
+        if (!t || t.protectionApplied !== true) continue;
+        const session = String(t.session ?? t.fillSession ?? t.fill_session ?? "").trim() || "—";
+        if (!bySession.has(session)) bySession.set(session, { session, affected: 0, saved: 0, cut: 0, deltaR: 0 });
+        const row = bySession.get(session);
+        row.affected += 1; totals.affected += 1;
+        const origR = num(t.originalR) ?? 0;
+        const reason = String(t.be_exit_reason ?? t.beExitReason ?? "").toLowerCase();
+        const triggered = bool(t.be_triggered ?? t.beTriggered) || reason === "be_stop";
+        if (triggered && origR < 0) { row.saved += 1; totals.saved += 1; }
+        else if (triggered && origR > 0) { row.cut += 1; totals.cut += 1; }
+        const d = num(t.deltaR) ?? 0;
+        row.deltaR += d; totals.deltaR += d;
+    }
+    const rows = [...bySession.values()]
+        .map((r) => ({ ...r, deltaR: rnd(r.deltaR) }))
+        .sort((a, b) => a.session.localeCompare(b.session));
+    totals.deltaR = rnd(totals.deltaR);
+    return { rows, totals };
+}
+
+/**
  * Cohort match (UX-REMODEL semantics):
  *   • No chips selected ANYWHERE = BE applied to NO trades → always false.
  *   • Otherwise: within a group = OR; across groups = AND; an empty group is
@@ -109,22 +158,22 @@ export function matchesCohort(trade, filters = {}) {
     const dirs = normList(filters.directions);
     const structs = normList(filters.structures);
     const sessions = normList(filters.sessions);
-    const levels = normLevels(filters.armLevels);
+    const arm = effectiveArmLevel(filters);
 
     // Nothing selected anywhere → apply BE to no trades.
-    if (!dirs.length && !structs.length && !sessions.length && !levels.length) return false;
+    if (!dirs.length && !structs.length && !sessions.length && arm == null) return false;
 
     if (dirs.length && !dirs.includes(normDirection(trade))) return false;
     if (structs.length && !structs.includes(normStructure(trade))) return false;
     if (sessions.length && !sessions.includes(normSession(trade))) return false;
 
-    // Arm Level Reached: the ORIGINAL trade's MFE must reach a selected level.
-    // OR within the group ⇒ reaching the lowest selected level qualifies.
-    // Not tied to the BE scenario (e.g. apply 0.5R BE only to trades that hit 2R).
-    if (levels.length) {
+    // Arm Level Reached (single): the ORIGINAL trade's MFE must reach the selected
+    // level. Not tied to the BE scenario (e.g. apply 0.5R BE only to trades that
+    // reached 1R). Null MFE (unfilled rows) never matches an arm constraint.
+    if (arm != null) {
         const mfe = tradeMfeR(trade);
         if (mfe == null) return false;
-        if (!levels.some((L) => mfe >= L - 1e-9)) return false;
+        if (mfe < arm - 1e-9) return false;
     }
     return true;
 }
@@ -137,7 +186,8 @@ export function selectedFilterLabel(filters = {}) {
         ...normList(filters.structures),
         ...normList(filters.sessions),
     ].map((p) => friendly[p] || p.replace(/\b\w/g, (c) => c.toUpperCase()));
-    const lvl = normLevels(filters.armLevels).map((L) => `${L}R`);
+    const arm = effectiveArmLevel(filters);
+    const lvl = arm != null ? [`${arm}R`] : [];
     const parts = [...cat, ...lvl];
     return parts.length ? parts.join(" + ") : "None";
 }
@@ -207,6 +257,12 @@ export function buildSelectiveBeUniverse({ originalTrades, beTrades, filters = {
             }
             const protectedRow = {
                 ...be,
+                // Cohort dimensions are a property of the SETUP, not the BE sim —
+                // carry them from the original so per-session/direction/structure
+                // attribution is correct even if the backend BE CSV omits them.
+                session: be.session ?? orig.session ?? orig.fillSession ?? orig.fill_session,
+                direction: be.direction ?? orig.direction,
+                structure: be.structure ?? orig.structure ?? orig.structure_type,
                 protectionApplied: true,
                 protectionType: "break_even",
                 protectionScenarioKey: scenarioKey,
@@ -244,8 +300,8 @@ export function buildSelectiveBeUniverse({ originalTrades, beTrades, filters = {
     const fdirs = normList(filters.directions);
     const fstructs = normList(filters.structures);
     const fsessions = normList(filters.sessions);
-    const flevels = normLevels(filters.armLevels);
-    const isNoFilterSelected = !fdirs.length && !fstructs.length && !fsessions.length && !flevels.length;
+    const farm = effectiveArmLevel(filters);
+    const isNoFilterSelected = !fdirs.length && !fstructs.length && !fsessions.length && farm == null;
 
     return {
         trades: out,                          // full run with BE applied to the cohort
@@ -274,7 +330,10 @@ export function buildSelectiveBeUniverse({ originalTrades, beTrades, filters = {
                 directions: normList(filters.directions),
                 structures: normList(filters.structures),
                 sessions: normList(filters.sessions),
-                armLevels: normLevels(filters.armLevels),
+                // Single effective arm level (preferred). armLevels kept (normalized
+                // to the one effective value) for any legacy consumer still reading it.
+                armLevel: farm,
+                armLevels: farm != null ? [farm] : [],
             },
             lowSampleThreshold: LOW_SAMPLE_THRESHOLD,
             total: originals.length,

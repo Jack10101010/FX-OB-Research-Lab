@@ -18,7 +18,7 @@ import {
 } from "@/data/beReplay";
 import { resolveBeScenarioSource, hasAnyExactBe, entryVariantHasExact, describeBeAvailability } from "@/data/beResolve";
 import { buildBeAffectedTrades } from "@/data/protectionTimeline";
-import { buildSelectiveBeUniverse } from "@/data/selectiveBeUniverse";
+import { buildSelectiveBeUniverse, stableTradeId, buildSessionAttribution } from "@/data/selectiveBeUniverse";
 import { summarizeTradeSanity } from "@/data/tradeClassification";
 import { BeAffectedTradesCard } from "@/components/lab/protection/BeAffectedTradesCard";
 import { useDataset, setFocusedBeTrade, setScenario } from "@/data/store";
@@ -333,8 +333,87 @@ function DifferenceCard({ o, sel, affected, lossesSaved, winnersCut, title = "Di
     );
 }
 
+// ── Debug attribution table (per-session affected / saved / cut / Δ R) ────────
+// `attribution` = { rows:[{session,affected,saved,cut,deltaR}], totals }.
+// `sessionOrder` (optional) forces a fixed row set so excluded sessions show 0s
+// in the cohort table. `includedSessions` (lowercased Set) highlights in-cohort
+// rows. `tone` = "cohort" (bright) | "global" (muted reference).
+function AttributionTable({ title, subtitle, attribution, sessionOrder = null, includedSessions = null, tone = "cohort", summaryDelta = null }) {
+    if (!attribution) return null;
+    const bySession = new Map(attribution.rows.map((r) => [r.session, r]));
+    const sessions = sessionOrder && sessionOrder.length
+        ? sessionOrder
+        : attribution.rows.map((r) => r.session);
+    const zero = (session) => ({ session, affected: 0, saved: 0, cut: 0, deltaR: 0 });
+    const rows = sessions.map((s) => bySession.get(s) || zero(s));
+    const t = attribution.totals;
+    const isCohort = tone === "cohort";
+    const dR = (v) => `${v > 0 ? "+" : ""}${Number(v).toFixed(1)}R`;
+    const dRTone = (v) => (v > 0.005 ? "text-[hsl(var(--success))]" : v < -0.005 ? "text-[hsl(var(--danger))]" : "text-[hsl(var(--text-2))]");
+    const deltaMismatch = summaryDelta != null && Math.abs(Number(summaryDelta) - Number(t.deltaR)) > 0.011;
+    return (
+        <div className={cn(
+            "rounded-[4px] border p-2 flex flex-col gap-1",
+            isCohort
+                ? "border-[hsl(var(--accent-secondary)/0.55)] bg-[hsl(var(--accent-secondary)/0.08)]"
+                : "border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.3)]",
+        )}>
+            <div className="flex items-baseline justify-between gap-2">
+                <span className={cn("text-[11px] font-ui font-semibold uppercase tracking-[0.06em]", isCohort ? "text-[hsl(var(--accent-secondary))]" : "text-[hsl(var(--text-2))]")}>{title}</span>
+                {subtitle && <span className="text-[9.5px] font-ui text-[hsl(var(--text-3))]">{subtitle}</span>}
+            </div>
+            <table className="w-full text-[11.5px] font-ui tabular-nums">
+                <thead>
+                    <tr className="text-[hsl(var(--text-3))]">
+                        <th className="text-left font-normal py-0.5">Session</th>
+                        <th className="text-right font-normal">Aff</th>
+                        <th className="text-right font-normal">Saved</th>
+                        <th className="text-right font-normal">Cut</th>
+                        <th className="text-right font-normal">Δ R</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {rows.map((r) => {
+                        const included = !isCohort || includedSessions == null || includedSessions.size === 0
+                            || includedSessions.has(String(r.session).trim().toLowerCase());
+                        return (
+                            <tr key={r.session} className={cn(
+                                "border-t border-[hsl(var(--border-soft)/0.4)]",
+                                isCohort && !included ? "opacity-40" : "",
+                                isCohort && included && r.affected > 0 ? "text-[hsl(var(--text))]" : "text-[hsl(var(--text-2))]",
+                            )}>
+                                <td className="text-left py-0.5">{r.session}</td>
+                                <td className="text-right">{r.affected}</td>
+                                <td className="text-right text-[hsl(var(--success))]">{r.saved}</td>
+                                <td className="text-right text-[hsl(var(--danger))]">{r.cut}</td>
+                                <td className={cn("text-right", dRTone(r.deltaR))}>{dR(r.deltaR)}</td>
+                            </tr>
+                        );
+                    })}
+                </tbody>
+                <tfoot>
+                    <tr className="border-t border-[hsl(var(--border-soft))] font-semibold text-[hsl(var(--text))]">
+                        <td className="text-left py-0.5">Total</td>
+                        <td className="text-right">{t.affected}</td>
+                        <td className="text-right text-[hsl(var(--success))]">{t.saved}</td>
+                        <td className="text-right text-[hsl(var(--danger))]">{t.cut}</td>
+                        <td className={cn("text-right", dRTone(t.deltaR))}>{dR(t.deltaR)}</td>
+                    </tr>
+                </tfoot>
+            </table>
+            {summaryDelta != null && (
+                <span className={cn("text-[9.5px] font-ui", deltaMismatch ? "text-[hsl(var(--danger))]" : "text-[hsl(var(--text-3))]")}>
+                    {deltaMismatch ? `⚠ footer Δ ${dR(t.deltaR)} ≠ summary ${dR(summaryDelta)}` : `✓ matches summary Δ ${dR(summaryDelta)}`}
+                </span>
+            )}
+        </div>
+    );
+}
+
 function SelectiveBeCohortPanel({
     beCohorts, toggleCohort, resetCohorts, cohortsActive, compare, selective, globalCounts, scenarioLabel, triggerBasis, onSetTrigger,
+    scenarioArm, onSetArmLevel,
+    cohortAttribution = null, globalAttribution = null, globalSummaryDelta = null, showAttribution = true, onToggleAttribution,
     onOpenAsResultView, openAsResultViewEnabled = false, activeProtectionLabel = null, onClearResultViewLayer,
 }) {
     if (!compare) return null;
@@ -394,33 +473,48 @@ function SelectiveBeCohortPanel({
                         Promotes the preview below to a global protected Result View. Does not silently apply global BE.
                     </span>
                 </div>
+                {/* Filters (left) + debug attribution panels (right), above the cards. */}
+                <div className="flex gap-3 flex-wrap lg:flex-nowrap items-start">
+                <div className="flex-1 min-w-0 flex flex-col gap-3">
                 <p className="text-[10.5px] font-ui text-[hsl(var(--text-2))] leading-snug">
-                    Select where BE should be applied. The right card always starts as the original run, then only
-                    the selected cohort is changed. No chips selected = no BE applied. Scenario: {scenarioLabel}.
+                    The scenario ({scenarioLabel}) sets the BE rule. Arm Level (below) sets which trades are eligible —
+                    by default the scenario&apos;s own arm. Direction / Structure / Session chips further narrow the cohort.
                 </p>
 
                 <CohortChips label="Direction" options={["Long", "Short"]} selected={beCohorts.directions} onToggle={(v) => toggleCohort("directions", v)} />
                 <CohortChips label="Structure" options={["CHoCH", "BOS"]} selected={beCohorts.structures} onToggle={(v) => toggleCohort("structures", v)} />
                 <CohortChips label="Session" options={["Asia", "London", "London Lull", "New York", "Outside"]} selected={beCohorts.sessions} onToggle={(v) => toggleCohort("sessions", v)} />
+                {/* Arm Level Reached — SINGLE-select (radio). Always set; defaults
+                    to the scenario arm. Reaching a higher level implies the lower
+                    ones, so only one threshold is meaningful at a time. */}
                 <div className="flex flex-col gap-1">
-                    <CohortChips
-                        label="Arm Level Reached"
-                        options={[
-                            { value: 0.25, label: "0.25R" },
-                            { value: 0.5, label: "0.5R" },
-                            { value: 0.75, label: "0.75R" },
-                            { value: 1, label: "1R" },
-                            { value: 1.5, label: "1.5R" },
-                            { value: 2, label: "2R" },
-                        ]}
-                        selected={beCohorts.armLevels}
-                        onToggle={(v) => toggleCohort("armLevels", v)}
-                    />
-                    <p
-                        className="pl-[72px] text-[10px] font-ui text-[hsl(var(--text-3))] leading-snug"
-                        title="Cohort filter on how far the trade ran, independent of the BE scenario. E.g. scenario 0.5R + Arm Level 2R = apply the 0.5R BE only to trades that eventually reached 2R."
-                    >
-                        Filters trades by how far they moved in profit before reversing.
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="w-[64px] shrink-0 text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--text-2))]">Arm Level</span>
+                        {[0.25, 0.5, 0.75, 1, 1.5, 2].map((lvl) => {
+                            const active = beCohorts.armLevel === lvl;
+                            const isScenarioArm = lvl === scenarioArm;
+                            return (
+                                <button
+                                    key={lvl}
+                                    type="button"
+                                    onClick={() => onSetArmLevel(lvl)}
+                                    className={cn(
+                                        "px-2.5 py-1 rounded-[4px] border text-[10.5px] font-ui transition-colors",
+                                        active
+                                            ? "bg-[hsl(var(--accent-secondary)/0.16)] border-[hsl(var(--accent-secondary)/0.5)] text-[hsl(var(--accent-secondary))]"
+                                            : "bg-[hsl(var(--panel-2)/0.4)] border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))] hover:text-[hsl(var(--text))]",
+                                    )}
+                                    title={isScenarioArm ? "Scenario arm level (default)" : `Apply the ${scenarioArm}R BE only to trades that reached ${lvl}R`}
+                                >
+                                    {lvl}R{isScenarioArm ? " ·" : ""}
+                                </button>
+                            );
+                        })}
+                    </div>
+                    <p className="pl-[72px] text-[10px] font-ui text-[hsl(var(--text-3))] leading-snug">
+                        {beCohorts.armLevel === scenarioArm
+                            ? `Scenario: ${scenarioLabel}. Arm filter: trades must have reached ${scenarioArm}R (the scenario's own arm).`
+                            : `Scenario applies ${scenarioArm}R BE only to trades that reached ${beCohorts.armLevel}R.`}
                     </p>
                 </div>
                 {onSetTrigger && (
@@ -448,9 +542,55 @@ function SelectiveBeCohortPanel({
                     </div>
                 )}
                 <div className="flex items-center gap-3 flex-wrap">
-                    <button type="button" onClick={resetCohorts} className="row-chip row-chip-muted text-[10.5px]">Clear (no BE)</button>
-                    <span className="text-[10px] font-ui text-[hsl(var(--text-2)/0.8)]">Within a group = OR · across groups = AND. Armed = reached the selected BE arm level for this scenario ({scenarioLabel}).</span>
+                    <button type="button" onClick={resetCohorts} className="row-chip row-chip-muted text-[10.5px]">Reset to scenario arm</button>
+                    <span className="text-[10px] font-ui text-[hsl(var(--text-2)/0.8)]">Direction/Structure/Session: within a group = OR, across groups = AND. Arm Level is single-select and always set. Reset clears chips and restores the {scenarioArm}R scenario arm.</span>
                 </div>
+                </div>{/* end left filter column */}
+
+                {/* Right: debug attribution panels — side by side, visible while changing filters. */}
+                <div className="w-full lg:w-[560px] shrink-0 flex flex-col gap-2">
+                    <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--text-2))]">Attribution Debug</span>
+                        <button
+                            type="button"
+                            onClick={onToggleAttribution}
+                            className={cn(
+                                "px-2 py-0.5 rounded-[4px] border text-[10.5px] font-ui transition-colors",
+                                showAttribution
+                                    ? "bg-[hsl(var(--accent-secondary)/0.16)] border-[hsl(var(--accent-secondary)/0.5)] text-[hsl(var(--accent-secondary))]"
+                                    : "bg-[hsl(var(--panel-2)/0.4)] border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))]",
+                            )}
+                            title="Show/hide the per-session attribution tables. Default ON."
+                        >
+                            {showAttribution ? "Show Attribution Debug: ON" : "Show Attribution Debug: OFF"}
+                        </button>
+                    </div>
+                    {showAttribution && (
+                        <div className="flex flex-col sm:flex-row gap-2 items-start">
+                            <div className="flex-1 min-w-0 w-full">
+                                <AttributionTable
+                                    title="Current Cohort Impact"
+                                    subtitle="follows filters"
+                                    tone="cohort"
+                                    attribution={cohortAttribution}
+                                    sessionOrder={(globalAttribution?.rows || []).map((r) => r.session)}
+                                    includedSessions={new Set((beCohorts.sessions || []).map((s) => String(s).trim().toLowerCase()))}
+                                    summaryDelta={selective?.summary?.deltaNetR}
+                                />
+                            </div>
+                            <div className="flex-1 min-w-0 w-full">
+                                <AttributionTable
+                                    title="Global BE Impact"
+                                    subtitle="all trades · ignores filters"
+                                    tone="global"
+                                    attribution={globalAttribution}
+                                    summaryDelta={globalSummaryDelta}
+                                />
+                            </div>
+                        </div>
+                    )}
+                </div>
+                </div>{/* end filters + attribution row */}
 
                 {/* Original Run vs Original Run + Selective BE → Difference */}
                 <div className="flex gap-3 flex-wrap lg:flex-nowrap items-stretch">
@@ -713,7 +853,16 @@ export function BreakevenTab({
     }, [activeRunId, armLevelR, triggerBasis, navigate]);
 
     // ── Selective BE (apply BE to cohorts) — EXACT only, current view scoped ──
-    const [beCohorts, setBeCohorts] = React.useState({ directions: [], structures: [], sessions: [], armLevels: [] });
+    // ARM-LEVEL-UX-FIX: Arm Level Reached is now a SINGLE value (armLevel), always
+    // set, defaulting to the current scenario arm (armLevelR). Direction/structure/
+    // session stay multi-select arrays.
+    const [beCohorts, setBeCohorts] = React.useState({ directions: [], structures: [], sessions: [], armLevel: armLevelR });
+    // Keep the arm filter defaulted to the scenario arm: when the user picks a
+    // different BE scenario (armLevelR changes), reset the arm filter to it. The
+    // user can still pick a different arm chip afterwards (single-select radio).
+    React.useEffect(() => {
+        setBeCohorts((c) => (c.armLevel === armLevelR ? c : { ...c, armLevel: armLevelR }));
+    }, [armLevelR]);
     const toggleCohort = React.useCallback((dim, value) => {
         setBeCohorts((c) => {
             const cur = c[dim] || [];
@@ -721,17 +870,73 @@ export function BreakevenTab({
             return { ...c, [dim]: next };
         });
     }, []);
-    const resetCohorts = React.useCallback(() => setBeCohorts({ directions: [], structures: [], sessions: [], armLevels: [] }), []);
-    const cohortsActive = beCohorts.directions.length || beCohorts.structures.length || beCohorts.sessions.length || beCohorts.armLevels.length;
+    // Arm Level Reached is nullable single-select: clicking a level selects it;
+    // clicking the active level again deselects it (→ null = no BE applied).
+    const setArmLevel = React.useCallback((value) => {
+        setBeCohorts((c) => ({ ...c, armLevel: c.armLevel === value ? null : value }));
+    }, []);
+    // Reset clears direction/structure/session and restores the arm to the
+    // scenario arm (NOT empty) — arm is always set in normal use.
+    const resetCohorts = React.useCallback(
+        () => setBeCohorts({ directions: [], structures: [], sessions: [], armLevel: armLevelR }),
+        [armLevelR],
+    );
+    const cohortsActive = Boolean(
+        beCohorts.directions.length || beCohorts.structures.length || beCohorts.sessions.length || beCohorts.armLevel != null,
+    );
     const selectiveBe = React.useMemo(() => {
+        if (selectedBeScenario?.source !== "EXACT" || !Array.isArray(selectedBeScenario.trades)) return null;
+        // Arm Level is the master switch: no arm selected ⇒ no BE applied at all,
+        // even if Direction/Structure/Session chips are set. Pass empty filters so
+        // the builder matches zero trades (never treat null arm as "unrestricted").
+        const filters = beCohorts.armLevel == null ? {} : beCohorts;
+        return buildSelectiveBeUniverse({
+            originalTrades: trades,
+            beTrades: selectedBeScenario.trades,
+            filters,
+            scenario: { beScenarioKey: selectedBeScenario.scenarioKey },
+        });
+    }, [selectedBeScenario, trades, beCohorts]);
+    // ARM-LEVEL-UX-FIX Phase E — cohort-scoped affected trades. §6b can show the
+    // GLOBAL BE-affected set (every trade the BE touched) or the COHORT set (only
+    // trades matched by the active cohort filters). Default to cohort so the table
+    // follows the panel instead of silently disagreeing with it.
+    const cohortAffectedRows = React.useMemo(() => {
+        if (selectedBeScenario?.source !== "EXACT" || !Array.isArray(selectedBeScenario.trades) || !selectiveBe) return [];
+        const ids = new Set((selectiveBe.filteredOriginalTrades || []).map((t) => stableTradeId(t)));
+        const beTrades = selectedBeScenario.trades.filter((t) => ids.has(stableTradeId(t)));
+        return buildBeAffectedTrades({
+            beTrades,
+            baselineTrades: trades,
+            scenario: { armLevelR, triggerBasis, beScenarioKey: selectedBeScenario.scenarioKey, stopBufferR: 0, delayCandles: 0 },
+        });
+    }, [selectedBeScenario, selectiveBe, trades, armLevelR, triggerBasis]);
+    const [affectedScope, setAffectedScope] = React.useState("cohort");
+    // ARM-LEVEL-UX/DEBUG-ATTRIBUTION — global BE universe (BE applied to ALL
+    // paired trades, ignoring cohort filters) for the Global BE Impact panel.
+    const globalBeUniverse = React.useMemo(() => {
         if (selectedBeScenario?.source !== "EXACT" || !Array.isArray(selectedBeScenario.trades)) return null;
         return buildSelectiveBeUniverse({
             originalTrades: trades,
             beTrades: selectedBeScenario.trades,
-            filters: beCohorts,
+            filters: {},
+            applyToAll: true,
             scenario: { beScenarioKey: selectedBeScenario.scenarioKey },
         });
-    }, [selectedBeScenario, trades, beCohorts]);
+    }, [selectedBeScenario, trades]);
+    const cohortAttribution = React.useMemo(() => (selectiveBe ? buildSessionAttribution(selectiveBe.trades) : null), [selectiveBe]);
+    const globalAttribution = React.useMemo(() => (globalBeUniverse ? buildSessionAttribution(globalBeUniverse.trades) : null), [globalBeUniverse]);
+    // Show Attribution Debug — default ON, persisted locally.
+    const [showAttribution, setShowAttribution] = React.useState(() => {
+        try { return localStorage.getItem("fxob_be_attribution_debug") !== "off"; } catch { return true; }
+    });
+    const toggleAttribution = React.useCallback(() => {
+        setShowAttribution((v) => {
+            const next = !v;
+            try { localStorage.setItem("fxob_be_attribution_debug", next ? "on" : "off"); } catch { /* best effort */ }
+            return next;
+        });
+    }, []);
     const beCompare = React.useMemo(() => {
         if (selectedBeScenario?.source !== "EXACT") return null;
         return {
@@ -1186,16 +1391,46 @@ export function BreakevenTab({
             )}
 
             {/* ── 6b. Trades affected by BE (EXACT only) ──────────────────── */}
-            {isExact && (
-                <BeAffectedTradesCard
-                    rows={affectedRows}
-                    headerRight={<Pill tone="success">EXACT · {armLevelR}R {triggerBasis === "wick" ? "Wick" : "Close"}</Pill>}
-                    actionLabel="View on Map"
-                    onAction={onViewBeTradeOnMap}
-                    scenarioSuffix={` at ${armLevelR}R ${triggerBasis}`}
-                    note={<>Trades where the BE stop fired. Loss Saved / Winner Cut are vs this view&apos;s no-BE baseline; unpaired rows show neutral BE Exit. Click a row or “View on Map” to inspect it on the Strategy Map with the BE overlay. Sorted by largest |Δ R| first.</>}
-                />
-            )}
+            {isExact && (() => {
+                const useCohort = affectedScope === "cohort";
+                const rows = useCohort ? cohortAffectedRows : affectedRows;
+                return (
+                    <BeAffectedTradesCard
+                        rows={rows}
+                        scrollBody
+                        headerRight={
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                                {["cohort", "global"].map((scope) => (
+                                    <button
+                                        key={scope}
+                                        type="button"
+                                        onClick={() => setAffectedScope(scope)}
+                                        className={cn(
+                                            "px-2 py-0.5 rounded-[4px] border text-[10px] font-ui transition-colors",
+                                            affectedScope === scope
+                                                ? "bg-[hsl(var(--accent-secondary)/0.16)] border-[hsl(var(--accent-secondary)/0.5)] text-[hsl(var(--accent-secondary))]"
+                                                : "bg-[hsl(var(--panel-2)/0.4)] border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))] hover:text-[hsl(var(--text))]",
+                                        )}
+                                        title={scope === "cohort"
+                                            ? "Only trades matched by the cohort filters below."
+                                            : "Every trade the BE scenario touched, ignoring cohort filters."}
+                                    >
+                                        {scope === "cohort" ? "Cohort affected" : "Global affected"}
+                                    </button>
+                                ))}
+                                <Pill tone="success">EXACT · {armLevelR}R {triggerBasis === "wick" ? "Wick" : "Close"}</Pill>
+                            </div>
+                        }
+                        actionLabel="View on Map"
+                        onAction={onViewBeTradeOnMap}
+                        scenarioSuffix={` at ${armLevelR}R ${triggerBasis}`}
+                        note={<>{useCohort
+                            ? "Cohort scope — only trades matched by the cohort filters in the panel below."
+                            : "Global scope — every trade the BE scenario touched; does NOT follow the cohort filters below."}{" "}
+                            Loss Saved / Winner Cut are vs this view&apos;s no-BE baseline; unpaired rows show neutral BE Exit. Click a row or “View on Map” to inspect it on the Strategy Map. Sorted by largest |Δ R| first.</>}
+                    />
+                );
+            })()}
 
             {/* ── 6c. Selective BE — apply BE to cohorts (EXACT only) ──────── */}
             {isExact && beCompare && (
@@ -1211,8 +1446,15 @@ export function BreakevenTab({
                         winnersCut: affectedRows.filter((r) => r.classification === "winner_cut").length,
                     }}
                     scenarioLabel={`${armLevelR}R ${triggerBasis === "wick" ? "Wick" : "Close"}`}
+                    scenarioArm={armLevelR}
+                    onSetArmLevel={setArmLevel}
                     triggerBasis={triggerBasis}
                     onSetTrigger={setTriggerBasis}
+                    cohortAttribution={cohortAttribution}
+                    globalAttribution={globalAttribution}
+                    globalSummaryDelta={globalBeUniverse?.summary?.deltaNetR}
+                    showAttribution={showAttribution}
+                    onToggleAttribution={toggleAttribution}
                     onOpenAsResultView={onOpenAsResultView}
                     openAsResultViewEnabled={openAsResultViewEnabled}
                     activeProtectionLabel={activeProtectionLabel}

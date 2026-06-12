@@ -20,7 +20,7 @@ function loadCjs(absPath) {
     return mod.exports;
 }
 
-const { buildSelectiveBeUniverse, matchesCohort, stableTradeId, cohortBreakdown } = loadCjs("src/data/selectiveBeUniverse.js");
+const { buildSelectiveBeUniverse, matchesCohort, stableTradeId, cohortBreakdown, buildSessionAttribution } = loadCjs("src/data/selectiveBeUniverse.js");
 
 let failures = 0;
 const ok = (cond, msg) => {
@@ -224,22 +224,70 @@ ok(lBuild({ structures: ["CHoCH"], armLevels: [1] }).applied === 1 && lRow(lBuil
 const lll = lBuild({ sessions: ["London"], directions: ["Long"], armLevels: [2] });
 ok(lll.applied === 1 && lRow(lll, "A").protectionApplied, "London + Long + 2R → A");
 
-// Multiple levels OR: [1,2] = reached ≥1 OR ≥2 = reached ≥1 → A,B.
-ok(lBuild({ armLevels: [1, 2] }).applied === 2, "1R OR 2R → reached ≥1R (A,B)");
+// ── ARM-LEVEL-UX-FIX: single-select arm level (filters.armLevel) ──────────────
+// 1. single arm level filters by mfe_r >= level
+ok(lBuild({ armLevel: 1 }).applied === 2, "single armLevel 1 → reached ≥1R (A,B)");
+// 2. selecting 1R excludes 0.5R-only trades (C reached 0.6)
+ok(!lBuild({ armLevel: 1 }).trades.find((t) => t.id === "C")?.protectionApplied, "armLevel 1 excludes C (0.6R)");
+ok(lBuild({ armLevel: 0.5 }).applied === 3, "single armLevel 0.5 → A,B,C");
+ok(lBuild({ armLevel: 2 }).applied === 1, "single armLevel 2 → only A (2.5R)");
+// 5. multiple old armLevels normalize safely → lowest (preserves prior OR semantics)
+ok(lBuild({ armLevels: [1, 2] }).applied === 2, "legacy [1,2] normalizes to lowest (1) → A,B");
+ok(lBuild({ armLevels: [0.5, 1, 2] }).meta.filters.armLevel === 0.5, "legacy [0.5,1,2] → effective armLevel 0.5");
+ok(lBuild({ armLevel: 1 }).meta.filters.armLevel === 1, "meta.filters.armLevel reflects single value");
 
-// No arm levels = unrestricted for that group (other groups drive); Long = A,C,E (all have BE).
-ok(lBuild({ directions: ["Long"] }).applied === 3, "no arm levels → unrestricted for group (Long: A,C,E)");
+// 6. direction/structure/session behaviour unchanged with single arm
+ok(lBuild({ directions: ["Long"] }).applied === 3, "no arm → unrestricted (Long: A,C,E)");
+ok(lBuild({ structures: ["CHoCH"], armLevel: 1 }).applied === 1, "CHoCH + armLevel 1 → A");
 
-// No filters anywhere = none.
+// 7. no filters at all (no arm) still applies BE to zero trades
 ok(lBuild({}).applied === 0 && lBuild({}).isNoFilterSelected === true, "no filters → 0 applied");
-ok(matchesCohort(lOrig[4], { armLevels: [0.25] }) === false, "no mfe_r → arm level no match");
-ok(matchesCohort(lOrig[0], { armLevels: [2] }) === true, "mfe 2.5 ≥ 2R → match");
-ok(matchesCohort(lOrig[2], { armLevels: [1] }) === false, "mfe 0.6 < 1R → no match");
+ok(matchesCohort(lOrig[4], { armLevel: 0.25 }) === false, "no mfe_r → arm level no match");
+ok(matchesCohort(lOrig[0], { armLevel: 2 }) === true, "mfe 2.5 ≥ 2R → match");
+ok(matchesCohort(lOrig[2], { armLevel: 1 }) === false, "mfe 0.6 < 1R → no match");
 
-// Labels.
-ok(lBuild({ structures: ["CHoCH"], sessions: ["New York"], armLevels: [2] }).selectedFilterLabel === "CHoCH + New York + 2R", "label: CHoCH + New York + 2R");
-ok(lBuild({ armLevels: [0.5, 1] }).selectedFilterLabel === "0.5R + 1R", "label: 0.5R + 1R");
-ok(lBuild({ armLevels: [1] }).isNoFilterSelected === false, "isNoFilterSelected tracks arm-level group");
+// Labels (single arm).
+ok(lBuild({ structures: ["CHoCH"], sessions: ["New York"], armLevel: 2 }).selectedFilterLabel === "CHoCH + New York + 2R", "label: CHoCH + New York + 2R");
+ok(lBuild({ armLevel: 0.5 }).selectedFilterLabel === "0.5R", "single arm label: 0.5R");
+ok(lBuild({ armLevel: 1 }).isNoFilterSelected === false, "isNoFilterSelected tracks arm level");
+
+console.log("\n§20  Session attribution (debug panels)");
+// Fixture: Asia (loser, saved), London (winner, cut), New York (loser, saved).
+const aOrig = [
+    mOrig("A1", "Long", "CHoCH", "Asia", -1, 1.5),
+    mOrig("L1", "Short", "BOS", "London", 3, 2.0),
+    mOrig("N1", "Long", "BOS", "New York", -1, 1.2),
+    mOrig("N2", "Short", "CHoCH", "New York", 2, 1.8),
+];
+const aBe = [be("A1", 0), be("L1", 0), be("N1", 0), be("N2", 0)];
+const aBuild = (filters, applyToAll = false) => buildSelectiveBeUniverse({ originalTrades: aOrig, beTrades: aBe, filters, scenario, applyToAll });
+
+// Global attribution: every session present, applied to all 4.
+const globalU = aBuild({}, true);
+const globalAttr = buildSessionAttribution(globalU.trades);
+ok(globalAttr.totals.affected === 4, "global attribution → all 4 affected");
+ok(globalAttr.rows.some((r) => r.session === "New York"), "global includes New York");
+ok(globalAttr.totals.deltaR.toFixed(2) === globalU.summary.deltaNetR.toFixed(2), "global footer Δ == global summary deltaNetR");
+ok(globalAttr.totals.saved === globalU.summary.lossesSaved && globalAttr.totals.cut === globalU.summary.winnersCut, "global saved/cut == summary");
+
+// Cohort attribution with New York EXCLUDED (Asia + London only).
+const cohortU = aBuild({ sessions: ["Asia", "London"] });
+const cohortAttr = buildSessionAttribution(cohortU.trades);
+ok(cohortAttr.rows.every((r) => r.session !== "New York"), "cohort attribution excludes deselected New York");
+ok(cohortAttr.totals.affected === 2, "cohort → only Asia + London affected (2)");
+ok(cohortAttr.totals.deltaR.toFixed(2) === cohortU.summary.deltaNetR.toFixed(2), "cohort footer Δ == selective summary deltaNetR");
+ok(cohortAttr.totals.saved === cohortU.summary.lossesSaved && cohortAttr.totals.cut === cohortU.summary.winnersCut, "cohort saved/cut == summary");
+// NY zeroed when rendered against the global session order (panel behavior).
+const nyRow = cohortAttr.rows.find((r) => r.session === "New York") || { affected: 0, saved: 0, cut: 0, deltaR: 0 };
+ok(nyRow.affected === 0 && nyRow.deltaR === 0, "NY row zeroed in cohort attribution");
+// No duplicate counting: sum of per-session affected == total applied.
+ok(cohortAttr.rows.reduce((s, r) => s + r.affected, 0) === cohortAttr.totals.affected, "no duplicate counting (rows sum to total)");
+
+// Direction / structure filters attribute correctly.
+const longAttr = buildSessionAttribution(aBuild({ directions: ["Long"] }).trades);
+ok(longAttr.totals.affected === 2, "Long filter → A1 + N1 (2 affected)");
+const chochAttr = buildSessionAttribution(aBuild({ structures: ["CHoCH"] }).trades);
+ok(chochAttr.totals.affected === 2, "CHoCH filter → A1 + N2 (2 affected)");
 
 console.log(`\n${failures === 0 ? "✅ ALL PASS" : `❌ ${failures} FAILURE(S)`}\n`);
 process.exit(failures === 0 ? 0 : 1);
