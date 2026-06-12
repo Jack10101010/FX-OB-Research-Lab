@@ -77,50 +77,61 @@ root (e.g. `CLASSIFICATION-TAB-V2-PLAN.md`). `docs/ai/` summarizes and points to
 
 ## Git & workstream commit discipline (all agents)
 
-`codex-dev` is edited by several AI chats in parallel. Shared files are frequently
-dirty from *other* streams. Follow this every session — it prevents cross-workstream
-contamination.
+`codex-dev` is edited by several AI chats in parallel; shared files are frequently dirty
+from *other* streams. **The agent owns the full git cycle — classify, stage, validate,
+commit — and executes it directly whenever it has terminal + repo access.** The user is
+pulled in only at the three gates marked **[ASK]** below. Never offload routine staging or
+hunk-picking onto the user.
 
-**Before any code work**
-1. Run `git status --short`. Always. This is a gate, not a formality.
-2. If the tree is dirty, **stop and classify** every dirty file by workstream
-   (use `WORKSTREAMS.md` "Owns"/"Shared-caution") *before editing anything*.
-3. **Do not begin a new workstream on top of unclassified dirty work.** If you
-   can't attribute a dirty file to a stream, surface it and ask — don't edit over it.
+**1 — Inspect (agent does this)**
+- Run `git status --short` before any code work. A gate, not a formality.
+- If dirty, classify every dirty file by workstream (`WORKSTREAMS.md` Owns / Shared-caution)
+  before editing. Do not start a new workstream on top of unclassified dirty work.
+- **[ASK – ambiguous]** if a dirty file or hunk can't be attributed to a stream — surface it,
+  don't edit over it.
 
-**While staging**
-4. **Never `git add .` or `git add -A` in this repo.** Ever.
-5. Stage explicitly by path: `git add <path1> <path2>`.
-6. If a file mixes workstreams, do **not** stage it whole. Use `git add -p`
-   (accept only your hunks); if hunks are interleaved with no separating context,
-   use `git add -e` to delete the foreign `+` lines from the patch.
-7. **The agent prepares and verifies the staging itself** — exact per-path / per-hunk
-   plan — and only hands the user the final reviewed commands. Do **not** offload raw
-   manual hunk-staging onto the user unless it is genuinely unavoidable, and say why.
+**2 — Stage (agent, non-interactively)**
+- **Never `git add .` or `git add -A`.** Stage explicitly by path: `git add <paths>`.
+- For a file that mixes workstreams, do **not** stage it whole and do **not** hand the user a
+  hunk-stage. `git add -p` is interactive and unavailable to a non-interactive shell, so stage
+  your hunks with a patch instead:
+  1. `git diff -- <file> > /tmp/<name>.patch`
+  2. Edit the patch to keep only your hunks — drop foreign hunks; for interleaved hunks delete
+     the foreign `+`/`-` lines and correct the `@@` line counts.
+  3. `git apply --cached /tmp/<name>.patch`
+- Hotspot files — never stage whole-file without the patch path above:
+  `frontend/src/pages/RunDetail.jsx`, `frontend/src/data/researchGlossary.js`,
+  `frontend/src/components/lab/protection/BreakevenTab.jsx`, `frontend/src/pages/StrategyMap.jsx`;
+  high-traffic: `frontend/src/data/importer.js`.
 
-**Before every commit, show**
-8. The exact files staged.
-9. `git diff --cached --stat`.
-10. A confirmation line: no unrelated-workstream strings are staged (grep the cached
-    diff for the other streams' symbols, e.g. `loserRunUp`, `retest_`, `BreakevenTab`).
+**3 — Validate (agent does this)**
+- Run the relevant `frontend/src/data/__validation__/*.validate.mjs` (Node ≥ 22 ESM) and a Babel
+  transpile check on touched files; run `craco build` for non-trivial changes. All green before
+  committing — a red gate is a stop, not a footnote.
 
-**Shared hotspot files — extra caution, never stage whole-file without a `-p` review:**
-- `frontend/src/pages/RunDetail.jsx` (Classification · Failures · Loser-Run-Up all touch it)
-- `frontend/src/data/researchGlossary.js` (Classification · Retest · Failures)
-- `frontend/src/components/lab/protection/BreakevenTab.jsx` (Protection/BE)
-- `frontend/src/pages/StrategyMap.jsx` (Strategy Map · BE-affected overlay)
-Also high-traffic: `frontend/src/data/importer.js` (every stream that maps a field).
+**4 — Verify the stage (agent does this)**
+- `git diff --cached --stat` — confirm only your files/lines are staged.
+- Grep the cached diff for other streams' symbols (e.g. `loserRunUp`, `retest_`, `BreakevenTab`)
+  → expect zero hits.
+- **[ASK – approval]** if a hotspot's foreign hunks could not be cleanly excluded (contamination risk).
 
-**Every chat ends one of two ways**
-11. A **clean scoped commit** (your files only, verified per above), or
-12. An explicit **"dirty-tree handoff"**: list each file left dirty, its owning
-    workstream, and whether it's safe for another stream to stage around.
+**5 — Commit (agent does this)**
+- Commit directly with a scoped message: `git commit -m "<type>(<scope>): <summary>"`.
+- Local commits are reversible → no approval needed.
+- **[ASK – approval]** before `git push`, before committing into a file another stream owns, and
+  before any history rewrite (`reset --hard`, `rebase`, force-push) — avoid the last unless asked.
 
-**Environment:** the Cowork sandbox cannot unlink `.git/index.lock` (and the index may
-read as corrupt) — so the *commit itself* runs on the host. The agent still does all
-classification, the `add -p`/`add -e` plan, and the `git diff --cached` verification,
-then hands the host the precise, reviewed sequence. Start the host sequence with
-`git reset` when foreign changes may already be staged, so you commit from a known-clean index.
+**The only times the user is involved:**
+- **[ASK – approval]** push to remote · commit into another stream's owned file · history rewrite ·
+  unavoidable hotspot contamination.
+- **[ASK – blocked]** the environment genuinely can't execute git (sandbox can't unlink
+  `.git/index.lock`, corrupt index, EPERM). *Only then* fall back to handing the user the exact
+  reviewed command sequence — starting with `git reset` if foreign changes may already be staged.
+- **[ASK – ambiguous]** a dirty file/hunk can't be attributed, or scope/ownership is unclear.
+
+**Session end** — leave either a clean scoped commit (your files only, verified above) or, if
+blocked, an explicit dirty-tree handoff: each dirty file, its owning workstream, and whether it's
+safe to stage around.
 
 ---
 

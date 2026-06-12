@@ -33,10 +33,12 @@ Read `AGENTS.md` first. This file defines how Codex operates on FX-OB-Research-L
 3. **Validate**: run the relevant `*.validate.mjs`, Babel transpile check; report results.
 4. **Report**: files read, files changed, validation, risks. Flag anything out of scope you
    noticed but did **not** touch.
-5. Hand commit commands to the user (sandbox can't unlink `.git/index.lock`; commit on host).
-   Follow **Git & workstream commit discipline** in `AGENTS.md`: `git status --short` first,
-   classify dirty files, never `git add .`, stage by path / `git add -p`, and show
-   `git diff --cached --stat` with a no-foreign-strings check before any commit.
+5. **Own the git cycle** per **Git & workstream commit discipline** in `AGENTS.md`:
+   `git status --short` first, classify dirty files, never `git add .`, stage by path (or by
+   patch via `git apply --cached` for mixed files), validate, verify `git diff --cached --stat`
+   with a no-foreign-strings check, then **commit directly**. Host hand-off is the *blocked-only*
+   fallback (sandbox can't unlink `.git/index.lock` / corrupt index), not the default; ask before
+   `git push`.
 
 ## Conventions to respect
 
