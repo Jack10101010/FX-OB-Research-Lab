@@ -53,6 +53,7 @@ import { buildTradeClassification } from "@/data/tradeClassificationDims";
 import { ClassificationBadge } from "@/components/lab/ClassificationBadge";
 import { getTagMeta } from "@/data/classificationRegistry";
 import { buildFillStateBreakdown, buildSessionBreakdown, buildSignalCards } from "@/data/fillStateBreakdown";
+import { buildDistanceAtArmBreakdown } from "@/data/distanceBreakdown";
 import { buildResearchSignals } from "@/data/researchSignals";
 import { TermTip, TooltipProvider } from "@/components/lab/TermTip";
 import { ConfidenceChip } from "@/components/lab/ConfidenceChip";
@@ -907,6 +908,11 @@ export default function RunDetail() {
     );
     const sessionBreakdown = React.useMemo(
         () => buildSessionBreakdown(displayTrades),
+        [displayTrades],
+    );
+    // Distance at arm (vacancy distance; triggered-edge only). available=false → gated note.
+    const distanceBreakdown = React.useMemo(
+        () => buildDistanceAtArmBreakdown(displayTrades),
         [displayTrades],
     );
     const signalCards = React.useMemo(
@@ -2590,6 +2596,40 @@ export default function RunDetail() {
                                         }))} />
                                     </div>
                                 )}
+
+                                {/* D2 — Distance at Arm (vacancy distance · triggered-edge only).
+                                    0 = price still inside the OB (occupied); positive = vacated by N
+                                    pips. Magnitude only — NOT a signed occupation-depth scale. Helps
+                                    validate/challenge F-004; gated when the run carries no arm-distance. */}
+                                <div>
+                                    <ClassSectionHeader label="Distance at Arm" />
+                                    {distanceBreakdown.available ? (
+                                        <>
+                                            <ClassBreakdownTable rows={distanceBreakdown.order
+                                                .filter((k) => k !== "unknown" || distanceBreakdown.buckets.unknown.count > 0)
+                                                .map((k) => ({
+                                                    label: distanceBreakdown.labels[k],
+                                                    tooltipKey: k === "occupied" ? "distance_occupied"
+                                                        : k === "edge" ? "distance_edge"
+                                                        : "distance_at_arm",
+                                                    stats: distanceBreakdown.buckets[k],
+                                                    muted: k === "unknown" || distanceBreakdown.buckets[k].lowSample,
+                                                    footnote: k === "unknown",
+                                                }))} />
+                                            <p className="mt-1.5 text-[10px] text-muted-lab leading-snug">
+                                                Triggered-edge rows only. <strong>0 = price still inside the OB at arm</strong> (occupied);
+                                                positive = price had vacated the OB by that many pips. Magnitude only —
+                                                not a signed occupation-depth scale, and there is no % field. Greyed rows have
+                                                &lt;&nbsp;{distanceBreakdown.lowSampleThreshold} decided trades (low sample).
+                                            </p>
+                                        </>
+                                    ) : (
+                                        <p className="text-[11px] text-muted-lab leading-snug">
+                                            Distance-at-arm is unavailable for this view — it is exported on triggered-edge
+                                            runs only (baseline / penetration carry no arm-distance).
+                                        </p>
+                                    )}
+                                </div>
 
                                 {/* E — Model Family Comparison: every model variant in the bundle
                                     across all families (baseline / entry-model / directional /
