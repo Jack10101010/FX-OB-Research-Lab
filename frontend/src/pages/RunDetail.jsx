@@ -54,6 +54,7 @@ import { ClassificationBadge } from "@/components/lab/ClassificationBadge";
 import { getTagMeta } from "@/data/classificationRegistry";
 import { buildFillStateBreakdown, buildSessionBreakdown, buildSignalCards } from "@/data/fillStateBreakdown";
 import { buildDistanceAtArmBreakdown } from "@/data/distanceBreakdown";
+import { buildLoserRunUp } from "@/data/loserRunUp";
 import { buildResearchSignals } from "@/data/researchSignals";
 import { TermTip, TooltipProvider } from "@/components/lab/TermTip";
 import { ConfidenceChip } from "@/components/lab/ConfidenceChip";
@@ -919,6 +920,13 @@ export default function RunDetail() {
         () => buildSignalCards(fillStateBreakdown, sessionBreakdown),
         [fillStateBreakdown, sessionBreakdown],
     );
+    // Trade Outcome & Loser Run-Up — TP-hit vs loss + loser MFE (max R reached
+    // before losing) across direction / structure / structure×direction / session
+    // cohorts. available=false → loser-MFE columns render a clear unavailable state.
+    const loserRunUp = React.useMemo(
+        () => buildLoserRunUp(displayTrades),
+        [displayTrades],
+    );
     const researchSignals = React.useMemo(
         () => buildResearchSignals(fillStateBreakdown, sessionBreakdown, classificationBreakdown.entry_model),
         [fillStateBreakdown, sessionBreakdown, classificationBreakdown],
@@ -1438,6 +1446,7 @@ export default function RunDetail() {
     const resultsTabs = React.useMemo(() => ([
         { id: "config", label: "Config" },
         { id: "trades", label: "Trades" },
+        { id: "outcome-runup", label: "Outcome & Run-Up" },
         { id: "classification", label: "Classification" },
         { id: "ob-stats", label: "OB Stats" },
         { id: "outcomes", label: "Outcomes" },
@@ -2515,6 +2524,32 @@ export default function RunDetail() {
                         ]}
                         rows={filteredLedgerRows}
                     />
+                </NeonPanel>}
+
+                {showResultsSection("outcome-runup") && <NeonPanel className="xl:col-span-3" title="Trade Outcome & Loser Run-Up">
+                    {!Array.isArray(displayTrades) || !displayTrades.length ? (
+                        <div className="py-6 text-center font-ui text-[11px] text-muted-lab">
+                            No trade data. Import a run to see trade outcomes and loser run-up.
+                        </div>
+                    ) : (
+                        <TooltipProvider delayDuration={150}>
+                            <div className="space-y-3">
+                                <p className="text-[11px] text-muted-lab leading-snug max-w-[70ch]">
+                                    This shows whether losing trades offered profit before failing. High loser MFE
+                                    may suggest better BE or partial-management rules.
+                                </p>
+                                {!loserRunUp.available && (
+                                    <p className="text-[10.5px] text-[hsl(var(--warning))] leading-snug">
+                                        Loser run-up (MFE) is unavailable for this run — no losing trade carries a
+                                        stop-anchored <span className="font-num">mfe_r</span> value (exported on
+                                        Phase&nbsp;11A+ bundles only). Outcome / win% / R columns are still shown;
+                                        loser-MFE columns read “—”.
+                                    </p>
+                                )}
+                                <LoserRunUpTable breakdown={loserRunUp} />
+                            </div>
+                        </TooltipProvider>
+                    )}
                 </NeonPanel>}
 
                 {showResultsSection("classification") && <NeonPanel className="xl:col-span-3" title="Classification Performance">
@@ -4424,6 +4459,101 @@ function ClassSectionHeader({ label }) {
             <span className="text-[11px] font-ui font-semibold uppercase tracking-[0.13em] text-[hsl(var(--text-2))]">
                 {label}
             </span>
+        </div>
+    );
+}
+
+// ── Trade Outcome & Loser Run-Up table ───────────────────────────────────────
+// 13 columns: cohort + outcome stats + loser MFE (max R reached before losing) +
+// ≥0.5/1/1.5/2R reach counts. Grouped by All / Direction / Structure /
+// Structure×Direction / Session with eyebrow rows between groups. Horizontally
+// scrollable so the wide column set never crushes the layout. Loser-MFE cells show
+// "—" (never 0) when a cohort has no loser carrying mfe_r. Data: data/loserRunUp.js.
+const LOSER_RUNUP_GRID =
+    "minmax(118px,1.3fr) repeat(6,minmax(44px,0.64fr)) repeat(6,minmax(40px,0.58fr))";
+
+function LoserRunUpTable({ breakdown }) {
+    const groups = breakdown?.groups ?? [];
+    if (!groups.length) return null;
+    const rTone = (v) => (v > 0 ? "text-[hsl(var(--success))]" : v < 0 ? "text-[hsl(var(--danger))]" : "text-muted-lab");
+    const fmtR = (v, d = 2) => (v == null ? "—" : formatSignedR(v, d));
+    const fmtInt = (v) => (v == null ? "—" : v);
+    const fmtMfe = (v) => (v == null ? "—" : v.toFixed(2));
+    return (
+        <div className="overflow-x-auto">
+            <div className="min-w-[760px]">
+                <div
+                    className="grid items-end gap-x-2 px-2 mb-1 border border-transparent text-[9.5px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--muted))]"
+                    style={{ gridTemplateColumns: LOSER_RUNUP_GRID }}
+                >
+                    <span>Cohort</span>
+                    <span className="text-right"><TermTip termKey="stat_n">Trades</TermTip></span>
+                    <span className="text-right">Wins / TP</span>
+                    <span className="text-right">Losses</span>
+                    <span className="text-right"><TermTip termKey="stat_wr">Win %</TermTip></span>
+                    <span className="text-right"><TermTip termKey="stat_avg_r">Avg R</TermTip></span>
+                    <span className="text-right">Med R</span>
+                    <span className="text-right">Lsr med maxR</span>
+                    <span className="text-right">Lsr avg maxR</span>
+                    <span className="text-right">≥0.5R</span>
+                    <span className="text-right">≥1R</span>
+                    <span className="text-right">≥1.5R</span>
+                    <span className="text-right">≥2R</span>
+                </div>
+                <div className="space-y-1">
+                    {groups.map((group, gi) => (
+                        <React.Fragment key={group.id}>
+                            {gi > 0 && (
+                                <div className="px-2 pt-2 pb-0.5 mt-0.5 border-t border-[hsl(var(--border-soft))] text-[9.5px] font-ui font-semibold uppercase tracking-[0.08em] text-[hsl(var(--text-2)/0.8)]">
+                                    {group.label}
+                                </div>
+                            )}
+                            {group.rows.map((row, ri) => {
+                                const s = row.stats;
+                                const emphasis = group.id === "all";
+                                const wrTone = s.winRate == null
+                                    ? "text-muted-lab"
+                                    : s.winRate >= 0.5 ? "text-[hsl(var(--success))]" : "text-[hsl(var(--danger))]";
+                                return (
+                                    <div
+                                        key={`${group.id}-${row.label}-${ri}`}
+                                        className={`grid items-center gap-x-2 px-2 py-1.5 border clip-bevel-sm ${
+                                            emphasis
+                                                ? "bg-[hsl(var(--panel-2)/0.7)] border-[hsl(var(--accent-secondary)/0.4)]"
+                                                : "bg-[hsl(var(--panel-2)/0.35)] border-[hsl(var(--border-soft))]"
+                                        }`}
+                                        style={{ gridTemplateColumns: LOSER_RUNUP_GRID }}
+                                    >
+                                        <div className={`min-w-0 truncate text-[11px] ${emphasis ? "font-semibold text-[hsl(var(--text))]" : "text-[hsl(var(--text-2))]"}`}>
+                                            {row.label}
+                                        </div>
+                                        <span className="font-num tabular-nums text-right text-[11px] text-[hsl(var(--text-2))]">{s.trades}</span>
+                                        <span className="font-num tabular-nums text-right text-[11px] text-[hsl(var(--success))]">{s.wins}</span>
+                                        <span className="font-num tabular-nums text-right text-[11px] text-[hsl(var(--danger))]">{s.losses}</span>
+                                        <span className={`font-num tabular-nums text-right text-[11px] ${wrTone}`}>
+                                            {s.winRate != null ? `${Math.round(s.winRate * 100)}%` : "—"}
+                                        </span>
+                                        <span className={`font-num tabular-nums text-right text-[11px] ${rTone(s.avgR ?? 0)}`}>{fmtR(s.avgR)}</span>
+                                        <span className={`font-num tabular-nums text-right text-[11px] ${rTone(s.medianR ?? 0)}`}>{fmtR(s.medianR)}</span>
+                                        <span className="font-num tabular-nums text-right text-[11px] text-[hsl(var(--text-2))]">{fmtMfe(s.loserMedianMaxR)}</span>
+                                        <span className="font-num tabular-nums text-right text-[11px] text-[hsl(var(--text-2))]">{fmtMfe(s.loserAvgMaxR)}</span>
+                                        <span className="font-num tabular-nums text-right text-[11px] text-muted-lab">{fmtInt(s.loserReach[0.5])}</span>
+                                        <span className="font-num tabular-nums text-right text-[11px] text-muted-lab">{fmtInt(s.loserReach[1])}</span>
+                                        <span className="font-num tabular-nums text-right text-[11px] text-muted-lab">{fmtInt(s.loserReach[1.5])}</span>
+                                        <span className="font-num tabular-nums text-right text-[11px] text-muted-lab">{fmtInt(s.loserReach[2])}</span>
+                                    </div>
+                                );
+                            })}
+                        </React.Fragment>
+                    ))}
+                </div>
+                <p className="mt-1.5 px-2 text-[10px] text-muted-lab leading-snug">
+                    Loser max R = stop-anchored MFE (max favourable R reached before the loss) — a peak, not a path,
+                    so it cannot prove a BE/trail would have held. Win % = wins / (wins + losses); breakevens are
+                    excluded from that denominator. Loser-MFE columns read “—” where no losing trade carries
+                    <span className="font-num"> mfe_r</span>.
+                </p>
+            </div>
         </div>
     );
 }
