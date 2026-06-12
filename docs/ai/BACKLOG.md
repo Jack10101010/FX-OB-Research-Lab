@@ -10,20 +10,17 @@ Groomed by ChatGPT. Priority: P1 (next up) · P2 (soon) · P3 (later).
 
 ## P1
 
-- **Confirmed false losers — backend export** *(Owner: Codex/backtester chat · repo:
-  Lux-OB-Backtester · audit complete 2026-06-10)* — additive post-pass in
-  `enrich_trades_with_stop_anchored_excursions`: `post_stop_mfe_r` (from original entry,
-  after the stop candle), `post_stop_reached_original_tp`, `post_stop_bars_to_1r`,
-  `post_stop_lookahead_bars` (default horizon 50 bars, configurable), `post_stop_model`.
-  LOSS rows only; winners/unfilled blank; no live-sim changes. Validation per the audit's
-  test plan (bullish/bearish recovery, never-recovers, horizon cutoff, end-of-data, no
-  mutation of existing fields).
-- **Confirmed false losers — frontend follow-up** *(Owner: Claude · blocked on the export
-  above)* — importer dual-key map (5 fields) → `buildConfirmedFalseLosers` →
-  Distance-to-Stop surface + upgrade the Views & Export False Loser panel from
-  "candidates only". FIELD_DEPS aliases already pre-wired (`post_stop_mfe_r` canonical).
-- **Distance importer mapping** — map `price_distance_from_ob_at_arm_pips` in `importer.js`
-  (Codex). Unblocks the distance breakdown.
+- **Distance-at-arm importer mapping** *(Owner: Claude/Codex)* — **the genuinely-open exported-but-
+  unmapped item.** Backend already exports `price_distance_from_ob_at_arm_pips` (verified present as a
+  real column in `Lux-OB-Backtester/outputs/trades_*.csv`); `importer.js` does **not** map it yet. Map
+  it (~2 lines), then build the distance breakdown (0–2 / 2–5 / 5–10 / 10+ pips) and validate against
+  F-004. No backend work required — this is frontend consumption only.
+
+> *(DONE / removed from queue — **Confirmed false losers**: backend export shipped (`post_stop_mfe_r`,
+> `post_stop_reached_original_tp`, `post_stop_bars_to_1r`, `post_stop_lookahead_bars`, `post_stop_model`),
+> importer maps them, and the panel is **live end-to-end** (Failures Lab Overview: "6 confirmed of 32
+> losses · model fixed_horizon · horizon 50"). It was NOT blocked. Remaining work is research
+> interpretation, not export/import — see PROJECT_STATUS. Research Signals engine + Confidence — committed `b3a200e`.)*
 
 > *(Shipped, removed from queue: Research Signals engine + Confidence layer — committed
 > `b3a200e`; was stale-listed here as "active next build".)*
@@ -45,11 +42,13 @@ Groomed by ChatGPT. Priority: P1 (next up) · P2 (soon) · P3 (later).
   and occupation depth are **one signed metric** — the price's offset from the OB **entry-side edge
   at arm** (**+ = vacant/outside, − = occupied/inside, 0 = on edge**). The existing
   `ob_occupied_at_arm` is just its **sign**; this is the **magnitude**.
-  - **Blocked FIRST on a backend export** (frontend has no arm-distance and it is **not derivable**
-    — no price-at-arm snapshot). Then importer map (~2 lines).
-  - **Final export spec (recommended):** `price_distance_from_ob_at_arm_pips` (signed, entry-edge ref)
-    **+** `price_distance_from_ob_at_arm_pct` (signed, % of OB width). Everything else — absolute,
-    vacancy distance, occupation depth — is **derived in-frontend** (don't export redundant fields).
+  - **Core field now EXPORTED** — `price_distance_from_ob_at_arm_pips` is a real column in the
+    backtester output CSVs. So the breakdown is **no longer backend-blocked**; the open work is the
+    frontend importer map (~2 lines, see P1 "Distance-at-arm importer mapping"). Still pending:
+    the optional `price_distance_from_ob_at_arm_pct` (% of OB width) is **not** yet exported.
+  - **Final export spec (recommended):** `price_distance_from_ob_at_arm_pips` (signed, entry-edge ref ·
+    **exported**) **+** `price_distance_from_ob_at_arm_pct` (signed, % of OB width · **pending**).
+    Everything else — absolute, vacancy distance, occupation depth — is **derived in-frontend**.
   - **Architecture:** a new **orthogonal `distance_band` dimension** (NOT folded into `fill_state`),
     derived like `deriveFillState`, with **signed, symmetric, config-driven bands** spanning
     occupied→edge→vacant. Make the **Edge Zone (|offset| < ~2 pips) an explicit band** — hypothesis:

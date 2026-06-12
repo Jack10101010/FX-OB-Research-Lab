@@ -15,8 +15,10 @@ Branch: `codex-dev`. Theme: dark "neon lab" (do not change without request).
 ## Current major workstream
 
 **Failures Lab V5 — decision layer.** V4 cleanup + V5 Phase 1 (Filter Discovery) shipped.
-V5 Phase 2 (confirmed false losers, frontend) + Phase 2B (Overview IA) built and validated;
-Phase 2B commit pending. Live data path waits on the Lux-OB-Backtester post-stop export.
+V5 Phase 2 (confirmed false losers) + Phase 2B (Overview IA) **live end-to-end (verified 2026-06-12)** —
+the backend `post_stop_*` export shipped, the importer maps it, and the Overview panel renders the real
+confirmed/candidate/genuine breakdown ("6 confirmed of 32 losses · model `fixed_horizon` · horizon 50").
+**Not waiting on any backend export.** Remaining work is research interpretation, not export/import.
 (Classification Tab V2 is paused with Phase 2 shipped.)
 
 Parallel state (all committed): **Master Controls Phase 13** (single composer-driven preview;
@@ -44,10 +46,13 @@ under its own stream.
   remains the single app-wide read overlay (unchanged); transform math unchanged. Added
   `__validation__/previewComposer.parity.mjs` (25/25); cost / filter / RR / FFT-unavailable / multi-stage /
   run-switch / apply-exit / cross-page all verified in the live app. Decision `D-009`. Committed.
-- **Failures Lab V5 Phase 2 + 2B (frontend)** — `buildConfirmedFalseLosers` classifies losers
-  confirmed/candidate/genuine (reached ≥1R or hit original TP / ≥0.5R / never) with cohort
-  breakdowns + horizon; importer maps the 5 `post_stop_*` fields dual-keyed; field-gated with a
-  candidates fallback (`failuresFalseLosers.validate.mjs` 30/30). **Phase 2B IA:** Confirmed False
+- **Failures Lab V5 Phase 2 + 2B (frontend) — LIVE end-to-end (verified 2026-06-12)** —
+  `buildConfirmedFalseLosers` classifies losers confirmed/candidate/genuine (reached ≥1R or hit original
+  TP / ≥0.5R / never) with cohort breakdowns + horizon; importer maps the 5 `post_stop_*` fields
+  (`post_stop_mfe_r` / `post_stop_reached_original_tp` / `post_stop_bars_to_1r` / `post_stop_lookahead_bars`
+  / `post_stop_model`) dual-keyed (`failuresFalseLosers.validate.mjs` 30/30). The active imported run
+  carries these fields, so the panel renders **live** (not the candidates fallback, which is the no-data
+  path for older runs). **Phase 2B IA:** Confirmed False
   Losers moved Views & Export → **Overview**; new **Global Failure Explorer** (whole-run, valid-
   universe gated) on Overview; Distance-to-Stop explorer relabelled **MFE Bucket Explorer** (logic
   unchanged via parametrised `FailureExplorer`); Views & Export trimmed to exports + saved views +

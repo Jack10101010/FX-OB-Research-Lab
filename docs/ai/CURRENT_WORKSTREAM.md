@@ -6,9 +6,10 @@
 
 ## Focus
 
-**Focus needs confirmation.** Failures Lab V5 (below) is still blocked on the Lux-OB-Backtester
-post-stop export, and since then several parallel streams have landed on `codex-dev`. Confirm the
-next active focus before starting new work.
+**Focus needs confirmation.** The previously-assumed blocker (Failures Lab V5 false losers waiting on
+the backtester export) is **resolved** — that surface is live (below). Several parallel streams have
+landed on `codex-dev`. Confirm the next active focus before starting new work; the cheapest open
+research win is the **Distance-at-arm importer map** (exported-but-unmapped — see `BACKLOG.md` P1).
 
 **Recently landed (committed):**
 - **Phase 14 Wave 1 — research run terminology** (`e9d03aa`; D-010). Wave 2 residual sweep is mostly
@@ -17,9 +18,12 @@ next active focus before starting new work.
 - **Protection Lab — selective BE + BE Trade Explorer** (`a6b1c09`; D-011).
 - **Master Controls Phase 13** — single composer-driven preview (D-009), committed.
 
-**Prior nominal focus — Failures Lab V5 (blocked):** Phase 1 shipped; Phase 2 (confirmed false losers)
-frontend built + validated; Phase 2B (Overview IA) built + validated. Backend export still needed to
-populate the live data path.
+**Failures Lab V5 — confirmed false losers: LIVE end-to-end (verified 2026-06-12).** Phase 1 shipped;
+Phase 2 + 2B built/validated. The backend post-stop export (`post_stop_mfe_r`,
+`post_stop_reached_original_tp`, `post_stop_bars_to_1r`, `post_stop_lookahead_bars`, `post_stop_model`)
+is shipped, the importer maps it, and the panel renders the confirmed/candidate/genuine breakdown on
+real data (Failures Lab Overview: "6 confirmed of 32 losses · model `fixed_horizon` · horizon 50").
+**Not blocked.** Remaining work is research interpretation, not export/import.
 
 ## Where we are
 
@@ -80,16 +84,17 @@ changes (Overview explorer passes `roadmapKey={null}`). Scoped commit = these 5 
 
 ## Blockers / open questions
 
-- **Phase 2 implementation is blocked on the Lux-OB-Backtester export** (separate repo,
-  not connected to this session). After it ships: importer dual-key map → confirmed
-  false-loser builder + surface (prompt drafted, see BACKLOG).
+- **Phase 2 false losers — NOT blocked (correction).** Earlier docs said this waited on the
+  Lux-OB-Backtester export; the export shipped, the importer maps it, and the surface is live
+  (verified 2026-06-12). No backend/import dependency remains.
 - Parallel streams: OB-Retest (active, own stream); Hypothesis Lab fixes landing from host.
   Master Controls Phase 13, Protection-BE (selective BE / BE Explorer), Storage mirror, and Phase 14
   Wave 1 are now **committed** (see Focus — recently landed) — no longer in-flight dirty work.
 
 ## Remaining
 
-Frontend (Phase 2 + 2B) is built, validated, and field-gated; with no export present it
-shows the candidates fallback. To light up the live path: ship the **Lux-OB-Backtester
-post-stop export** (separate repo) and re-import a run carrying the 5 fields. Then commit
-the Phase 2B 5-file scope on the host and sync docs.
+Frontend (Phase 2 + 2B) is built, validated, and **live** — the active imported run carries the
+`post_stop_*` fields and the panel renders the real confirmed/candidate/genuine breakdown (the
+candidates-only fallback is the *no-data* path, not the current state). The field-gating still
+correctly degrades to the fallback for older runs imported before the export existed. Remaining
+work is **research interpretation** (what the false-loser cohorts mean), not export/import/build.
