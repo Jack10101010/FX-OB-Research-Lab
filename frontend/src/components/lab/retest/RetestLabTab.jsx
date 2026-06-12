@@ -22,6 +22,10 @@ import { useRetestData, RETEST_STATUS } from "./useRetestData";
 // ── formatting helpers ──────────────────────────────────────────────────────────
 const pct = (v, d = 0) => (v == null || !isFinite(v) ? "—" : `${(v * 100).toFixed(d)}%`);
 const pips = (v, d = 1) => (v == null || !isFinite(v) ? "—" : `${Number(v).toFixed(d)}`);
+// Median R (2dp) vs a discrete R threshold (e.g. 2.5R) — kept distinct so the
+// suggested target/BE read as the threshold levels they are.
+const fmtR2 = (v) => (v == null || !isFinite(v) ? "—" : `${Number(v).toFixed(2)}R`);
+const fmtThresholdR = (v) => (v == null || !isFinite(v) ? "—" : `${Number(v)}R`);
 const fmtTime = (epochSec) => {
     if (epochSec == null || !isFinite(epochSec)) return "—";
     const dt = new Date(epochSec * 1000);
@@ -85,7 +89,7 @@ function GateShell({ title, badge, children }) {
 }
 
 export function RetestLabTab({ orderBlocks = [], trades = [], activeRun = null, activeRunId = null, enabled = false }) {
-    const { status, source, error, candleCount, events, perOB, summary, meta, edgeBreakdowns, bestWorstConditions, sessionMatrix, findings, monetizationSummary, minN, config, setConfig, retryLoad } = useRetestData({
+    const { status, source, error, candleCount, events, perOB, summary, meta, edgeBreakdowns, bestWorstConditions, sessionMatrix, findings, monetizationSummary, tradeability, minN, config, setConfig, retryLoad } = useRetestData({
         orderBlocks, trades, activeRun, activeRunId, enabled,
     });
 
@@ -148,7 +152,7 @@ export function RetestLabTab({ orderBlocks = [], trades = [], activeRun = null, 
                 <ObLevelCards summary={summary} />
                 <MonetizationSection mon={monetizationSummary} />
                 <SessionMatrix matrix={sessionMatrix} minN={minN} />
-                <EdgeDiscoveryTabs edgeBreakdowns={edgeBreakdowns} minN={minN} />
+                <EdgeDiscoveryTabs edgeBreakdowns={edgeBreakdowns} tradeability={tradeability} minN={minN} />
                 <EventTable events={events} />
             </div>
         </TooltipProvider>
@@ -410,25 +414,117 @@ function EdgeBreakdownTable({ entry, minN }) {
     );
 }
 
-function EdgeDiscoveryTabs({ edgeBreakdowns, minN }) {
+// Tradeability view of one dimension (Phase 2 Step 4). Conditioned monetization by
+// cohort — reads tradeability.dimensions[dimKey] (buildTradeabilityRows output). For
+// dimensions excluded from the precompute (generic event-grain) or otherwise without
+// attributable MFE, renders a compact explanation instead of faking numbers.
+function TradeabilityTable({ entry, dimResult, minN }) {
+    if (!dimResult || !dimResult.monetizationAvailable) {
+        return (
+            <NeonPanel title={entry.label} dense collapsible defaultCollapsed={false}>
+                <div className="text-[11px] text-muted-lab leading-relaxed">
+                    {dimResult?.reason || "This dimension is event-grain. OB-level MFE cannot be attributed safely."}
+                </div>
+            </NeonPanel>
+        );
+    }
+    const rows = dimResult.rows || [];
+    if (!rows.length) return null;
+    const capCell = (v) => (v == null ? <span className="text-muted-lab">n/a</span> : pct(v, 0));
+    const columns = [
+        { key: "key", label: entry.label, align: "left", tip: entry.tip,
+          render: (r) => (r.belowMinN ? <span className="text-muted-lab">{r.key} *</span> : r.key) },
+        { key: "n", label: "n", align: "right", tip: "retest_sample" },
+        { key: "reactionSuccessRate", label: "React Succ", align: "right", tip: "retest_reaction_success",
+          sortValue: (r) => (r.reactionSuccessRate == null ? -1 : r.reactionSuccessRate),
+          render: (r) => (r.reactionSuccessRate == null ? "—" : (
+              <span className={r.belowMinN ? "text-muted-lab" : reactionBandClass(r.reactionSuccessRate)}>
+                  {pct(r.reactionSuccessRate, 0)}{r.belowMinN ? " *" : ""}
+              </span>
+          )) },
+        { key: "medianMfeR", label: "Med MFE", align: "right", tip: "retest_mfe_before_death",
+          sortValue: (r) => (r.medianMfeR == null ? -1 : r.medianMfeR),
+          render: (r) => fmtR2(r.medianMfeR) },
+        { key: "capture1R", label: "1R", align: "right", tip: "retest_rr_capture", render: (r) => capCell(r.capture1R) },
+        { key: "capture2R", label: "2R", align: "right", tip: "retest_rr_capture", render: (r) => capCell(r.capture2R) },
+        { key: "capture3R", label: "3R", align: "right", tip: "retest_rr_capture", render: (r) => capCell(r.capture3R) },
+        { key: "capture5R", label: "5R", align: "right", tip: "retest_rr_capture", render: (r) => capCell(r.capture5R) },
+        { key: "suggestedTargetR", label: "Target", align: "right", tip: "retest_suggested_target",
+          sortValue: (r) => (r.suggestedTargetR == null ? -1 : r.suggestedTargetR),
+          render: (r) => (r.suggestedTargetR == null ? "—" : (
+              <span className={r.belowMinN ? "text-muted-lab" : undefined}>
+                  {r.targetFromFallback ? "≈" : ""}{fmtThresholdR(r.suggestedTargetR)}
+              </span>
+          )) },
+        { key: "suggestedBETriggerR", label: "BE Trig", align: "right", tip: "retest_be_trigger",
+          sortValue: (r) => (r.suggestedBETriggerR == null ? -1 : r.suggestedBETriggerR),
+          render: (r) => fmtThresholdR(r.suggestedBETriggerR) },
+    ];
+    const isRetestAnchor = dimResult.mfeAnchor === "retest";
+    const hasThin = rows.some((r) => r.belowMinN);
+    const hasFallback = rows.some((r) => r.targetFromFallback);
+    return (
+        <NeonPanel title={entry.label} dense collapsible defaultCollapsed={false}>
+            <DataTable columns={columns} rows={rows} rowKey="key" defaultSortKey="n" compact />
+            <div className="mt-1.5 space-y-0.5">
+                {isRetestAnchor && <div className="text-[10px] text-muted-lab">Per-retest MFE anchors (R1/R2/R3); 3R/5R capture isn’t measured at retest anchors (n/a).</div>}
+                {hasFallback && <div className="text-[10px] text-muted-lab">≈ = target fell back to the cohort median (no R level cleared the capture floor).</div>}
+                {hasThin && <div className="text-[10px] text-muted-lab">* = below min sample (n &lt; {minN}); shown but not ranked.</div>}
+            </div>
+        </NeonPanel>
+    );
+}
+
+function EdgeDiscoveryTabs({ edgeBreakdowns, tradeability, minN }) {
     const dims = edgeBreakdowns || {};
-    const entries = Object.values(dims).filter((d) => d?.rows?.length);
-    const groups = RETEST_DIMENSION_GROUPS.filter((g) => entries.some((e) => e.group === g.key));
+    const entryPairs = Object.entries(dims).filter(([, d]) => d?.rows?.length);
+    const groups = RETEST_DIMENSION_GROUPS.filter((g) => entryPairs.some(([, e]) => e.group === g.key));
     const [active, setActive] = React.useState(groups[0]?.key);
+    const [mode, setMode] = React.useState("react"); // "react" | "trade"
     React.useEffect(() => {
         if (groups.length && !groups.some((g) => g.key === active)) setActive(groups[0].key);
     }, [groups, active]);
-    if (!entries.length) return null;
-    const activeEntries = entries.filter((e) => e.group === active);
+    const tradeAvailable = !!tradeability?.available;
+    // If the run isn't v2.1 (or becomes unavailable), keep the toggle on "react".
+    React.useEffect(() => {
+        if (!tradeAvailable && mode === "trade") setMode("react");
+    }, [tradeAvailable, mode]);
+    if (!entryPairs.length) return null;
+    const activePairs = entryPairs.filter(([, e]) => e.group === active);
+    const tradeMode = mode === "trade" && tradeAvailable;
     return (
         <div className="space-y-3">
             <div className="flex items-center justify-between flex-wrap gap-2">
                 <div className="panel-title-label uppercase text-title-lab">Retest Edge Discovery</div>
-                <div className="text-[10px] text-muted-lab">Reaction success &amp; window hold are closed-only; rows below n ≥ {minN} shown but not ranked (*).</div>
+                {tradeAvailable ? (
+                    <Segment
+                        options={[{ value: "react", label: "Does it react?" }, { value: "trade", label: "How to trade it?" }]}
+                        value={mode}
+                        onChange={setMode}
+                    />
+                ) : (
+                    <span className="text-[10px] text-muted-lab">
+                        “How to trade it?” needs v2.1 monetization data{tradeability?.reason ? ` — ${tradeability.reason}` : ""}.
+                    </span>
+                )}
+            </div>
+            <div className="text-[10px] text-muted-lab">
+                {tradeMode ? (
+                    <span>
+                        <TermTip termKey="retest_idealized_r">Idealized opportunity</TermTip> conditioned by cohort: capture, suggested
+                        target &amp; BE trigger. 1R = OB width — not realized PnL. The run-wide curve stays in Monetization Before Death above.
+                    </span>
+                ) : (
+                    <span>Reaction success &amp; window hold are closed-only; rows below n ≥ {minN} shown but not ranked (*).</span>
+                )}
             </div>
             <Segment options={groups.map((g) => ({ value: g.key, label: g.label }))} value={active} onChange={setActive} />
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                {activeEntries.map((entry) => <EdgeBreakdownTable key={entry.label} entry={entry} minN={minN} />)}
+                {activePairs.map(([key, entry]) => (
+                    tradeMode
+                        ? <TradeabilityTable key={key} entry={entry} dimResult={tradeability.dimensions?.[key]} minN={minN} />
+                        : <EdgeBreakdownTable key={entry.label} entry={entry} minN={minN} />
+                ))}
             </div>
         </div>
     );

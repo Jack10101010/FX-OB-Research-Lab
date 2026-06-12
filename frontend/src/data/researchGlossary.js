@@ -626,13 +626,23 @@ export const GLOSSARY = {
     },
     retest_rr_capture: {
         friendlyName: "RR Capture",
-        definition: "Of touched zones, the share whose MFE before death reached at least a given R multiple (0.25R, 0.5R, 1R, 1.5R, 2R, 3R, 5R), where 1R = the zone's own width.",
+        definition: "Of touched zones, the share whose MFE before death reached at least a given R multiple (1R, 1.5R, 2R, 2.5R, 3R, 3.5R, 4R, 4.5R, 5R), where 1R = the zone's own width.",
         whyItMatters: "The realistic-target curve: on the evidence run 1R was reached by ~63% of zones and 2R by ~46% — each higher target roughly halves the hit rate.",
     },
     retest_idealized_r: {
         friendlyName: "Idealized R Unit",
         definition: "In the monetization layer, 1R = the OB's width: entry at the near edge, stop at the far edge, perfect fills, no spread. It measures OPPORTUNITY, not realized PnL — treat every R-based capture figure as an upper bound.",
         whyItMatters: "One pinned definition prevents the lab's most quotable numbers from being misread as achievable trade results.",
+    },
+    retest_suggested_target: {
+        friendlyName: "Suggested Target",
+        definition: "The furthest R target most zones in this cohort actually reached before dying — the largest R level whose capture share clears the target floor (50% by default). Marked “≈” when it falls back to the cohort's median MFE because no level cleared the floor.",
+        whyItMatters: "A realistic take-profit ceiling grounded in what this specific group of zones did, not a hoped-for number — and still an idealized opportunity, not realized PnL.",
+    },
+    retest_be_trigger: {
+        friendlyName: "Suggested BE Trigger",
+        definition: "A conservative level where moving the stop to break-even might make sense, taken from the capture curve: the smallest R a strong majority of the cohort (70% by default) reached. This is a first transparent heuristic, NOT a proven break-even strategy yet.",
+        whyItMatters: "Points at where downside protection looks cheapest to add as a starting hypothesis for break-even testing — treat it as a prompt to investigate, not a validated rule.",
     },
     retest_monetization: {
         friendlyName: "Monetization Before Death",
