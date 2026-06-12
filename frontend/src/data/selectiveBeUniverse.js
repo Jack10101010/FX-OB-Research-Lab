@@ -58,6 +58,20 @@ function normList(arr) {
         .map((v) => String(v).trim().toLowerCase())
         .filter(Boolean);
 }
+function normLevels(arr) {
+    return (Array.isArray(arr) ? arr : [])
+        .map(Number)
+        .filter((n) => Number.isFinite(n) && n > 0);
+}
+/**
+ * Max favorable excursion (R) the ORIGINAL trade reached before reversing —
+ * stop-anchored `mfe_r`. This is the cohort source for "Arm Level Reached":
+ * it answers "how far did this trade move into profit", independent of the BE
+ * scenario. Null when absent (e.g. unfilled rows) → never matches an arm level.
+ */
+function tradeMfeR(t) {
+    return num(t?.mfe_r) ?? num(t?.mfeR);
+}
 
 /**
  * Structural composition of a trade list (pure; for the panel's count chips).
@@ -80,18 +94,52 @@ export function cohortBreakdown(trades) {
 }
 
 /**
- * Cohort match: empty array in a dimension = "all" for that dimension; values
- * within a dimension are OR'd; dimensions combine as AND.
+ * Cohort match (UX-REMODEL semantics):
+ *   • No chips selected ANYWHERE = BE applied to NO trades → always false.
+ *   • Otherwise: within a group = OR; across groups = AND; an empty group is
+ *     unrestricted ONLY because at least one other group has a selection.
+ *
+ * Examples (with ≥1 selection somewhere):
+ *   Asia            → session == asia
+ *   Asia + London   → session ∈ {asia, london}
+ *   Long + Asia     → direction == long AND session == asia
+ *   CHoCH + NY      → structure == choch AND session == new york
  */
 export function matchesCohort(trade, filters = {}) {
     const dirs = normList(filters.directions);
     const structs = normList(filters.structures);
     const sessions = normList(filters.sessions);
+    const levels = normLevels(filters.armLevels);
+
+    // Nothing selected anywhere → apply BE to no trades.
+    if (!dirs.length && !structs.length && !sessions.length && !levels.length) return false;
 
     if (dirs.length && !dirs.includes(normDirection(trade))) return false;
     if (structs.length && !structs.includes(normStructure(trade))) return false;
     if (sessions.length && !sessions.includes(normSession(trade))) return false;
+
+    // Arm Level Reached: the ORIGINAL trade's MFE must reach a selected level.
+    // OR within the group ⇒ reaching the lowest selected level qualifies.
+    // Not tied to the BE scenario (e.g. apply 0.5R BE only to trades that hit 2R).
+    if (levels.length) {
+        const mfe = tradeMfeR(trade);
+        if (mfe == null) return false;
+        if (!levels.some((L) => mfe >= L - 1e-9)) return false;
+    }
     return true;
+}
+
+/** Human label for the active filter selection, e.g. "CHoCH + New York + 2R" or "None". */
+export function selectedFilterLabel(filters = {}) {
+    const friendly = { choch: "CHoCH", bos: "BOS", long: "Long", short: "Short" };
+    const cat = [
+        ...normList(filters.directions),
+        ...normList(filters.structures),
+        ...normList(filters.sessions),
+    ].map((p) => friendly[p] || p.replace(/\b\w/g, (c) => c.toUpperCase()));
+    const lvl = normLevels(filters.armLevels).map((L) => `${L}R`);
+    const parts = [...cat, ...lvl];
+    return parts.length ? parts.join(" + ") : "None";
 }
 
 /**
@@ -139,10 +187,9 @@ export function buildSelectiveBeUniverse({ originalTrades, beTrades, filters = {
         const origR = tradeR(orig);
         originalNetR += origR;
 
+        const be = beById.get(stableTradeId(orig)) || null;
         const isMatch = matchesCohort(orig, filters);
         if (isMatch) { matched += 1; filteredOriginalTrades.push(orig); }
-
-        const be = isMatch ? beById.get(stableTradeId(orig)) : null;
 
         if (isMatch && be) {
             const protR = tradeR(be);
@@ -191,6 +238,12 @@ export function buildSelectiveBeUniverse({ originalTrades, beTrades, filters = {
     if (lowSample) warnings.push("low_sample");
     if (matched === 0) warnings.push("no_cohort_match");
 
+    const fdirs = normList(filters.directions);
+    const fstructs = normList(filters.structures);
+    const fsessions = normList(filters.sessions);
+    const flevels = normLevels(filters.armLevels);
+    const isNoFilterSelected = !fdirs.length && !fstructs.length && !fsessions.length && !flevels.length;
+
     return {
         trades: out,                          // full run with BE applied to the cohort
         filteredOriginalTrades,               // cohort only, before BE
@@ -198,6 +251,8 @@ export function buildSelectiveBeUniverse({ originalTrades, beTrades, filters = {
         applied,
         matched,
         skippedMissingBe,
+        isNoFilterSelected,
+        selectedFilterLabel: selectedFilterLabel(filters),
         summary: {
             originalNetR: rnd(originalNetR),
             protectedNetR: rnd(protectedNetR),
@@ -216,6 +271,7 @@ export function buildSelectiveBeUniverse({ originalTrades, beTrades, filters = {
                 directions: normList(filters.directions),
                 structures: normList(filters.structures),
                 sessions: normList(filters.sessions),
+                armLevels: normLevels(filters.armLevels),
             },
             lowSampleThreshold: LOW_SAMPLE_THRESHOLD,
             total: originals.length,

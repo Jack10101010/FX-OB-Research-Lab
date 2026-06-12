@@ -47,8 +47,8 @@ const build = (filters) => buildSelectiveBeUniverse({ originalTrades, beTrades, 
 const rOf = (u, id) => u.trades.find((t) => t.id === id);
 
 // ─────────────────────────────────────────────────────────────────────────────
-console.log("\n§1  apply BE to all (empty filters)");
-const all = build({});
+console.log("\n§1  apply BE to all (all directions selected)");
+const all = build({ directions: ["Long", "Short"] }); // every trade is long or short → all 4
 ok(all.applied === 4, "all 4 applied");
 ok(all.trades.every((t) => t.protectionApplied), "every output row protectionApplied");
 ok(approx(all.summary.originalNetR, -2 + 3 - 1 + 1), "originalNetR = +1");
@@ -118,11 +118,17 @@ ok(rOf(all, "A").protectionScenarioKey === "be_wick_0p50R", "scenario key on pro
 ok(rOf(choch, "B").deltaR === 0 && rOf(choch, "B").protectionType === null, "unprotected row delta 0, type null");
 
 // ─────────────────────────────────────────────────────────────────────────────
-console.log("\n§13  empty filters = apply to all  ·  §14 empty input safe");
-ok(build({ directions: [], structures: [], sessions: [] }).applied === 4, "empty arrays = all");
+console.log("\n§13  NO chips selected = apply to NONE  ·  §14 empty input safe");
+const none = build({ directions: [], structures: [], sessions: [] });
+ok(none.applied === 0 && none.matched === 0, "no chips → 0 applied / 0 matched");
+ok(none.isNoFilterSelected === true && none.selectedFilterLabel === "None", "isNoFilterSelected + label None");
+ok(approx(none.summary.deltaNetR, 0), "no chips → deltaNetR 0");
+ok(none.trades.every((t) => t.protectionApplied === false), "no chips → selective == original (no rows protected)");
+ok(none.trades.map((t) => t.id).join(",") === "A,B,C,D", "no chips → trades unchanged + ordered");
 const empty = buildSelectiveBeUniverse({ originalTrades: [], beTrades: [], filters: {}, scenario: {} });
 ok(empty.trades.length === 0 && empty.applied === 0, "empty input → empty output");
-ok(matchesCohort(originalTrades[0], {}) === true, "matchesCohort empty filters → true");
+ok(matchesCohort(originalTrades[0], {}) === false, "matchesCohort empty filters → false (apply to none)");
+ok(matchesCohort(originalTrades[0], { directions: ["Long"] }) === true, "matchesCohort with a selection → applies");
 ok(stableTradeId({ trade_id: "X-1" }) === "X-1", "stableTradeId by trade_id");
 
 // low-sample warning
@@ -152,12 +158,88 @@ ok(flb.longs === 1 && flb.shorts === 1, "filteredBreakdown: A long, D short");
 const cb = cohortBreakdown([orig("X", "Long", "BOS", "London", 1), orig("Y", "Long", "CHoCH", "London", 1)]);
 ok(cb.longs === 2 && cb.choch === 1 && cb.bos === 1 && cb.sessions.London === 2, "cohortBreakdown standalone + session counts");
 
-console.log("\n§17  no-filter → filtered cohort = full run; Global unchanged");
-const uAll = build({});
-ok(uAll.filteredOriginalTrades.length === 4 && uAll.meta.filteredBreakdown.total === 4, "no filter → filtered cohort = full run");
-ok(uAll.meta.fullBreakdown.total === uAll.meta.filteredBreakdown.total, "full == filtered when no filter");
-// Existing summary fields unchanged by the additions:
-ok(uAll.applied === 4 && uAll.summary.deltaNetR === -1, "existing summary still correct (regression)");
+console.log("\n§17  no-filter → empty cohort; all-selected → full cohort");
+const uNone = build({});
+ok(uNone.filteredOriginalTrades.length === 0 && uNone.meta.filteredBreakdown.total === 0, "no filter → empty filtered cohort");
+ok(uNone.meta.fullBreakdown.total === 4, "fullBreakdown still reflects the whole run");
+ok(all.filteredOriginalTrades.length === 4 && all.applied === 4 && all.summary.deltaNetR === -1, "all-selected → full cohort applied (regression)");
+
+// ─────────────────────────────────────────────────────────────────────────────
+console.log("\n§18  REMODEL semantics: selection defines where BE applies");
+ok(build({}).isNoFilterSelected === true, "no chips → isNoFilterSelected");
+ok(build({ sessions: ["Asia"] }).selectedFilterLabel === "Asia", "label: Asia");
+ok(build({ directions: ["Long"], sessions: ["Asia"] }).selectedFilterLabel === "Long + Asia", "label: Long + Asia");
+// Asia only → only C (Asia) applied.
+const asia = build({ sessions: ["Asia"] });
+ok(asia.applied === 1 && rOf(asia, "C").protectionApplied, "Asia only → just C applied");
+ok(!rOf(asia, "A").protectionApplied && !rOf(asia, "B").protectionApplied, "non-Asia kept original");
+// Long + Asia (AND) → only long Asia trades = C.
+const longAsia = build({ directions: ["Long"], sessions: ["Asia"] });
+ok(longAsia.applied === 1 && rOf(longAsia, "C").protectionApplied, "Long+Asia → C only (AND)");
+// CHoCH + New York (AND) → B is BOS/NY (no), D is CHoCH/London (no) → none match.
+const chochNy = build({ structures: ["CHoCH"], sessions: ["New York"] });
+ok(chochNy.applied === 0, "CHoCH+New York → none (no CHoCH trade in NY)");
+// Sessions OR: Asia + New York → C (Asia) + B (NY).
+const asiaNy = build({ sessions: ["Asia", "New York"] });
+ok(asiaNy.applied === 2 && rOf(asiaNy, "B").protectionApplied && rOf(asiaNy, "C").protectionApplied, "Asia OR New York → B,C");
+// Directions OR: Long + Short → all 4.
+ok(build({ directions: ["Long", "Short"] }).applied === 4, "Long OR Short → all 4");
+// Structures OR: CHoCH + BOS → all 4.
+ok(build({ structures: ["CHoCH", "BOS"] }).applied === 4, "CHoCH OR BOS → all 4");
+
+// ─────────────────────────────────────────────────────────────────────────────
+console.log("\n§19  ARM LEVEL REACHED filter (mfe_r cohort)");
+// orig() helper signature: (id, direction, structure, session, r). Add mfe_r via spread.
+const mOrig = (id, direction, structure, session, r, mfe) => ({ ...orig(id, direction, structure, session, r), mfe_r: mfe });
+// A reached 2.5R, B reached 1.2R, C reached 0.6R, D reached 0.3R, E no mfe (unfilled).
+const lOrig = [
+    mOrig("A", "Long",  "CHoCH", "London",   -2, 2.5),
+    mOrig("B", "Short", "BOS",   "New York",  3, 1.2),
+    mOrig("C", "Long",  "BOS",   "Asia",     -1, 0.6),
+    mOrig("D", "Short", "CHoCH", "London",    1, 0.3),
+    { ...orig("E", "Long", "CHoCH", "London", -1) }, // no mfe_r
+];
+const lBe = [be("A", 0), be("B", 0), be("C", 0), be("D", 0), be("E", 0)];
+const lBuild = (filters) => buildSelectiveBeUniverse({ originalTrades: lOrig, beTrades: lBe, filters, scenario });
+const lRow = (u, id) => u.trades.find((t) => t.id === id);
+
+const r025 = lBuild({ armLevels: [0.25] });
+ok(r025.applied === 4 && lRow(r025, "A").protectionApplied && lRow(r025, "D").protectionApplied, "0.25R → A,B,C,D (all that moved)");
+ok(!lRow(r025, "E").protectionApplied, "E (no mfe) never matches an arm level");
+
+const r05 = lBuild({ armLevels: [0.5] });
+ok(r05.applied === 3 && !lRow(r05, "D").protectionApplied, "0.5R → A,B,C (D only reached 0.3R)");
+
+const r1 = lBuild({ armLevels: [1] });
+ok(r1.applied === 2 && lRow(r1, "A").protectionApplied && lRow(r1, "B").protectionApplied, "1R → A,B");
+ok(!lRow(r1, "C").protectionApplied, "C (0.6R) excluded at 1R");
+
+const r2 = lBuild({ armLevels: [2] });
+ok(r2.applied === 1 && lRow(r2, "A").protectionApplied, "2R → only A (2.5R)");
+
+// CHoCH + 1R (AND): CHoCH = A,D,E ; reached ≥1R = A,B → A.
+ok(lBuild({ structures: ["CHoCH"], armLevels: [1] }).applied === 1 && lRow(lBuild({ structures: ["CHoCH"], armLevels: [1] }), "A").protectionApplied, "CHoCH + 1R → A");
+
+// London + Long + 2R: London={A,D,E}, Long={A,C,E}, ≥2R={A} → A.
+const lll = lBuild({ sessions: ["London"], directions: ["Long"], armLevels: [2] });
+ok(lll.applied === 1 && lRow(lll, "A").protectionApplied, "London + Long + 2R → A");
+
+// Multiple levels OR: [1,2] = reached ≥1 OR ≥2 = reached ≥1 → A,B.
+ok(lBuild({ armLevels: [1, 2] }).applied === 2, "1R OR 2R → reached ≥1R (A,B)");
+
+// No arm levels = unrestricted for that group (other groups drive); Long = A,C,E (all have BE).
+ok(lBuild({ directions: ["Long"] }).applied === 3, "no arm levels → unrestricted for group (Long: A,C,E)");
+
+// No filters anywhere = none.
+ok(lBuild({}).applied === 0 && lBuild({}).isNoFilterSelected === true, "no filters → 0 applied");
+ok(matchesCohort(lOrig[4], { armLevels: [0.25] }) === false, "no mfe_r → arm level no match");
+ok(matchesCohort(lOrig[0], { armLevels: [2] }) === true, "mfe 2.5 ≥ 2R → match");
+ok(matchesCohort(lOrig[2], { armLevels: [1] }) === false, "mfe 0.6 < 1R → no match");
+
+// Labels.
+ok(lBuild({ structures: ["CHoCH"], sessions: ["New York"], armLevels: [2] }).selectedFilterLabel === "CHoCH + New York + 2R", "label: CHoCH + New York + 2R");
+ok(lBuild({ armLevels: [0.5, 1] }).selectedFilterLabel === "0.5R + 1R", "label: 0.5R + 1R");
+ok(lBuild({ armLevels: [1] }).isNoFilterSelected === false, "isNoFilterSelected tracks arm-level group");
 
 console.log(`\n${failures === 0 ? "✅ ALL PASS" : `❌ ${failures} FAILURE(S)`}\n`);
 process.exit(failures === 0 ? 0 : 1);
