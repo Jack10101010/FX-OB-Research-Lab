@@ -20,7 +20,7 @@ function loadCjs(absPath) {
     return mod.exports;
 }
 
-const { buildSelectiveBeUniverse, matchesCohort, stableTradeId, cohortBreakdown, buildSessionAttribution, classifyBeAttributionRow } = loadCjs("src/data/selectiveBeUniverse.js");
+const { buildSelectiveBeUniverse, matchesCohort, stableTradeId, cohortBreakdown, buildSessionAttribution, classifyBeAttributionRow, deriveMaxArmReached, buildBeTradeExplorerRows } = loadCjs("src/data/selectiveBeUniverse.js");
 
 let failures = 0;
 const ok = (cond, msg) => {
@@ -329,6 +329,55 @@ ok(aA.totals.applied === 3, "attribution applied counts all 3");
 ok(aA.totals.saved === 1 && aA.totals.tpKept === 1 && aA.totals.newsFlat === 1, "categories: 1 saved, 1 tpKept, 1 newsFlat");
 ok(aA.totals.same === (aA.totals.sameLoss + aA.totals.sameBreakeven + aA.totals.otherSame), "displayed 'same' = sameLoss+sameBreakeven+otherSame");
 ok(aA.totals.deltaR.toFixed(2) === aU.summary.deltaNetR.toFixed(2), "attribution footer Δ == summary deltaNetR");
+
+console.log("\n§23  BE Trade Explorer (master rows + Max Arm)");
+const ARMS = [0.5, 1, 1.5, 2, 2.5, 3];
+ok(deriveMaxArmReached({ mfe_r: 2.73 }, ARMS) === 2.5, "maxArm: mfe 2.73 → 2.5");
+ok(deriveMaxArmReached({ mfe_r: 0.1 }, ARMS) === null, "maxArm: mfe 0.1 → null (below lowest)");
+ok(deriveMaxArmReached({}, ARMS) === null, "maxArm: no mfe → null");
+ok(deriveMaxArmReached({ mfe_r: 3.4 }, ARMS) === 3, "maxArm: mfe 3.4 → 3 (highest ≤ mfe)");
+
+const eOrig = [
+    mOrig("LS", "Long", "CHoCH", "London", -1, 1.4),   // loser → be 0 = loss_saved
+    mOrig("WC", "Short", "BOS", "New York", 3, 2.6),   // winner → be 0 = winner_cut
+    mOrig("TP", "Long", "BOS", "Asia", 2, 2.1),        // winner kept (be 2) = tp_kept
+    { ...orig("NF", "Short", "CHoCH", "London", -0.3), mfe_r: 1.1, outcome: "NEWS_FLATTEN" }, // news_flat
+    mOrig("NA", "Long", "BOS", "Asia", -1, 0.4),       // NO be pair = not_applied
+];
+const eBe = [be("LS", 0), be("WC", 0), be("TP", 2), { id: "NF", net_r: -0.3 }]; // no NA
+const ex = (filters) => buildBeTradeExplorerRows({ originalTrades: eOrig, beTrades: eBe, filters, selectedScenario: { beScenarioKey: "be_wick_0p50R" }, availableArmLevels: ARMS });
+const allRows = ex({});
+const rowBy = (id) => allRows.find((r) => r.tradeId === id);
+
+ok(allRows.length === 5, "one row per original trade (5)");
+ok(new Set(allRows.map((r) => r.baseTradeId)).size === 5, "no duplicate rows (5 unique ids)");
+ok(allRows.map((r) => r.tradeId).join(",") === "LS,WC,TP,NF,NA", "original order preserved");
+ok(rowBy("LS").classification === "loss_saved", "LS → loss_saved");
+ok(rowBy("WC").classification === "winner_cut", "WC → winner_cut");
+ok(rowBy("TP").classification === "tp_kept", "TP → tp_kept");
+ok(rowBy("NF").classification === "news_flat", "NF → news_flat");
+ok(rowBy("NA").classification === "not_applied" && rowBy("NA").beApplied === false, "NA (no BE pair) → not_applied");
+ok(rowBy("WC").maxArmReached === 2.5 && rowBy("LS").maxArmReached === 1 && rowBy("NA").maxArmReached === null, "maxArm per row (WC 2.5, LS 1, NA null)");
+
+// All-trades footer = global (applyToAll) delta.
+const eGlobalU = buildSelectiveBeUniverse({ originalTrades: eOrig, beTrades: eBe, filters: {}, applyToAll: true, scenario: { beScenarioKey: "be_wick_0p50R" } });
+const allDelta = Math.round(allRows.filter((r) => r.beApplied).reduce((s, r) => s + r.deltaR, 0) * 100) / 100;
+ok(allDelta.toFixed(2) === eGlobalU.summary.deltaNetR.toFixed(2), "all-trades footer Δ == global summary deltaNetR");
+
+// Current-cohort: CHoCH + arm 0.5 → LS, NF in cohort; selectiveApplied true (arm set).
+const chochRows = ex({ structures: ["choch"], armLevel: 0.5 });
+ok(chochRows.filter((r) => r.inCohort).map((r) => r.tradeId).sort().join(",") === "LS,NF", "cohort (CHoCH+0.5R) → LS,NF in cohort");
+ok(chochRows.find((r) => r.tradeId === "WC").inCohort === false, "WC (BOS) excluded from CHoCH cohort");
+const selU = buildSelectiveBeUniverse({ originalTrades: eOrig, beTrades: eBe, filters: { structures: ["choch"], armLevel: 0.5 }, scenario: { beScenarioKey: "be_wick_0p50R" } });
+const cohortDelta = Math.round(chochRows.filter((r) => r.selectiveApplied).reduce((s, r) => s + r.deltaR, 0) * 100) / 100;
+ok(cohortDelta.toFixed(2) === selU.summary.deltaNetR.toFixed(2), "cohort footer Δ == selective summary deltaNetR");
+
+// Arm-level filter uses mfe_r.
+const arm2 = ex({ armLevel: 2 });
+ok(arm2.filter((r) => r.inCohort).map((r) => r.tradeId).sort().join(",") === "TP,WC", "armLevel 2 → only mfe≥2 (WC 2.6, TP 2.1)");
+// Null arm → no selective effect even with sessions.
+const nullArm = ex({ sessions: ["London"] });
+ok(nullArm.every((r) => r.selectiveApplied === false), "null arm + sessions → selectiveApplied false for all");
 
 console.log(`\n${failures === 0 ? "✅ ALL PASS" : `❌ ${failures} FAILURE(S)`}\n`);
 process.exit(failures === 0 ? 0 : 1);

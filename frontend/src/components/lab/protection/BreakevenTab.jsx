@@ -18,9 +18,9 @@ import {
 } from "@/data/beReplay";
 import { resolveBeScenarioSource, hasAnyExactBe, entryVariantHasExact, describeBeAvailability } from "@/data/beResolve";
 import { buildBeAffectedTrades } from "@/data/protectionTimeline";
-import { buildSelectiveBeUniverse, stableTradeId, buildSessionAttribution } from "@/data/selectiveBeUniverse";
+import { buildSelectiveBeUniverse, buildSessionAttribution, buildBeTradeExplorerRows, DEFAULT_ARM_LEVELS } from "@/data/selectiveBeUniverse";
+import { BeTradeExplorer } from "@/components/lab/protection/BeTradeExplorer";
 import { summarizeTradeSanity } from "@/data/tradeClassification";
-import { BeAffectedTradesCard } from "@/components/lab/protection/BeAffectedTradesCard";
 import { useDataset, setFocusedBeTrade, setScenario } from "@/data/store";
 import { buildProtectionLabel } from "@/data/protectionLayers";
 import { familyFromKey, extractThreshold, fillModeFromKey } from "@/data/tradeUniverse";
@@ -453,12 +453,12 @@ function SelectiveBeCohortPanel({
                     preview below so the two are never conflated. */}
                 {activeProtectionLabel && (
                     <div className="flex items-center gap-2 flex-wrap px-2.5 py-1.5 rounded-[4px] border border-[hsl(var(--accent-secondary)/0.5)] bg-[hsl(var(--accent-secondary)/0.1)]">
-                        <span className="text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))]">Active Result View</span>
+                        <span className="text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))]">Active View</span>
                         <span className="text-[11px] font-ui font-semibold text-[hsl(var(--text))]">{activeProtectionLabel}</span>
                         <Pill tone="warning">EXPLORATORY</Pill>
                         <span className="text-[10px] font-ui text-[hsl(var(--text-2)/0.8)]">Applied app-wide. The cards below are a separate local preview.</span>
                         {onClearResultViewLayer && (
-                            <button type="button" onClick={onClearResultViewLayer} className="row-chip row-chip-muted text-[10.5px] ml-auto">Clear Result View Layer</button>
+                            <button type="button" onClick={onClearResultViewLayer} className="row-chip row-chip-muted text-[10.5px] ml-auto">Clear View Layer</button>
                         )}
                     </div>
                 )}
@@ -476,13 +476,13 @@ function SelectiveBeCohortPanel({
                                 : "bg-[hsl(var(--panel-2)/0.3)] border-[hsl(var(--border-soft))] text-[hsl(var(--text-2)/0.5)] cursor-not-allowed",
                         )}
                         title={openAsResultViewEnabled
-                            ? "Apply this selective BE across the whole app (Run Detail, Strategy Map, labs) as an exploratory Result View."
+                            ? "Apply this selective BE across the whole app (Run Detail, Strategy Map, labs) as an exploratory View."
                             : "Select an EXACT BE scenario and at least one cohort that applies to ≥1 trade."}
                     >
-                        Open as Result View
+                        Open as View
                     </button>
                     <span className="text-[10px] font-ui text-[hsl(var(--text-2)/0.75)]">
-                        Promotes the preview below to a global protected Result View. Does not silently apply global BE.
+                        Promotes the preview below to a global protected View. Does not silently apply global BE.
                     </span>
                 </div>
                 {/* Filters (left) + debug attribution panels (right), above the cards. */}
@@ -911,21 +911,6 @@ export function BreakevenTab({
             scenario: { beScenarioKey: selectedBeScenario.scenarioKey },
         });
     }, [selectedBeScenario, trades, beCohorts]);
-    // ARM-LEVEL-UX-FIX Phase E — cohort-scoped affected trades. §6b can show the
-    // GLOBAL BE-affected set (every trade the BE touched) or the COHORT set (only
-    // trades matched by the active cohort filters). Default to cohort so the table
-    // follows the panel instead of silently disagreeing with it.
-    const cohortAffectedRows = React.useMemo(() => {
-        if (selectedBeScenario?.source !== "EXACT" || !Array.isArray(selectedBeScenario.trades) || !selectiveBe) return [];
-        const ids = new Set((selectiveBe.filteredOriginalTrades || []).map((t) => stableTradeId(t)));
-        const beTrades = selectedBeScenario.trades.filter((t) => ids.has(stableTradeId(t)));
-        return buildBeAffectedTrades({
-            beTrades,
-            baselineTrades: trades,
-            scenario: { armLevelR, triggerBasis, beScenarioKey: selectedBeScenario.scenarioKey, stopBufferR: 0, delayCandles: 0 },
-        });
-    }, [selectedBeScenario, selectiveBe, trades, armLevelR, triggerBasis]);
-    const [affectedScope, setAffectedScope] = React.useState("cohort");
     // ARM-LEVEL-UX/DEBUG-ATTRIBUTION — global BE universe (BE applied to ALL
     // paired trades, ignoring cohort filters) for the Global BE Impact panel.
     const globalBeUniverse = React.useMemo(() => {
@@ -939,6 +924,19 @@ export function BreakevenTab({
         });
     }, [selectedBeScenario, trades]);
     const cohortAttribution = React.useMemo(() => (selectiveBe ? buildSessionAttribution(selectiveBe.trades) : null), [selectiveBe]);
+    // Master BE Trade Explorer rows — one row per original trade, enriched with BE
+    // lifecycle + Max Arm. Built with the panel's filters so Current Cohort mode
+    // mirrors the cards. Null arm ⇒ no selective effect (selectiveApplied false).
+    const explorerRows = React.useMemo(() => {
+        if (selectedBeScenario?.source !== "EXACT" || !Array.isArray(selectedBeScenario.trades)) return [];
+        return buildBeTradeExplorerRows({
+            originalTrades: trades,
+            beTrades: selectedBeScenario.trades,
+            filters: beCohorts,
+            selectedScenario: { beScenarioKey: selectedBeScenario.scenarioKey },
+            availableArmLevels: DEFAULT_ARM_LEVELS,
+        });
+    }, [selectedBeScenario, trades, beCohorts]);
     const globalAttribution = React.useMemo(() => (globalBeUniverse ? buildSessionAttribution(globalBeUniverse.trades) : null), [globalBeUniverse]);
     // Show Attribution Debug — default ON, persisted locally.
     const [showAttribution, setShowAttribution] = React.useState(() => {
@@ -1404,48 +1402,18 @@ export function BreakevenTab({
                 </NeonPanel>
             )}
 
-            {/* ── 6b. Trades affected by BE (EXACT only) ──────────────────── */}
-            {isExact && (() => {
-                const useCohort = affectedScope === "cohort";
-                const rows = useCohort ? cohortAffectedRows : affectedRows;
-                return (
-                    <BeAffectedTradesCard
-                        rows={rows}
-                        scrollBody
-                        title="Trades Where the BE Stop Fired"
-                        headerRight={
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                                {["cohort", "global"].map((scope) => (
-                                    <button
-                                        key={scope}
-                                        type="button"
-                                        onClick={() => setAffectedScope(scope)}
-                                        className={cn(
-                                            "px-2 py-0.5 rounded-[4px] border text-[10px] font-ui transition-colors",
-                                            affectedScope === scope
-                                                ? "bg-[hsl(var(--accent-secondary)/0.16)] border-[hsl(var(--accent-secondary)/0.5)] text-[hsl(var(--accent-secondary))]"
-                                                : "bg-[hsl(var(--panel-2)/0.4)] border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))] hover:text-[hsl(var(--text))]",
-                                        )}
-                                        title={scope === "cohort"
-                                            ? "Only trades matched by the cohort filters below."
-                                            : "Every trade the BE scenario touched, ignoring cohort filters."}
-                                    >
-                                        {scope === "cohort" ? "Cohort affected" : "Global affected"}
-                                    </button>
-                                ))}
-                                <Pill tone="success">EXACT · {armLevelR}R {triggerBasis === "wick" ? "Wick" : "Close"}</Pill>
-                            </div>
-                        }
-                        actionLabel="View on Map"
-                        onAction={onViewBeTradeOnMap}
-                        scenarioSuffix={` at ${armLevelR}R ${triggerBasis}`}
-                        note={<>This table lists only trades where the BE stop actually <strong>fired</strong> (be_triggered / be_stop) — not every trade the BE rule was applied to. {useCohort
-                            ? "Cohort scope — only trades matched by the cohort filters in the panel below."
-                            : "Global scope — every BE-triggered trade, ignoring the cohort filters below."}{" "}
-                            Applied means the trade received the BE rule; Saved/Cut means the BE stop changed the original result; trades that kept their TP or were news-flattened won&apos;t appear here (no BE-stop fire). Loss Saved / Winner Cut are vs this view&apos;s no-BE baseline. Sorted by largest |Δ R| first.</>}
-                    />
-                );
-            })()}
+            {/* ── 6b. BE Trade Explorer (EXACT only) — master one-row-per-trade table ─ */}
+            {isExact && (
+                <BeTradeExplorer
+                    rows={explorerRows}
+                    scenarioLabel={`EXACT · ${armLevelR}R ${triggerBasis === "wick" ? "Wick" : "Close"}`}
+                    cohortActive={cohortsActive}
+                    cohortDelta={selectiveBe?.summary?.deltaNetR ?? null}
+                    globalDelta={globalBeUniverse?.summary?.deltaNetR ?? null}
+                    filters={beCohorts}
+                    onViewOnMap={onViewBeTradeOnMap}
+                />
+            )}
 
             {/* ── 6c. Selective BE — apply BE to cohorts (EXACT only) ──────── */}
             {isExact && beCompare && (

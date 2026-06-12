@@ -205,6 +205,108 @@ export function buildSessionAttribution(universeTrades) {
     return { rows, totals: totalsOut };
 }
 
+/** Default arm-level ladder for the Max Arm bucket (future-proof, extensible). */
+export const DEFAULT_ARM_LEVELS = [0.25, 0.5, 0.75, 1, 1.5, 2, 2.5, 3, 3.5];
+
+/**
+ * Highest arm level a trade's MFE reached — a derived MFE bucket, NOT the
+ * selected BE scenario. Returns the largest arm ≤ mfe_r, or null if none. Pure.
+ *
+ * @example deriveMaxArmReached({mfe_r:2.73}, [0.5,1,1.5,2,2.5,3]) → 2.5
+ */
+export function deriveMaxArmReached(trade, availableArmLevels = DEFAULT_ARM_LEVELS) {
+    const mfe = tradeMfeR(trade);
+    if (mfe == null) return null;
+    const arms = (Array.isArray(availableArmLevels) ? availableArmLevels : [])
+        .map(Number).filter((n) => Number.isFinite(n) && n > 0).sort((a, b) => a - b);
+    let max = null;
+    for (const a of arms) { if (mfe >= a - 1e-9) max = a; }
+    return max;
+}
+
+/**
+ * Master "BE Trade Explorer" rows — ONE row per original trade (preserving order,
+ * never duplicated), paired with its BE row when available, enriched with BE
+ * lifecycle + Max Arm. Pure.
+ *
+ * Per row flags:
+ *   • beApplied      — a BE row exists for this trade (BE could be simulated)
+ *   • inCohort       — matches the panel's display cohort (dir/struct/session +
+ *                      arm if set; nothing selected ⇒ all rows in-cohort)
+ *   • selectiveApplied — BE is actually applied under the current panel state
+ *                      (inCohort AND beApplied AND an arm level is selected). This
+ *                      mirrors the selective universe: null arm ⇒ no selective effect.
+ *   • classification — intrinsic BE lifecycle (classifyBeAttributionRow) when a BE
+ *                      row exists, else "not_applied".
+ *
+ * Footer reconciliation (caller):
+ *   • Current Cohort: Σ deltaR over selectiveApplied rows === selective summary.deltaNetR
+ *   • All Trades:     Σ deltaR over beApplied rows        === global (applyToAll) summary.deltaNetR
+ *
+ * @returns {object[]} explorer rows
+ */
+export function buildBeTradeExplorerRows({ originalTrades, beTrades, filters = {}, selectedScenario = {}, availableArmLevels = DEFAULT_ARM_LEVELS } = {}) {
+    const originals = Array.isArray(originalTrades) ? originalTrades : [];
+    const beList = Array.isArray(beTrades) ? beTrades : [];
+    const beById = new Map();
+    for (const be of beList) { const id = stableTradeId(be); if (id) beById.set(id, be); }
+
+    const dirs = normList(filters.directions);
+    const structs = normList(filters.structures);
+    const sessions = normList(filters.sessions);
+    const armSet = effectiveArmLevel(filters) != null;
+    const hasActiveCohort = dirs.length > 0 || structs.length > 0 || sessions.length > 0 || armSet;
+    const scenarioKey = selectedScenario.beScenarioKey ?? selectedScenario.scenarioKey ?? null;
+
+    const out = [];
+    for (const orig of originals) {
+        const be = beById.get(stableTradeId(orig)) || null;
+        const origR = tradeR(orig);
+        const protR = be ? tradeR(be) : null;
+        const deltaR = protR != null ? rnd(protR - origR) : 0;
+        const reason = be ? String(be.be_exit_reason ?? be.beExitReason ?? "").toLowerCase() : "";
+        const beTriggered = be ? (bool(be.be_triggered ?? be.beTriggered) || reason === "be_stop") : false;
+        const beArmed = be ? bool(be.be_armed ?? be.beArmed) : false;
+        const classification = be ? classifyBeAttributionRow({ originalTrade: orig, protectedTrade: be }).category : "not_applied";
+        // Display-cohort membership: nothing selected ⇒ all rows; else match dims+arm.
+        const inCohort = !hasActiveCohort ? true : matchesCohort(orig, {
+            directions: filters.directions, structures: filters.structures,
+            sessions: filters.sessions, armLevel: filters.armLevel, armLevels: filters.armLevels,
+        });
+        const selectiveApplied = Boolean(be) && armSet && inCohort;
+
+        out.push({
+            tradeId: orig.displayTradeId ?? orig.id ?? orig.trade_id ?? "",
+            baseTradeId: stableTradeId(orig),
+            obId: orig.displayObId ?? orig.obId ?? orig.ob_id ?? (be ? (be.obId ?? be.ob_id) : "") ?? "",
+            direction: orig.direction ?? "",
+            structure: orig.structure ?? orig.structure_type ?? "",
+            session: orig.session ?? orig.fillSession ?? orig.fill_session ?? "",
+            originalR: rnd(origR),
+            mfeR: tradeMfeR(orig),
+            maeR: num(orig.mae_r) ?? num(orig.maeR),
+            maxArmReached: deriveMaxArmReached(orig, availableArmLevels),
+            originalOutcome: orig.outcome ?? orig.result ?? "",
+            beApplied: Boolean(be),
+            beArmed,
+            beTriggered,
+            beExitReason: be ? (be.be_exit_reason ?? be.beExitReason ?? "") : "",
+            beExitR: be ? (num(be.be_exit_r) ?? num(be.beExitR)) : null,
+            deltaR,
+            classification,
+            inCohort,
+            selectiveApplied,
+            fillTime: orig.entry ?? orig.fill_time ?? orig.fillTime ?? "",
+            originalExitTime: orig.exit ?? orig.exit_time ?? orig.exitTime ?? "",
+            beArmTime: be ? (be.be_arm_time ?? be.beArmTime ?? "") : "",
+            beExitTime: be ? (be.be_exit_time ?? be.beExitTime ?? "") : "",
+            scenarioKey,
+            mapTradeId: stableTradeId(orig) || (orig.displayTradeId ?? orig.id ?? ""),
+        });
+    }
+    return out;
+}
+
 /**
  * Cohort match (UX-REMODEL semantics):
  *   • No chips selected ANYWHERE = BE applied to NO trades → always false.
