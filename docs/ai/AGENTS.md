@@ -75,6 +75,20 @@ root (e.g. `CLASSIFICATION-TAB-V2-PLAN.md`). `docs/ai/` summarizes and points to
 
 ---
 
+## Pre-implementation classification gate (all agents)
+
+Before starting any new implementation:
+- **Audit current dirty files** (`git status --short`).
+- **Identify the owning workstream for each dirty file** (`WORKSTREAMS.md` Owns / Shared-caution).
+- **Report commit boundaries** — which dirty files belong together as a scoped commit, and which
+  must be kept apart.
+- **Report whether the new task should continue an existing workstream or start a new one**, with
+  the reason.
+
+**Do not begin implementation until this classification is complete.**
+
+---
+
 ## Git & workstream commit discipline (all agents)
 
 `codex-dev` is edited by several AI chats in parallel; shared files are frequently dirty
