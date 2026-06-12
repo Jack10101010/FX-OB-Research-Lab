@@ -555,12 +555,20 @@ export function buildBacktesterConfig(cfg) {
             teFftMoveAwayObMultiple     = 0;
             teFftMinObWidthPips         = 0;
         } else if (model === "triggered_edge") {
-            const thr = Number(cfg.singleTriggeredEdgeThreshold ?? 25);
+            // Threshold SET: prefer the multi-select array (preset chips + custom);
+            // fall back to the legacy single value. Cleaned to numeric, >0, <100,
+            // deduped, sorted. Empty/invalid → default [25].
+            const thrSource = Array.isArray(cfg.singleTriggeredEdgeThresholds) && cfg.singleTriggeredEdgeThresholds.length
+                ? cfg.singleTriggeredEdgeThresholds
+                : [cfg.singleTriggeredEdgeThreshold ?? 25];
+            const thrSet = [...new Set(
+                thrSource.map(Number).filter((n) => Number.isFinite(n) && n > 0 && n < 100),
+            )].sort((a, b) => a - b);
             entryModels                 = ["triggered_edge"];
             obEntryDepthPct             = 0;
             entryPenetrationThresholds  = [];
             batchEntryPenetration       = false;
-            teThresholds                = Number.isFinite(thr) && thr > 0 && thr < 100 ? [thr] : [25];
+            teThresholds                = thrSet.length ? thrSet : [25];
             teEntryLevelPct             = clampNumber(cfg.triggeredEdgeEntryLevelPct, 0, 100, 0);
             teSameCandleModes           = triggeredEdgeSameCandleModes(cfg.triggeredEdgeSameCandleMode);
             teCandleDelays              = Array.isArray(cfg.triggeredEdgeDelays) && cfg.triggeredEdgeDelays.length
@@ -903,9 +911,15 @@ export function buildRunConfigLoadReport(current, run) {
         }
         if (patch.selectedEntryModel === "triggered_edge" &&
             Array.isArray(source.triggered_edge_trigger_thresholds) &&
-            source.triggered_edge_trigger_thresholds.length === 1) {
-            const v = toNumber(source.triggered_edge_trigger_thresholds[0]);
-            if (v != null) patch.singleTriggeredEdgeThreshold = v;
+            source.triggered_edge_trigger_thresholds.length) {
+            const set = [...new Set(
+                source.triggered_edge_trigger_thresholds.map(toNumber).filter((n) => n != null && n > 0 && n < 100),
+            )].sort((a, b) => a - b);
+            if (set.length) {
+                // Restore the multi-select set; keep the single value (first) for the custom input.
+                patch.singleTriggeredEdgeThresholds = set;
+                patch.singleTriggeredEdgeThreshold = set[0];
+            }
         }
     }
 

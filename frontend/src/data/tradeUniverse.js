@@ -280,7 +280,7 @@ export function buildAvailableOptions(allKeys = []) {
         }
     }
 
-    const FILL_ORDER = ["both", "same", "next", "d2", "d3", "d4"];
+    const FILL_ORDER = ["both", "same", "next", "d2", "d3", "d4", "d5", "d6"];
     const sortFillModes = (modes) => [...modes].sort(
         (a, b) => FILL_ORDER.indexOf(a) - FILL_ORDER.indexOf(b),
     );

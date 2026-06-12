@@ -114,7 +114,8 @@ export default function StrategyBuilder() {
         entryMode: "single",
         selectedEntryModel: "baseline",
         singlePenetrationPct: 25,
-        singleTriggeredEdgeThreshold: 25,
+        singleTriggeredEdgeThreshold: 25,           // custom-input buffer
+        singleTriggeredEdgeThresholds: [25],        // serialized threshold SET (presets + custom)
         // ── Directional entry assignment (Phase 2 config foundation) ──────
         directionalEntryMode: "symmetric",
         longEntryEnabled: true,
@@ -878,7 +879,7 @@ export default function StrategyBuilder() {
                                             />
                                             <p className="mt-1 text-[10.5px] text-muted-lab">
                                                 {cfg.beVariants === "all"
-                                                    ? "Runs BE against every active entry model (Triggered Edge, Penetration, …). Many more passes — slower and larger bundles."
+                                                    ? "Runs BE against every active entry model × threshold × delay. Generating BE for all entry variants can be expensive — for large research packs prefer selected variants or matrix generation."
                                                     : "Runs BE against the baseline entry trade set only. Variant result views fall back to REPLAY."}
                                             </p>
                                         </div>
@@ -988,15 +989,56 @@ export default function StrategyBuilder() {
                                         Arms the trade only after price reaches the trigger threshold, then places a limit at the configured entry level. Entry delay controls when the order can arm after the trigger.
                                     </div>
                                     <div className="grid grid-cols-2 gap-3">
-                                        <Field label="Trigger Threshold %">
-                                            <NeonInput
-                                                type="number"
-                                                min="1"
-                                                max="99"
-                                                step="1"
-                                                value={cfg.singleTriggeredEdgeThreshold}
-                                                onChange={(e) => set("singleTriggeredEdgeThreshold")(Number(e.target.value))}
-                                            />
+                                        <Field label="Trigger Threshold %" hint="One or more. Presets + custom.">
+                                            {(() => {
+                                                const thrSet = Array.isArray(cfg.singleTriggeredEdgeThresholds) && cfg.singleTriggeredEdgeThresholds.length
+                                                    ? cfg.singleTriggeredEdgeThresholds
+                                                    : [cfg.singleTriggeredEdgeThreshold ?? 25];
+                                                const commit = (next) => {
+                                                    const clean = [...new Set(next.map(Number).filter((n) => Number.isFinite(n) && n > 0 && n < 100))].sort((a, b) => a - b);
+                                                    if (!clean.length) return; // never empty
+                                                    setCfg((c) => ({ ...c, singleTriggeredEdgeThresholds: clean, singleTriggeredEdgeThreshold: clean[0] }));
+                                                };
+                                                return (
+                                                    <div className="flex flex-col gap-2">
+                                                        <div className="flex gap-1.5 flex-wrap">
+                                                            {thrSet.map((t) => (
+                                                                <button key={t} type="button" title="Remove" onClick={() => commit(thrSet.filter((x) => x !== t))}
+                                                                    className="px-2.5 py-1 text-[10.5px] font-ui clip-bevel-sm border bg-[hsl(var(--accent-primary)/0.16)] border-[hsl(var(--accent-primary)/0.5)] text-[hsl(var(--accent-primary))]">
+                                                                    {t}% ✕
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                        <div className="flex gap-1.5 flex-wrap items-center">
+                                                            <span className="text-[10px] font-ui uppercase tracking-[0.08em] text-muted-lab">Presets</span>
+                                                            {[10, 25, 50, 75].map((p) => {
+                                                                const active = thrSet.includes(p);
+                                                                return (
+                                                                    <button key={p} type="button"
+                                                                        onClick={() => commit(active ? thrSet.filter((x) => x !== p) : [...thrSet, p])}
+                                                                        className={[
+                                                                            "px-2.5 py-1 text-[10.5px] font-ui clip-bevel-sm border transition-colors",
+                                                                            active
+                                                                                ? "bg-[hsl(var(--accent-primary)/0.16)] border-[hsl(var(--accent-primary)/0.5)] text-[hsl(var(--accent-primary))]"
+                                                                                : "bg-[hsl(var(--panel-2)/0.4)] border-[hsl(var(--border-soft))] text-muted-lab hover:text-[hsl(var(--text-base))]",
+                                                                        ].join(" ")}>
+                                                                        {p}%
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                        <div className="flex gap-2 items-center">
+                                                            <NeonInput type="number" min="1" max="99" step="1"
+                                                                value={cfg.singleTriggeredEdgeThreshold}
+                                                                onChange={(e) => set("singleTriggeredEdgeThreshold")(Number(e.target.value))} />
+                                                            <button type="button" className="px-3 py-1.5 text-[10.5px] font-ui clip-bevel-sm border border-[hsl(var(--border-soft))] hover:text-[hsl(var(--text-base))]"
+                                                                onClick={() => commit([...thrSet, Number(cfg.singleTriggeredEdgeThreshold)])}>
+                                                                Add
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })()}
                                         </Field>
                                         <Field label="Entry Level %" hint="0 is the OB edge.">
                                             <NeonInput
@@ -1012,13 +1054,13 @@ export default function StrategyBuilder() {
                                             label={
                                                 <LabelWithTooltip
                                                     label="Entry Delay After Trigger"
-                                                    help={`Entry delay controls when the limit order is armed after the trigger threshold is reached.\n\nArm C0 = order becomes active on the trigger candle.\nArm C1 = order becomes active at the start of the next candle.\nArm C2/C3 = order becomes active at the start of the second/third candle after trigger.\n\nThis is not the same as fill timing. A trade can Arm C0 but still Fill C1, C2, or later if price reaches the limit later.`}
+                                                    help={`Entry delay controls when the limit order is armed after the trigger threshold is reached.\n\nArm C0 = order becomes active on the trigger candle.\nArm C1 = order becomes active at the start of the next candle.\nArm C2–C6 = order becomes active at the start of the Nth candle after trigger.\n\nThis is not the same as fill timing. A trade can Arm C0 but still Fill C1, C2, or later if price reaches the limit later.`}
                                                 />
                                             }
                                             className="col-span-2"
                                         >
                                             <div className="flex gap-2">
-                                                {[{ d: 0, label: "Arm C0" }, { d: 1, label: "Arm C1" }, { d: 2, label: "Arm C2" }, { d: 3, label: "Arm C3" }].map(({ d, label }) => {
+                                                {[{ d: 0, label: "Arm C0" }, { d: 1, label: "Arm C1" }, { d: 2, label: "Arm C2" }, { d: 3, label: "Arm C3" }, { d: 4, label: "Arm C4" }, { d: 5, label: "Arm C5" }, { d: 6, label: "Arm C6" }].map(({ d, label }) => {
                                                     const delays = Array.isArray(cfg.triggeredEdgeDelays) ? cfg.triggeredEdgeDelays : [0, 1];
                                                     const active = delays.includes(d);
                                                     return (
@@ -1325,13 +1367,13 @@ export default function StrategyBuilder() {
                                                 label={
                                                     <LabelWithTooltip
                                                         label="Entry Delay After Trigger"
-                                                        help={`Entry delay controls when the limit order is armed after the trigger threshold is reached.\n\nArm C0 = order becomes active on the trigger candle.\nArm C1 = order becomes active at the start of the next candle.\nArm C2/C3 = order becomes active at the start of the second/third candle after trigger.\n\nThis is not the same as fill timing. A trade can Arm C0 but still Fill C1, C2, or later if price reaches the limit later.`}
+                                                        help={`Entry delay controls when the limit order is armed after the trigger threshold is reached.\n\nArm C0 = order becomes active on the trigger candle.\nArm C1 = order becomes active at the start of the next candle.\nArm C2–C6 = order becomes active at the start of the Nth candle after trigger.\n\nThis is not the same as fill timing. A trade can Arm C0 but still Fill C1, C2, or later if price reaches the limit later.`}
                                                     />
                                                 }
                                                 className="col-span-2"
                                             >
                                                 <div className="flex gap-2">
-                                                    {[{ d: 0, label: "Arm C0" }, { d: 1, label: "Arm C1" }, { d: 2, label: "Arm C2" }, { d: 3, label: "Arm C3" }].map(({ d, label }) => {
+                                                    {[{ d: 0, label: "Arm C0" }, { d: 1, label: "Arm C1" }, { d: 2, label: "Arm C2" }, { d: 3, label: "Arm C3" }, { d: 4, label: "Arm C4" }, { d: 5, label: "Arm C5" }, { d: 6, label: "Arm C6" }].map(({ d, label }) => {
                                                         const delays = Array.isArray(cfg.triggeredEdgeDelays) ? cfg.triggeredEdgeDelays : [0, 1];
                                                         const active = delays.includes(d);
                                                         return (
@@ -2135,7 +2177,7 @@ function DirectionalEntryCard({ label, enabled, entryModel, penetrationPct, trig
                                 label={
                                     <LabelWithTooltip
                                         label="Entry Delay"
-                                        help={`Entry delay controls when the limit order is armed after the trigger threshold is reached.\n\nArm C0 = order becomes active on the trigger candle.\nArm C1 = order becomes active at the start of the next candle.\nArm C2/C3 = order becomes active at the start of the second/third candle after trigger.\n\nThis is not the same as fill timing. A trade can Arm C0 but still Fill C1, C2, or later if price reaches the limit later.`}
+                                        help={`Entry delay controls when the limit order is armed after the trigger threshold is reached.\n\nArm C0 = order becomes active on the trigger candle.\nArm C1 = order becomes active at the start of the next candle.\nArm C2–C6 = order becomes active at the start of the Nth candle after trigger.\n\nThis is not the same as fill timing. A trade can Arm C0 but still Fill C1, C2, or later if price reaches the limit later.`}
                                     />
                                 }
                             >

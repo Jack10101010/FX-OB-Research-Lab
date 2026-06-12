@@ -147,5 +147,25 @@ ok([2.5, 3, 3.5].every((a) => BE_ARM_LEVEL_CHOICES.includes(a)), "BE_ARM_LEVEL_C
 const cfgHi = buildBeConfig({ beEnabled: true, beArmLevels: [0.5, 2.5, 3, 3.5], beTriggerBases: ["wick", "close"] });
 ok(JSON.stringify(cfgHi.be_arm_levels) === JSON.stringify([0.5, 2.5, 3, 3.5]), "buildBeConfig serializes 2.5/3/3.5 (sorted, no whitelist drop)");
 
+console.log("\nTriggered Edge entry-universe expansion (thresholds + delays)");
+const teCfg = (over) => buildBacktesterConfig({ ...baseCfg, selectedEntryModel: "triggered_edge", triggeredEdgeDelays: [0, 1], ...over });
+// Threshold SET via presets array.
+ok(JSON.stringify(teCfg({ singleTriggeredEdgeThresholds: [25, 10, 75, 50] }).triggered_edge_trigger_thresholds) === JSON.stringify([10, 25, 50, 75]),
+    "preset set [10,25,50,75] serializes sorted/deduped");
+// Backward compat: single value only.
+ok(JSON.stringify(teCfg({ singleTriggeredEdgeThreshold: 25, singleTriggeredEdgeThresholds: undefined }).triggered_edge_trigger_thresholds) === JSON.stringify([25]),
+    "single threshold (no array) → [25] (back-compat)");
+// Threshold ≥ 100 rejected.
+ok(JSON.stringify(teCfg({ singleTriggeredEdgeThresholds: [50, 100, 150] }).triggered_edge_trigger_thresholds) === JSON.stringify([50]),
+    "threshold ≥ 100 dropped");
+// Delays 0–6 serialize.
+ok(JSON.stringify(teCfg({ triggeredEdgeDelays: [0, 1, 2, 3, 4, 5, 6] }).triggered_edge_candle_delays) === JSON.stringify([0, 1, 2, 3, 4, 5, 6]),
+    "delays 0–6 serialize");
+// Old C0–C3 unchanged.
+ok(JSON.stringify(teCfg({ triggeredEdgeDelays: [0, 1, 2, 3] }).triggered_edge_candle_delays) === JSON.stringify([0, 1, 2, 3]),
+    "old C0–C3 delays unchanged");
+// BE not silently set to all variants.
+ok(teCfg({}).be_variants !== "all", "TE expansion does not force be_variants 'all'");
+
 console.log(`\n${failures === 0 ? "✅ ALL PASS" : `❌ ${failures} FAILURE(S)`}\n`);
 process.exit(failures === 0 ? 0 : 1);
