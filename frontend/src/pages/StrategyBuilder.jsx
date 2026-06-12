@@ -31,6 +31,7 @@ import {
     toNumber,
     normalizeDateValue,
     ensureArray,
+    BE_ARM_LEVEL_CHOICES,
 } from "@/data/configTranslator";
 
 const LAST_CONFIG_KEY = "fxob_strategy_builder_last_config";
@@ -135,7 +136,7 @@ export default function StrategyBuilder() {
         // the extra passes. NOTE: backend BE is currently computed on the BASELINE
         // trade set only — see the Break-even tab note for non-baseline views.
         beEnabled: true,
-        beArmLevels: [0.25, 0.5, 0.75, 1.0, 1.5, 2.0],
+        beArmLevels: [...BE_ARM_LEVEL_CHOICES],
         beTriggerBases: ["wick", "close"],
         beDelayCandles: 0,
         // Which entry trade sets get exact BE: "baseline" (default) or "all"
@@ -157,7 +158,7 @@ export default function StrategyBuilder() {
         // Never allow zero triggers — fall back to wick.
         return { ...c, beTriggerBases: next.length ? next : ["wick"] };
     });
-    const BE_ARM_CHOICES = [0.25, 0.5, 0.75, 1.0, 1.5, 2.0];
+    const BE_ARM_CHOICES = BE_ARM_LEVEL_CHOICES;
     const beScenarioCount = cfg.beEnabled
         ? (Array.isArray(cfg.beArmLevels) ? cfg.beArmLevels.length : 0)
           * (Array.isArray(cfg.beTriggerBases) ? cfg.beTriggerBases.length : 0)

@@ -32,7 +32,7 @@ function loadCjs(absPath) {
     return mod.exports;
 }
 
-const { buildBeConfig, buildBacktesterConfig, buildRunConfigLoadReport } = loadCjs("src/data/configTranslator.js");
+const { buildBeConfig, buildBacktesterConfig, buildRunConfigLoadReport, BE_ARM_LEVEL_CHOICES } = loadCjs("src/data/configTranslator.js");
 
 let failures = 0;
 const ok = (cond, msg) => {
@@ -141,6 +141,11 @@ const cfgAll = buildBacktesterConfig({ ...baseCfg, beEnabled: true, beArmLevels:
 ok(cfgAll.be_variants === "all", "full payload carries be_variants 'all'");
 const cfgBaseOnly = buildBacktesterConfig({ ...baseCfg, beEnabled: true, beArmLevels: [0.5], beTriggerBases: ["wick"] });
 ok(cfgBaseOnly.be_variants === "baseline", "full payload defaults be_variants 'baseline'");
+
+console.log("\nHigher arm levels (research expansion)");
+ok([2.5, 3, 3.5].every((a) => BE_ARM_LEVEL_CHOICES.includes(a)), "BE_ARM_LEVEL_CHOICES includes 2.5/3/3.5");
+const cfgHi = buildBeConfig({ beEnabled: true, beArmLevels: [0.5, 2.5, 3, 3.5], beTriggerBases: ["wick", "close"] });
+ok(JSON.stringify(cfgHi.be_arm_levels) === JSON.stringify([0.5, 2.5, 3, 3.5]), "buildBeConfig serializes 2.5/3/3.5 (sorted, no whitelist drop)");
 
 console.log(`\n${failures === 0 ? "✅ ALL PASS" : `❌ ${failures} FAILURE(S)`}\n`);
 process.exit(failures === 0 ? 0 : 1);

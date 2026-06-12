@@ -479,7 +479,13 @@ export const LOAD_FIELD_LABELS = {
 // OFF (or no valid arm levels remain after sanitising), it emits ONLY
 // { be_enabled: false } so a normal run is byte-identical to pre-BE behavior.
 // Invariant: never send be_enabled:true with empty be_arm_levels.
-export const BE_ARM_LEVEL_CHOICES = [0.25, 0.5, 0.75, 1.0, 1.5, 2.0];
+// Canonical supported BE arm levels (R). Single source of truth for the
+// Strategy Builder chips/default, the Break-even panel scenario rows, and the
+// selective arm filter. Extended with higher research arms (2.5/3/3.5R); the
+// backend accepts any positive arm via be_arm_levels (no whitelist), so this is
+// purely the UI choice set. selectiveBeUniverse.DEFAULT_ARM_LEVELS mirrors this
+// (that module is import-free for its single-file validation harness).
+export const BE_ARM_LEVEL_CHOICES = [0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5];
 export const BE_TRIGGER_CHOICES = ["wick", "close"];
 export const BE_DELAY_CHOICES = [0, 1, 2];
 

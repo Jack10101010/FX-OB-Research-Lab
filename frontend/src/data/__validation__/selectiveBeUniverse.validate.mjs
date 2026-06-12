@@ -379,5 +379,24 @@ ok(arm2.filter((r) => r.inCohort).map((r) => r.tradeId).sort().join(",") === "TP
 const nullArm = ex({ sessions: ["London"] });
 ok(nullArm.every((r) => r.selectiveApplied === false), "null arm + sessions → selectiveApplied false for all");
 
+console.log("\n§24  Higher arm levels (research expansion 2.5/3/3.5R)");
+const { DEFAULT_ARM_LEVELS } = loadCjs("src/data/selectiveBeUniverse.js");
+ok([2.5, 3, 3.5].every((a) => DEFAULT_ARM_LEVELS.includes(a)), "DEFAULT_ARM_LEVELS includes 2.5/3/3.5");
+ok([0.25, 0.5, 0.75, 1, 1.5, 2].every((a) => DEFAULT_ARM_LEVELS.includes(a)), "existing arm levels unchanged");
+ok([...DEFAULT_ARM_LEVELS].sort((a, b) => a - b).join() === DEFAULT_ARM_LEVELS.join() && new Set(DEFAULT_ARM_LEVELS).size === DEFAULT_ARM_LEVELS.length, "no duplicates, sorted");
+// deriveMaxArmReached examples from the spec (against the full ladder).
+ok(deriveMaxArmReached({ mfe_r: 2.73 }, DEFAULT_ARM_LEVELS) === 2.5, "mfe 2.73 → 2.5R");
+ok(deriveMaxArmReached({ mfe_r: 3.22 }, DEFAULT_ARM_LEVELS) === 3, "mfe 3.22 → 3R");
+ok(deriveMaxArmReached({ mfe_r: 0.84 }, DEFAULT_ARM_LEVELS) === 0.75, "mfe 0.84 → 0.75R");
+ok(deriveMaxArmReached({ mfe_r: 4.0 }, DEFAULT_ARM_LEVELS) === 3.5, "mfe 4.0 → 3.5R (top of ladder)");
+// Selective arm filter accepts the new levels (matchesCohort uses mfe_r).
+const hOrig = [mOrig("H1", "Long", "BOS", "Asia", 1, 3.2), mOrig("H2", "Short", "CHoCH", "London", 1, 2.6)];
+const hBe = [be("H1", 0), be("H2", 0)];
+const hBuild = (f) => buildSelectiveBeUniverse({ originalTrades: hOrig, beTrades: hBe, filters: f, scenario });
+ok(hBuild({ armLevel: 3 }).applied === 1 && hBuild({ armLevel: 3 }).trades.find((t) => t.id === "H1").protectionApplied, "armLevel 3 → only H1 (mfe 3.2)");
+ok(hBuild({ armLevel: 2.5 }).applied === 2, "armLevel 2.5 → H1,H2 (both ≥2.5)");
+ok(hBuild({ armLevel: 3.5 }).applied === 0, "armLevel 3.5 → none (neither reached 3.5)");
+ok(hBuild({ armLevel: 2.5 }).selectedFilterLabel === "2.5R" && hBuild({ armLevel: 3.5 }).selectedFilterLabel === "3.5R", "label formats 2.5R / 3.5R");
+
 console.log(`\n${failures === 0 ? "✅ ALL PASS" : `❌ ${failures} FAILURE(S)`}\n`);
 process.exit(failures === 0 ? 0 : 1);

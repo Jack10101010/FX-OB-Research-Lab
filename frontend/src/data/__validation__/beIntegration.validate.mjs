@@ -73,6 +73,10 @@ console.log("\n§3  beResolve key helpers");
 ok(formatArmToken(0.5) === "0p50" && formatArmToken(1) === "1p00", "formatArmToken");
 ok(beScenarioKey("wick", 0.5) === "be_wick_0p50R", "beScenarioKey");
 ok(parseBeScenarioKey("be_wick_0p5R")?.armLevelR === 0.5, "parse single-decimal 0p5 → 0.5");
+// Research expansion — higher arm levels round-trip through the key helpers.
+ok(formatArmToken(2.5) === "2p50" && formatArmToken(3) === "3p00" && formatArmToken(3.5) === "3p50", "formatArmToken 2.5/3/3.5");
+ok(beScenarioKey("close", 2.5) === "be_close_2p50R" && beScenarioKey("wick", 3.5) === "be_wick_3p50R", "beScenarioKey 2.5/3.5");
+ok(parseBeScenarioKey("be_wick_2p50R")?.armLevelR === 2.5 && parseBeScenarioKey("be_close_3p00R")?.armLevelR === 3 && parseBeScenarioKey("be_wick_3p50R")?.armLevelR === 3.5, "parse 2.5/3/3.5 keys");
 
 // ─────────────────────────────────────────────────────────────────────────────
 console.log("\n§4  normalizeBeResults (dual-shape)");

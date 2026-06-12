@@ -20,6 +20,7 @@ import { resolveBeScenarioSource, hasAnyExactBe, entryVariantHasExact, describeB
 import { buildBeAffectedTrades } from "@/data/protectionTimeline";
 import { buildSelectiveBeUniverse, buildSessionAttribution, buildBeTradeExplorerRows, DEFAULT_ARM_LEVELS } from "@/data/selectiveBeUniverse";
 import { BeTradeExplorer } from "@/components/lab/protection/BeTradeExplorer";
+import { BE_ARM_LEVEL_CHOICES } from "@/data/configTranslator";
 import { summarizeTradeSanity } from "@/data/tradeClassification";
 import { useDataset, setFocusedBeTrade, setScenario } from "@/data/store";
 import { buildProtectionLabel } from "@/data/protectionLayers";
@@ -33,7 +34,9 @@ import { ShieldAlert, AlertTriangle, TrendingUp, BarChart2, Hash, Activity, Load
 // render (which would thrash the scenario-compute effect's dependency array).
 const EMPTY_BE_MAP = Object.freeze({});
 
-const ARM_LEVELS = [0.25, 0.5, 0.75, 1.0, 1.5, 2.0];
+// Supported BE arm levels — canonical list from configTranslator (research
+// expansion adds 2.5/3/3.5R). Ungenerated arms resolve REPLAY/unavailable.
+const ARM_LEVELS = BE_ARM_LEVEL_CHOICES;
 const DEFAULT_ARM = 0.5;
 const DEFAULT_TRIGGER = "wick";
 
@@ -502,7 +505,7 @@ function SelectiveBeCohortPanel({
                 <div className="flex flex-col gap-1">
                     <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="w-[64px] shrink-0 text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--text-2))]">Arm Level</span>
-                        {[0.25, 0.5, 0.75, 1, 1.5, 2].map((lvl) => {
+                        {BE_ARM_LEVEL_CHOICES.map((lvl) => {
                             const active = beCohorts.armLevel === lvl;
                             const isScenarioArm = lvl === scenarioArm;
                             return (
