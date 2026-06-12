@@ -25,6 +25,7 @@ import {
 import { archetypeLabel } from "../shared/failuresRegistry";
 import { buildHypothesisCard, writeHypothesisToStorage } from "../shared/failuresExporter";
 import { ConfirmedFalseLosersPanel } from "./ConfirmedFalseLosersPanel";
+import { LossTriagePanel } from "./LossTriagePanel";
 import { FailureExplorer } from "../excursion/FailureExplorer";
 import { isPerformanceTrade } from "@/data/tradeClassification";
 
@@ -221,7 +222,7 @@ function FailureCommandCenter({ allTrades = [], allLosers = [] }) {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function FailuresOverview({ losers = [], allLosers = [], allTrades = [], config = {} }) {
+export function FailuresOverview({ losers = [], allLosers = [], allTrades = [], config = {}, beTradesByMode = null, executionMode = null }) {
     const kpis         = useMemo(() => computeFailureKPIs(allTrades, allLosers), [allTrades, allLosers]);
     const currentStreak= useMemo(() => buildCurrentStreak(allTrades), [allTrades]);
     const sessionStats = useMemo(() => computeSessionFailureRates(allTrades), [allTrades]);
@@ -257,6 +258,9 @@ export function FailuresOverview({ losers = [], allLosers = [], allTrades = [], 
 
             {/* ── Confirmed False Losers — surfaced here (V5 Phase 2B IA) ────── */}
             <ConfirmedFalseLosersPanel allLosers={allLosers} />
+
+            {/* ── Loss Triage — V5 decision layer (run-up × recovery + BE verdict) ── */}
+            <LossTriagePanel allTrades={allTrades} beTradesByMode={beTradesByMode} executionMode={executionMode} />
 
             {/* ── KPI strip ─────────────────────────────────────────────────── */}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">

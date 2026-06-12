@@ -153,6 +153,10 @@ export function FailuresWorkspace() {
         allTrades:  trades,             // full trade list (needed for equity curve, streaks)
         config,                         // backtest config (executionTf etc.)
         filters,                        // current cohort filter state (for ViewManager saved views)
+        // BE replay variant trade sets + execution mode for the Loss Triage BE verdict
+        // (read-only; gated to "unavailable" when a run carries no BE variants).
+        beTradesByMode: activeRun?.beTradesByMode ?? null,
+        executionMode:  activeRun?.primaryVariant ?? null,
     };
 
     // ── Render ────────────────────────────────────────────────────────────────
