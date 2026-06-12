@@ -5,11 +5,13 @@
 > Attach to a workstream (or add one) before coding. Never touch another stream's files
 > without explicit scope.
 
-*Last updated: 2026-06-11.*
+*Last updated: 2026-06-12.*
 
 ## Failures Lab V4  (committed; paused)
 
-- **Status:** feature-complete; integration cleanup committed. Paused — see CURRENT_WORKSTREAM for focus.
+- **Status:** feature-complete; integration cleanup committed. **Loser Run-Up breakdown shipped**
+  (`2004d28`): Trade Outcome & Loser Run-Up panel/tab — loser MFE + ≥0.5/1/1.5/2R reach across cohorts
+  (`data/loserRunUp.js`, gated when no loser carries `mfe_r`). Remaining work is interpretation, not build.
 - **Lead:** Claude (design/analytics/frontend).
 - **Purpose:** loss diagnostics — Distance to Stop (Excursion) tab: MFE reach, BE opportunity
   (upper bound), winner MAE stop pressure, MAE/MFE by dimension, penetration dimension,
@@ -25,7 +27,9 @@
 
 ## Trade Classification
 
-- **Status:** paused (Phase 2 shipped; polish items in backlog).
+- **Status:** paused (Phase 2 shipped; polish items in backlog). **Distance-at-arm breakdown shipped**
+  (`449dc58`, D-014): `data/distanceBreakdown.js` + RunDetail D2 section (signed, TE-only gated);
+  enables in-app F-004 validation (F-004 stays provisional).
 - **Lead:** Claude (design/UX/frontend); Codex for data/test.
 - **Purpose:** fill-state taxonomy, Classification Tab V2, research signals, confidence.
 - **Owns:** `frontend/src/data/tradeClassificationDims.js`, `classificationRegistry.js`,
@@ -80,10 +84,13 @@
 ## Entry / FFT / Paired Runs
 
 - **Status:** active (parallel). **FFT auto-pair control-run architecture complete** (auto-pairs
-  FFT-OFF control trades); **auto-control importer ingestion complete** (`importer` ingests
-  auto-control trade files); FFT classification breakdown panel shipped.
+  FFT-OFF control trades); **auto-control importer ingestion complete**; FFT classification breakdown
+  panel shipped. **Triggered-edge entry-universe expansion shipped** (`6a69ab4`, D-013): trigger
+  thresholds → sorted/deduped SET (presets + custom, single-value back-compat); arm delays C0–C3 → C0–C6
+  (`tradeUniverse` fill-order d5/d6, `configTranslator`, StrategyBuilder UI). Pairs with the backend C0–C6 change.
 - **Owns:** `components/lab/entries/*`, `IntrabarInspector.jsx`, `data/importer.js`
-  (auto-control ingestion), `pages/StrategyBuilder.jsx` (shared — coordinate).
+  (auto-control ingestion), `data/configTranslator.js` (TE serialization — coordinate with Master Controls),
+  `pages/StrategyBuilder.jsx` (shared — coordinate).
 
 ## Strategy Map
 
@@ -92,9 +99,13 @@
 
 ## OB Retest / Retest Lab
 
-- **Status:** active. Phase 1 retest analysis lab + standalone retest tracker shipped; now at
-  **Phase 2 exporter audit** (`OB-RETEST-ANALYSIS-3-PHASE-2-EXPORTER-AUDIT.md`).
-- **Owns:** `data/obRetest.js`, `components/lab/retest/*`, `OB-RETEST-ANALYSIS-*.md`.
+- **Status:** active. Phase 1 retest analysis lab + standalone retest tracker shipped; Phase 2 exporter
+  audit done. **v2.1 monetization insights shipped** (`287dfe3`): `obRetestMonetization.js` (RR-capture
+  curve, time-to-impact buckets, decay-by-retest) + RetestLabTab RunInsightCard / Monetization Before
+  Death. Reward gated to OB-grain cohorts (event-grain hides reward by design). Next: interpret the
+  monetization curves — research, not build.
+- **Owns:** `data/obRetest.js`, `data/obRetestMonetization.js`, `data/obRetestTradeability.js`,
+  `components/lab/retest/*`, `OB-RETEST-ANALYSIS-*.md`.
 
 ## Ghost / Backend Research
 

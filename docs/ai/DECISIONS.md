@@ -6,9 +6,31 @@ Append-only. Newest at top. Each entry: what we decided, why, and the consequenc
 > Validated **research conclusions** (what the data says) live in `FINDINGS.md`. Decisions cite
 > findings — e.g. D-003 is the *decision* to lead with Vacant, justified by F-001/F-002.
 
-*Last updated: 2026-06-11.*
+*Last updated: 2026-06-12.*
 
 ---
+
+### D-014 · Distance-at-arm is a signed magnitude with an explicit Edge Zone, surfaced TE-only
+The frontend consumes `price_distance_from_ob_at_arm_pips` as a **signed** value: **0 = price still
+inside the OB at arm (occupied)**, positive = vacated by N pips. The breakdown buckets are
+occupied (0) / edge / 2–5 / 5–10 / 10+ pips with the **edge zone** (|offset| < ~2 pips) explicit, and
+the section is **gated to triggered-edge runs only** (baseline / penetration carry no arm-distance).
+No `%`-of-OB-width field is consumed (not exported). **Why:** the basic distance breakdown is the
+cheapest way to put F-004 (distance < 2 pips weak/negative) in front of users without inventing a new
+dimension. **Consequence:** this **enables in-app F-004 validation but does not promote it** — F-004
+remains provisional until confirmed on a run; the deeper signed `distance_band` / occupation-depth
+dimension stays a separate research item (`BACKLOG.md` P2). **Evidence:** `449dc58`.
+
+### D-013 · Triggered-edge entry universe = a threshold SET plus arm delays C0–C6
+Trigger thresholds are serialized as a **sorted, deduped set** built from preset chips (10/25/50/75)
+plus a custom value, with a **single-value back-compat** path (legacy `singleTriggeredEdgeThreshold`
+→ `[v]`); values are cleaned to numeric `> 0` and `< 100`, empty → default `[25]`. Arm delays expand
+from C0–C3 to **C0–C6** (`tradeUniverse` fill-order gains d5/d6). The expansion does **not** force
+`be_variants: "all"`. **Why:** widen the entry research grid (more thresholds × more arm levels) without
+breaking saved configs or silently inflating BE passes. **Consequence:** config schema gains
+`singleTriggeredEdgeThresholds` (array) alongside the single value for the custom-input buffer; round-trip
+on run load restores the set; pairs with the backend C0–C6 candle-delay change. Validated by
+`beConfigSerialization` (+6 TE cases). **Evidence:** `6a69ab4`.
 
 ### D-012 · Research state uses a durable backend mirror with localStorage as the instant cache
 Research domains now mirror to a durable backend via `/storage/{domain}` GET/PUT (domains:

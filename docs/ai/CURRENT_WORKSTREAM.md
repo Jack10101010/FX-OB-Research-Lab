@@ -2,16 +2,33 @@
 
 > The single active focus. Update this first when focus changes. Source for `/status`.
 
-*Last updated: 2026-06-11.*
+*Last updated: 2026-06-12.*
 
 ## Focus
 
-**Focus needs confirmation.** The previously-assumed blocker (Failures Lab V5 false losers waiting on
-the backtester export) is **resolved** — that surface is live (below). Several parallel streams have
-landed on `codex-dev`. Confirm the next active focus before starting new work; the cheapest open
-research win is the **Distance-at-arm importer map** (exported-but-unmapped — see `BACKLOG.md` P1).
+**Next focus: research interpretation / decision-layer work on the newly surfaced metrics — not more
+plumbing.** As of 2026-06-12 the data plumbing the docs kept pointing at is shipped and synced to
+`origin/codex-dev` (HEAD `96fc733`). The Distance-at-arm consumption, OB-Retest v2.1 monetization, and
+Loser Run-Up surfaces are all live; the open question is no longer "wire the export" but "what do these
+cohorts mean and what rule do they justify." Do not start new infrastructure unless explicitly requested.
 
-**Recently landed (committed):**
+**Recently landed (committed + pushed this session):**
+- **Distance-at-arm — frontend consumption** (`449dc58`; D-014). Importer maps
+  `price_distance_from_ob_at_arm_pips`; RunDetail renders the signed distance breakdown
+  (occupied=0 / edge / 2–5 / 5–10 / 10+ pips, TE-only gated). This **enables in-app F-004 validation**;
+  F-004 stays **provisional** until confirmed on a run.
+- **Triggered-edge entry-universe expansion** (`6a69ab4`; D-013). Trigger thresholds are now a
+  sorted/deduped SET (presets 10/25/50/75 + custom, single-value back-compat); arm delays C0–C3 → C0–C6.
+  Pairs with the backend C0–C6 candle-delay change.
+- **OB-Retest v2.1 monetization insights** (`287dfe3`). RR-capture curve, time-to-impact buckets,
+  decay-by-retest + run insight card in RetestLabTab; also repaired a dangling `obRetestMonetization.js`
+  import. Reward shown for OB-grain cohorts only (event-grain hides reward by design).
+- **Failures Lab — Loser Run-Up breakdown** (`2004d28`). Whether losers offered profit before failing
+  (loser MFE / max-R-reached + ≥0.5/1/1.5/2R reach counts across cohorts); gated when no loser carries `mfe_r`.
+- **Build-integrity fixes** (`7eeb596`, `96fc733`). Committed `BeVerificationPanel.jsx` /
+  `BannerRunIdentity.jsx` — referenced by tracked imports but never tracked (built locally, broke clean clone).
+
+**Earlier landed (committed):**
 - **Phase 14 Wave 1 — research run terminology** (`e9d03aa`; D-010). Wave 2 residual sweep is mostly
   done — see `BACKLOG.md`.
 - **Storage — durable backend mirror** (`ccb240e`; D-012).
@@ -96,5 +113,15 @@ changes (Overview explorer passes `roadmapKey={null}`). Scoped commit = these 5 
 Frontend (Phase 2 + 2B) is built, validated, and **live** — the active imported run carries the
 `post_stop_*` fields and the panel renders the real confirmed/candidate/genuine breakdown (the
 candidates-only fallback is the *no-data* path, not the current state). The field-gating still
-correctly degrades to the fallback for older runs imported before the export existed. Remaining
-work is **research interpretation** (what the false-loser cohorts mean), not export/import/build.
+correctly degrades to the fallback for older runs imported before the export existed.
+
+**Remaining work is research interpretation / decision-layer**, not export/import/build. Open questions
+now answerable on live data: what the confirmed/candidate/genuine false-loser cohorts and the loser
+run-up (loser-MFE) distributions mean, whether they justify BE/partial-management rules, and what the
+distance-at-arm breakdown says about F-004. Capture conclusions in `FINDINGS.md` (do not pre-promote).
+
+**Preserved open items (not this focus — pick up only if requested):**
+- **Signed occupation-depth / distance-band research** (`BACKLOG.md` P2) — the orthogonal signed
+  `distance_band` dimension; natural follow-on now that distance-at-arm is consumed.
+- **Repo hygiene:** root audit-doc cleanup, a CI/fresh-checkout build gate (would have caught the
+  dangling imports above), and root `package.json`/`package-lock.json` clutter removal.

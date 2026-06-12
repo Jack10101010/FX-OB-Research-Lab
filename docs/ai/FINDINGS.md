@@ -43,10 +43,11 @@ partial pipeline) · **Investigating** · **Deprecated**.
 ### F-004 — Distance < 2 pips at arm is weak/negative
 - **Summary:** When price is within ~2 pips of the OB at arm, edge is weak or negative — too
   close to count as a meaningful vacate.
-- **Evidence:** Backend analysis. **Provisional in-app**: `price_distance_from_ob_at_arm_pips`
-  is not yet mapped in `importer.js`, so the frontend cannot yet reproduce this.
-- **Status:** Provisional (blocked on importer mapping — see `BACKLOG.md` P1).
-- **Date:** 2026-06-07
+- **Evidence:** Backend analysis. **In-app validation now ENABLED** (2026-06-12): `importer.js` maps
+  `price_distance_from_ob_at_arm_pips` and RunDetail renders the distance breakdown (`449dc58`, D-014),
+  so the frontend can now reproduce this — but it has not yet been confirmed on a live run.
+- **Status:** Provisional (no longer blocked; awaiting in-app confirmation — do not treat as validated).
+- **Date:** 2026-06-07 (in-app validation enabled 2026-06-12)
 
 ### F-005 — Timing/expiry is currently low priority
 - **Summary:** Expiry/timing protections are not where the edge is. AAE fills cluster within

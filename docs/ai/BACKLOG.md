@@ -6,15 +6,15 @@ Groomed by ChatGPT. Priority: P1 (next up) · P2 (soon) · P3 (later).
 > sequence it moves to `ROADMAP.md` (use `/promote`); not-yet-ready thoughts live in
 > `IDEA_CAPTURE.md`. Don't list the same item as "active" in both backlog and roadmap.
 
-*Last updated: 2026-06-11.*
+*Last updated: 2026-06-12.*
 
 ## P1
 
-- **Distance-at-arm importer mapping** *(Owner: Claude/Codex)* — **the genuinely-open exported-but-
-  unmapped item.** Backend already exports `price_distance_from_ob_at_arm_pips` (verified present as a
-  real column in `Lux-OB-Backtester/outputs/trades_*.csv`); `importer.js` does **not** map it yet. Map
-  it (~2 lines), then build the distance breakdown (0–2 / 2–5 / 5–10 / 10+ pips) and validate against
-  F-004. No backend work required — this is frontend consumption only.
+> *(DONE / removed from queue — **Distance-at-arm importer mapping + breakdown**: shipped
+> `449dc58` (D-014). `importer.js` maps `price_distance_from_ob_at_arm_pips`; RunDetail renders the
+> signed distance breakdown (occupied=0 / edge / 2–5 / 5–10 / 10+ pips, TE-only gated). This **enables
+> in-app F-004 validation**; F-004 remains **provisional** until confirmed on a run. Frontend
+> consumption only — no backend work.)*
 
 > *(DONE / removed from queue — **Confirmed false losers**: backend export shipped (`post_stop_mfe_r`,
 > `post_stop_reached_original_tp`, `post_stop_bars_to_1r`, `post_stop_lookahead_bars`, `post_stop_model`),
@@ -42,10 +42,10 @@ Groomed by ChatGPT. Priority: P1 (next up) · P2 (soon) · P3 (later).
   and occupation depth are **one signed metric** — the price's offset from the OB **entry-side edge
   at arm** (**+ = vacant/outside, − = occupied/inside, 0 = on edge**). The existing
   `ob_occupied_at_arm` is just its **sign**; this is the **magnitude**.
-  - **Core field now EXPORTED** — `price_distance_from_ob_at_arm_pips` is a real column in the
-    backtester output CSVs. So the breakdown is **no longer backend-blocked**; the open work is the
-    frontend importer map (~2 lines, see P1 "Distance-at-arm importer mapping"). Still pending:
-    the optional `price_distance_from_ob_at_arm_pct` (% of OB width) is **not** yet exported.
+  - **Core field EXPORTED + CONSUMED** — `price_distance_from_ob_at_arm_pips` is a real column in the
+    backtester CSVs and is now mapped + surfaced as the flat distance breakdown (`449dc58`, D-014). The
+    **open** work here is the deeper **signed `distance_band` dimension** (below), not the basic
+    breakdown. Still pending export: the optional `price_distance_from_ob_at_arm_pct` (% of OB width).
   - **Final export spec (recommended):** `price_distance_from_ob_at_arm_pips` (signed, entry-edge ref ·
     **exported**) **+** `price_distance_from_ob_at_arm_pct` (signed, % of OB width · **pending**).
     Everything else — absolute, vacancy distance, occupation depth — is **derived in-frontend**.

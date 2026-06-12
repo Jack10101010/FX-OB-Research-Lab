@@ -4,7 +4,7 @@
 > git-coordination doc (dirty files, commits ahead). This one is the product/research
 > state. Verify against live git before trusting it.
 
-*Last updated: 2026-06-11.*
+*Last updated: 2026-06-12.*
 
 ## Project
 
@@ -21,6 +21,11 @@ confirmed/candidate/genuine breakdown ("6 confirmed of 32 losses · model `fixed
 **Not waiting on any backend export.** Remaining work is research interpretation, not export/import.
 (Classification Tab V2 is paused with Phase 2 shipped.)
 
+**Shipped 2026-06-12 (pushed to `origin/codex-dev`, HEAD `96fc733`) — next focus is interpreting these,
+not more plumbing:** Distance-at-arm consumption (`449dc58`, D-014), Triggered-edge entry-universe
+expansion (`6a69ab4`, D-013), OB-Retest v2.1 monetization insights (`287dfe3`), Failures Lab Loser
+Run-Up breakdown (`2004d28`), and two build-integrity fixes (`7eeb596`, `96fc733`). See Completed.
+
 Parallel state (all committed): **Master Controls Phase 13** (single composer-driven preview;
 `previewLens` still the single read path), **Protection Lab selective BE / BE Trade Explorer**,
 **Phase 14 Wave 1 terminology**, and the **Storage durable backend mirror**. OB-Retest remains active
@@ -28,6 +33,22 @@ under its own stream.
 
 ## Completed
 
+- **Distance-at-arm — frontend consumption** (`449dc58`; D-014) — `importer.js` maps
+  `price_distance_from_ob_at_arm_pips`; RunDetail renders the signed distance breakdown (occupied=0 /
+  edge / 2–5 / 5–10 / 10+ pips), TE-only gated. **Enables in-app F-004 validation; F-004 stays provisional.**
+- **Triggered-edge entry-universe expansion** (`6a69ab4`; D-013) — trigger thresholds are a
+  sorted/deduped SET (presets 10/25/50/75 + custom; single-value back-compat); arm delays C0–C3 → C0–C6.
+  configTranslator serialize + round-trip, tradeUniverse fill-order d5/d6, StrategyBuilder UI. Pairs with
+  the backend C0–C6 candle-delay change. Validated (`beConfigSerialization` +6 TE cases).
+- **OB-Retest v2.1 monetization insights** (`287dfe3`) — pure `obRetestMonetization.js` (RR-capture
+  curve, time-to-impact buckets, decay-by-retest, summary) + 38-case logictest; surfaced in RetestLabTab
+  (RunInsightCard + Monetization Before Death). Reward shown for OB-grain cohorts only (event-grain hides
+  reward by design). Also repaired a dangling `obRetestMonetization.js` import already in HEAD.
+- **Failures Lab — Loser Run-Up breakdown** (`2004d28`) — Trade Outcome & Loser Run-Up panel/tab:
+  loser MFE (max-R-reached before losing) + ≥0.5/1/1.5/2R reach counts across direction / structure /
+  session cohorts; gated to a clear unavailable state when no loser carries `mfe_r`. Validated (36 cases).
+- **Build-integrity fixes** (`7eeb596`, `96fc733`) — committed `BeVerificationPanel.jsx` /
+  `BannerRunIdentity.jsx`, referenced by tracked imports but never tracked (built locally, broke a clean clone).
 - **Storage — durable backend mirror** (`ccb240e`) — research domains (playbook, section roadmaps,
   configs/presets, hypotheses, promotion) mirror to a durable backend via `/storage/{domain}` GET/PUT;
   localStorage stays the instant cache; backend optional (down → local-only); union/newer-wins merge on
@@ -103,8 +124,8 @@ glossary and derivation.
   accumulators → true effect-SE confidence. *(paused with Classification)*
 - **UI Explainability Audit** — tooltips / plain-English descriptions across screens (one shared
   dark tooltip style via `TermTip`/`GlossaryCard`). *(next candidate)*
-- **Distance importer mapping** — `price_distance_from_ob_at_arm_pips` (NOT yet in `importer.js`);
-  then the **Distance-at-arm breakdown**. *(next candidate)*
+- **Distance importer mapping + breakdown** — **SHIPPED** (`449dc58`, D-014). Next on this thread is
+  the signed `distance_band` research (occupation-depth), see `BACKLOG.md` P2 — research, not plumbing.
 - **Model Family Comparison (full, cross-run)** — deferred; the in-tab Enabled Variant Comparison
   is the compact first step. *(next candidate: planning)*
 - **Save findings / research library**.
