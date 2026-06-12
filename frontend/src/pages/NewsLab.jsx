@@ -309,7 +309,7 @@ export default function NewsLab() {
                                     className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.45)] px-3 py-2 text-[11.5px] font-ui text-[hsl(var(--text-2))]"
                                 />
                             </label>
-                            <ActionButton onClick={applyActiveRunRange} icon={CalendarClock} disabled={!trades.length}>Match Active Run</ActionButton>
+                            <ActionButton onClick={applyActiveRunRange} icon={CalendarClock} disabled={!trades.length}>Match Run</ActionButton>
                             <ActionButton onClick={applyFullCalendarRange} icon={Globe2}>Full Calendar</ActionButton>
                             <ActionButton onClick={clearDateRange} icon={FileText} disabled={!dateRangeActive}>Clear</ActionButton>
                         </div>

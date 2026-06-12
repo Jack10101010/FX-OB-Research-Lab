@@ -433,7 +433,7 @@ function UniverseBadge({ universe, modelLabel, variant, source }) {
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border border-[hsl(var(--border-soft)/0.7)] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm px-2.5 py-1.5">
             <BadgeCell label="Universe" value={universeLabel} tone={universeTone} />
             <BadgeCell label="Model" value={modelLabel} />
-            {variant && <BadgeCell label="Variant" value={variantShortLabel(variant)} />}
+            {variant && <BadgeCell label="Position Mode" value={variantShortLabel(variant)} />}
             {source && (
                 <BadgeCell label="Source" value={source} mono title={source} subtle />
             )}

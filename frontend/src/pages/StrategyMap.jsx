@@ -2477,7 +2477,7 @@ function StrategyMapIntelligencePanel({ runStats, sessionStats, obStats }) {
                     in the same row without distinction. */}
                 <div className="grid grid-cols-2 gap-1.5">
                     <StatChip label="Symbol" value={runStats.symbol} />
-                    <StatChip label="Variant" value={variantLabel(runStats.variant)} />
+                    <StatChip label="Position Mode" value={variantLabel(runStats.variant)} />
                     <StatChip label="Detection TF" value={runStats.detectionTf} />
                     <StatChip label="Execution TF" value={runStats.executionTf} />
                 </div>

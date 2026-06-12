@@ -1207,7 +1207,7 @@ export default function StrategyBuilder() {
                         <div className="flex items-center justify-between">
                             <div>
                                 <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab">Scenario Batch</div>
-                                <div className="text-[10px] text-muted-lab">Export baseline plus multiple scenario result views in one run. Each becomes a selectable Result View in Run Workspace.</div>
+                                <div className="text-[10px] text-muted-lab">Export baseline plus multiple scenario result views in one run. Each becomes a selectable View in Run Workspace.</div>
                             </div>
                             <NeonToggle
                                 checked={cfg.entryMode === "research"}

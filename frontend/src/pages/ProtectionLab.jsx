@@ -208,7 +208,7 @@ export default function ProtectionLab() {
                 <div className="px-6 mt-2 mb-3 flex flex-col gap-1.5">
                     <ResearchResultViewBanner universe={universe} run={buildBannerRunIdentity(activeRun)} />
                     <p className="text-[10.5px] font-ui text-[hsl(var(--text-2))] leading-relaxed">
-                        Protection analysis reflects the selected Result View. Panels needing exporter
+                        Protection analysis reflects the selected View. Panels needing exporter
                         fields a variant's CSV lacks will show limited data.
                     </p>
                 </div>

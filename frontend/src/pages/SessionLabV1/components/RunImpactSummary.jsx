@@ -130,7 +130,7 @@ function PreviewToggle({ previewMode, setPreviewMode }) {
 
 export default function RunImpactSummary({ previewMode, setPreviewMode, impactSummary, resultViewLabel }) {
   const { baseline, preview, delta } = impactSummary ?? MOCK_IMPACT_SUMMARY;
-  const baselineEyebrow = resultViewLabel ?? "Current Result View";
+  const baselineEyebrow = resultViewLabel ?? "Current View";
 
   const baseNetRPos    = baseline.netR >= 0;
   const previewNetRPos = preview.netR  >= 0;
