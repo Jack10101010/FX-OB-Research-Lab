@@ -64,6 +64,10 @@ export function BeAffectedTradesCard({
     onAction,
     note,
     scenarioSuffix = "",
+    // STABILITY-FIX: opt-in fixed-height scrolling body so the card keeps a
+    // constant height as the row count changes (prevents page jump when
+    // switching filters). Off by default → Strategy Map usage unchanged.
+    scrollBody = false,
 }) {
     const [filter, setFilter] = React.useState("all"); // all | loss_saved | winner_cut
     const counts = React.useMemo(() => ({
@@ -100,19 +104,21 @@ export function BeAffectedTradesCard({
                         </button>
                     ))}
                 </div>
-                {filtered.length ? (
-                    <DataTable
-                        columns={columns}
-                        rows={filtered}
-                        rowKey="id"
-                        onRowClick={onAction ? (row) => onAction(row) : undefined}
-                        defaultSortKey={null}
-                    />
-                ) : (
-                    <div className="py-3 text-[11.5px] font-ui text-[hsl(var(--text-2))]">
-                        No {filter === "all" ? "BE-affected" : filter === "loss_saved" ? "loss-saved" : "winner-cut"} trades{scenarioSuffix}.
-                    </div>
-                )}
+                <div className={cn(scrollBody && "min-h-[360px] max-h-[420px] overflow-y-auto")}>
+                    {filtered.length ? (
+                        <DataTable
+                            columns={columns}
+                            rows={filtered}
+                            rowKey="id"
+                            onRowClick={onAction ? (row) => onAction(row) : undefined}
+                            defaultSortKey={null}
+                        />
+                    ) : (
+                        <div className="py-3 text-[11.5px] font-ui text-[hsl(var(--text-2))]">
+                            No {filter === "all" ? "BE-affected" : filter === "loss_saved" ? "loss-saved" : "winner-cut"} trades{scenarioSuffix}.
+                        </div>
+                    )}
+                </div>
                 {note ? (
                     <div className="mt-1 text-[11px] font-ui text-[hsl(var(--text-2))] leading-relaxed">{note}</div>
                 ) : null}
