@@ -8,20 +8,24 @@ import { cn } from "@/lib/utils";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
 
-// Visible chip labels. Internal category keys are unchanged.
-const RESULT_META = {
+// Display buckets (5 primary + a rare "Changed" for a genuine atypical Δ R). Internal
+// classification keys are UNCHANGED — this is a display-only grouping. `reason` is the
+// fine-grained internal label, surfaced in the BE Result tooltip.
+const DISPLAY_BUCKET = {
     loss_saved:     { label: "Loss Saved",  tone: "success" },
     winner_cut:     { label: "Winner Cut",  tone: "danger" },
-    tp_kept:        { label: "TP Hit",      tone: "muted" },
-    news_flat:      { label: "News Flat",   tone: "warning" },
-    same_loss:      { label: "Same Loss",   tone: "muted" },
-    same_breakeven: { label: "Same BE",     tone: "muted" },
-    other_same:     { label: "No BE Effect", tone: "muted" },
-    other_changed:  { label: "Changed",     tone: "secondary" },
+    tp_kept:        { label: "TP Kept",     tone: "muted" },
+    news_flat:      { label: "No Change",   tone: "muted",     reason: "News flat" },
+    same_loss:      { label: "No Change",   tone: "muted",     reason: "Same loss" },
+    same_breakeven: { label: "No Change",   tone: "muted",     reason: "Same BE" },
+    other_same:     { label: "No Change",   tone: "muted",     reason: "Other same" },
+    other_changed:  { label: "Changed",     tone: "secondary", reason: "Δ R without a clean save/cut" },
     not_applied:    { label: "Not Applied", tone: "muted" },
 };
-// "No BE Effect" = BE applied but the R outcome didn't change (Δ≈0 buckets).
-const NO_EFFECT_CATS = new Set(["tp_kept", "news_flat", "same_loss", "same_breakeven", "other_same"]);
+// "No Change" groups the Δ≈0 neutral cases. EXCLUDES tp_kept (its own bucket) and
+// other_changed (a genuine Δ R — kept as the rare "Changed" bucket so a non-zero-Δ row
+// is never mislabelled "No Change", which would also contradict footer reconciliation).
+const NO_CHANGE_CATS = new Set(["news_flat", "same_loss", "same_breakeven", "other_same"]);
 
 function fmtTimeShort(t) {
     if (!t) return "—";
@@ -40,8 +44,8 @@ const SIMPLE_FILTERS = [
     { key: "all", label: "All" },
     { key: "loss_saved", label: "Loss Saved" },
     { key: "winner_cut", label: "Winner Cut" },
-    { key: "be_hit", label: "BE Hit" },
-    { key: "no_effect", label: "No BE Effect" },
+    { key: "tp_kept", label: "TP Kept" },
+    { key: "no_change", label: "No Change" },
     { key: "not_applied", label: "Not Applied" },
 ];
 
@@ -69,10 +73,9 @@ export function BeTradeExplorer({
 
     const filtered = React.useMemo(() => {
         if (filter === "all") return scoped;
-        // BE Hit = BE stop actually hit (be_triggered/be_stop) AND applied — not armed-only, not TP.
-        if (filter === "be_hit") return scoped.filter((r) => r.beTriggered && (mode === "all" ? r.beApplied : r.selectiveApplied));
-        if (filter === "no_effect") return scoped.filter((r) => NO_EFFECT_CATS.has(r._disp));
-        return scoped.filter((r) => r._disp === filter);
+        // "No Change" groups the Δ≈0 neutral categories (not tp_kept, not other_changed).
+        if (filter === "no_change") return scoped.filter((r) => NO_CHANGE_CATS.has(r._disp));
+        return scoped.filter((r) => r._disp === filter); // loss_saved · winner_cut · tp_kept · not_applied
     }, [scoped, filter, mode]);
 
     // Sort: non-zero Δ first, then Max Arm desc, then original order.
@@ -99,8 +102,10 @@ export function BeTradeExplorer({
         return { visible: scoped.length, applied: appliedRows.length, triggered, saved, cut, deltaR, expected, mismatch };
     }, [scoped, mode, globalDelta, cohortDelta]);
 
-    // Column order prioritizes decision-making. Arm/BE-exit timestamps are removed
-    // as columns and surfaced in the BE Result cell's tooltip instead.
+    // Column order is decision-first: BE Result + Δ R adjacent (verdict + impact), then
+    // Orig R / Max Arm, then context dims, then MFE R / IDs. The Armed + BE Hit booleans
+    // and arm/exit timestamps are folded into the BE Result cell's tooltip (redundant with
+    // the result chip as columns). MFE R sits right of Max Arm (Max Arm is its bucketed form).
     // Compact "what am I looking at" context line.
     const filterContext = React.useMemo(() => {
         const scenarioPart = String(scenarioLabel || "").replace(/^EXACT\s·\s/, "");
@@ -119,20 +124,24 @@ export function BeTradeExplorer({
     const columns = React.useMemo(() => [
         {
             key: "_disp", label: "BE Result", sortable: false, render: (r) => {
-                const m = RESULT_META[r._disp] || RESULT_META.not_applied;
-                const tip = [r.beArmTime ? `Armed: ${fmtTimeShort(r.beArmTime)}` : null, r.beExitTime ? `BE Exit: ${fmtTimeShort(r.beExitTime)}` : null].filter(Boolean).join(" · ");
+                const m = DISPLAY_BUCKET[r._disp] || DISPLAY_BUCKET.not_applied;
+                const tip = [
+                    m.reason || null,
+                    r.beArmed ? "Armed ✓" : null,
+                    r.beTriggered ? "BE Hit ✓" : null,
+                    r.beArmTime ? `Armed: ${fmtTimeShort(r.beArmTime)}` : null,
+                    r.beExitTime ? `BE Exit: ${fmtTimeShort(r.beExitTime)}` : null,
+                ].filter(Boolean).join(" · ");
                 return <span title={tip || undefined}><Pill tone={m.tone}>{m.label}</Pill></span>;
             },
         },
+        { key: "deltaR", label: "Δ R", align: "right", render: (r) => (r.deltaR != null ? <ColoredR value={r.deltaR} /> : "—") },
+        { key: "originalR", label: "Orig R", align: "right", render: (r) => (r.originalR != null ? <ColoredR value={r.originalR} /> : "—") },
+        { key: "maxArmReached", label: "Max Arm", align: "right", render: (r) => <span className="font-num text-[11px] text-[hsl(var(--text-1))]">{r.maxArmReached != null ? `${r.maxArmReached}R` : "—"}</span> },
         { key: "session", label: "Session", render: (r) => <span className="font-ui text-[11px] text-[hsl(var(--text-2))]">{r.session || "—"}</span> },
         { key: "direction", label: "Dir", render: (r) => <span className="font-ui text-[11px] text-[hsl(var(--text-2))]">{r.direction || "—"}</span> },
         { key: "structure", label: "Struct", render: (r) => <span className="font-ui text-[11px] text-[hsl(var(--text-2))]">{r.structure || "—"}</span> },
-        { key: "originalR", label: "Orig R", align: "right", render: (r) => (r.originalR != null ? <ColoredR value={r.originalR} /> : "—") },
-        { key: "deltaR", label: "Δ R", align: "right", render: (r) => (r.deltaR != null ? <ColoredR value={r.deltaR} /> : "—") },
         { key: "mfeR", label: "MFE R", align: "right", render: (r) => <span className="font-num text-[11px] text-[hsl(var(--text-2))]">{r.mfeR != null ? `${Number(r.mfeR).toFixed(2)}` : "—"}</span> },
-        { key: "maxArmReached", label: "Max Arm", align: "right", render: (r) => <span className="font-num text-[11px] text-[hsl(var(--text-1))]">{r.maxArmReached != null ? `${r.maxArmReached}R` : "—"}</span> },
-        { key: "beArmed", label: "Armed", align: "center", render: (r) => <span className="text-[11px]" title="BE condition reached and BE protection became active">{r.beArmed ? "✓" : "—"}</span> },
-        { key: "beTriggered", label: "BE Hit", align: "center", render: (r) => <span className="text-[11px]" title="BE stop was actually hit after being armed">{r.beTriggered ? "✓" : "—"}</span> },
         { key: "tradeId", label: "Trade", render: (r) => <span className="font-code text-[11px] text-[hsl(var(--text-1))]">{r.tradeId || "—"}</span> },
         { key: "obId", label: "OB", render: (r) => <span className="font-code text-[11px] text-[hsl(var(--text-2))]">{r.obId || "—"}</span> },
         ...(onViewOnMap ? [{
@@ -207,7 +216,7 @@ export function BeTradeExplorer({
                 <div className="flex items-center gap-3 flex-wrap text-[11px] font-ui border-t border-[hsl(var(--border-soft))] pt-2">
                     <span className="text-[hsl(var(--text-2))]">Visible <strong className="text-[hsl(var(--text))]">{footer.visible}</strong></span>
                     <span className="text-[hsl(var(--text-2))]">BE Applied <strong className="text-[hsl(var(--text))]">{footer.applied}</strong></span>
-                    <span className="text-[hsl(var(--text-2))]">BE Hit <strong className="text-[hsl(var(--text))]">{footer.triggered}</strong></span>
+                    <span className="text-[hsl(var(--text-2))]" title="Trades where the BE stop was actually hit — a lifecycle metric, not a result bucket.">BE Hit <strong className="text-[hsl(var(--text))]">{footer.triggered}</strong></span>
                     <span className="text-[hsl(var(--accent-success))]">Saved {footer.saved}</span>
                     <span className="text-[hsl(var(--danger))]">Cut {footer.cut}</span>
                     <span className={cn(footer.deltaR > 0.005 ? "text-[hsl(var(--accent-success))]" : footer.deltaR < -0.005 ? "text-[hsl(var(--danger))]" : "text-[hsl(var(--text-2))]")}>
