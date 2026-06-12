@@ -63,6 +63,12 @@
  */
 
 import { summarizeTradeSanity } from "./tradeClassification";
+import {
+    applyProtectionLayers,
+    normalizeLayers,
+    buildProtectedSourceKey,
+    buildProtectionLabel,
+} from "./protectionLayers";
 
 // ───────────────────────────────────────────────────────────────────────────────
 // Pure helpers (extracted from useResolvedScenario.js so both consumers share
@@ -596,7 +602,7 @@ export function resolveTradeUniverse(params = {}) {
     const stats = summarizeTradeSanity(trades || []);
     const baselineStats = isBaseline ? stats : summarizeTradeSanity(baselineTrades || []);
 
-    return {
+    const baseUniverse = {
         universeType,
         label,
         sourceKey: canonicalKey || "baseline",
@@ -613,6 +619,41 @@ export function resolveTradeUniverse(params = {}) {
         canCompareToBaseline: !isBaseline,
         baselineTrades: baselineTrades || [],
         baselineStats,
+    };
+
+    // ── Protection / qualification layer(s) ──────────────────────────────────
+    // PROTECTION-LAYER-TRADE-UNIVERSE Phase 1. With no layer the base entry
+    // universe is returned untouched (old scenarios load identically). With one
+    // or more layers we fold them over the base universe and return a
+    // "protected_result" universe — same contract, different trade list — so
+    // every page that reads `universe.trades` stays consistent (no parallel BE).
+    const layers = normalizeLayers(scenario || {});
+    if (!layers.length) return baseUniverse;
+
+    const folded = applyProtectionLayers({ baseUniverse, bundle, layers });
+    const protectedTrades = folded.trades || [];
+    const protectedSourceKey = buildProtectedSourceKey(baseUniverse.sourceKey, layers);
+    const protectionLabel = layers.map(buildProtectionLabel).join(" + ");
+
+    return {
+        ...baseUniverse,
+        universeType: "protected_result",
+        baseUniverseType: baseUniverse.universeType,
+        label: `${baseUniverse.label} + ${protectionLabel}`,
+        sourceKey: protectedSourceKey,
+        trades: protectedTrades,
+        stats: summarizeTradeSanity(protectedTrades),
+        warnings: [...baseUniverse.warnings, ...folded.warnings],
+        canCompareToBaseline: true,
+        // Pre-protection base entry universe, exposed for Δ-vs-original views.
+        baseEntryTrades: baseUniverse.trades,
+        baseEntryStats: baseUniverse.stats,
+        protection: {
+            baseEntryVariantKey: baseUniverse.sourceKey,
+            baseLabel: baseUniverse.label,
+            layers: folded.layers,
+            exploratory: true,
+        },
     };
 }
 

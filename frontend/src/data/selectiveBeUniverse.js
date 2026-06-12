@@ -155,7 +155,7 @@ export function selectedFilterLabel(filters = {}) {
  *   meta: object,
  * }}
  */
-export function buildSelectiveBeUniverse({ originalTrades, beTrades, filters = {}, scenario = {} } = {}) {
+export function buildSelectiveBeUniverse({ originalTrades, beTrades, filters = {}, scenario = {}, applyToAll = false } = {}) {
     const originals = Array.isArray(originalTrades) ? originalTrades : [];
     const beList = Array.isArray(beTrades) ? beTrades : [];
     const warnings = [];
@@ -188,7 +188,10 @@ export function buildSelectiveBeUniverse({ originalTrades, beTrades, filters = {
         originalNetR += origR;
 
         const be = beById.get(stableTradeId(orig)) || null;
-        const isMatch = matchesCohort(orig, filters);
+        // applyToAll = "All Trades" protection view: every trade is in-cohort,
+        // independent of filters (used by the protection-layer adapter's "all"
+        // mode). Default false ⇒ the panel's selective semantics are unchanged.
+        const isMatch = applyToAll ? true : matchesCohort(orig, filters);
         if (isMatch) { matched += 1; filteredOriginalTrades.push(orig); }
 
         if (isMatch && be) {
