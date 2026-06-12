@@ -56,6 +56,28 @@ function reactionBandClass(rate) {
     return "text-[hsl(var(--danger))]";
 }
 
+// ── Plain-English interpretation helpers (display only — NO new statistics) ──────
+// Weak-hold trap: held the reaction window often but rarely produced a real move.
+function isWeakHold(holdRate, reactionRate) {
+    return holdRate != null && reactionRate != null && holdRate >= 0.75 && reactionRate < 0.35;
+}
+
+// Cohort verdict from already-computed row values. Transparent, intentionally simple
+// (no overfitting): thin samples never earn a tradeable verdict; otherwise the tier
+// follows the cohort's own capture curve + the model's suggested target.
+function cohortVerdict(r, minN) {
+    if (!r) return null;
+    const thin = r.belowMinN || (r.eligibleN != null && r.eligibleN < minN);
+    if (thin) return { label: "Needs more sample", tone: "muted", tip: "retest_sample" };
+    const c1 = r.capture1R, c3 = r.capture3R, t = r.suggestedTargetR;
+    if (c1 != null && c1 < 0.30) return { label: "Avoid", tone: "danger", tip: "retest_rr_capture" };
+    if (c1 != null && c1 < 0.50) return { label: "Scalp only", tone: "warning", tip: "retest_suggested_target" };
+    if (t == null) return { label: "Scalp only", tone: "warning", tip: "retest_suggested_target" };
+    if (t >= 3 && (c3 == null || c3 >= 0.40)) return { label: "Can consider 3R+", tone: "success", tip: "retest_suggested_target" };
+    if (t >= 1.5) return { label: "1.5R–2R target", tone: "success", tip: "retest_suggested_target" };
+    return { label: "1R target", tone: "secondary", tip: "retest_suggested_target" };
+}
+
 // Event-table outcome display: "survived" is shown as a HOLD (window-scoped),
 // split into strong (reaction met) vs weak (no reaction) — see survival audit.
 const OUTCOME_TONE = { survived: "success", failed: "danger", open: "muted" };
@@ -146,6 +168,7 @@ export function RetestLabTab({ orderBlocks = [], trades = [], activeRun = null, 
         <TooltipProvider>
             <div className="px-6 mt-4 space-y-4">
                 <BasisBanner candleCount={candleCount} meta={meta} summary={summary} source={source} />
+                <RunInsightCard summary={summary} monetizationSummary={monetizationSummary} />
                 <ConfigBar config={config} setConfig={setConfig} source={source} />
                 <RetestIntelligence bestWorst={bestWorstConditions} findings={findings} minN={minN} />
                 <SummaryCards summary={summary} />
@@ -183,6 +206,69 @@ function BasisBanner({ candleCount, meta, summary, source }) {
                 <SectionRoadmap sectionKey="retest-lab" />
             </span>
         </div>
+    );
+}
+
+// ── "What this run is telling you" — plain-English summary of THIS run's own
+// computed numbers (no AI claims; every sentence is gated on a real value). ───────
+function RunInsightCard({ summary, monetizationSummary }) {
+    if (!summary) return null;
+    const closed = summary.survived + summary.failed;
+    const react = closed ? summary.reactionSuccessRate : null;
+    const hold = closed ? summary.windowHoldRate : null;
+    const weak = closed ? summary.weakHoldRate : null;
+    const evFail = summary.obLevel?.eventualFailureRate ?? null;
+    const mon = monetizationSummary?.available ? monetizationSummary : null;
+    const ptShare = (r) => mon?.rrCapture?.points?.find((p) => p.r === r)?.share ?? null;
+
+    const lines = [];
+    if (hold != null && react != null) {
+        if (isWeakHold(hold, react)) {
+            lines.push({ tone: "warning", text: `Most retests held the zone (${pct(hold, 0)} window hold) but very few produced a clean reaction (${pct(react, 0)} reaction success). This is a weak hold — the zone often survives briefly, but isn't easy to trade on the immediate bounce.` });
+        } else if (react >= 0.50) {
+            lines.push({ tone: "success", text: `Retests held the window ${pct(hold, 0)} of the time and reacted cleanly ${pct(react, 0)} of the time — a relatively tradeable immediate reaction.` });
+        } else {
+            lines.push({ tone: "muted", text: `Retests held the window ${pct(hold, 0)} of the time; ${pct(react, 0)} produced a clean reaction. Read the two together before trading the bounce.` });
+        }
+    }
+    if (weak != null && weak >= 0.40) {
+        lines.push({ tone: "muted", text: `About ${pct(weak, 0)} of resolved retests were weak holds — they held the window without a real move, so don't count those as wins.` });
+    }
+    if (evFail != null) {
+        lines.push({ tone: "muted", text: `${pct(evFail, 0)} of touched zones were eventually invalidated — treat retests as a race to capture R before the zone dies, not as levels to hold.` });
+    }
+    if (mon) {
+        const c1 = ptShare(1), c2 = ptShare(2), c5 = ptShare(5);
+        const parts = [];
+        if (c1 != null) parts.push(`${pct(c1, 0)} reached 1R`);
+        if (c2 != null) parts.push(`${pct(c2, 0)} reached 2R`);
+        if (c5 != null) parts.push(`${pct(c5, 0)} reached 5R`);
+        lines.push({ tone: "success", text: `Even so, many zones paid before dying: a median of ${fmtR2(mon.medianMfeBeforeDeathR)} of opportunity${parts.length ? `, with ${parts.join(", ")}` : ""} (idealized — an upper bound).` });
+        if (react != null && react < 0.35 && c1 != null && c1 >= 0.50) {
+            lines.push({ tone: "primary", text: `Good R is available but the reaction is weak — the edge here is entry timing and management, not a bigger target. Use this run for target/management research, not blind entries.` });
+        } else {
+            lines.push({ tone: "primary", text: `Best used for target and management research per cohort (open "How to trade it?" below), not blind entries.` });
+        }
+    } else {
+        lines.push({ tone: "muted", text: `Reward data (MFE / R-capture) needs a v2.1 run — re-export this run to unlock target and management research.` });
+    }
+
+    const dot = { success: "text-[hsl(var(--success))]", warning: "text-[hsl(var(--warning))]", danger: "text-[hsl(var(--danger))]", primary: "text-[hsl(var(--accent-primary))]", muted: "text-muted-lab" };
+    return (
+        <NeonPanel title={<TermTip termKey="retest_intelligence">What this run is telling you</TermTip>} tone="primary" dense>
+            <ul className="space-y-1.5">
+                {lines.map((l, i) => (
+                    <li key={i} className="text-[12px] text-[hsl(var(--text-2))] leading-snug flex gap-1.5">
+                        <span className={dot[l.tone] || dot.muted}>•</span>
+                        <span>{l.text}</span>
+                    </li>
+                ))}
+            </ul>
+            <div className="mt-2 text-[10px] text-muted-lab leading-relaxed">
+                Plain-English summary of this run's own computed numbers. All R figures are idealized opportunity
+                (1R = OB width; no spread/slippage) — upper bounds, not realized PnL.
+            </div>
+        </NeonPanel>
     );
 }
 
@@ -459,6 +545,22 @@ function TradeabilityTable({ entry, dimResult, minN }) {
         { key: "suggestedBETriggerR", label: "BE Trig", align: "right", tip: "retest_be_trigger",
           sortValue: (r) => (r.suggestedBETriggerR == null ? -1 : r.suggestedBETriggerR),
           render: (r) => fmtThresholdR(r.suggestedBETriggerR) },
+        { key: "verdict", label: "Verdict", align: "left", tip: "retest_suggested_target",
+          sortValue: (r) => {
+              const order = { "Avoid": 0, "Scalp only": 1, "1R target": 2, "1.5R–2R target": 3, "Can consider 3R+": 4 };
+              const v = cohortVerdict(r, minN);
+              return v ? (order[v.label] ?? -1) : -1;
+          },
+          render: (r) => {
+              const v = cohortVerdict(r, minN);
+              const weak = isWeakHold(r.windowHoldRate, r.reactionSuccessRate);
+              return (
+                  <div className="flex flex-col items-start gap-0.5">
+                      {v && <Pill tone={v.tone}>{v.tip ? <TermTip termKey={v.tip}>{v.label}</TermTip> : v.label}</Pill>}
+                      {weak && <span className="text-[9px] text-[hsl(var(--warning))]"><TermTip termKey="retest_weak_hold_trap">weak hold</TermTip></span>}
+                  </div>
+              );
+          } },
     ];
     const isRetestAnchor = dimResult.mfeAnchor === "retest";
     const hasThin = rows.some((r) => r.belowMinN);
@@ -508,16 +610,23 @@ function EdgeDiscoveryTabs({ edgeBreakdowns, tradeability, minN }) {
                     </span>
                 )}
             </div>
-            <div className="text-[10px] text-muted-lab">
-                {tradeMode ? (
-                    <span>
-                        <TermTip termKey="retest_idealized_r">Idealized opportunity</TermTip> conditioned by cohort: capture, suggested
-                        target &amp; BE trigger. 1R = OB width — not realized PnL. The run-wide curve stays in Monetization Before Death above.
-                    </span>
-                ) : (
-                    <span>Reaction success &amp; window hold are closed-only; rows below n ≥ {minN} shown but not ranked (*).</span>
-                )}
-            </div>
+            {tradeMode ? (
+                <div className="text-[10.5px] text-muted-lab leading-relaxed space-y-1">
+                    <div>
+                        <span className="text-[hsl(var(--text-2))]">How to use this:</span> compare cohorts to find where retests pay best.
+                        A good cohort needs enough sample, decent reaction success, and strong R capture. If reaction success is low but
+                        R capture is high (a <TermTip termKey="retest_weak_hold_trap">weak hold</TermTip>), the setup likely needs better
+                        entry timing or slower management — not a bigger target. The <TermTip termKey="retest_suggested_target">Verdict</TermTip> column
+                        sums each cohort up.
+                    </div>
+                    <div>
+                        <TermTip termKey="retest_idealized_r">Idealized opportunity</TermTip> conditioned by cohort: 1R = OB width, not realized PnL.
+                        The run-wide curve stays in Monetization Before Death above.
+                    </div>
+                </div>
+            ) : (
+                <div className="text-[10px] text-muted-lab">Reaction success &amp; window hold are closed-only; rows below n ≥ {minN} shown but not ranked (*).</div>
+            )}
             <Segment options={groups.map((g) => ({ value: g.key, label: g.label }))} value={active} onChange={setActive} />
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                 {activePairs.map(([key, entry]) => (

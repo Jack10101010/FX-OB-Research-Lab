@@ -573,23 +573,23 @@ export const GLOSSARY = {
     // the old "Survival Rate" is now Window Hold %; Reaction Success % is the headline.
     retest_window_hold: {
         friendlyName: "Window Hold %",
-        definition: "Of retests that resolved (held or failed), the share with no close beyond the OB's far edge inside the reaction window (~10 candles). It does NOT require a favorable reaction, and it is not eventual survival — an OB can hold a window and be invalidated later (tracked separately as Eventual Failure, engine v2).",
-        whyItMatters: "An honest short-horizon hold measure. It runs high by construction — use Reaction Success % to judge whether retests are actually tradeable.",
+        definition: "Of retests that resolved (held or failed), the share with no close beyond the OB's far edge inside the reaction window (~10 candles). It does NOT require a favorable reaction, and it is not eventual survival — an OB can hold a window and be invalidated later (tracked separately as Eventual Failure).",
+        whyItMatters: "Higher looks safer — but this runs high by design and can mislead: a zone can hold the short window and still die soon after. Use it as a quick 'didn't immediately break' check. Do NOT use it alone to call a setup tradeable — always read it next to Reaction Success %.",
     },
     retest_reaction_success: {
         friendlyName: "Reaction Success %",
-        definition: "Of resolved retests, the share that held the reaction window AND produced at least the configured minimum favorable move (reaction met). Open (right-censored) retests are excluded.",
-        whyItMatters: "The headline metric: a retest only matters if the OB held and price actually reacted. Reaction Success + Weak Hold + Failure = 100% of resolved retests.",
+        definition: "Of resolved retests, the share that held the reaction window AND produced at least the configured minimum favorable move. Open (still-running) retests are excluded. Reaction Success + Weak Hold + Failure = 100% of resolved retests.",
+        whyItMatters: "Higher is better — this is the honest 'did price actually move for you' number. Use it to judge whether a cohort is worth entering on the spot. A high Window Hold % is NOT a substitute: only this metric requires a real favourable move.",
     },
     retest_weak_hold: {
         friendlyName: "Weak Hold %",
-        definition: "Of resolved retests, the share that held the reaction window but did NOT produce the minimum favorable move — price just sat there without breaching.",
-        whyItMatters: "These padded the old 'Survival Rate'. A high weak-hold share means many 'holds' were untradeable.",
+        definition: "Of resolved retests, the share that held the reaction window but did NOT produce the minimum favorable move — price just sat at the zone without breaking or running.",
+        whyItMatters: "Lower is better. A high weak-hold share means many 'holds' were untradeable — the zone survived but didn't pay. Use it to spot the weak-hold trap; do NOT count weak holds as wins.",
     },
     retest_eventual_failure: {
         friendlyName: "Eventual Failure %",
-        definition: "Of touched OBs with a known end (never-touched excluded), the share EVER invalidated — on first touch, inside a retest window, or between windows (engine v2 checks every candle after first touch). OBs still alive when the data ends are censored and counted as not-failed, so this is a conservative lower bound.",
-        whyItMatters: "The OB-level number users usually mean by 'survival' — did the zone eventually die? — as opposed to the per-retest window metrics above.",
+        definition: "Of touched OBs with a known end, the share EVER invalidated — on first touch, inside a retest window, or between windows. Zones still alive when the data ends count as not-failed, so this is a conservative lower bound.",
+        whyItMatters: "Expect this to be high — most zones eventually die. Use it to frame retests as a race to capture R before the zone breaks, not as levels to buy and hold. Do NOT read a surviving zone as a safe one; it just hadn't died yet when the data ended.",
     },
     retest_delayed_failure: {
         friendlyName: "Delayed Failure",
@@ -608,8 +608,8 @@ export const GLOSSARY = {
     },
     retest_engine_version: {
         friendlyName: "Retest Engine Version",
-        definition: "v2 (continuous invalidation) checks for OB breaches on every candle after first touch and reports OB-level eventual failure. v1 only checked inside reaction windows, so v1 backend artifacts can include zombie retests and slightly inflated hold rates — re-export the run to upgrade. Schema v2.1 adds death-quality fields (kill margin, confirmation, re-held) and the MFE family on the same engine.",
-        whyItMatters: "Explains why artifacts of different vintages can legitimately disagree, and which panels each artifact version can power.",
+        definition: "v2 checks for OB breaches on every candle after first touch (not just inside reaction windows) and reports OB-level eventual failure. v2.1 adds the reward fields — MFE before death and the R-capture family — plus death-quality detail. v1 is the old window-only engine.",
+        whyItMatters: "v2.1 is the current, most complete engine: it's what powers the Monetization and Tradeability views. Older v1/v2 runs still load but can't show those reward panels — re-export to upgrade. Use the badge to know which numbers a run can actually support.",
     },
 
     // ── OB Retest v2.1 — death-definition refinement + monetization terms ────────
@@ -640,8 +640,8 @@ export const GLOSSARY = {
     },
     retest_mfe_before_death: {
         friendlyName: "MFE Before Death",
-        definition: "The maximum favorable excursion from the OB's near edge between first touch and invalidation (or data end for zones still alive), in pips. Candles after invalidation never count.",
-        whyItMatters: "The zone's total payable opportunity before it died — the foundation of the monetization layer (evidence run: median ≈ 1.5R; ~63% of zones reached 1R before dying).",
+        definition: "The furthest price ran in your favour from the OB's near edge, between first touch and the moment the zone died (or the data end for zones still alive). Measured in R, where 1R = the zone's own width. Anything after the zone dies never counts.",
+        whyItMatters: "Higher is better — it's the zone's total payable opportunity before it died, and the basis for realistic targets. Use it to size targets. Do NOT read it as realized PnL: it assumes perfect fills and no spread, so treat it as an upper bound.",
     },
     retest_mfe_after_rk: {
         friendlyName: "MFE After R1 / R2 / R3",
@@ -650,8 +650,8 @@ export const GLOSSARY = {
     },
     retest_rr_capture: {
         friendlyName: "RR Capture",
-        definition: "Of touched zones, the share whose MFE before death reached at least a given R multiple (1R, 1.5R, 2R, 2.5R, 3R, 3.5R, 4R, 4.5R, 5R), where 1R = the zone's own width.",
-        whyItMatters: "The realistic-target curve: on the evidence run 1R was reached by ~63% of zones and 2R by ~46% — each higher target roughly halves the hit rate.",
+        definition: "Of touched zones, the share that eventually reached at least a given R target before dying (1R, 2R, 3R, 5R, etc.), where 1R = the zone's own width. The share falls as the target gets bigger.",
+        whyItMatters: "Higher is better at each level. Use it to pick a target a majority of the cohort actually reached. Do NOT assume a high 1R capture means easy money — if Reaction Success is low, that R came slowly and underwater first, so it needed patience/management to collect.",
     },
     retest_idealized_r: {
         friendlyName: "Idealized R Unit",
@@ -685,8 +685,18 @@ export const GLOSSARY = {
     },
     retest_backend_computed: {
         friendlyName: "Backend Computed",
-        definition: "These retest events were computed by the backend exporter and imported as artifacts (rather than derived in-browser from candles). It is a statement about the data's source, not a validation of the metric definitions. Check the engine-version badge: v1 artifacts predate the continuous-invalidation fix.",
-        whyItMatters: "Backend and frontend implement the same logic — provenance differs, definitions (and their caveats) are identical.",
+        definition: "These retest events were calculated by the backend exporter and imported, rather than worked out live in the browser from candles. It describes where the numbers came from, not how good they are.",
+        whyItMatters: "Use it for provenance only — backend and in-browser use the same definitions, so it's not a quality stamp. Still check the engine-version badge to see which panels the run can power.",
+    },
+    retest_grain: {
+        friendlyName: "OB-grain vs Event-grain",
+        definition: "Some breakdowns describe the whole order block and never change between retests — structure, direction, the session it was born in, OB size, origin-candle shape. That's OB-grain. Others describe one specific retest that can differ each visit — retest number, the session of that retest, penetration, timing. That's event-grain.",
+        whyItMatters: "It decides whether reward (MFE / R-capture) can be shown for a cohort. A zone has a single MFE-before-death, so reward can only be pinned to OB-grain cohorts. For event-grain cohorts the lab shows reaction/hold only and hides reward on purpose — that's honesty, not missing data. The one exception is Retest Number, which has its own per-retest reward anchors.",
+    },
+    retest_weak_hold_trap: {
+        friendlyName: "Weak Hold Trap",
+        definition: "A cohort with high Window Hold % but low Reaction Success % — the zone usually doesn't break right away, yet it rarely produces a real favourable move.",
+        whyItMatters: "It looks safe and reliable but isn't a tradeable edge — 'held the window' is not the same as 'paid you'. Use it as a warning to demand good R-capture or better entry timing before trusting the cohort; do NOT treat a high hold rate as a green light.",
     },
     // Legacy key (pre-rename) — kept so older surfaces still resolve. Same meaning
     // as retest_window_hold; do not present as "Survival" anywhere new.
