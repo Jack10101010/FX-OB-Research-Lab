@@ -271,6 +271,36 @@ export function applyProtectionLayers({ baseUniverse, bundle, layers = [] }) {
     return { trades: cur.trades || [], layers: layerMeta, warnings };
 }
 
+// Layer-resolution warning codes (a layer that could not be applied to a run).
+const LAYER_RESOLUTION_WARNINGS = new Set(["NO_BE_DATA", "NO_MATCHING_VARIANT", "NO_MATCHING_SCENARIO"]);
+
+/**
+ * Describe a (possibly protected) universe for cross-run comparison + banners.
+ * A protected universe is ALWAYS universeType "protected_result" even when the
+ * layer could not be applied to a given run (resolver returns base trades + a
+ * resolution warning) — so `resolved` means "the protection layer actually
+ * applied here", which is what Comparison Lab needs to avoid mixing a protected
+ * run against an unprotected fallback. Pure.
+ *
+ * @returns {{ isProtected, resolved, baseLabel, layerLabel, appliedCount, deltaNetR, unresolvedWarnings }}
+ */
+export function describeProtectedUniverse(universe) {
+    const isProtected = universe?.universeType === "protected_result";
+    const layer0 = isProtected ? universe?.protection?.layers?.[0] : null;
+    const unresolvedWarnings = (Array.isArray(universe?.warnings) ? universe.warnings : [])
+        .filter((w) => w && LAYER_RESOLUTION_WARNINGS.has(w.code));
+    return {
+        isProtected,
+        // Resolved iff protected AND the layer applied (no resolution warning, ≥1 trade).
+        resolved: Boolean(isProtected && unresolvedWarnings.length === 0 && (universe?.trades?.length || 0) > 0),
+        baseLabel: universe?.protection?.baseLabel ?? null,
+        layerLabel: layer0?.layerLabel ?? null,
+        appliedCount: layer0?.appliedCount ?? 0,
+        deltaNetR: layer0?.deltaNetR ?? null,
+        unresolvedWarnings,
+    };
+}
+
 /**
  * Normalize a scenario's protection selection into an ordered layer array.
  * Accepts `scenario.layers` (array, preferred) OR `scenario.protection` (single

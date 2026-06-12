@@ -8,6 +8,7 @@ import { NeonSelect, NeonButton } from "@/components/lab/controls";
 import { getRunDisplayName, compactTimeframe, useDataset, addProjectFinding, getTradeUniverse } from "@/data/store";
 import { useTradeUniverse } from "@/data/useTradeUniverse";
 import { collectAllEntryKeys, buildAvailableOptions } from "@/data/tradeUniverse";
+import { describeProtectedUniverse } from "@/data/protectionLayers";
 import { formatDirectionalScenarioLabel } from "@/components/lab/entries/analytics/entryFormatters";
 import ResearchContextBanner from "@/components/lab/ResearchContextBanner";
 // RB-8d: canonical Results Basis summaries replace the deprecated lib/metrics.
@@ -123,6 +124,12 @@ export default function ComparisonLab() {
     // Directional parallel path — bypasses the entryResults / universe chain entirely.
     const isDirectionalMode     = globalScenario?.family === "directional";
     const directionalStorageKey = isDirectionalMode ? (globalScenario?.directionalStorageKey || null) : null;
+    // PROTECTION-LAYER Phase 3 — protected comparison mode. Active only if the
+    // effective scenario carries protection layers. A slot is comparable only
+    // when its protection layer actually RESOLVED for that run; a run that lacks
+    // the BE scenario falls back to its base universe and is EXCLUDED (never
+    // silently compared against a protected slot).
+    const isProtectedMode       = Array.isArray(effectiveScenario?.layers) && effectiveScenario.layers.length > 0;
 
     // Resolve a TradeUniverse for each slot against the same effective scenario.
     const slotUniverses = useMemo(
@@ -130,13 +137,14 @@ export default function ComparisonLab() {
         [runs, effectiveScenario],
     );
 
-    // 3C-FINALIZE — scenario coverage. In scenario mode a slot is comparable
-    // only when its resolved universe actually carries scenario trades; slots
-    // that fall back to baseline are EXCLUDED from the verdict/deltas so a single
-    // comparison never mixes scenario numbers against baseline-fallback numbers.
-    // Baseline mode: every slot is comparable.
-    // Directional mode: check bundle.directionalResults directly (bypasses universe chain).
+    // 3C-FINALIZE — scenario coverage. In scenario/protected mode a slot is
+    // comparable only when its resolved universe actually carries scenario /
+    // protected trades; slots that fall back are EXCLUDED from the verdict/deltas
+    // so a single comparison never mixes scenario (or protected) numbers against
+    // a baseline / unprotected fallback. Baseline mode: every slot is comparable.
+    const isRestrictedMode = isScenarioMode || isProtectedMode;
     const slotHasScenario = (idx) => {
+        if (isProtectedMode) return describeProtectedUniverse(slotUniverses[idx]).resolved;
         if (!isScenarioMode) return false;
         if (isDirectionalMode) {
             const bundle = getRunData(runs[idx]?.id);
@@ -145,13 +153,13 @@ export default function ComparisonLab() {
         return slotUniverses[idx]?.universeType === "scenario"
             && (slotUniverses[idx]?.trades?.length || 0) > 0;
     };
-    const slotComparable = (idx) => !isScenarioMode || slotHasScenario(idx);
+    const slotComparable = (idx) => !isRestrictedMode || slotHasScenario(idx);
     const scenarioCoverage = (() => {
-        if (!isScenarioMode) return { present: runs.length, total: runs.length, missingRunIds: [] };
+        if (!isRestrictedMode) return { present: runs.length, total: runs.length, missingRunIds: [] };
         const missingRunIds = runs.filter((_r, idx) => !slotHasScenario(idx)).map((r) => r?.id).filter(Boolean);
         return { present: runs.length - missingRunIds.length, total: runs.length, missingRunIds };
     })();
-    const hasPartialScenarioCoverage = isScenarioMode && scenarioCoverage.missingRunIds.length > 0;
+    const hasPartialScenarioCoverage = isRestrictedMode && scenarioCoverage.missingRunIds.length > 0;
 
     // Union of scenario keys found across all selected runs (for the entry-model selector).
     const allAvailableOptions = useMemo(() => {
@@ -598,14 +606,18 @@ export default function ComparisonLab() {
                     />
                 </div>
                 <p className="text-[10.5px] font-ui text-[hsl(var(--text-2))] leading-relaxed">
-                    {isScenarioMode
-                        ? `Scenario mode · ${activeScenarioLabel} · Raw R`
-                        : "Comparing primary-variant baselines · Raw R"}
+                    {isProtectedMode
+                        ? `Protected mode · ${describeProtectedUniverse(slotUniverses[0]).layerLabel || "Protection layer"} · exploratory · Raw R`
+                        : isScenarioMode
+                            ? `Scenario mode · ${activeScenarioLabel} · Raw R`
+                            : "Comparing primary-variant baselines · Raw R"}
                 </p>
                 {hasPartialScenarioCoverage && (
                     <div className="flex items-start gap-2 border border-[hsl(var(--warning)/0.35)] bg-[hsl(var(--warning)/0.06)] clip-bevel-sm px-2.5 py-1.5" data-testid="cmp-partial-coverage">
                         <span className="text-[10.5px] leading-relaxed text-[hsl(var(--text-2))]">
-                            Partial coverage — {scenarioCoverage.present} of {scenarioCoverage.total} runs have {activeScenarioLabel}; missing runs are excluded from verdict/deltas.
+                            {isProtectedMode
+                                ? `Partial protection coverage — ${scenarioCoverage.present} of ${scenarioCoverage.total} runs resolved this protection layer; runs without it are excluded from verdict/deltas (never compared unprotected vs protected).`
+                                : `Partial coverage — ${scenarioCoverage.present} of ${scenarioCoverage.total} runs have ${activeScenarioLabel}; missing runs are excluded from verdict/deltas.`}
                         </span>
                     </div>
                 )}

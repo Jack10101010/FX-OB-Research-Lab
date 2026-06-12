@@ -6,6 +6,8 @@
 import React, { useMemo } from "react";
 import { getRunDisplayName, useDataset } from "@/data/store";
 import { useTradeUniverse } from "@/data/useTradeUniverse";
+import { summarizeTradeClassifications } from "@/data/tradeClassification";
+import { evaluateSampleGuardrail } from "@/data/sampleGuardrail";
 import ResearchResultViewBanner from "@/components/lab/ResearchResultViewBanner";
 import { buildBannerRunIdentity } from "@/components/lab/researchBanner/bannerRun";
 import { LabRunHero } from "@/components/lab/LabRunHero";
@@ -113,6 +115,17 @@ export function FailuresWorkspace() {
     // Step 1: Extract losers from all trades
     const allLosers = useMemo(() => filterLosers(trades), [trades]);
 
+    // PROTECTION-LAYER Phase 3 — protected-universe awareness. When the active
+    // universe is a protected_result, BE-exit rows are mixed into the trade list;
+    // surface their counts so a BE-saved loss is never silently dropped, and
+    // gate strong conclusions on the loser sample size.
+    const isProtectedUniverse = universe.universeType === "protected_result";
+    const exitTypeRollup = useMemo(() => summarizeTradeClassifications(trades), [trades]);
+    const failuresGuardrail = useMemo(
+        () => evaluateSampleGuardrail({ sampleSize: allLosers.length }),
+        [allLosers.length],
+    );
+
     // Step 2: Classify each loser into a failure archetype
     const classifiedLosers = useMemo(
         () => classifyAll(allLosers, config),
@@ -164,6 +177,25 @@ export function FailuresWorkspace() {
             <div className="px-6 mt-2 mb-2">
                 <ResearchResultViewBanner universe={universe} run={buildBannerRunIdentity(activeRun)} />
             </div>
+
+            {/* PROTECTION-LAYER Phase 3 — protected-universe notice: exit-type
+                counts + low-sample caution so failure analytics on a protected
+                (exploratory) universe are never read as the real strategy. */}
+            {isProtectedUniverse && (
+                <div className="px-6 mb-2">
+                    <div className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-[4px] border border-[hsl(var(--accent-secondary)/0.5)] bg-[hsl(var(--accent-secondary)/0.08)]">
+                        <span className="text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))]">Protected universe</span>
+                        <span className="text-[10.5px] font-ui text-[hsl(var(--text-2))]">
+                            Failure analytics below run on a protected, exploratory universe — not the raw strategy.
+                        </span>
+                        <span className="px-2 py-0.5 text-[10px] font-ui border border-[hsl(var(--text-muted)/0.4)] text-[hsl(var(--text-2))]">BE Exit {exitTypeRollup.beExitCount ?? 0}</span>
+                        <span className="px-2 py-0.5 text-[10px] font-ui border border-[hsl(var(--text-muted)/0.4)] text-[hsl(var(--text-2))]">Protection Applied {exitTypeRollup.protectionAppliedCount ?? 0}</span>
+                        {failuresGuardrail.message && (
+                            <span className="px-2 py-0.5 text-[10px] font-ui border border-[hsl(var(--warning)/0.5)] text-[hsl(var(--warning))]">{failuresGuardrail.message}</span>
+                        )}
+                    </div>
+                </div>
+            )}
 
             {/* Tab rail */}
             <WorkspaceTabBar

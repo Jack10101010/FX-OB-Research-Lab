@@ -86,6 +86,25 @@ export const EXCLUDED_CATEGORIES = new Set([
 ]);
 
 // ────────────────────────────────────────────────────────────────────────────
+// Exit-type / provenance axis (PROTECTION-LAYER Phase 3)
+// ────────────────────────────────────────────────────────────────────────────
+// This axis is ORTHOGONAL to the economic category above. The economic category
+// (WIN/LOSS/BREAKEVEN) stays the single source of truth for netR / win-rate /
+// PF / equity — a break-even exit is a real fill that moves equity, so it must
+// remain in those buckets by its realized R. The exit-type axis records HOW the
+// trade ended (provenance) for display, counts, filtering, and banners, and is
+// future-proof for partial-risk / trailing / gate layers. A gate layer that
+// EXCLUDES a trade removes it from universe.trades entirely; "filtered_out" is
+// reserved for surfacing such an excluded set separately, never as P&L.
+export const EXIT_TYPES = Object.freeze({
+    NORMAL: "normal",
+    BE_EXIT: "be_exit",
+    PARTIAL_PROFIT: "partial_profit",
+    PARTIAL_LOSS: "partial_loss",
+    FILTERED_OUT: "filtered_out",
+});
+
+// ────────────────────────────────────────────────────────────────────────────
 // Low-level helpers
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -244,6 +263,33 @@ export function classifyTrade(trade, options = {}) {
     return r > 0 ? "WIN" : "LOSS";
 }
 
+/**
+ * Provenance / exit-type for a trade — orthogonal to classifyTrade's economic
+ * category. Does NOT affect win/loss/netR. First match wins:
+ *   • outcome PARTIAL_* → partial_profit / partial_loss (reserved for future layers)
+ *   • BE_EXIT outcome, or a protection-layer row (protectionApplied + break_even),
+ *     or any be_* exit field present → be_exit
+ *   • outcome FILTERED_OUT → filtered_out (reserved; excluded sets only)
+ *   • otherwise → normal
+ */
+export function tradeExitType(trade) {
+    if (!trade) return EXIT_TYPES.NORMAL;
+    const norm = normalizeOutcome(trade.outcome ?? trade.result);
+    if (norm === "PARTIAL_PROFIT") return EXIT_TYPES.PARTIAL_PROFIT;
+    if (norm === "PARTIAL_LOSS") return EXIT_TYPES.PARTIAL_LOSS;
+    if (norm === "PARTIAL_CLOSE" || norm === "PARTIAL") {
+        const r = numericR(trade);
+        return (r != null && r < 0) ? EXIT_TYPES.PARTIAL_LOSS : EXIT_TYPES.PARTIAL_PROFIT;
+    }
+    const isBeProtection = asTruthyFlag(trade.protectionApplied)
+        && String(trade.protectionType ?? "").toLowerCase() === "break_even";
+    const hasBeFields = trade.be_exit_r != null || trade.beExitR != null
+        || asTruthyFlag(trade.be_triggered) || asTruthyFlag(trade.beTriggered);
+    if (norm === "BE_EXIT" || isBeProtection || hasBeFields) return EXIT_TYPES.BE_EXIT;
+    if (norm === "FILTERED_OUT") return EXIT_TYPES.FILTERED_OUT;
+    return EXIT_TYPES.NORMAL;
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Convenience predicates
 // ────────────────────────────────────────────────────────────────────────────
@@ -338,11 +384,17 @@ export function summarizeTradeClassifications(trades, options = {}) {
         : "wins_plus_losses";
 
     const byCategory = { ...ZERO_COUNTS };
+    // Orthogonal exit-type axis (provenance). Counts only; never affects netR.
+    const byExitType = { normal: 0, be_exit: 0, partial_profit: 0, partial_loss: 0, filtered_out: 0 };
+    let protectionAppliedCount = 0;
     let netR = 0;
     let netRPerformance = 0;
     for (const trade of list) {
         const category = classifyTrade(trade, options);
         byCategory[category] = (byCategory[category] || 0) + 1;
+        const exitType = tradeExitType(trade);
+        byExitType[exitType] = (byExitType[exitType] || 0) + 1;
+        if (asTruthyFlag(trade?.protectionApplied)) protectionAppliedCount += 1;
         const r = numericR(trade);
         if (r != null) {
             netR += r;
@@ -371,6 +423,10 @@ export function summarizeTradeClassifications(trades, options = {}) {
     return {
         total: list.length,
         byCategory,
+        // Provenance axis — orthogonal to win/loss; for display / counts / banners.
+        byExitType,
+        beExitCount: byExitType.be_exit,
+        protectionAppliedCount,
         wins,
         losses,
         flats,
