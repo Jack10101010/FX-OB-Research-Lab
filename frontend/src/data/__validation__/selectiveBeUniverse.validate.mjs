@@ -20,7 +20,7 @@ function loadCjs(absPath) {
     return mod.exports;
 }
 
-const { buildSelectiveBeUniverse, matchesCohort, stableTradeId, cohortBreakdown, buildSessionAttribution } = loadCjs("src/data/selectiveBeUniverse.js");
+const { buildSelectiveBeUniverse, matchesCohort, stableTradeId, cohortBreakdown, buildSessionAttribution, classifyBeAttributionRow } = loadCjs("src/data/selectiveBeUniverse.js");
 
 let failures = 0;
 const ok = (cond, msg) => {
@@ -288,6 +288,47 @@ const longAttr = buildSessionAttribution(aBuild({ directions: ["Long"] }).trades
 ok(longAttr.totals.affected === 2, "Long filter → A1 + N1 (2 affected)");
 const chochAttr = buildSessionAttribution(aBuild({ structures: ["CHoCH"] }).trades);
 ok(chochAttr.totals.affected === 2, "CHoCH filter → A1 + N2 (2 affected)");
+
+console.log("\n§21  Nullable arm level — panel 'no BE' contract");
+// The panel maps a null arm to EMPTY filters (no BE) so a null arm is never
+// treated as unrestricted even when sessions/direction are selected.
+const panelFilters = (c) => (c.armLevel == null ? {} : c);
+const pBuild = (c) => buildSelectiveBeUniverse({ originalTrades: aOrig, beTrades: aBe, filters: panelFilters(c), scenario });
+ok(pBuild({ armLevel: null, sessions: ["Asia", "London"] }).applied === 0, "null arm + sessions → 0 applied (panel gate)");
+ok(pBuild({ armLevel: null, directions: ["Long"] }).applied === 0, "null arm + direction → 0 applied (panel gate)");
+ok(pBuild({ armLevel: null }).applied === 0 && pBuild({ armLevel: null }).isNoFilterSelected === true, "null arm alone → no BE");
+ok(pBuild({ armLevel: 0.5 }).applied === 4, "armLevel 0.5 selected → applies (A,B,N reached ≥0.5; all 4 here)");
+ok(pBuild({ armLevel: 1.5, sessions: ["London"] }).applied === 1, "armLevel 1.5 + London → only L1 (2.0R) ");
+// Direct builder callers are unchanged (null arm is simply 'no arm constraint').
+ok(buildSelectiveBeUniverse({ originalTrades: aOrig, beTrades: aBe, filters: { sessions: ["Asia"] }, scenario }).applied === 1, "direct caller: sessions-only still applies (builder unchanged)");
+
+console.log("\n§22  Explicit BE attribution classification");
+const cls = (o, p) => classifyBeAttributionRow({ originalTrade: o, protectedTrade: p }).category;
+ok(cls({ net_r: -1 }, { net_r: 0 }) === "loss_saved", "loser → BE 0 = loss_saved");
+ok(cls({ net_r: 3 }, { net_r: 0 }) === "winner_cut", "winner → BE 0 = winner_cut");
+ok(cls({ net_r: 2 }, { net_r: 2 }) === "tp_kept", "winner unchanged (Δ0) = tp_kept");
+ok(cls({ net_r: -0.3, outcome: "NEWS_FLATTEN" }, { net_r: -0.3 }) === "news_flat", "news-flattened original (Δ0) = news_flat");
+ok(cls({ net_r: -0.3 }, { net_r: -0.3, news_action: "flattened_active_trade" }) === "news_flat", "news_action on protected (Δ0) = news_flat");
+ok(cls({ net_r: -1 }, { net_r: -1 }) === "same_loss", "loser unchanged (Δ0) = same_loss");
+ok(cls({ net_r: 0 }, { net_r: 0 }) === "same_breakeven", "flat unchanged (Δ0) = same_breakeven");
+ok(cls({ net_r: 1 }, { net_r: 2 }) === "other_changed", "Δ≠0 winner-improved = other_changed (not save/cut)");
+ok(cls({ net_r: -1 }, { net_r: -2 }) === "other_changed", "Δ≠0 loser-worsened = other_changed");
+// other_same is a defensive fallback (unreachable when protR == originalR exactly,
+// since equal R always lands in tp_kept / same_loss / same_breakeven). Documented.
+
+// Session attribution counts every category + composed "same"; footer == summary.
+const cOrig = [
+    mOrig("W1", "Long", "BOS", "London", 2, 2.0),   // winner kept (BE 2 → 2): tp_kept
+    mOrig("S1", "Long", "CHoCH", "London", -1, 1.5), // loser saved
+    { ...orig("F1", "Short", "BOS", "Asia", -0.3), mfe_r: 1.2, outcome: "NEWS_FLATTEN" }, // news flat
+];
+const cBe = [be("W1", 2), be("S1", 0), { id: "F1", net_r: -0.3 }];
+const aU = buildSelectiveBeUniverse({ originalTrades: cOrig, beTrades: cBe, filters: {}, applyToAll: true, scenario });
+const aA = buildSessionAttribution(aU.trades);
+ok(aA.totals.applied === 3, "attribution applied counts all 3");
+ok(aA.totals.saved === 1 && aA.totals.tpKept === 1 && aA.totals.newsFlat === 1, "categories: 1 saved, 1 tpKept, 1 newsFlat");
+ok(aA.totals.same === (aA.totals.sameLoss + aA.totals.sameBreakeven + aA.totals.otherSame), "displayed 'same' = sameLoss+sameBreakeven+otherSame");
+ok(aA.totals.deltaR.toFixed(2) === aU.summary.deltaNetR.toFixed(2), "attribution footer Δ == summary deltaNetR");
 
 console.log(`\n${failures === 0 ? "✅ ALL PASS" : `❌ ${failures} FAILURE(S)`}\n`);
 process.exit(failures === 0 ? 0 : 1);

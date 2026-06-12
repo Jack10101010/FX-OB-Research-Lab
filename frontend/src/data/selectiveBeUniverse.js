@@ -108,38 +108,101 @@ export function cohortBreakdown(trades) {
     return { total: list.length, longs, shorts, choch, bos, sessions };
 }
 
+// Flat/breakeven tolerance for R comparisons (matches tradeClassification).
+const ATTR_FLAT_EPS = 0.005;
+const ATTR_DELTA_EPS = 1e-9;
+const ATTR_LABELS = {
+    loss_saved: "Loss Saved",
+    winner_cut: "Winner Cut",
+    tp_kept: "TP Kept",
+    news_flat: "News Flat",
+    same_loss: "Same Loss",
+    same_breakeven: "Same Breakeven",
+    other_same: "Other Same",
+    other_changed: "Other Changed",
+};
+
+function attrOutcomeNorm(v) {
+    return String(v ?? "").trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+}
+/** News-flatten detection from a trade's outcome / news_action. Self-contained. */
+function attrIsNewsFlat(t) {
+    if (!t) return false;
+    const o = attrOutcomeNorm(t.outcome ?? t.result);
+    if (o.includes("NEWS_FLATTEN")) return true;
+    const a = attrOutcomeNorm(t.news_action ?? t.newsAction);
+    return a === "FLATTENED_ACTIVE_TRADE" || a.includes("NEWS_FLATTEN");
+}
+
+/**
+ * Explicit lifecycle classification for a BE-applied trade (PURE). Replaces the
+ * ambiguous "affected / no change" language with a definite bucket. The economic
+ * R math is unchanged — this only labels what happened.
+ *
+ * @returns {{ category, label, deltaR, originalR, protectedR }}
+ */
+export function classifyBeAttributionRow({ originalTrade, protectedTrade } = {}) {
+    const origR = tradeR(originalTrade);
+    const protR = tradeR(protectedTrade);
+    const deltaR = protR - origR;
+    let category;
+    if (deltaR > ATTR_DELTA_EPS && origR < 0) category = "loss_saved";
+    else if (deltaR < -ATTR_DELTA_EPS && origR > 0) category = "winner_cut";
+    else if (Math.abs(deltaR) <= ATTR_DELTA_EPS) {
+        if (attrIsNewsFlat(protectedTrade) || attrIsNewsFlat(originalTrade)) category = "news_flat";
+        else if (origR > ATTR_FLAT_EPS && protR > ATTR_FLAT_EPS) category = "tp_kept";
+        else if (origR < -ATTR_FLAT_EPS && protR < -ATTR_FLAT_EPS) category = "same_loss";
+        else if (Math.abs(origR) <= ATTR_FLAT_EPS && Math.abs(protR) <= ATTR_FLAT_EPS) category = "same_breakeven";
+        else category = "other_same";
+    } else {
+        category = "other_changed"; // Δ ≠ 0 but not a clean save/cut.
+    }
+    return { category, label: ATTR_LABELS[category], deltaR: rnd(deltaR), originalR: rnd(origR), protectedR: rnd(protR) };
+}
+
 /**
  * Per-session attribution over a built selective universe's trades. Counts only
- * protectionApplied (BE-swapped) rows, so the totals reconcile exactly with the
- * universe summary: totals.affected === applied, totals.saved === lossesSaved,
- * totals.cut === winnersCut, totals.deltaR === summary.deltaNetR (2dp). Pure.
+ * protectionApplied (BE-swapped) rows by explicit lifecycle category (see
+ * classifyBeAttributionRow). Totals reconcile with the universe summary:
+ * totals.applied === applied, totals.deltaR === summary.deltaNetR (2dp).
+ * `same` = sameLoss + sameBreakeven + otherSame (display bucket); the detailed
+ * counts are retained for debugging. Pure.
  *
  * @param {object[]} universeTrades  the `.trades` of a buildSelectiveBeUniverse result
- * @returns {{ rows: {session,affected,saved,cut,deltaR}[], totals: {affected,saved,cut,deltaR} }}
  */
 export function buildSessionAttribution(universeTrades) {
     const list = Array.isArray(universeTrades) ? universeTrades : [];
     const bySession = new Map();
-    const totals = { affected: 0, saved: 0, cut: 0, deltaR: 0 };
+    const mk = (session) => ({
+        session, applied: 0, saved: 0, cut: 0, tpKept: 0, newsFlat: 0,
+        sameLoss: 0, sameBreakeven: 0, otherSame: 0, otherChanged: 0, deltaR: 0,
+    });
+    const totals = mk(undefined); delete totals.session;
+    const CAT_TO_KEY = {
+        loss_saved: "saved", winner_cut: "cut", tp_kept: "tpKept", news_flat: "newsFlat",
+        same_loss: "sameLoss", same_breakeven: "sameBreakeven", other_same: "otherSame", other_changed: "otherChanged",
+    };
     for (const t of list) {
         if (!t || t.protectionApplied !== true) continue;
         const session = String(t.session ?? t.fillSession ?? t.fill_session ?? "").trim() || "—";
-        if (!bySession.has(session)) bySession.set(session, { session, affected: 0, saved: 0, cut: 0, deltaR: 0 });
+        if (!bySession.has(session)) bySession.set(session, mk(session));
         const row = bySession.get(session);
-        row.affected += 1; totals.affected += 1;
-        const origR = num(t.originalR) ?? 0;
-        const reason = String(t.be_exit_reason ?? t.beExitReason ?? "").toLowerCase();
-        const triggered = bool(t.be_triggered ?? t.beTriggered) || reason === "be_stop";
-        if (triggered && origR < 0) { row.saved += 1; totals.saved += 1; }
-        else if (triggered && origR > 0) { row.cut += 1; totals.cut += 1; }
+        row.applied += 1; totals.applied += 1;
+        // Prefer the category stamped at build time; fall back to recomputing.
+        const category = t.beCategory
+            || classifyBeAttributionRow({ originalTrade: { net_r: t.originalR }, protectedTrade: t }).category;
+        const key = CAT_TO_KEY[category] || "otherSame";
+        row[key] += 1; totals[key] += 1;
         const d = num(t.deltaR) ?? 0;
         row.deltaR += d; totals.deltaR += d;
     }
-    const rows = [...bySession.values()]
-        .map((r) => ({ ...r, deltaR: rnd(r.deltaR) }))
-        .sort((a, b) => a.session.localeCompare(b.session));
-    totals.deltaR = rnd(totals.deltaR);
-    return { rows, totals };
+    const withSame = (r) => ({ ...r, same: r.sameLoss + r.sameBreakeven + r.otherSame, deltaR: rnd(r.deltaR) });
+    const rows = [...bySession.values()].map(withSame).sort((a, b) => a.session.localeCompare(b.session));
+    const totalsOut = withSame(totals);
+    // Back-compat alias: callers that read `affected` still work.
+    totalsOut.affected = totalsOut.applied;
+    rows.forEach((r) => { r.affected = r.applied; });
+    return { rows, totals: totalsOut };
 }
 
 /**
@@ -266,6 +329,8 @@ export function buildSelectiveBeUniverse({ originalTrades, beTrades, filters = {
                 protectionApplied: true,
                 protectionType: "break_even",
                 protectionScenarioKey: scenarioKey,
+                // Explicit lifecycle bucket for attribution (pure; no R impact).
+                beCategory: classifyBeAttributionRow({ originalTrade: orig, protectedTrade: be }).category,
                 originalR: rnd(origR),
                 protectedR: rnd(protR),
                 deltaR: rnd(protR - origR),

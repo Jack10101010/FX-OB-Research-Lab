@@ -344,13 +344,22 @@ function AttributionTable({ title, subtitle, attribution, sessionOrder = null, i
     const sessions = sessionOrder && sessionOrder.length
         ? sessionOrder
         : attribution.rows.map((r) => r.session);
-    const zero = (session) => ({ session, affected: 0, saved: 0, cut: 0, deltaR: 0 });
+    const zero = (session) => ({ session, applied: 0, saved: 0, cut: 0, tpKept: 0, newsFlat: 0, same: 0, deltaR: 0 });
     const rows = sessions.map((s) => bySession.get(s) || zero(s));
     const t = attribution.totals;
     const isCohort = tone === "cohort";
     const dR = (v) => `${v > 0 ? "+" : ""}${Number(v).toFixed(1)}R`;
     const dRTone = (v) => (v > 0.005 ? "text-[hsl(var(--success))]" : v < -0.005 ? "text-[hsl(var(--danger))]" : "text-[hsl(var(--text-2))]");
     const deltaMismatch = summaryDelta != null && Math.abs(Number(summaryDelta) - Number(t.deltaR)) > 0.011;
+    // Compact headers (tooltip = full meaning). Columns: Applied · Saved · Cut · TP Kept · News Flat · Same · Δ R.
+    const HEADS = [
+        { k: "applied", h: "Appl", t: "BE Applied — trade received the BE rule (SL moved to BE)" },
+        { k: "saved", h: "Sv", t: "Saved — original loser improved by BE", c: "text-[hsl(var(--success))]" },
+        { k: "cut", h: "Ct", t: "Cut — original winner worsened by BE", c: "text-[hsl(var(--danger))]" },
+        { k: "tpKept", h: "TP", t: "TP Kept — BE applied but trade still finished a winner (no R change)" },
+        { k: "newsFlat", h: "Nws", t: "News Flat — BE applied but final result is news-flattened / forced flat" },
+        { k: "same", h: "Sm", t: "Same — unchanged (same loss / breakeven / other), R not changed by BE" },
+    ];
     return (
         <div className={cn(
             "rounded-[4px] border p-2 flex flex-col gap-1",
@@ -362,14 +371,13 @@ function AttributionTable({ title, subtitle, attribution, sessionOrder = null, i
                 <span className={cn("text-[11px] font-ui font-semibold uppercase tracking-[0.06em]", isCohort ? "text-[hsl(var(--accent-secondary))]" : "text-[hsl(var(--text-2))]")}>{title}</span>
                 {subtitle && <span className="text-[9.5px] font-ui text-[hsl(var(--text-3))]">{subtitle}</span>}
             </div>
-            <table className="w-full text-[11.5px] font-ui tabular-nums">
+            <div className="overflow-x-auto">
+            <table className="w-full text-[11px] font-ui tabular-nums">
                 <thead>
                     <tr className="text-[hsl(var(--text-3))]">
-                        <th className="text-left font-normal py-0.5">Session</th>
-                        <th className="text-right font-normal">Aff</th>
-                        <th className="text-right font-normal">Saved</th>
-                        <th className="text-right font-normal">Cut</th>
-                        <th className="text-right font-normal">Δ R</th>
+                        <th className="text-left font-normal py-0.5">Sess</th>
+                        {HEADS.map((c) => <th key={c.k} className="text-right font-normal px-0.5" title={c.t}>{c.h}</th>)}
+                        <th className="text-right font-normal px-0.5" title="Δ R — net R change vs original, summed">Δ R</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -380,13 +388,11 @@ function AttributionTable({ title, subtitle, attribution, sessionOrder = null, i
                             <tr key={r.session} className={cn(
                                 "border-t border-[hsl(var(--border-soft)/0.4)]",
                                 isCohort && !included ? "opacity-40" : "",
-                                isCohort && included && r.affected > 0 ? "text-[hsl(var(--text))]" : "text-[hsl(var(--text-2))]",
+                                isCohort && included && r.applied > 0 ? "text-[hsl(var(--text))]" : "text-[hsl(var(--text-2))]",
                             )}>
                                 <td className="text-left py-0.5">{r.session}</td>
-                                <td className="text-right">{r.affected}</td>
-                                <td className="text-right text-[hsl(var(--success))]">{r.saved}</td>
-                                <td className="text-right text-[hsl(var(--danger))]">{r.cut}</td>
-                                <td className={cn("text-right", dRTone(r.deltaR))}>{dR(r.deltaR)}</td>
+                                {HEADS.map((c) => <td key={c.k} className={cn("text-right px-0.5", c.c)}>{r[c.k] ?? 0}</td>)}
+                                <td className={cn("text-right px-0.5", dRTone(r.deltaR))}>{dR(r.deltaR)}</td>
                             </tr>
                         );
                     })}
@@ -394,13 +400,12 @@ function AttributionTable({ title, subtitle, attribution, sessionOrder = null, i
                 <tfoot>
                     <tr className="border-t border-[hsl(var(--border-soft))] font-semibold text-[hsl(var(--text))]">
                         <td className="text-left py-0.5">Total</td>
-                        <td className="text-right">{t.affected}</td>
-                        <td className="text-right text-[hsl(var(--success))]">{t.saved}</td>
-                        <td className="text-right text-[hsl(var(--danger))]">{t.cut}</td>
-                        <td className={cn("text-right", dRTone(t.deltaR))}>{dR(t.deltaR)}</td>
+                        {HEADS.map((c) => <td key={c.k} className={cn("text-right px-0.5", c.c)}>{t[c.k] ?? 0}</td>)}
+                        <td className={cn("text-right px-0.5", dRTone(t.deltaR))}>{dR(t.deltaR)}</td>
                     </tr>
                 </tfoot>
             </table>
+            </div>
             {summaryDelta != null && (
                 <span className={cn("text-[9.5px] font-ui", deltaMismatch ? "text-[hsl(var(--danger))]" : "text-[hsl(var(--text-3))]")}>
                     {deltaMismatch ? `⚠ footer Δ ${dR(t.deltaR)} ≠ summary ${dR(summaryDelta)}` : `✓ matches summary Δ ${dR(summaryDelta)}`}
@@ -422,16 +427,23 @@ function SelectiveBeCohortPanel({
     const noFilter = selective?.isNoFilterSelected ?? !cohortsActive;
     const filterLabel = selective?.selectedFilterLabel ?? "None";
     const applied = selective?.applied ?? 0;
-    const card2Subtitle = noFilter ? "No BE applied yet" : `BE applied to: ${filterLabel}`;
+    const noBe = noFilter || applied === 0;
+    const card2Subtitle = noBe ? "No BE applied" : `BE applied to: ${filterLabel}`;
     return (
         <NeonPanel
             title="Apply BE to Cohorts"
             action={
                 <div className="flex items-center gap-1.5 flex-wrap">
-                    <Pill tone="muted">BE applied to {applied} trades</Pill>
-                    <Pill tone="success">Saved {selective?.summary.lossesSaved ?? 0}</Pill>
-                    <Pill tone="danger">Cut {selective?.summary.winnersCut ?? 0}</Pill>
-                    <Pill tone="muted">Filter: {filterLabel}</Pill>
+                    {noBe ? (
+                        <Pill tone="muted">No BE applied · 0 trades</Pill>
+                    ) : (
+                        <>
+                            <Pill tone="muted">BE applied to {applied} trades</Pill>
+                            <Pill tone="success">Saved {selective?.summary.lossesSaved ?? 0}</Pill>
+                            <Pill tone="danger">Cut {selective?.summary.winnersCut ?? 0}</Pill>
+                            <Pill tone="muted">Filter: {filterLabel}</Pill>
+                        </>
+                    )}
                     <Pill tone="warning">EXPLORATORY</Pill>
                 </div>
             }
@@ -512,9 +524,11 @@ function SelectiveBeCohortPanel({
                         })}
                     </div>
                     <p className="pl-[72px] text-[10px] font-ui text-[hsl(var(--text-3))] leading-snug">
-                        {beCohorts.armLevel === scenarioArm
-                            ? `Scenario: ${scenarioLabel}. Arm filter: trades must have reached ${scenarioArm}R (the scenario's own arm).`
-                            : `Scenario applies ${scenarioArm}R BE only to trades that reached ${beCohorts.armLevel}R.`}
+                        {beCohorts.armLevel == null
+                            ? "No arm level selected — BE is not applied. Click an arm level to apply BE; click it again to remove."
+                            : beCohorts.armLevel === scenarioArm
+                                ? `Scenario applies ${scenarioArm}R BE only to trades that reached ${scenarioArm}R (the scenario's own arm).`
+                                : `Scenario applies ${scenarioArm}R BE only to trades that reached ${beCohorts.armLevel}R.`}
                     </p>
                 </div>
                 {onSetTrigger && (
@@ -967,13 +981,13 @@ export function BreakevenTab({
     const openAsResultViewEnabled = Boolean(
         selectedBeScenario?.source === "EXACT"
         && selectedBeScenario.scenarioKey
-        && cohortsActive
+        && beCohorts.armLevel != null      // no arm = no BE → nothing to promote
         && selectiveBe && selectiveBe.applied > 0,
     );
 
     const onOpenAsResultView = React.useCallback(() => {
         if (selectedBeScenario?.source !== "EXACT" || !selectedBeScenario.scenarioKey) return;
-        if (!cohortsActive || !(selectiveBe && selectiveBe.applied > 0)) return;
+        if (beCohorts.armLevel == null || !(selectiveBe && selectiveBe.applied > 0)) return;
         const layer = {
             type: "break_even",
             mode: "selective",
@@ -1398,6 +1412,7 @@ export function BreakevenTab({
                     <BeAffectedTradesCard
                         rows={rows}
                         scrollBody
+                        title="Trades Where the BE Stop Fired"
                         headerRight={
                             <div className="flex items-center gap-1.5 flex-wrap">
                                 {["cohort", "global"].map((scope) => (
@@ -1424,10 +1439,10 @@ export function BreakevenTab({
                         actionLabel="View on Map"
                         onAction={onViewBeTradeOnMap}
                         scenarioSuffix={` at ${armLevelR}R ${triggerBasis}`}
-                        note={<>{useCohort
+                        note={<>This table lists only trades where the BE stop actually <strong>fired</strong> (be_triggered / be_stop) — not every trade the BE rule was applied to. {useCohort
                             ? "Cohort scope — only trades matched by the cohort filters in the panel below."
-                            : "Global scope — every trade the BE scenario touched; does NOT follow the cohort filters below."}{" "}
-                            Loss Saved / Winner Cut are vs this view&apos;s no-BE baseline; unpaired rows show neutral BE Exit. Click a row or “View on Map” to inspect it on the Strategy Map. Sorted by largest |Δ R| first.</>}
+                            : "Global scope — every BE-triggered trade, ignoring the cohort filters below."}{" "}
+                            Applied means the trade received the BE rule; Saved/Cut means the BE stop changed the original result; trades that kept their TP or were news-flattened won&apos;t appear here (no BE-stop fire). Loss Saved / Winner Cut are vs this view&apos;s no-BE baseline. Sorted by largest |Δ R| first.</>}
                     />
                 );
             })()}
