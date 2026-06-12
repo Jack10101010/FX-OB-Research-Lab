@@ -306,6 +306,18 @@ check("v2.1 alive row: empty booleans → null (not false)", a21.killConfirmedTf
 check("v2.1 alive row: killMarginPips null, censored MFE mapped (13)", a21.killMarginPips === null && a21.mfeBeforeDeathPips === 13);
 check("v2.1 alive row: finalOutcome alive_at_data_end", a21.finalOutcome === "alive_at_data_end");
 
+// ── Dimension registry grain metadata (Tradeability Explorer, Phase 2 Step 1) ──────
+console.log("\nDimension grain metadata");
+const GRAINS = R.RETEST_DIMENSION_GRAINS;
+check("RETEST_DIMENSION_GRAINS = ['ob','event']", JSON.stringify(GRAINS) === JSON.stringify(["ob", "event"]));
+check("every dimension declares a valid grain", Object.values(R.RETEST_DIMENSIONS).every((d) => GRAINS.includes(d.grain)));
+const OB_GRAIN = ["byObSize", "byOriginSession", "byStructure", "byDirection", "byStructureDirection", "byOriginBodyDominance", "byOriginWickDominance", "byDominantWickSide", "byOriginRange", "byOriginImpulse"];
+const EVENT_GRAIN = ["byRetestNumber", "byRetestSession", "bySameSession", "byEntryPenetration", "byPenetration", "byTimeSinceDetection", "byTimeSinceFirstTouch", "byTimeSincePrevRetest", "byFirstTouchOutcome", "byFailureBehavior", "byReactionQuality"];
+check("OB-stable dimensions tagged grain 'ob'", OB_GRAIN.every((k) => R.RETEST_DIMENSIONS[k].grain === "ob"));
+check("event-varying dimensions tagged grain 'event'", EVENT_GRAIN.every((k) => R.RETEST_DIMENSIONS[k].grain === "event"));
+check("OB+event lists cover the whole registry", OB_GRAIN.length + EVENT_GRAIN.length === Object.keys(R.RETEST_DIMENSIONS).length);
+check("only byRetestNumber carries mfeAnchor 'retest'", Object.entries(R.RETEST_DIMENSIONS).every(([k, d]) => (d.mfeAnchor === "retest") === (k === "byRetestNumber")));
+
 // ── result ───────────────────────────────────────────────────────────────────────
 console.log(`\n${"=".repeat(52)}`);
 console.log(`Results: ${PASS} passed, ${FAIL} failed`);

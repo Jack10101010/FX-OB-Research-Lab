@@ -15,8 +15,19 @@ import React from "react";
 import { useDataset } from "@/data/store";
 import { buildTradesByObId, deriveOBStatus } from "@/data/obLifecycle";
 import { deriveRetests, summarizeRetestEvents, DEFAULT_RETEST_CONFIG } from "@/data/obRetest";
-import { enrichRetestEvents, buildRetestEdgeBreakdowns, buildBestWorstRetestConditions, buildSessionMatrix, buildRetestFindings, DEFAULT_MIN_N } from "@/data/obRetestResearch";
+import { enrichRetestEvents, buildRetestEdgeBreakdowns, buildBestWorstRetestConditions, buildSessionMatrix, buildRetestFindings, RETEST_DIMENSIONS, DEFAULT_MIN_N } from "@/data/obRetestResearch";
 import { buildMonetizationSummary } from "@/data/obRetestMonetization";
+import { buildTradeabilityRows } from "@/data/obRetestTradeability";
+
+// Tradeability Explorer (Phase 2 Step 3) precomputes the cohort fusion for the
+// dimensions where OB-level monetization can be honestly attributed: every
+// OB-grain dimension, plus byRetestNumber (the lone event-grain dim with a
+// per-retest MFE anchor). Generic event-grain dims are intentionally excluded —
+// they have no valid monetization to precompute (the module would only return
+// reaction-only rows, which the UI already gets from edgeBreakdowns).
+const TRADEABILITY_DIM_KEYS = Object.entries(RETEST_DIMENSIONS)
+    .filter(([, d]) => d.grain === "ob" || d.mfeAnchor === "retest")
+    .map(([key]) => key);
 
 // Synthesize per-OB rows from events when the ob_retest_summary.csv sidecar is
 // absent — lets summarizeRetestEvents derive obsRetested even without it.
@@ -196,6 +207,27 @@ export function useRetestData({ orderBlocks = [], trades = [], activeRun = null,
         return buildMonetizationSummary(perOBRows, obs);
     }, [result, activeRun]);
 
+    // ── Phase 2 Step 3: Tradeability Explorer precompute (compute-once) ──────────
+    // Pure composition over the already-memoized enriched events + per-OB rows.
+    // Gated on monetizationSummary.available (i.e. v2.1 data present); otherwise a
+    // clean unavailable object so the UI can hide the section without faking rows.
+    // Source-agnostic: `result` is backend or frontend-derived, both feed identical
+    // enrichedEvents/perOB shapes. Keyed so it only recomputes when the run, the
+    // derived events/per-OB, or v2.1 availability change.
+    const tradeability = React.useMemo(() => {
+        if (!result || !monetizationSummary.available) {
+            return { available: false, reason: monetizationSummary.reason || "v2.1 monetization data unavailable" };
+        }
+        const enrichedEvents = research.enrichedEvents || [];
+        const perOBRows = result.perOB || [];
+        const obs = Array.isArray(activeRun?.orderBlocks) ? activeRun.orderBlocks : [];
+        const dimensions = {};
+        for (const dimKey of TRADEABILITY_DIM_KEYS) {
+            dimensions[dimKey] = buildTradeabilityRows(enrichedEvents, perOBRows, obs, dimKey, { minN: DEFAULT_MIN_N });
+        }
+        return { available: true, dimensions, minN: DEFAULT_MIN_N };
+    }, [result, research, activeRun, monetizationSummary]);
+
     // Resolve the public status enum. Candle availability is decided by the load
     // RESULT (not just the imported `hasCandles` flag): backend events win; a
     // completed-but-empty load is NO_CANDLES; a thrown load error is FAILED (retry);
@@ -227,6 +259,8 @@ export function useRetestData({ orderBlocks = [], trades = [], activeRun = null,
         findings: research.findings,
         // Phase D monetization (null-gated inside the module)
         monetizationSummary,
+        // Phase 2 Step 3 tradeability precompute ({ available:false, reason } when gated off)
+        tradeability,
         minN: DEFAULT_MIN_N,
         config,
         setConfig,

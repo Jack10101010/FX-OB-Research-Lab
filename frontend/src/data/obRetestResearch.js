@@ -337,30 +337,47 @@ export function groupRetestsByDimension(events = [], dimension, { minN = DEFAULT
 // already produced by enrichRetestEvents (Phase C1) — no new statistic/computation
 // is introduced here (C1.6 surfaces existing dimensions, it does not add research
 // dimensions). `tip` is the researchGlossary key for the header tooltip.
+//
+// `grain` (Tradeability Explorer, Phase 2 Step 1) declares the unit of analysis the
+// dimension partitions on, which decides whether OB-level monetization (MFE-before-
+// death, RR capture) can be attributed to a cohort:
+//   "ob"    → the value is constant across every retest of an OB (structure,
+//             direction, origin properties, OB size). The OB list can be grouped
+//             directly, so the full RR-capture monetization is valid.
+//   "event" → the value varies between retests of the same OB (retest #, session,
+//             penetration, timing, behaviour). An OB's single MFE-before-death
+//             cannot be attributed to one such cohort, so generic monetization is
+//             withheld. The lone exception carries `mfeAnchor: "retest"`:
+//             byRetestNumber maps onto the existing mfeAfterR1/R2/R3 anchors
+//             (buildDecayByRetest), which ARE measured per retest.
 export const RETEST_DIMENSIONS = {
-    byRetestNumber: { label: "Retest #", group: "timing", tip: "retest_number", fn: (e) => e.retestNumberBucket },
-    byObSize: { label: "OB Size", group: "structure", tip: "retest_ob_size", fn: (e) => e.sizeBucket },
-    byOriginSession: { label: "Origin Session", group: "sessions", tip: "retest_origin_session", fn: (e) => e.originSession },
-    byRetestSession: { label: "Retest Session", group: "sessions", tip: "retest_retest_session", fn: (e) => e.retestSession },
-    bySameSession: { label: "Same vs Cross Session", group: "sessions", tip: "retest_same_cross_session", fn: (e) => e.sameSession },
-    byStructure: { label: "Structure (BOS/CHoCH)", group: "structure", tip: "retest_structure", fn: (e) => e.structure },
-    byDirection: { label: "Direction", group: "structure", tip: "retest_direction", fn: (e) => (e.direction === "bull" ? "Bullish" : e.direction === "bear" ? "Bearish" : e.direction) },
-    byStructureDirection: { label: "Structure × Direction", group: "structure", tip: "retest_structure_direction", fn: (e) => e.structureDirection },
-    byEntryPenetration: { label: "Entry Penetration", group: "penetration", tip: "retest_entry_penetration", fn: (e) => e.entryPenetrationBucket },
-    byPenetration: { label: "Max Penetration", group: "penetration", tip: "retest_max_penetration", fn: (e) => e.maxPenetrationBucket },
-    byTimeSinceDetection: { label: "Time Since Detection", group: "timing", tip: "retest_time_since_detection", fn: (e) => e.timeSinceDetectionBucket },
-    byTimeSinceFirstTouch: { label: "Time Since First Touch", group: "timing", tip: "retest_time_since_first_touch", fn: (e) => e.timeSinceFirstTouchBucket },
-    byTimeSincePrevRetest: { label: "Time Since Previous Retest", group: "timing", tip: "retest_time_since_prev", fn: (e) => e.timeSincePrevRetestBucket },
-    byFirstTouchOutcome: { label: "First Touch Outcome", group: "behavior", tip: "retest_first_touch_outcome", fn: (e) => e.firstTouchOutcome || "unknown" },
-    byFailureBehavior: { label: "Failure Behaviour", group: "behavior", tip: "retest_failure_behavior", fn: (e) => e.failureBehavior },
-    byReactionQuality: { label: "Reaction Quality", group: "behavior", tip: "retest_reaction_quality", fn: (e) => e.reactionQuality },
-    // Origin candle structure (Phase C2)
-    byOriginBodyDominance: { label: "Origin Body Dominance", group: "origin", tip: "retest_body_dominance", fn: (e) => e.originBodyDominance },
-    byOriginWickDominance: { label: "Origin Wick Dominance", group: "origin", tip: "retest_wick_dominance", fn: (e) => e.originWickDominance },
-    byDominantWickSide: { label: "Dominant Wick Side", group: "origin", tip: "retest_dominant_wick", fn: (e) => e.dominantWickSide },
-    byOriginRange: { label: "Origin Range", group: "origin", tip: "retest_origin_range", fn: (e) => e.originRangeBucket },
-    byOriginImpulse: { label: "Origin Impulse Proxy", group: "origin", tip: "retest_impulse_proxy", fn: (e) => e.originImpulseProxy },
+    byRetestNumber: { label: "Retest #", group: "timing", tip: "retest_number", grain: "event", mfeAnchor: "retest", fn: (e) => e.retestNumberBucket },
+    byObSize: { label: "OB Size", group: "structure", tip: "retest_ob_size", grain: "ob", fn: (e) => e.sizeBucket },
+    byOriginSession: { label: "Origin Session", group: "sessions", tip: "retest_origin_session", grain: "ob", fn: (e) => e.originSession },
+    byRetestSession: { label: "Retest Session", group: "sessions", tip: "retest_retest_session", grain: "event", fn: (e) => e.retestSession },
+    bySameSession: { label: "Same vs Cross Session", group: "sessions", tip: "retest_same_cross_session", grain: "event", fn: (e) => e.sameSession },
+    byStructure: { label: "Structure (BOS/CHoCH)", group: "structure", tip: "retest_structure", grain: "ob", fn: (e) => e.structure },
+    byDirection: { label: "Direction", group: "structure", tip: "retest_direction", grain: "ob", fn: (e) => (e.direction === "bull" ? "Bullish" : e.direction === "bear" ? "Bearish" : e.direction) },
+    byStructureDirection: { label: "Structure × Direction", group: "structure", tip: "retest_structure_direction", grain: "ob", fn: (e) => e.structureDirection },
+    byEntryPenetration: { label: "Entry Penetration", group: "penetration", tip: "retest_entry_penetration", grain: "event", fn: (e) => e.entryPenetrationBucket },
+    byPenetration: { label: "Max Penetration", group: "penetration", tip: "retest_max_penetration", grain: "event", fn: (e) => e.maxPenetrationBucket },
+    byTimeSinceDetection: { label: "Time Since Detection", group: "timing", tip: "retest_time_since_detection", grain: "event", fn: (e) => e.timeSinceDetectionBucket },
+    byTimeSinceFirstTouch: { label: "Time Since First Touch", group: "timing", tip: "retest_time_since_first_touch", grain: "event", fn: (e) => e.timeSinceFirstTouchBucket },
+    byTimeSincePrevRetest: { label: "Time Since Previous Retest", group: "timing", tip: "retest_time_since_prev", grain: "event", fn: (e) => e.timeSincePrevRetestBucket },
+    byFirstTouchOutcome: { label: "First Touch Outcome", group: "behavior", tip: "retest_first_touch_outcome", grain: "event", fn: (e) => e.firstTouchOutcome || "unknown" },
+    byFailureBehavior: { label: "Failure Behaviour", group: "behavior", tip: "retest_failure_behavior", grain: "event", fn: (e) => e.failureBehavior },
+    byReactionQuality: { label: "Reaction Quality", group: "behavior", tip: "retest_reaction_quality", grain: "event", fn: (e) => e.reactionQuality },
+    // Origin candle structure (Phase C2) — all OB-stable (derived from the origin candle).
+    byOriginBodyDominance: { label: "Origin Body Dominance", group: "origin", tip: "retest_body_dominance", grain: "ob", fn: (e) => e.originBodyDominance },
+    byOriginWickDominance: { label: "Origin Wick Dominance", group: "origin", tip: "retest_wick_dominance", grain: "ob", fn: (e) => e.originWickDominance },
+    byDominantWickSide: { label: "Dominant Wick Side", group: "origin", tip: "retest_dominant_wick", grain: "ob", fn: (e) => e.dominantWickSide },
+    byOriginRange: { label: "Origin Range", group: "origin", tip: "retest_origin_range", grain: "ob", fn: (e) => e.originRangeBucket },
+    byOriginImpulse: { label: "Origin Impulse Proxy", group: "origin", tip: "retest_impulse_proxy", grain: "ob", fn: (e) => e.originImpulseProxy },
 };
+
+// Valid grain tags (Tradeability Explorer). Exported so the tradeability module and
+// its tests share one source of truth.
+export const RETEST_DIMENSION_GRAINS = ["ob", "event"];
 
 // IA grouping (C1.6) — which dimensions live under each Edge Discovery sub-tab.
 export const RETEST_DIMENSION_GROUPS = [
