@@ -540,6 +540,11 @@ export function parseTradesCSV(text) {
             max_distance_away_before_fill_price: numOrNull(pick(r, "max_distance_away_before_fill_price")),
             max_distance_away_before_fill_pips: numOrNull(pick(r, "max_distance_away_before_fill_pips")),
             max_distance_away_before_fill_r: numOrNull(pick(r, "max_distance_away_before_fill_r")),
+            // Vacancy distance at arm (triggered-edge only; magnitude ≥ 0 where 0 = price still
+            // inside the OB / occupied at arm). Blank → null = non-TE / never-triggered / unavailable.
+            // Dual-keyed; powers the Classification "Distance at Arm" breakdown (validates F-004).
+            priceDistanceFromObAtArmPips:        numOrNull(pick(r, "price_distance_from_ob_at_arm_pips", "priceDistanceFromObAtArmPips")),
+            price_distance_from_ob_at_arm_pips:  numOrNull(pick(r, "price_distance_from_ob_at_arm_pips", "priceDistanceFromObAtArmPips")),
             stop_buffer: numOrNull(pick(r, "stop_buffer")),
             stop_buffer_pips: numOrNull(pick(r, "stop_buffer_pips")),
             rr_config: numOrNull(pick(r, "rr_config")),

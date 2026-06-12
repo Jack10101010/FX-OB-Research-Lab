@@ -39,6 +39,11 @@ Read `AGENTS.md` first. This file defines how Claude operates on FX-OB-Research-
 5. **Report** — files read, files changed, validation, risks, follow-ups.
 6. **Sync** — update `docs/ai/` via `/sync` when the task is meaningful.
 
+> **Commits:** follow **Git & workstream commit discipline** in `AGENTS.md` — `git status --short`
+> first, classify dirty files by workstream before editing, never `git add .`, stage by path /
+> `git add -p` (hotspots like `RunDetail.jsx` and `researchGlossary.js` are never staged whole),
+> and verify `git diff --cached --stat` carries no other stream's strings before committing.
+
 ## Conventions Claude maintains
 
 - **Single sources of truth:** `classificationRegistry.js` = presentation (label/tone/flags);

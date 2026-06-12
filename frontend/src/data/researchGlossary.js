@@ -35,6 +35,30 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const GLOSSARY = {
+    // ── Distance at arm (vacancy distance · triggered-edge only) ─────────────
+    distance_at_arm: {
+        term: "Distance at Arm",
+        friendlyName: "Vacancy Distance at Arm",
+        definition:
+            "How far price had vacated the order block at the moment the limit armed, in pips " +
+            "(magnitude only; 0 = still inside the OB). Exported on triggered-edge rows only; " +
+            "blank for baseline / penetration. Not a signed occupation-depth scale.",
+        whyItMatters:
+            "Tests whether arming farther from the OB strengthens the edge — the basis for the " +
+            "<2-pips-is-weak hypothesis (F-004, provisional).",
+    },
+    distance_occupied: {
+        term: "Occupied / inside OB",
+        friendlyName: "Occupied at Arm (0 pips)",
+        definition: "Price was still inside the order block when the limit armed (distance = 0).",
+        whyItMatters: "The weak baseline; the vacant buckets are measured against it.",
+    },
+    distance_edge: {
+        term: "Edge zone",
+        friendlyName: "Edge Zone (0–2 pips)",
+        definition: "Price had just vacated the OB by under 2 pips at arm — too close to count as a meaningful vacate.",
+        whyItMatters: "F-004's hypothesised weak/negative band; validate against the 2–5 / 5+ buckets.",
+    },
     // ── Fill state at arm (canonical hierarchy) ──────────────────────────────
     occupied_at_arm: {
         term: "Occupied",

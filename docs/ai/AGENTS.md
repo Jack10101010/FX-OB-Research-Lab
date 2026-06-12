@@ -60,7 +60,8 @@ root (e.g. `CLASSIFICATION-TAB-V2-PLAN.md`). `docs/ai/` summarizes and points to
 3. **Never change the dark theme** unless explicitly requested.
 4. **Always report:** files read, files changed, validation performed, risks, follow-ups.
 5. **Update `docs/ai/` when a meaningful task completes** (use `/sync`).
-6. **Scoped commits only** — never `git add .`; stage only your task's files.
+6. **Git & commit discipline** — scoped commits only; never `git add .`. See the dedicated
+   **Git & workstream commit discipline** section below.
 7. Prefer the smallest correct change. Leave the tree green.
 8. **Documentation accuracy.** If `PROJECT_STATUS.md`, `CURRENT_WORKSTREAM.md`, `ROADMAP.md`,
    `WORKSTREAMS.md`, `FINDINGS.md`, `DECISIONS.md`, `EXPERIMENTS.md`, or `BACKLOG.md` are
@@ -71,6 +72,55 @@ root (e.g. `CLASSIFICATION-TAB-V2-PLAN.md`). `docs/ai/` summarizes and points to
 > `.git/index.lock` (mount restriction), so staging/committing is done on the host.
 > Agents validate in-sandbox (assertions + Babel transpile), then hand the exact
 > commit commands to the user.
+
+---
+
+## Git & workstream commit discipline (all agents)
+
+`codex-dev` is edited by several AI chats in parallel. Shared files are frequently
+dirty from *other* streams. Follow this every session — it prevents cross-workstream
+contamination.
+
+**Before any code work**
+1. Run `git status --short`. Always. This is a gate, not a formality.
+2. If the tree is dirty, **stop and classify** every dirty file by workstream
+   (use `WORKSTREAMS.md` "Owns"/"Shared-caution") *before editing anything*.
+3. **Do not begin a new workstream on top of unclassified dirty work.** If you
+   can't attribute a dirty file to a stream, surface it and ask — don't edit over it.
+
+**While staging**
+4. **Never `git add .` or `git add -A` in this repo.** Ever.
+5. Stage explicitly by path: `git add <path1> <path2>`.
+6. If a file mixes workstreams, do **not** stage it whole. Use `git add -p`
+   (accept only your hunks); if hunks are interleaved with no separating context,
+   use `git add -e` to delete the foreign `+` lines from the patch.
+7. **The agent prepares and verifies the staging itself** — exact per-path / per-hunk
+   plan — and only hands the user the final reviewed commands. Do **not** offload raw
+   manual hunk-staging onto the user unless it is genuinely unavoidable, and say why.
+
+**Before every commit, show**
+8. The exact files staged.
+9. `git diff --cached --stat`.
+10. A confirmation line: no unrelated-workstream strings are staged (grep the cached
+    diff for the other streams' symbols, e.g. `loserRunUp`, `retest_`, `BreakevenTab`).
+
+**Shared hotspot files — extra caution, never stage whole-file without a `-p` review:**
+- `frontend/src/pages/RunDetail.jsx` (Classification · Failures · Loser-Run-Up all touch it)
+- `frontend/src/data/researchGlossary.js` (Classification · Retest · Failures)
+- `frontend/src/components/lab/protection/BreakevenTab.jsx` (Protection/BE)
+- `frontend/src/pages/StrategyMap.jsx` (Strategy Map · BE-affected overlay)
+Also high-traffic: `frontend/src/data/importer.js` (every stream that maps a field).
+
+**Every chat ends one of two ways**
+11. A **clean scoped commit** (your files only, verified per above), or
+12. An explicit **"dirty-tree handoff"**: list each file left dirty, its owning
+    workstream, and whether it's safe for another stream to stage around.
+
+**Environment:** the Cowork sandbox cannot unlink `.git/index.lock` (and the index may
+read as corrupt) — so the *commit itself* runs on the host. The agent still does all
+classification, the `add -p`/`add -e` plan, and the `git diff --cached` verification,
+then hands the host the precise, reviewed sequence. Start the host sequence with
+`git reset` when foreign changes may already be staged, so you commit from a known-clean index.
 
 ---
 

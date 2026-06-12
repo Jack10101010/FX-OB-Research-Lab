@@ -34,6 +34,9 @@ Read `AGENTS.md` first. This file defines how Codex operates on FX-OB-Research-L
 4. **Report**: files read, files changed, validation, risks. Flag anything out of scope you
    noticed but did **not** touch.
 5. Hand commit commands to the user (sandbox can't unlink `.git/index.lock`; commit on host).
+   Follow **Git & workstream commit discipline** in `AGENTS.md`: `git status --short` first,
+   classify dirty files, never `git add .`, stage by path / `git add -p`, and show
+   `git diff --cached --stat` with a no-foreign-strings check before any commit.
 
 ## Conventions to respect
 
