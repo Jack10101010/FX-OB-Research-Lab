@@ -7,9 +7,9 @@
 
 *Last updated: 2026-06-11.*
 
-## Failures Lab V4  ← CURRENT FOCUS (final integration cleanup, then pause)
+## Failures Lab V4  (committed; paused)
 
-- **Status:** active — feature-complete; integration cleanup implemented, commit pending.
+- **Status:** feature-complete; integration cleanup committed. Paused — see CURRENT_WORKSTREAM for focus.
 - **Lead:** Claude (design/analytics/frontend).
 - **Purpose:** loss diagnostics — Distance to Stop (Excursion) tab: MFE reach, BE opportunity
   (upper bound), winner MAE stop pressure, MAE/MFE by dimension, penetration dimension,
@@ -39,8 +39,8 @@
 
 ## Master Controls / Research Control Plane
 
-- **Status:** active (parallel). **Through Phase 12C; Phase 13 (preview consolidation) implemented +
-  validated + smoke-tested — scoped commit pending on host.** (Corrects the earlier stale "Phase 7A".)
+- **Status:** active (parallel). **Through Phase 13 — preview consolidation implemented, validated,
+  smoke-tested, and committed (D-009).** (Corrects the earlier stale "Phase 7A".)
   Earlier milestones: draft/active config, dirty + rerun-tier classification, preview→run promotion,
   active-vs-preview compare, the four instant Preview Lenses (cost / filter / FFT / RR) + the composed lens.
 - **Phase 13 outcome:** the five parallel preview paths (cost / filter / FFT / RR / composed) are collapsed
@@ -51,6 +51,26 @@
   and the repo-root `MASTER-CONTROLS-PHASE-13-*` audit/plan docs.
 - **Owns:** `components/masterControls/*`, `data/configRegistry.js`, `data/configTranslator.js`.
 - **Do not touch** from Classification work.
+
+## Protection Lab / BE
+
+- **Status:** active (parallel). **Selective BE + BE-affected map debug + BE Trade Explorer committed** (`a6b1c09`).
+  Selective BE applies BE to a filtered cohort (Original → Selective → Difference, Global BE as reference);
+  BE Trade Explorer is a per-trade original-vs-BE drilldown. Derived views only — no BE-calc / replay /
+  protection-layer / trade-universe changes. See `DECISIONS.md` D-011.
+- **Owns:** `pages/ProtectionLab.jsx`, `components/lab/protection/*` (incl. `BreakevenTab.jsx`,
+  `BeTradeExplorer.jsx`, `BeAffectedTradesCard.jsx`), `data/selectiveBeUniverse.js`,
+  `data/protectionTimeline.js`, `data/beReplay.js` (+ their validations).
+- **Shared/caution:** `pages/StrategyMap.jsx` (BE-affected overlay — coordinate with Strategy Map).
+
+## Storage / Durable Backend Mirror
+
+- **Status:** committed (`ccb240e`). Mirrors research domains (playbook, section roadmaps, configs/presets,
+  hypotheses, promotion) to a durable backend via `/storage/{domain}` GET/PUT; localStorage stays the instant
+  cache; backend optional (down → local-only); union/newer-wins merge on boot. See `DECISIONS.md` D-012.
+- **Owns:** `backend/server.py` (`/storage/{domain}`), `frontend/src/data/backendDomainSync.js`, and the
+  mirror hooks in `playbookStore.js` / `roadmapStore.js` / `presets.js` / `usePlaybook.js` / `SectionRoadmap.jsx`
+  / `EntryHypothesisLab.jsx` / `PromotionDesk.jsx`.
 
 ## Session Lab
 

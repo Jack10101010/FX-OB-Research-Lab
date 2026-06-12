@@ -19,20 +19,31 @@ V5 Phase 2 (confirmed false losers, frontend) + Phase 2B (Overview IA) built and
 Phase 2B commit pending. Live data path waits on the Lux-OB-Backtester post-stop export.
 (Classification Tab V2 is paused with Phase 2 shipped.)
 
-Parallel state: **Master Controls is through Phase 12C, with Phase 13 (preview consolidation)
-implemented + validated + smoke-tested (scoped commit pending on host)** — Preview is now a single
-composer-driven system (`composePreviewBundle`); `previewLens` remains the single read path. OB-Retest
-and Protection/BE-Replay have active uncommitted work owned by other streams.
+Parallel state (all committed): **Master Controls Phase 13** (single composer-driven preview;
+`previewLens` still the single read path), **Protection Lab selective BE / BE Trade Explorer**,
+**Phase 14 Wave 1 terminology**, and the **Storage durable backend mirror**. OB-Retest remains active
+under its own stream.
 
 ## Completed
 
+- **Storage — durable backend mirror** (`ccb240e`) — research domains (playbook, section roadmaps,
+  configs/presets, hypotheses, promotion) mirror to a durable backend via `/storage/{domain}` GET/PUT;
+  localStorage stays the instant cache; backend optional (down → local-only); union/newer-wins merge on
+  boot. No persisted-key/identifier changes. Decision `D-012`.
+- **Protection Lab — selective BE + BE Trade Explorer** (`a6b1c09`) — selective BE applies BE to a filtered
+  cohort under an Original → Selective → Difference framing (Global BE as reference); BE Trade Explorer is a
+  per-trade original-vs-BE drilldown; BE-affected trades highlighted on the Strategy Map. Derived views only —
+  no BE-calc / replay / protection-layer / trade-universe change. Decision `D-011`.
+- **Phase 14 Wave 1 — research run terminology** (`e9d03aa`) — shared banner cluster aligned to the Phase 14
+  model: Active Run→Run, Result View→Model/View, Position Variant→Position Mode, Current Result View→Current
+  View. Display-only; identifiers/persisted keys unchanged; smoke-tested. Decision `D-010`. (Phase 14 is NOT
+  complete — Wave 1 only; Wave 2 residual sweep is in `BACKLOG.md`.)
 - **Master Controls Phase 13 — preview consolidation (frontend)** — collapsed the five parallel preview
   paths (cost / filter / FFT / RR / composed) into ONE composer-driven path: `composePreviewBundle` is the
   sole builder, with one preview state machine, one Apply path, and one drawer preview card. `previewLens`
   remains the single app-wide read overlay (unchanged); transform math unchanged. Added
   `__validation__/previewComposer.parity.mjs` (25/25); cost / filter / RR / FFT-unavailable / multi-stage /
-  run-switch / apply-exit / cross-page all verified in the live app. Decision `D-009`. (Scoped commit
-  pending on host: `MasterControlsContext.jsx`, `MasterControlsDrawer.jsx`, `previewComposer.js`, parity script.)
+  run-switch / apply-exit / cross-page all verified in the live app. Decision `D-009`. Committed.
 - **Failures Lab V5 Phase 2 + 2B (frontend)** — `buildConfirmedFalseLosers` classifies losers
   confirmed/candidate/genuine (reached ≥1R or hit original TP / ≥0.5R / never) with cohort
   breakdowns + horizon; importer maps the 5 `post_stop_*` fields dual-keyed; field-gated with a

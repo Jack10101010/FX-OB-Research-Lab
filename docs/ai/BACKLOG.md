@@ -31,10 +31,13 @@ Groomed by ChatGPT. Priority: P1 (next up) · P2 (soon) · P3 (later).
 ## P2
 
 - **Phase 14 Wave 2 — residual terminology sweep** *(Owner: Claude · follows D-010 / Wave 1
-  commit `e9d03aa`)* — finish the display-string sweep outside the shared banner cluster:
-  Strategy Map ScenarioSelector "VARIANT" badge → Position Mode; `ProtectionLab.jsx` "selected
-  Result View" sentence → View/Model; and remaining page-level "Result View" / "Position Variant"
-  strings. Display-only; no identifier or persisted-key changes (per D-010 scope).
+  commit `e9d03aa`)* — **mostly done.** Six page files swept and committed (ScenarioSelector "Variant"→
+  Position Mode, ProtectionLab "selected Result View"→View, StrategyBuilder, RunImpactSummary, NewsLab
+  "Match Active Run"→Match Run, StrategyMap "Variant"→Position Mode). **Remaining residual:** the
+  `BreakevenTab.jsx` "Result View" cluster strings (ride with the Protection-BE commit), plus a few
+  comment-only references. Display-only; no identifier or persisted-key changes (per D-010 scope).
+  Deferred to Wave 3 (do not touch here): Scenario/Baseline strings, "Run Preview" / Master Controls
+  labels, model-grid "Variant".
 
 - **Distance & Occupation-Depth Research** *(Priority: Medium · Owner: Codex (backend export +
   importer) → Claude (classification + UI) · likely its OWN workstream once unblocked)* — research

@@ -10,6 +10,25 @@ Append-only. Newest at top. Each entry: what we decided, why, and the consequenc
 
 ---
 
+### D-012 · Research state uses a durable backend mirror with localStorage as the instant cache
+Research domains now mirror to a durable backend via `/storage/{domain}` GET/PUT (domains:
+**playbook, section roadmaps, configs/presets, hypotheses, promotion**). **localStorage stays the
+instant UI cache**; the backend is **optional** — if it's down, behavior is localStorage-only and
+unchanged. On boot each domain **merges** local + remote with domain-specific rules (union of
+checked/`true` flags, or newer-`updatedAt`/`addedAt`/`_savedAt`-wins on a key conflict).
+**Why:** make per-run research state (playbook progress, roadmap overrides, saved configs,
+hypotheses, promotions) survive a browser/profile change without giving up instant local UX.
+**Consequence:** no persisted-key or identifier renames; failures degrade to local-only. **Evidence:** `ccb240e`.
+
+### D-011 · Selective BE and BE Trade Explorer are derived research views, not new protection modes
+**Selective BE** applies break-even to a **filtered cohort** of trades (the rest stay as originally
+traded) and surfaces it under an **Original → Selective → Difference** framing, with **Global BE as a
+fixed reference**. The **BE Trade Explorer** gives a one-row-per-trade drilldown across original vs
+BE result. **Why:** answer "what would applying BE to *this cohort* do to the full run?" as exploratory
+research without inventing a protection mode. **Consequence:** these are **derived views** — they do
+**not** change BE calculations, replay logic, protection-layer architecture, or the base trade universe.
+**Evidence:** `a6b1c09`.
+
 ### D-010 · Phase 14 Wave 1 — research run terminology
 Display-only terminology alignment with the Phase 14 conceptual model. **Decided renames:**
 Active Run → **Run**; Result View → **Model** (when used as the dimension label); Current Result

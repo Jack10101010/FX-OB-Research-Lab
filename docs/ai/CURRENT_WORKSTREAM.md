@@ -6,9 +6,20 @@
 
 ## Focus
 
-**Failures Lab V5 — decision layer.** Phase 1 shipped; Phase 2 (confirmed false losers)
-frontend built + validated; Phase 2B (Overview IA) built + validated, commit pending.
-Backend export still needed to populate the live data path.
+**Focus needs confirmation.** Failures Lab V5 (below) is still blocked on the Lux-OB-Backtester
+post-stop export, and since then several parallel streams have landed on `codex-dev`. Confirm the
+next active focus before starting new work.
+
+**Recently landed (committed):**
+- **Phase 14 Wave 1 — research run terminology** (`e9d03aa`; D-010). Wave 2 residual sweep is mostly
+  done — see `BACKLOG.md`.
+- **Storage — durable backend mirror** (`ccb240e`; D-012).
+- **Protection Lab — selective BE + BE Trade Explorer** (`a6b1c09`; D-011).
+- **Master Controls Phase 13** — single composer-driven preview (D-009), committed.
+
+**Prior nominal focus — Failures Lab V5 (blocked):** Phase 1 shipped; Phase 2 (confirmed false losers)
+frontend built + validated; Phase 2B (Overview IA) built + validated. Backend export still needed to
+populate the live data path.
 
 ## Where we are
 
@@ -72,12 +83,9 @@ changes (Overview explorer passes `roadmapKey={null}`). Scoped commit = these 5 
 - **Phase 2 implementation is blocked on the Lux-OB-Backtester export** (separate repo,
   not connected to this session). After it ships: importer dual-key map → confirmed
   false-loser builder + surface (prompt drafted, see BACKLOG).
-- Parallel streams active on this branch: OB-Retest (v2.1 committed), Protection/BE-Replay
-  (`ProtectionLab.jsx` dirty — do not stage), Hypothesis Lab fixes landing from host.
-- **Master Controls Phase 13** landed as a parallel stream — preview consolidation implemented +
-  validated + smoke-tested. `MasterControlsContext.jsx` / `MasterControlsDrawer.jsx` / `previewComposer.js`
-  (+ `__validation__/previewComposer.parity.mjs`) are dirty as their **own** scoped commit — do not fold
-  into Failures commits. See `DECISIONS.md` D-009.
+- Parallel streams: OB-Retest (active, own stream); Hypothesis Lab fixes landing from host.
+  Master Controls Phase 13, Protection-BE (selective BE / BE Explorer), Storage mirror, and Phase 14
+  Wave 1 are now **committed** (see Focus — recently landed) — no longer in-flight dirty work.
 
 ## Remaining
 
