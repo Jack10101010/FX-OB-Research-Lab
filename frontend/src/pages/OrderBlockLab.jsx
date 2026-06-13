@@ -274,8 +274,11 @@ export default function OrderBlockLab() {
                 <MetricChip label="Worst Session" value={analytics.worstSession ? formatR(analytics.worstSession.netR) : "—"} sub={analytics.worstSession?.label || "No data"} tone={analytics.worstSession?.netR < 0 ? "danger" : "muted"} icon={Clock} />
             </div>
 
-            {/* Auto-generated insights */}
-            {insights.length > 0 && <InsightCallouts insights={insights} />}
+            {/* Order Block Insights — synthesis layer (Phase 1). Renders the existing
+                buildInsights() output (split Working/Hurting, all preserved) plus a new
+                Executive Summary, Action Queue, and Caveats. Supersedes the bare
+                InsightCallouts strip; buildInsights + InsightCallouts remain defined. */}
+            <OrderBlockInsights insights={insights} analytics={analytics} />
 
 
             {/* Structural Quality + Session Performance — 2×2 grid.
@@ -643,6 +646,121 @@ function FilterBar({ filters, onUpdate, onClear, totalTrades, filteredCount }) {
 }
 
 // ─── Insight Callouts ─────────────────────────────────────────────────────────
+
+// ── Order Block Insights — synthesis / verdict layer (Phase 1) ─────────────────
+// Mounts below the KPI strip. REUSES existing analytics only: the buildInsights()
+// output (rendered here, split Working/Hurting — every insight preserved, nothing
+// dropped) plus best/worst session+bucket, catastrophic breach, and linkage counts.
+// Adds the synthesis the page lacked — Executive Summary, Action Queue, Caveats.
+// No new analytics, no new engine. buildInsights + InsightCallouts remain defined.
+const OBI_TONE = {
+    primary:   "hsl(var(--accent-primary))",
+    secondary: "hsl(var(--accent-secondary))",
+    success:   "hsl(var(--success))",
+    danger:    "hsl(var(--danger))",
+    warning:   "hsl(var(--warning))",
+};
+const OBI_POS = ["primary", "secondary", "success"];
+
+function OBInsightCard({ insight }) {
+    const accent = OBI_TONE[insight.tone] || OBI_TONE.primary;
+    return (
+        <div className="clip-bevel-sm border border-[hsl(var(--border-soft))] border-l-2 bg-[hsl(var(--panel-2)/0.4)] px-3 py-2.5"
+            style={{ borderLeftColor: accent }}>
+            <div className="text-[10px] font-ui uppercase tracking-[0.12em] mb-1" style={{ color: accent }}>{insight.label}</div>
+            <div className="text-[11.5px] font-ui text-[hsl(var(--text-2))] leading-snug">{insight.text}</div>
+        </div>
+    );
+}
+
+function OrderBlockInsights({ insights = [], analytics }) {
+    if (!analytics) return null;
+    const a = analytics;
+
+    // Biggest edge / biggest leak — from EXISTING best/worst fields (no new calc).
+    const edges = [a.bestBucket, a.bestSession].filter((x) => x && x.netR != null);
+    const leaks = [a.worstBucket, a.worstSession].filter((x) => x && x.netR != null);
+    const bestEdge  = edges.length ? edges.reduce((m, x) => (x.netR > m.netR ? x : m)) : null;
+    const worstLeak = leaks.length ? leaks.reduce((m, x) => (x.netR < m.netR ? x : m)) : null;
+
+    // Working / Hurting — the existing buildInsights output, split by tone (all preserved).
+    const working = insights.filter((i) => OBI_POS.includes(i.tone));
+    const hurting = insights.filter((i) => !OBI_POS.includes(i.tone));
+    const breach = a.catastrophicBreach || {};
+
+    // Action Queue ("if you had one hour") — verbs from worst leak / breach / linkage. Max 3.
+    const actions = [];
+    if (worstLeak) actions.push({ verb: "Investigate", text: `the worst slice — ${worstLeak.label} (${formatR(worstLeak.netR)}). See the Structural Quality / Session grids below.` });
+    if ((breach.breachPct || 0) >= 20 && (breach.breachCount || 0) >= 5) actions.push({ verb: "Review", text: `the catastrophic-breach cohort — ${formatPct(breach.breachPct)} (${breach.breachCount} hard-invalidated). See Catastrophic Breach below.` });
+    if (a.unlinkedCount > 0) actions.push({ verb: "Improve", text: `OB linkage — ${a.unlinkedCount} unlinked trades carry no OB data and limit this research.` });
+    if (bestEdge && actions.length < 3) actions.push({ verb: "Validate", text: `that the ${bestEdge.label} edge (${formatR(bestEdge.netR)}) holds across runs before trusting it.` });
+    const actionQueue = actions.slice(0, 3);
+
+    if (!bestEdge && !worstLeak && !working.length && !hurting.length) {
+        return (
+            <NeonPanel title="Order Block Insights" tone="secondary">
+                <div className="p-4 text-[11px] font-ui text-muted-lab">
+                    Not enough linked OB data to synthesize insights yet — explore the analytics below.
+                </div>
+            </NeonPanel>
+        );
+    }
+
+    return (
+        <NeonPanel title="Order Block Insights" tone="secondary">
+            <div className="p-4 space-y-3">
+                {/* Executive summary */}
+                <div className="text-[11.5px] font-ui text-[hsl(var(--text-2))] leading-snug">
+                    {bestEdge && <>Biggest edge: <strong className="text-[hsl(var(--success))]">{bestEdge.label} {formatR(bestEdge.netR)}</strong>. </>}
+                    {worstLeak && <>Biggest leak: <strong className="text-[hsl(var(--danger))]">{worstLeak.label} {formatR(worstLeak.netR)}</strong>. </>}
+                    <span className="text-muted-lab">Verdict synthesis of the analytics below — not new metrics.</span>
+                </div>
+
+                {/* Working / Hurting — existing insights, grouped (all shown). */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                        <div className="text-[9.5px] font-ui uppercase tracking-[0.08em] text-[hsl(var(--success))] mb-1.5">What's working</div>
+                        <div className="space-y-2">
+                            {working.length ? working.map((i, k) => <OBInsightCard key={k} insight={i} />)
+                                : bestEdge ? <OBInsightCard insight={{ tone: "success", label: bestEdge.label, text: `Top slice by net R: ${formatR(bestEdge.netR)}.` }} />
+                                : <div className="text-[10.5px] font-ui text-muted-lab">No positive edge above the sample floor yet.</div>}
+                        </div>
+                    </div>
+                    <div>
+                        <div className="text-[9.5px] font-ui uppercase tracking-[0.08em] text-[hsl(var(--danger))] mb-1.5">What's hurting</div>
+                        <div className="space-y-2">
+                            {hurting.length ? hurting.map((i, k) => <OBInsightCard key={k} insight={i} />)
+                                : worstLeak ? <OBInsightCard insight={{ tone: "danger", label: worstLeak.label, text: `Worst slice by net R: ${formatR(worstLeak.netR)}.` }} />
+                                : <div className="text-[10.5px] font-ui text-muted-lab">No clear leak above the sample floor.</div>}
+                        </div>
+                    </div>
+                </div>
+
+                {/* Action queue */}
+                {actionQueue.length > 0 && (
+                    <div className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.4)] p-3"
+                        style={{ borderTop: "2px solid hsl(var(--accent-primary)/0.5)" }}>
+                        <div className="text-[10px] font-ui uppercase tracking-[0.08em] text-[hsl(var(--accent-primary))] mb-1.5">If you had one hour</div>
+                        <ol className="space-y-1">
+                            {actionQueue.map((act, k) => (
+                                <li key={k} className="text-[11px] font-ui text-[hsl(var(--text-2))] leading-snug">
+                                    <span className="font-num text-muted-lab mr-1.5">{k + 1}.</span>
+                                    <strong className="text-[hsl(var(--text))]">{act.verb}</strong> {act.text}
+                                </li>
+                            ))}
+                        </ol>
+                    </div>
+                )}
+
+                {/* Caveats */}
+                <p className="text-[9.5px] font-ui text-muted-lab leading-snug">
+                    This run only · slices below n={LOW_SAMPLE_N} are excluded/flagged · {a.unlinkedCount || 0} unlinked
+                    trades carry no OB data · no validated finding is created here — see the grids below for evidence.
+                </p>
+            </div>
+        </NeonPanel>
+    );
+}
 
 function InsightCallouts({ insights }) {
     const toneMap = {
