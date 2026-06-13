@@ -13,7 +13,9 @@ import React, { useMemo, useState } from "react";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { AlertTriangle, Info, ShieldAlert, Ban, ArrowUpRight, Search, X, Eye } from "lucide-react";
 import { buildLossTriage, buildBeVerdict, buildContextSinkholes } from "@/data/lossTriage";
-import { FailureExplorer } from "../excursion/FailureExplorer";
+// Reuse the existing grouping/lift engine (no new engine) + the existing lift coloring.
+import { buildBucketExplorerRows } from "../shared/excursionAnalytics";
+import { LiftCell } from "../excursion/FailureExplorer";
 
 // Per-cell tone (presentation only).
 const CELL_TONE = {
@@ -23,19 +25,12 @@ const CELL_TONE = {
     round_trip:  "warning",           // strongest stop-too-tight signal
 };
 
-// Dedicated FailureExplorer prefs for the cohort drilldown (its own persisted UI
-// state, isolated from the MFE Bucket / Global explorers). Seeded once with the
-// Phase-1 defaults: bucket scope, Session × Direction, ranked by Lift, floor 15.
-const COHORT_PREFS_KEY = "fxob_loss_cohort_explorer_v1";
-function seedCohortPrefsIfAbsent() {
-    try {
-        if (!localStorage.getItem(COHORT_PREFS_KEY)) {
-            localStorage.setItem(COHORT_PREFS_KEY, JSON.stringify({
-                scope: "bucket", dimA: "session", dimB: "direction", metric: "lift", floor: 15,
-            }));
-        }
-    } catch { /* storage unavailable — FailureExplorer falls back to its own defaults */ }
-}
+// Cohort drilldown is fixed to Session × Direction (the Tier-1 default from the
+// design audit) with a sample floor of 15 — deterministic and clearest for "where
+// does this loss type concentrate". Dim-switching is a deliberate future enhancement.
+const COHORT_DIM_A = "session";
+const COHORT_DIM_B = "direction";
+const COHORT_SAMPLE_FLOOR = 15;
 
 function TriageCell({ c, selected, onSelect }) {
     const tone = CELL_TONE[c.key] || "text-2";
@@ -150,45 +145,93 @@ function SinkholeCard({ sinkholes }) {
     );
 }
 
-// Inherited caveats — shown inside the drilldown so the "why" view never reads as proof.
-const COHORT_CAVEATS = [
-    "This run only.",
-    "Lift is overrepresentation, not proof.",
-    "High lift at a small sample is not a finding.",
-    "Peak-not-path applies to recovered cohorts (False Loser / Round-Trip).",
-];
+// Loss-type-share table. For each Session × Direction setup: how many of that setup's
+// total losses are the selected loss type, plus run-wide lift. Rows come from the reused
+// engine; we only derive the two count-shares and render. Net R / Wins / PF are hidden —
+// in legacy (cohort) mode the engine cannot attribute per-setup winner R, so they'd be
+// blank/misleading here.
+function CohortTable({ rows, cohortLabel, cohortTotal }) {
+    const r1 = (n) => Math.round(n * 10) / 10;
+    const enriched = (Array.isArray(rows) ? rows : [])
+        .filter((row) => row.bucketLosses > 0)
+        .map((row) => ({
+            ...row,
+            setup: row.keyB != null ? `${row.keyA} · ${row.keyB}` : row.keyA,
+            pctOfLosses: row.fullLosses > 0 ? r1((row.bucketLosses / row.fullLosses) * 100) : 0,
+            pctOfCohort: cohortTotal > 0 ? r1((row.bucketLosses / cohortTotal) * 100) : 0,
+        }))
+        // Default sort: highest % of setup losses first, then raw count — low-sample sunk.
+        .sort((a, b) =>
+            (Number(b.rankable) - Number(a.rankable))
+            || (b.pctOfLosses - a.pctOfLosses)
+            || (b.bucketLosses - a.bucketLosses));
 
-// Inline cohort drilldown. Reuses FailureExplorer in BUCKET scope — the selected
-// triage cell's member losers ARE the bucket. No new explorer/lift/PF/netR logic.
+    if (!enriched.length) {
+        return <div className="px-1 py-3 text-[11px] font-ui text-muted-lab">No setups carry a {cohortLabel} at this grouping.</div>;
+    }
+    const th = "text-right py-1.5 px-2 text-[9.5px] font-ui uppercase tracking-[0.05em] text-[hsl(var(--text-2))]";
+    const td = "text-right py-1.5 px-2 font-num tabular-nums text-[11px]";
+    return (
+        <div className="overflow-x-auto">
+            <table className="w-full border-collapse">
+                <thead>
+                    <tr className="border-b border-[hsl(var(--border-soft))]">
+                        <th className="text-left py-1.5 px-2 text-[9.5px] font-ui uppercase tracking-[0.05em] text-[hsl(var(--text-2))]">Setup</th>
+                        <th className={th}>{cohortLabel}</th>
+                        <th className={th}>Total losses</th>
+                        <th className={th}>% of losses</th>
+                        <th className={th}>% of cohort</th>
+                        <th className={th}>Lift</th>
+                        <th className={th}>Loss-R</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {enriched.map((row) => {
+                        const pctTone = row.pctOfLosses >= 50 ? "text-[hsl(var(--danger))]" : row.pctOfLosses >= 30 ? "text-[hsl(var(--warning))]" : "text-[hsl(var(--text))]";
+                        return (
+                            <tr key={row.setup} className={`border-b border-[hsl(var(--border-soft)/0.5)] ${row.lowSample ? "opacity-55" : ""}`}>
+                                <td className="text-left py-1.5 px-2 text-[11px] font-ui text-[hsl(var(--text))]">
+                                    {row.setup}
+                                    {row.lowSample && <span className="ml-1.5 text-[9px] font-ui text-muted-lab">low-n</span>}
+                                </td>
+                                <td className={`${td} text-[hsl(var(--text))] font-semibold`}>{row.bucketLosses}</td>
+                                <td className={`${td} text-muted-lab`}>{row.fullLosses}</td>
+                                <td className={`${td} ${pctTone} font-semibold`}>{row.pctOfLosses}%</td>
+                                <td className={`${td} text-muted-lab`}>{row.pctOfCohort}%</td>
+                                <td className="py-1.5 px-2 text-right"><LiftCell lift={row.lift} /></td>
+                                <td className={`${td} text-[hsl(var(--danger))]`}>−{row.bucketLossR}R</td>
+                            </tr>
+                        );
+                    })}
+                </tbody>
+            </table>
+            <p className="mt-2 px-1 text-[9.5px] font-ui text-muted-lab leading-snug">
+                <strong>% of losses</strong> = {cohortLabel} ÷ that setup’s total losses. <strong>% of cohort</strong> = setup’s share of all {cohortLabel}.
+                <strong> Lift</strong> = run-wide loss-share ÷ trade-share (overrepresentation, not proof). Rows below the sample floor (n &lt; {COHORT_SAMPLE_FLOOR}) are dimmed. This run only.
+            </p>
+        </div>
+    );
+}
+
+// Inline cohort drilldown. Reuses the bucket-explorer engine for grouping/lift; renders
+// a loss-type-share table (see CohortTable). No new engine; FailureExplorer untouched.
 function CohortDrawer({ cells, selectedKey, onSelect, onClose, allTrades }) {
     const cell = cells.find((c) => c.key === selectedKey);
     if (!cell) return null;
     const tone = CELL_TONE[cell.key] || "text-2";
 
-    // FailureExplorer bucket contract: { key, label, trades, lossR, contributionPct, losers }.
-    // A triage cohort is NOT an MFE raw bucket, so pass key:null → buildBucketExplorerRows
-    // uses legacy mode and groups the passed cohort losers directly (non-null keys trigger
-    // MFE-band matching, which yields zero rows here → "No cells").
-    const r1 = (n) => Math.round(n * 10) / 10;
-    const netOf = (t) => Number(t?.netR ?? t?.net_r) || 0;
-    const cohortLossR = r1(cell.trades.reduce((s, t) => s + netOf(t), 0)); // negative (all cohort members are losses)
-    const runLossR = (Array.isArray(allTrades) ? allTrades : [])
-        .reduce((s, t) => (String(t?.outcome ?? "").toUpperCase() === "LOSS" ? s + netOf(t) : s), 0);
-    const contributionPct = runLossR !== 0 ? r1((cohortLossR / runLossR) * 100) : 0;
-    const explorerBucket = {
-        key: null,
-        label: cell.label,
-        trades: cell.count,
-        lossR: cohortLossR,
-        contributionPct,
-        losers: cell.trades,
-    };
-    const caveatIntro = (
-        <span className="text-[10px] font-ui text-muted-lab leading-snug">
-            <strong className="text-[hsl(var(--text-2))]">Rows show where this selected loss type clusters.</strong>{" "}
-            Overrepresented characteristics of <strong>{cell.label}</strong> vs the whole run. {COHORT_CAVEATS.join(" ")}
-        </span>
-    );
+    // Reuse the grouping/lift engine in LEGACY mode (bucketKey:null): it groups the
+    // cohort's OWN losers (cell.trades) by Session × Direction AND carries each setup's
+    // overall loss total — exactly the "of all losses for this setup, how many are this
+    // loss type?" comparison. No new engine; lift coloring reused via <LiftCell />.
+    const rows = (buildBucketExplorerRows({
+        bucketLosers: cell.trades,
+        bucketKey: null,
+        allTrades,
+        dimA: COHORT_DIM_A,
+        dimB: COHORT_DIM_B,
+        sampleFloor: COHORT_SAMPLE_FLOOR,
+    }).rows) || [];
     return (
         <div className="border clip-bevel-sm bg-[hsl(var(--panel-2)/0.25)] border-[hsl(var(--accent-primary)/0.6)] ring-1 ring-[hsl(var(--accent-primary)/0.25)]"
             style={{ borderTop: `2px solid hsl(var(--${tone})/0.6)` }}>
@@ -227,27 +270,19 @@ function CohortDrawer({ cells, selectedKey, onSelect, onClose, allTrades }) {
             <div className="mx-3 mt-3 p-2.5 clip-bevel-sm border-l-2 border-[hsl(var(--accent-primary)/0.7)] bg-[hsl(var(--accent-primary)/0.1)]">
                 <div className="flex items-center gap-1.5 text-[11px] font-ui font-semibold text-[hsl(var(--accent-primary))]">
                     <Eye size={12} className="shrink-0" />
-                    Viewing {cell.label} cohort only
+                    Viewing {cell.label} only.
                 </div>
                 <p className="mt-1 text-[10px] font-ui text-[hsl(var(--text-2))] leading-snug">
-                    This breakdown only includes the selected loss type. It does not show all trades or all losses for each setup.
+                    This table compares this loss type against total losses for each setup (Session × Direction).
                 </p>
                 <p className="mt-0.5 text-[10px] font-ui text-muted-lab leading-snug">
-                    Use <span className="text-[hsl(var(--text-2))]">Lift</span> / <span className="text-[hsl(var(--text-2))]">% Universe</span> to compare this cohort against the full run.
+                    <span className="text-[hsl(var(--text-2))]">% of Losses</span> = this loss type ÷ that setup’s total losses.{" "}
+                    Read <span className="text-[hsl(var(--text-2))]">Lift</span> for run-wide overrepresentation. Peak-not-path applies to recovered cohorts.
                 </p>
             </div>
-            {/* Reused FailureExplorer (bucket scope). prefs seeded to Session × Direction / Lift / floor 15. */}
-            <div className="p-1">
-                <FailureExplorer
-                    key={selectedKey}
-                    allTrades={allTrades}
-                    allLosers={cell.trades}
-                    bucket={explorerBucket}
-                    title={`${cell.label} — cohort breakdown`}
-                    prefsKey={COHORT_PREFS_KEY}
-                    roadmapKey={null}
-                    intro={caveatIntro}
-                />
+            {/* Loss-type-share table — reuses buildBucketExplorerRows (legacy grouping + lift). */}
+            <div className="p-3">
+                <CohortTable rows={rows} cohortLabel={cell.label} cohortTotal={cell.count} />
             </div>
         </div>
     );
@@ -255,7 +290,7 @@ function CohortDrawer({ cells, selectedKey, onSelect, onClose, allTrades }) {
 
 export function LossTriagePanel({ allTrades = [], beTradesByMode = null, executionMode = null }) {
     const [selectedKey, setSelectedKey] = useState(null);
-    const selectCohort = (key) => { seedCohortPrefsIfAbsent(); setSelectedKey(key); };
+    const selectCohort = (key) => setSelectedKey(key);
     const triage = useMemo(() => buildLossTriage(allTrades), [allTrades]);
     const baselineNetR = useMemo(
         () => (Array.isArray(allTrades) ? allTrades.reduce((s, t) => s + (Number(t?.netR ?? t?.net_r) || 0), 0) : 0),
