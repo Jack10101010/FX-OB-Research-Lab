@@ -162,5 +162,42 @@ console.log("\n§10  context sinkholes (session × direction, n >= threshold, ne
     ok(buildContextSinkholes([]).available === false, "empty → unavailable");
 }
 
+console.log("\n§11  cells[].trades membership (cohort drilldown)");
+{
+    // Distinct objects so membership/dedup is checkable by reference.
+    const clean = [loss(-0.2, 0.2), loss(-0.3, 0.1)];                 // genuine + flat  → clean_loss (2)
+    const falseL = [loss(1.5, 0.2)];                                  // recovered + flat → false_loser (1)
+    const give  = [loss(-0.2, 1.4), loss(-0.1, 2.0), loss(-0.3, 1.1)]; // genuine + ran   → give_back (3)
+    const round = [loss(2.0, 1.8)];                                  // recovered + ran → round_trip (1)
+    const nod   = [{ outcome: "LOSS", mfe_r: 1.2 }];                  // no post-stop → unclassified (but keeps availability via others)
+    const all = [...clean, ...falseL, ...give, ...round, ...nod];
+    const r = buildLossTriage(all);
+
+    ok(cell(r, "clean_loss").trades.length === 2, "clean_loss carries 2 member trades");
+    ok(cell(r, "false_loser").trades.length === 1, "false_loser carries 1 member trade");
+    ok(cell(r, "give_back").trades.length === 3, "give_back carries 3 member trades");
+    ok(cell(r, "round_trip").trades.length === 1, "round_trip carries 1 member trade");
+
+    // each cell's trades.length === its count
+    ok(r.cells.every((c) => c.trades.length === c.count), "every cell: trades.length === count");
+
+    // total membership across cells === classified losses
+    const membership = r.cells.reduce((s, c) => s + c.trades.length, 0);
+    ok(membership === r.totals.classified, "sum of cell trades === classified losses");
+    ok(membership === all.length - r.totals.unclassified, "membership excludes only the unclassified loser");
+
+    // no duplicate trades across cells (each loser lands in exactly one cell)
+    const refs = r.cells.flatMap((c) => c.trades);
+    ok(new Set(refs).size === refs.length, "no duplicate trade objects across cells");
+
+    // membership is exactly the classified members (by reference)
+    ok(cell(r, "give_back").trades.every((t) => give.includes(t)), "give_back members are the right objects");
+
+    // unavailable report still exposes cells[].trades (empty)
+    const un = buildLossTriage([]);
+    ok(un.available === false && un.cells.every((c) => Array.isArray(c.trades) && c.trades.length === 0),
+        "unavailable report: each cell exposes empty trades[]");
+}
+
 console.log(`\n${failures === 0 ? "✅ ALL PASS" : `❌ ${failures} FAILURE(S)`}\n`);
 process.exit(failures === 0 ? 0 : 1);

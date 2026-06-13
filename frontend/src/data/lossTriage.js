@@ -114,14 +114,16 @@ export function buildLossTriage(trades, options = {}) {
             totals: { losses: losers.length, classified: 0, unclassified: losers.length, recovered: 0, ran: 0 },
             cells: CELL_DEFS.map((c) => ({
                 key: c.key, label: c.label, meaning: c.meaning, action: c.action,
-                count: 0, pctOfLosses: 0, lowSample: true,
+                count: 0, pctOfLosses: 0, lowSample: true, trades: [],
             })),
             thresholds,
             caveats: CAVEATS,
         };
     }
 
-    const counts = { clean_loss: 0, false_loser: 0, give_back: 0, round_trip: 0 };
+    // Member loser trades per cell (so the cohort explorer can drill each cell as a
+    // FailureExplorer bucket). Each classified loser lands in exactly one cell.
+    const members = { clean_loss: [], false_loser: [], give_back: [], round_trip: [] };
     let unclassified = 0, recovered = 0, ran = 0;
 
     for (const t of losers) {
@@ -131,15 +133,16 @@ export function buildLossTriage(trades, options = {}) {
         if (a === "recovered") recovered++;
         if (b === "ran") ran++;
         const cell = CELL_DEFS.find((c) => c.a === a && c.b === b);
-        if (cell) counts[cell.key]++;
+        if (cell) members[cell.key].push(t);
     }
 
     const classified = losers.length - unclassified;
     const cells = CELL_DEFS.map((c) => ({
         key: c.key, label: c.label, meaning: c.meaning, action: c.action,
-        count: counts[c.key],
-        pctOfLosses: losers.length ? round1((counts[c.key] / losers.length) * 100) : 0,
-        lowSample: counts[c.key] < lowN,
+        count: members[c.key].length,
+        pctOfLosses: losers.length ? round1((members[c.key].length / losers.length) * 100) : 0,
+        lowSample: members[c.key].length < lowN,
+        trades: members[c.key],
     }));
 
     return {

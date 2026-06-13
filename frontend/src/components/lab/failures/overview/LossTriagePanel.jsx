@@ -9,10 +9,11 @@
 // Pure presentation over data/lossTriage.js. All copy says "reached"/"peak", never
 // "would have profited" — post-stop recovery is an upper bound, not realized profit.
 
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { NeonPanel } from "@/components/lab/NeonPanel";
-import { AlertTriangle, Info, ShieldAlert, Ban, ArrowUpRight } from "lucide-react";
+import { AlertTriangle, Info, ShieldAlert, Ban, ArrowUpRight, Search, X } from "lucide-react";
 import { buildLossTriage, buildBeVerdict, buildContextSinkholes } from "@/data/lossTriage";
+import { FailureExplorer } from "../excursion/FailureExplorer";
 
 // Per-cell tone (presentation only).
 const CELL_TONE = {
@@ -22,13 +23,38 @@ const CELL_TONE = {
     round_trip:  "warning",           // strongest stop-too-tight signal
 };
 
-function TriageCell({ c }) {
+// Dedicated FailureExplorer prefs for the cohort drilldown (its own persisted UI
+// state, isolated from the MFE Bucket / Global explorers). Seeded once with the
+// Phase-1 defaults: bucket scope, Session × Direction, ranked by Lift, floor 15.
+const COHORT_PREFS_KEY = "fxob_loss_cohort_explorer_v1";
+function seedCohortPrefsIfAbsent() {
+    try {
+        if (!localStorage.getItem(COHORT_PREFS_KEY)) {
+            localStorage.setItem(COHORT_PREFS_KEY, JSON.stringify({
+                scope: "bucket", dimA: "session", dimB: "direction", metric: "lift", floor: 15,
+            }));
+        }
+    } catch { /* storage unavailable — FailureExplorer falls back to its own defaults */ }
+}
+
+function TriageCell({ c, selected, onSelect }) {
     const tone = CELL_TONE[c.key] || "text-2";
+    const clickable = c.count > 0;
     return (
-        <div className="p-3 border border-[hsl(var(--border-soft))] clip-bevel-sm bg-[hsl(var(--panel-2)/0.4)] flex flex-col"
+        <button
+            type="button"
+            disabled={!clickable}
+            aria-pressed={selected}
+            onClick={() => clickable && onSelect(c.key)}
+            className={`text-left p-3 border clip-bevel-sm bg-[hsl(var(--panel-2)/0.4)] flex flex-col transition-colors ${
+                selected ? "border-[hsl(var(--accent-primary)/0.7)] ring-1 ring-[hsl(var(--accent-primary)/0.4)]" : "border-[hsl(var(--border-soft))]"
+            } ${clickable ? "hover:bg-[hsl(var(--panel-2)/0.7)] cursor-pointer" : "cursor-default opacity-90"}`}
             style={{ borderTop: `2px solid hsl(var(--${tone})/0.5)` }}>
             <div className="flex items-baseline justify-between gap-2">
-                <span className="text-[11px] font-ui font-semibold text-[hsl(var(--text))]">{c.label}</span>
+                <span className="text-[11px] font-ui font-semibold text-[hsl(var(--text))] flex items-center gap-1">
+                    {c.label}
+                    {clickable && <Search size={10} className="opacity-50" />}
+                </span>
                 <span className="flex items-baseline gap-1">
                     <span className={`text-[16px] font-num text-[hsl(var(--${tone}))] ${c.lowSample ? "opacity-60" : ""}`}>{c.count}</span>
                     <span className="text-[10px] font-num text-muted-lab">{c.pctOfLosses}%</span>
@@ -39,7 +65,7 @@ function TriageCell({ c }) {
             {c.lowSample && c.count > 0 && (
                 <p className="mt-1 text-[9.5px] font-ui text-muted-lab">Low sample (&lt; 15).</p>
             )}
-        </div>
+        </button>
     );
 }
 
@@ -124,7 +150,80 @@ function SinkholeCard({ sinkholes }) {
     );
 }
 
+// Inherited caveats — shown inside the drilldown so the "why" view never reads as proof.
+const COHORT_CAVEATS = [
+    "This run only.",
+    "Lift is overrepresentation, not proof.",
+    "High lift at a small sample is not a finding.",
+    "Peak-not-path applies to recovered cohorts (False Loser / Round-Trip).",
+];
+
+// Inline cohort drilldown. Reuses FailureExplorer in BUCKET scope — the selected
+// triage cell's member losers ARE the bucket. No new explorer/lift/PF/netR logic.
+function CohortDrawer({ cells, selectedKey, onSelect, onClose, allTrades }) {
+    const cell = cells.find((c) => c.key === selectedKey);
+    if (!cell) return null;
+    const tone = CELL_TONE[cell.key] || "text-2";
+    const caveatIntro = (
+        <span className="text-[10px] font-ui text-muted-lab leading-snug">
+            Overrepresented characteristics of <strong>{cell.label}</strong> vs the whole run.{" "}
+            {COHORT_CAVEATS.join(" ")}
+        </span>
+    );
+    return (
+        <div className="border clip-bevel-sm bg-[hsl(var(--panel-2)/0.25)] border-[hsl(var(--accent-primary)/0.4)]"
+            style={{ borderTop: `2px solid hsl(var(--${tone})/0.6)` }}>
+            {/* Header */}
+            <div className="flex items-start justify-between gap-3 p-3 border-b border-[hsl(var(--border-soft))]">
+                <div>
+                    <div className="text-[12px] font-ui font-semibold text-[hsl(var(--text))]">{cell.label} — why?</div>
+                    <div className="text-[10.5px] font-num text-muted-lab mt-0.5">{cell.count} losses · {cell.pctOfLosses}% of losses</div>
+                </div>
+                <button type="button" onClick={onClose} aria-label="Close cohort drilldown"
+                    className="shrink-0 p-1 text-muted-lab hover:text-[hsl(var(--text))]">
+                    <X size={14} />
+                </button>
+            </div>
+            {/* Cohort segmented selector — switch cohorts without leaving the drawer */}
+            <div className="flex flex-wrap gap-1.5 p-3 pb-0">
+                {cells.map((c) => {
+                    const active = c.key === selectedKey;
+                    const disabled = c.count === 0;
+                    return (
+                        <button key={c.key} type="button" disabled={disabled} aria-pressed={active}
+                            onClick={() => onSelect(c.key)}
+                            className={`px-2.5 py-1 text-[10.5px] font-ui clip-bevel-sm border transition-colors ${
+                                active
+                                    ? "bg-[hsl(var(--accent-primary)/0.16)] border-[hsl(var(--accent-primary)/0.5)] text-[hsl(var(--accent-primary))]"
+                                    : disabled
+                                        ? "border-[hsl(var(--border-soft))] text-muted-lab opacity-50 cursor-default"
+                                        : "bg-[hsl(var(--panel-2)/0.4)] border-[hsl(var(--border-soft))] text-muted-lab hover:text-[hsl(var(--text-base))]"
+                            }`}>
+                            {c.label} <span className="font-num">{c.count}</span>
+                        </button>
+                    );
+                })}
+            </div>
+            {/* Reused FailureExplorer (bucket scope). prefs seeded to Session × Direction / Lift / floor 15. */}
+            <div className="p-1">
+                <FailureExplorer
+                    key={selectedKey}
+                    allTrades={allTrades}
+                    allLosers={cell.trades}
+                    bucket={{ key: cell.key, losers: cell.trades }}
+                    title={`${cell.label} — cohort breakdown`}
+                    prefsKey={COHORT_PREFS_KEY}
+                    roadmapKey={null}
+                    intro={caveatIntro}
+                />
+            </div>
+        </div>
+    );
+}
+
 export function LossTriagePanel({ allTrades = [], beTradesByMode = null, executionMode = null }) {
+    const [selectedKey, setSelectedKey] = useState(null);
+    const selectCohort = (key) => { seedCohortPrefsIfAbsent(); setSelectedKey(key); };
     const triage = useMemo(() => buildLossTriage(allTrades), [allTrades]);
     const baselineNetR = useMemo(
         () => (Array.isArray(allTrades) ? allTrades.reduce((s, t) => s + (Number(t?.netR ?? t?.net_r) || 0), 0) : 0),
@@ -159,10 +258,23 @@ export function LossTriagePanel({ allTrades = [], beTradesByMode = null, executi
                     They do not predict each other, so a run-up does not imply break-even would help.
                 </p>
 
-                {/* A — 2x2 matrix */}
+                {/* A — 2x2 matrix (cells are clickable → cohort drilldown) */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                    {triage.cells.map((c) => <TriageCell key={c.key} c={c} />)}
+                    {triage.cells.map((c) => (
+                        <TriageCell key={c.key} c={c} selected={c.key === selectedKey} onSelect={selectCohort} />
+                    ))}
                 </div>
+
+                {/* A.1 — cohort drilldown (reused FailureExplorer, bucket scope) */}
+                {selectedKey && (
+                    <CohortDrawer
+                        cells={triage.cells}
+                        selectedKey={selectedKey}
+                        onSelect={selectCohort}
+                        onClose={() => setSelectedKey(null)}
+                        allTrades={allTrades}
+                    />
+                )}
 
                 {/* B — BE replay verdict */}
                 <BeVerdictCard verdict={beVerdict} />
