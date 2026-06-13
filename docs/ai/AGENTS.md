@@ -67,6 +67,9 @@ root (e.g. `CLASSIFICATION-TAB-V2-PLAN.md`). `docs/ai/` summarizes and points to
    `WORKSTREAMS.md`, `FINDINGS.md`, `DECISIONS.md`, `EXPERIMENTS.md`, or `BACKLOG.md` are
    materially stale, propose a `/sync` update **before continuing major planning work**. Prefer
    small incremental updates over large retrospective rewrites.
+9. **Preserve analytical power unless the user explicitly requests simplification.** Rule 7
+   ("smallest correct change") never justifies removing exploration, flexibility, or research
+   capability. See **Research Workflow Preservation** below.
 
 > **Environment note:** in the Cowork sandbox, git can create but **not unlink**
 > `.git/index.lock` (mount restriction), so staging/committing is done on the host.
@@ -162,6 +165,92 @@ The user values **proactive suggestions**. When a meaningful improvement is appa
 
 Proactivity means *proposing*, not *acting*: still get approval before implementing, never
 refactor unrelated code, never change the dark theme.
+
+---
+
+## Research Workflow Preservation
+
+**CRITICAL PRODUCT RULE**
+
+FX-OB Research Lab is a research platform first and a reporting tool second.
+
+When choosing between:
+- **A)** simpler implementation
+- **B)** preserving analytical flexibility
+
+prefer **B** unless explicitly instructed otherwise.
+
+Explorers, filters, dimensions, pivots, comparisons, drilldowns, cohort analysis, ranking
+systems, and investigative workflows are **core product features**.
+
+Do not remove, hard-code, simplify, replace, or reduce these capabilities merely to make
+implementation easier.
+
+If a requested feature could be implemented by:
+- extending an existing explorer
+- adding columns
+- adding metrics
+- adding adapters
+- adding views
+
+prefer that approach over replacing the explorer with a static report.
+
+Before implementing any change that would remove:
+- dimension selectors
+- exploration controls
+- drilldowns
+- pivots
+- filtering
+- comparison capabilities
+- ranking systems
+- cohort exploration
+
+**STOP and report it during the audit phase.** Such changes require explicit approval.
+
+---
+
+## Research UI Design Principle
+
+The goal of Research Lab is **discovery**. Users should be able to:
+- investigate unexpected relationships
+- pivot data through multiple dimensions
+- compare cohorts
+- drill into subsets
+- test hypotheses
+
+Do not convert exploratory tools into fixed reports unless explicitly requested.
+
+- A **report** answers: "What happened?"
+- A **research tool** answers: "Why did it happen?"
+
+Prefer preserving the ability to answer **"why"**.
+
+---
+
+## Existing Explorer Protection
+
+If modifying an existing explorer or explorer-adjacent surface, follow this default
+**preference order**:
+
+1. Additive enhancement
+2. Adapter layer
+3. Additional columns
+4. Additional metrics
+5. Additional filters
+6. Additional views
+7. Explorer replacement
+
+**Explorer replacement requires explicit approval.** If an implementation would remove
+functionality that already exists in an explorer, call it out during the audit and request
+approval before proceeding.
+
+**Validation requirement** — for any explorer-related task, include in the final report:
+- What existing capabilities were **preserved**
+- What capabilities were **added**
+- What capabilities were **removed**, if any
+- Whether **live UI verification** was performed
+
+If any capability was removed, explain why and confirm approval was obtained.
 
 ---
 
