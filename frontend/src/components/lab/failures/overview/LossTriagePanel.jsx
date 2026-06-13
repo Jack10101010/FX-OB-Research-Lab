@@ -13,8 +13,10 @@ import React, { useMemo, useState } from "react";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { AlertTriangle, Info, ShieldAlert, Ban, ArrowUpRight, Search, X, Eye } from "lucide-react";
 import { buildLossTriage, buildBeVerdict, buildContextSinkholes } from "@/data/lossTriage";
-// Reuse the existing grouping/lift engine (no new engine) + the existing lift coloring.
-import { buildBucketExplorerRows } from "../shared/excursionAnalytics";
+// Reuse the existing grouping/lift engine (no new engine) + the existing lift coloring
+// + the canonical sample-floor set. ExplorerSelect is private to FailureExplorer, so we
+// replicate a tiny styled <select> (DimSelect) to avoid touching that shared component.
+import { buildBucketExplorerRows, EXPLORER_FLOORS } from "../shared/excursionAnalytics";
 import { LiftCell } from "../excursion/FailureExplorer";
 
 // Per-cell tone (presentation only).
@@ -30,7 +32,9 @@ const CELL_TONE = {
 // does this loss type concentrate". Dim-switching is a deliberate future enhancement.
 const COHORT_DIM_A = "session";
 const COHORT_DIM_B = "direction";
-const COHORT_SAMPLE_FLOOR = 15;
+// Default floor uses a value from the explorer's canonical set ([4,8,12,20]) so the
+// default is reflected in the floor buttons.
+const COHORT_SAMPLE_FLOOR = 12;
 
 function TriageCell({ c, selected, onSelect }) {
     const tone = CELL_TONE[c.key] || "text-2";
@@ -145,12 +149,30 @@ function SinkholeCard({ sinkholes }) {
     );
 }
 
-// Loss-type-share table. For each Session × Direction setup: how many of that setup's
-// total losses are the selected loss type, plus run-wide lift. Rows come from the reused
-// engine; we only derive the two count-shares and render. Net R / Wins / PF are hidden —
-// in legacy (cohort) mode the engine cannot attribute per-setup winner R, so they'd be
-// blank/misleading here.
-function CohortTable({ rows, cohortLabel, cohortTotal }) {
+// Minimal styled select — replica of FailureExplorer's private ExplorerSelect so the
+// cohort drilldown has the same Dimension A / Dimension B controls without importing
+// (or modifying) the shared component.
+function DimSelect({ label, value, onChange, options, includeNone = false }) {
+    return (
+        <div className="flex flex-col gap-1">
+            <span className="text-[9.5px] font-ui uppercase tracking-[0.05em] text-[hsl(var(--text-2))]">{label}</span>
+            <select
+                value={value ?? ""}
+                onChange={(e) => onChange(e.target.value)}
+                className="px-2 py-1.5 text-[11px] font-ui clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.5)] text-[hsl(var(--text))]">
+                {includeNone && <option value="">None</option>}
+                {options.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+            </select>
+        </div>
+    );
+}
+
+// Loss-type-share table. For each setup (current Dimension A × Dimension B): how many of
+// that setup's total losses are the selected loss type, plus run-wide lift. Rows come from
+// the reused engine; we only derive the two count-shares and render. Net R / Wins / PF are
+// hidden — in legacy (cohort) mode the engine cannot attribute per-setup winner R, so
+// they'd be blank/misleading here.
+function CohortTable({ rows, cohortLabel, cohortTotal, sampleFloor }) {
     const r1 = (n) => Math.round(n * 10) / 10;
     const enriched = (Array.isArray(rows) ? rows : [])
         .filter((row) => row.bucketLosses > 0)
@@ -207,7 +229,7 @@ function CohortTable({ rows, cohortLabel, cohortTotal }) {
             </table>
             <p className="mt-2 px-1 text-[9.5px] font-ui text-muted-lab leading-snug">
                 <strong>% of losses</strong> = {cohortLabel} ÷ that setup’s total losses. <strong>% of cohort</strong> = setup’s share of all {cohortLabel}.
-                <strong> Lift</strong> = run-wide loss-share ÷ trade-share (overrepresentation, not proof). Rows below the sample floor (n &lt; {COHORT_SAMPLE_FLOOR}) are dimmed. This run only.
+                <strong> Lift</strong> = run-wide loss-share ÷ trade-share (overrepresentation, not proof). Rows below the sample floor (n &lt; {sampleFloor}) are dimmed. This run only.
             </p>
         </div>
     );
@@ -216,22 +238,33 @@ function CohortTable({ rows, cohortLabel, cohortTotal }) {
 // Inline cohort drilldown. Reuses the bucket-explorer engine for grouping/lift; renders
 // a loss-type-share table (see CohortTable). No new engine; FailureExplorer untouched.
 function CohortDrawer({ cells, selectedKey, onSelect, onClose, allTrades }) {
+    // Explorer-style controls (default Session × Direction, but switchable). State lives
+    // here so it persists while switching cohorts in the open drawer. Hooks must precede
+    // the early return below.
+    const [dimA, setDimA] = useState(COHORT_DIM_A);
+    const [dimB, setDimB] = useState(COHORT_DIM_B);
+    const [floor, setFloor] = useState(COHORT_SAMPLE_FLOOR);
+
     const cell = cells.find((c) => c.key === selectedKey);
-    if (!cell) return null;
-    const tone = CELL_TONE[cell.key] || "text-2";
 
     // Reuse the grouping/lift engine in LEGACY mode (bucketKey:null): it groups the
-    // cohort's OWN losers (cell.trades) by Session × Direction AND carries each setup's
+    // cohort's OWN losers (cell.trades) by the chosen dimension(s) AND carries each setup's
     // overall loss total — exactly the "of all losses for this setup, how many are this
-    // loss type?" comparison. No new engine; lift coloring reused via <LiftCell />.
-    const rows = (buildBucketExplorerRows({
-        bucketLosers: cell.trades,
+    // loss type?" comparison. Returns { available, dimA, dimB, rows } so we can drive the
+    // Dimension A/B selectors from the engine's own resolved dimensions.
+    const result = buildBucketExplorerRows({
+        bucketLosers: cell?.trades ?? [],
         bucketKey: null,
         allTrades,
-        dimA: COHORT_DIM_A,
-        dimB: COHORT_DIM_B,
-        sampleFloor: COHORT_SAMPLE_FLOOR,
-    }).rows) || [];
+        dimA,
+        dimB: dimB || null,
+        sampleFloor: floor,
+    });
+
+    if (!cell) return null;
+    const tone = CELL_TONE[cell.key] || "text-2";
+    const available = result.available || [];
+    const dimBOptions = available.filter((d) => d.key !== result.dimA);
     return (
         <div className="border clip-bevel-sm bg-[hsl(var(--panel-2)/0.25)] border-[hsl(var(--accent-primary)/0.6)] ring-1 ring-[hsl(var(--accent-primary)/0.25)]"
             style={{ borderTop: `2px solid hsl(var(--${tone})/0.6)` }}>
@@ -273,16 +306,36 @@ function CohortDrawer({ cells, selectedKey, onSelect, onClose, allTrades }) {
                     Viewing {cell.label} only.
                 </div>
                 <p className="mt-1 text-[10px] font-ui text-[hsl(var(--text-2))] leading-snug">
-                    This table compares this loss type against total losses for each setup (Session × Direction).
+                    This table compares this loss type against total losses for each setup.
                 </p>
                 <p className="mt-0.5 text-[10px] font-ui text-muted-lab leading-snug">
                     <span className="text-[hsl(var(--text-2))]">% of Losses</span> = this loss type ÷ that setup’s total losses.{" "}
                     Read <span className="text-[hsl(var(--text-2))]">Lift</span> for run-wide overrepresentation. Peak-not-path applies to recovered cohorts.
                 </p>
             </div>
+            {/* Explorer-style controls — Dimension A / B + sample floor (default Session × Direction). */}
+            <div className="flex flex-wrap items-end gap-3 px-3 pt-3">
+                <DimSelect label="Dimension A" value={result.dimA ?? ""} onChange={setDimA} options={available} />
+                <DimSelect label="Dimension B" value={result.dimB ?? ""} onChange={setDimB} options={dimBOptions} includeNone />
+                <div className="flex flex-col gap-1">
+                    <span className="text-[9.5px] font-ui uppercase tracking-[0.05em] text-[hsl(var(--text-2))]">Sample floor</span>
+                    <div className="flex items-center gap-1">
+                        {EXPLORER_FLOORS.map((f) => (
+                            <button key={f} type="button" onClick={() => setFloor(f)}
+                                className={`px-2 py-1.5 text-[11px] font-num tabular-nums clip-bevel-sm border transition-colors ${
+                                    f === floor
+                                        ? "border-[hsl(var(--accent-primary)/0.6)] bg-[hsl(var(--accent-primary)/0.12)] text-[hsl(var(--text))]"
+                                        : "border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))] hover:bg-[hsl(var(--panel-2)/0.5)]"
+                                }`}>
+                                ≥{f}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            </div>
             {/* Loss-type-share table — reuses buildBucketExplorerRows (legacy grouping + lift). */}
             <div className="p-3">
-                <CohortTable rows={rows} cohortLabel={cell.label} cohortTotal={cell.count} />
+                <CohortTable rows={result.rows} cohortLabel={cell.label} cohortTotal={cell.count} sampleFloor={floor} />
             </div>
         </div>
     );
