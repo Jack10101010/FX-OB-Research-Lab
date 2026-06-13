@@ -38,6 +38,12 @@ const PRUNE_REASON = {
     no_marginal_gain: "no gain over parent",
     low_confidence:   "confidence too low",
 };
+// Targets that require post-stop / excursion export fields. When the run lacks them
+// the target is structurally inert (0 events), so we explain that rather than show 0.
+const EXCURSION_TARGETS = new Set(["give_backs", "false_losers", "round_trips"]);
+// Near-miss sort: closest-to-surviving reason first (passed floor + had real effect),
+// then highest reconstructed lift, then largest sample.
+const REASON_RANK = { effect_too_small: 0, no_marginal_gain: 1, low_confidence: 2, below_floor: 3 };
 
 const predKey = (p) => (p || []).map((x) => `${x.dim}=${x.value}`).sort().join("|");
 
@@ -79,6 +85,65 @@ export default function ClusterExplorer() {
         }
         return map;
     }, [result]);
+
+    // ── CLUSTER-2A: "why empty" diagnostics (UI-only; no engine change) ──────────
+    // Accessor lookup for the in-play dimensions, used to reconstruct pruned-cohort
+    // stats the engine never exposed numerically.
+    const accByKey = useMemo(() => {
+        const m = {};
+        for (const d of dimensions) m[d.key] = d.accessor;
+        return m;
+    }, [dimensions]);
+
+    // Gate funnel derived purely from the engine's existing outputs (pruned reasons +
+    // evaluatedCount + clusters). No statistical change — just counting.
+    const funnel = useMemo(() => {
+        const r = { below_floor: 0, effect_too_small: 0, no_marginal_gain: 0, low_confidence: 0 };
+        for (const p of result.pruned || []) if (r[p.reason] != null) r[p.reason] += 1;
+        const tested = result.evaluatedCount || 0;
+        const afterEffect = tested - r.effect_too_small;
+        const afterGain = afterEffect - r.no_marginal_gain;
+        const afterConf = afterGain - r.low_confidence;
+        const final = result.clusters.length;
+        return {
+            tested, seeded: tested + r.below_floor, final,
+            below_floor: r.below_floor, effect_too_small: r.effect_too_small,
+            no_marginal_gain: r.no_marginal_gain, low_confidence: r.low_confidence,
+            fdr: Math.max(0, afterConf - final),
+        };
+    }, [result]);
+
+    // Reconstruct n / event-rate / lift for the closest rejected candidates from the
+    // run's trades + dimension accessors + the selected target's predicates. The engine
+    // only emitted predicate/reason, so this re-derivation lives here (read-only).
+    const nearMisses = useMemo(() => {
+        if (!result.available || result.clusters.length > 0) return [];
+        const tgt = CLUSTER_TARGETS[target];
+        if (!tgt) return [];
+        const baseRate = result.baseline?.rate || 0;
+        const out = [];
+        for (const p of result.pruned || []) {
+            const pred = p.predicate || [];
+            if (!pred.length) continue;
+            const cohort = trades.filter((t) => pred.every((x) => {
+                const acc = accByKey[x.dim];
+                return acc && String(acc(t)) === String(x.value);
+            }));
+            const uni = cohort.filter((t) => tgt.universe(t));
+            const n = uni.length;
+            const rate = n ? uni.filter((t) => tgt.hit(t)).length / n : 0;
+            out.push({
+                label: pred.map((x) => x.value).join(" · "),
+                parent: (p.parentPredicate || []).map((x) => x.value).join(" · ") || "—",
+                n, rate, lift: baseRate ? rate / baseRate : 0, reason: p.reason,
+            });
+        }
+        out.sort((a, b) => (REASON_RANK[a.reason] - REASON_RANK[b.reason]) || (b.lift - a.lift) || (b.n - a.n));
+        return out.slice(0, 10);
+    }, [result, trades, accByKey, target]);
+
+    // An excursion-dependent target with zero events on this run/variant = missing data.
+    const missingExcursion = EXCURSION_TARGETS.has(target) && result.available && (result.baseline?.targetN ?? 0) === 0;
 
     function saveFinding(cluster) {
         if (!projectId) return;
@@ -174,11 +239,87 @@ export default function ClusterExplorer() {
                         </p>
 
                         {result.clusters.length === 0 ? (
-                            <div className="py-6 text-center border border-dashed border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.18)] clip-bevel-sm" data-testid="cluster-feed-empty">
-                                <div className="font-ui text-[10px] uppercase tracking-[0.14em] text-muted-lab">No surviving clusters</div>
-                                <div className="mt-1 text-[11px] text-[hsl(var(--text-2))]">
-                                    Nothing cleared the validity gates for this target — no disproportionate cohort on this run.
-                                </div>
+                            <div className="space-y-3" data-testid="cluster-why-empty">
+                                {missingExcursion && (
+                                    <div className="py-3 px-3 border border-[hsl(var(--border-mid))] bg-[hsl(var(--panel-2)/0.24)] clip-bevel-sm" data-testid="cluster-missing-fields">
+                                        <div className="inline-flex items-center gap-1.5 text-[11px] text-[hsl(var(--warning))]">
+                                            <AlertTriangle className="w-3.5 h-3.5" /> This target needs excursion data
+                                        </div>
+                                        <div className="mt-1 text-[10.5px] text-[hsl(var(--text-2))] leading-relaxed">
+                                            “{CLUSTER_TARGETS[target].label}” needs post-stop / excursion fields such as <code>mfe_r</code> and{" "}
+                                            <code>post_stop_mfe_r</code>. This run/variant doesn’t appear to contain enough of that data
+                                            (0 such events found), so the target can’t be evaluated.
+                                        </div>
+                                    </div>
+                                )}
+
+                                {result.evaluatedCount > 0 ? (
+                                    <>
+                                        <div className="py-4 px-3 border border-dashed border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.18)] clip-bevel-sm">
+                                            <div className="font-ui text-[10px] uppercase tracking-[0.14em] text-muted-lab">No surviving clusters — here’s why</div>
+                                            <div className="mt-1 text-[11px] text-[hsl(var(--text-2))] leading-relaxed">
+                                                The engine evaluated <span className="font-num">{funnel.tested}</span> candidate cohort{funnel.tested === 1 ? "" : "s"} but
+                                                none cleared the statistical gates. This does <span className="italic">not</span> mean there are no patterns — it means
+                                                no pattern cleared the current evidence threshold on this run/variant.
+                                                {target === "losses" && " For common targets like Losers, lift has limited headroom when the baseline loss rate is already high."}
+                                            </div>
+                                        </div>
+
+                                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5" data-testid="cluster-funnel">
+                                            <FunnelStat label="Seeded" value={funnel.seeded} />
+                                            <FunnelStat label="Below floor" value={`−${funnel.below_floor}`} />
+                                            <FunnelStat label="Failed effect gate" value={`−${funnel.effect_too_small}`} />
+                                            <FunnelStat label="No gain vs parent" value={`−${funnel.no_marginal_gain}`} />
+                                            <FunnelStat label="Low confidence" value={`−${funnel.low_confidence}`} />
+                                            <FunnelStat label="FDR rejected" value={`−${funnel.fdr}`} />
+                                            <FunnelStat label="Survivors" value={funnel.final} tone="danger" />
+                                        </div>
+
+                                        {nearMisses.length > 0 && (
+                                            <div data-testid="cluster-near-misses">
+                                                <div className="text-[10px] font-ui uppercase tracking-wider text-muted-lab mb-1">Closest candidates (did not survive)</div>
+                                                <div className="overflow-x-auto">
+                                                    <table className="w-full text-[10.5px] font-num tabular-nums">
+                                                        <thead>
+                                                            <tr className="text-left text-muted-lab">
+                                                                <th className="py-1 pr-2 font-ui">Cluster</th>
+                                                                <th className="py-1 px-2">n</th>
+                                                                <th className="py-1 px-2">rate</th>
+                                                                <th className="py-1 px-2">base</th>
+                                                                <th className="py-1 px-2">lift</th>
+                                                                <th className="py-1 px-2 font-ui">parent</th>
+                                                                <th className="py-1 pl-2 font-ui">reason</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {nearMisses.map((m, i) => (
+                                                                <tr key={i} className="border-t border-[hsl(var(--border-soft))]">
+                                                                    <td className="py-1 pr-2 text-[hsl(var(--text-1))]">{m.label}</td>
+                                                                    <td className="py-1 px-2">{m.n}</td>
+                                                                    <td className="py-1 px-2">{pctR(m.rate)}</td>
+                                                                    <td className="py-1 px-2 text-muted-lab">{pctR(result.baseline.rate)}</td>
+                                                                    <td className="py-1 px-2">{m.lift.toFixed(2)}×</td>
+                                                                    <td className="py-1 px-2 text-muted-lab">{m.parent}</td>
+                                                                    <td className="py-1 pl-2 text-muted-lab">{PRUNE_REASON[m.reason] || m.reason}</td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                                <div className="mt-1.5 text-[10px] text-muted-lab italic">
+                                                    Shown for transparency — these are below the evidence bar, not findings.
+                                                </div>
+                                            </div>
+                                        )}
+                                    </>
+                                ) : (
+                                    <div className="py-6 text-center border border-dashed border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.18)] clip-bevel-sm" data-testid="cluster-feed-empty">
+                                        <div className="font-ui text-[10px] uppercase tracking-[0.14em] text-muted-lab">No candidates to evaluate</div>
+                                        <div className="mt-1 text-[11px] text-[hsl(var(--text-2))]">
+                                            No single cohort had enough trades to test on this run/variant — needs a larger sample.
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         ) : (
                             <div className="space-y-2" data-testid="cluster-feed">
@@ -269,6 +410,15 @@ export default function ClusterExplorer() {
                     </NeonPanel>
                 )}
             </div>
+        </div>
+    );
+}
+
+function FunnelStat({ label, value, tone }) {
+    return (
+        <div className="px-2 py-1.5 border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.24)] clip-bevel-sm">
+            <div className="text-[9px] font-ui uppercase tracking-[0.12em] text-muted-lab leading-tight">{label}</div>
+            <div className={`mt-0.5 text-[13px] font-num tabular-nums ${tone === "danger" ? "text-[hsl(var(--danger))]" : "text-[hsl(var(--text-1))]"}`}>{value}</div>
         </div>
     );
 }
