@@ -164,6 +164,25 @@ function CohortDrawer({ cells, selectedKey, onSelect, onClose, allTrades }) {
     const cell = cells.find((c) => c.key === selectedKey);
     if (!cell) return null;
     const tone = CELL_TONE[cell.key] || "text-2";
+
+    // FailureExplorer bucket contract: { key, label, trades, lossR, contributionPct, losers }.
+    // A triage cohort is NOT an MFE raw bucket, so pass key:null → buildBucketExplorerRows
+    // uses legacy mode and groups the passed cohort losers directly (non-null keys trigger
+    // MFE-band matching, which yields zero rows here → "No cells").
+    const r1 = (n) => Math.round(n * 10) / 10;
+    const netOf = (t) => Number(t?.netR ?? t?.net_r) || 0;
+    const cohortLossR = r1(cell.trades.reduce((s, t) => s + netOf(t), 0)); // negative (all cohort members are losses)
+    const runLossR = (Array.isArray(allTrades) ? allTrades : [])
+        .reduce((s, t) => (String(t?.outcome ?? "").toUpperCase() === "LOSS" ? s + netOf(t) : s), 0);
+    const contributionPct = runLossR !== 0 ? r1((cohortLossR / runLossR) * 100) : 0;
+    const explorerBucket = {
+        key: null,
+        label: cell.label,
+        trades: cell.count,
+        lossR: cohortLossR,
+        contributionPct,
+        losers: cell.trades,
+    };
     const caveatIntro = (
         <span className="text-[10px] font-ui text-muted-lab leading-snug">
             Overrepresented characteristics of <strong>{cell.label}</strong> vs the whole run.{" "}
@@ -210,7 +229,7 @@ function CohortDrawer({ cells, selectedKey, onSelect, onClose, allTrades }) {
                     key={selectedKey}
                     allTrades={allTrades}
                     allLosers={cell.trades}
-                    bucket={{ key: cell.key, losers: cell.trades }}
+                    bucket={explorerBucket}
                     title={`${cell.label} — cohort breakdown`}
                     prefsKey={COHORT_PREFS_KEY}
                     roadmapKey={null}
