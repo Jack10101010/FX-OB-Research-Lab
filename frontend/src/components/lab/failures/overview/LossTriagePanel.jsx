@@ -21,7 +21,10 @@ import { LiftCell, ExplorerSelect } from "../excursion/FailureExplorer";
 import { Pill } from "@/components/lab/DataTable";
 
 // Rank-by options for the cohort table (loss-share focused — not generic explorer metrics).
+// "Setup (A–Z)" is the default so rows read in deterministic setup order (Asia, Asia,
+// London, London, …) rather than by metric magnitude.
 const COHORT_RANK_OPTIONS = [
+    { key: "setup",     label: "Setup (A–Z)" },
     { key: "pctLosses", label: "% of losses" },
     { key: "count",     label: "Count" },
     { key: "lift",      label: "Lift" },
@@ -164,7 +167,7 @@ function SinkholeCard({ sinkholes }) {
 // the reused engine; we only derive the two count-shares and render. Net R / Wins / PF are
 // hidden — in legacy (cohort) mode the engine cannot attribute per-setup winner R, so
 // they'd be blank/misleading here.
-function CohortTable({ rows, cohortLabel, cohortTotal, sampleFloor, rankBy = "pctLosses" }) {
+function CohortTable({ rows, cohortLabel, cohortTotal, sampleFloor, rankBy = "setup" }) {
     const r1 = (n) => Math.round(n * 10) / 10;
     const metric = (row) => ({
         pctLosses: row.pctOfLosses,
@@ -181,11 +184,14 @@ function CohortTable({ rows, cohortLabel, cohortTotal, sampleFloor, rankBy = "pc
             pctOfLosses: row.fullLosses > 0 ? r1((row.bucketLosses / row.fullLosses) * 100) : 0,
             pctOfCohort: cohortTotal > 0 ? r1((row.bucketLosses / cohortTotal) * 100) : 0,
         }))
-        // Sort by the chosen metric (default % of setup losses), then count — low-sample sunk.
+        // "setup" → deterministic A–Z order (groups by Dimension A: Asia, Asia, London, …).
+        // Any metric → low-sample sunk, then metric desc, then count.
         .sort((a, b) =>
-            (Number(b.rankable) - Number(a.rankable))
-            || (metric(b) - metric(a))
-            || (b.bucketLosses - a.bucketLosses));
+            rankBy === "setup"
+                ? a.setup.localeCompare(b.setup, undefined, { numeric: true })
+                : (Number(b.rankable) - Number(a.rankable))
+                    || (metric(b) - metric(a))
+                    || (b.bucketLosses - a.bucketLosses));
 
     if (!enriched.length) {
         return <div className="px-1 py-3 text-[11px] font-ui text-muted-lab">No setups carry a {cohortLabel} at this grouping.</div>;
@@ -243,7 +249,7 @@ function CohortDrawer({ cells, selectedKey, onSelect, onClose, allTrades }) {
     const [dimA, setDimA] = useState(COHORT_DIM_A);
     const [dimB, setDimB] = useState(COHORT_DIM_B);
     const [floor, setFloor] = useState(COHORT_SAMPLE_FLOOR);
-    const [rankBy, setRankBy] = useState("pctLosses");
+    const [rankBy, setRankBy] = useState("setup");
 
     const cell = cells.find((c) => c.key === selectedKey);
 
