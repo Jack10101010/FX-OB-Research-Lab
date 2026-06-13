@@ -8,6 +8,7 @@ import { LabRunHero } from "@/components/lab/LabRunHero";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { Pill } from "@/components/lab/DataTable";
 import { useDataset, getRunDisplayName } from "@/data/store";
+import { resolveDisplayTrades } from "@/data/resolveDisplayTrades";
 import { isPerformanceTrade, isWinTrade, isLossTrade } from "@/data/tradeClassification";
 import { buildFillStateBreakdown, buildSessionBreakdown } from "@/data/fillStateBreakdown";
 import { buildResearchSignals } from "@/data/researchSignals";
@@ -47,11 +48,14 @@ const TOPIC_CHROME = {
 };
 
 export default function ResearchCockpit() {
-    const { ACTIVE_RUN, RUNS, ACTIVE_PROJECT, getRunData } = useDataset();
+    const { ACTIVE_RUN, RUNS, ACTIVE_PROJECT, ACTIVE_TRADE_VARIANT, getRunData } = useDataset();
 
     const runId = ACTIVE_RUN?.id || null;
     const runData = useMemo(() => (runId && getRunData ? getRunData(runId) : null), [runId, getRunData]);
-    const trades = useMemo(() => (Array.isArray(runData?.trades) ? runData.trades : []), [runData]);
+    // Variant-aware: read the ACTIVE trade variant (e.g. "TrigE +2"), consistent with
+    // RunDetail / Strategy Map — not the bundle's base trades array.
+    const resolved = useMemo(() => resolveDisplayTrades(runData, ACTIVE_TRADE_VARIANT), [runData, ACTIVE_TRADE_VARIANT]);
+    const trades = resolved.trades;
 
     // ── reuse existing pure analytics over the active run's trades ──────────────
     const fillStateBreakdown = useMemo(() => buildFillStateBreakdown(trades), [trades]);
@@ -194,9 +198,10 @@ export default function ResearchCockpit() {
                         </div>
                     ) : (
                         <div className="space-y-3">
-                            <div className="text-[12px] text-[hsl(var(--text-1))]">
+                            <div className="text-[12px] text-[hsl(var(--text-1))] flex flex-wrap items-center gap-2">
                                 <span className="font-semibold">{meta.runLabel}</span>
-                                <span className="text-muted-lab"> · {meta.totalTrades} trades · {meta.decidedTrades} decided</span>
+                                <span className="text-muted-lab">· {meta.totalTrades} trades · {meta.decidedTrades} decided</span>
+                                <Pill tone="info">Variant: {resolved.selectedVariantLabel || "Baseline"}</Pill>
                             </div>
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                                 <Metric label="Net R" value={fmtR(meta.netR)} good={num(meta.netR) >= 0} />

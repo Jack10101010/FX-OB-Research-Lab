@@ -8,6 +8,8 @@ import { NeonPanel } from "@/components/lab/NeonPanel";
 import { Pill } from "@/components/lab/DataTable";
 import { useDataset, getRunDisplayName, addProjectFinding } from "@/data/store";
 import { buildResearchFindingPayload } from "@/data/projectWorkflow";
+import { resolveDisplayTrades } from "@/data/resolveDisplayTrades";
+import { isPerformanceTrade } from "@/data/tradeClassification";
 import { FAILURE_DIMENSIONS } from "@/components/lab/failures/shared/failuresDimensions";
 import {
     buildClusterExplorer, selectAvailableDimensions, distanceBandDim,
@@ -40,14 +42,18 @@ const PRUNE_REASON = {
 const predKey = (p) => (p || []).map((x) => `${x.dim}=${x.value}`).sort().join("|");
 
 export default function ClusterExplorer() {
-    const { ACTIVE_RUN, ACTIVE_PROJECT, getRunData } = useDataset();
+    const { ACTIVE_RUN, ACTIVE_PROJECT, ACTIVE_TRADE_VARIANT, getRunData } = useDataset();
     const [target, setTarget] = useState("losses");
     const [expanded, setExpanded] = useState(null);
     const [saved, setSaved] = useState({});
 
     const runId = ACTIVE_RUN?.id || null;
     const runData = useMemo(() => (runId && getRunData ? getRunData(runId) : null), [runId, getRunData]);
-    const trades = useMemo(() => (Array.isArray(runData?.trades) ? runData.trades : []), [runData]);
+    // Variant-aware: analyse the ACTIVE trade variant (e.g. "TrigE +2"), consistent
+    // with RunDetail / Strategy Map — not the bundle's base trades array.
+    const resolved = useMemo(() => resolveDisplayTrades(runData, ACTIVE_TRADE_VARIANT), [runData, ACTIVE_TRADE_VARIANT]);
+    const trades = resolved.trades;
+    const decidedCount = useMemo(() => trades.filter((t) => isPerformanceTrade(t)).length, [trades]);
     const projectId = runData?.projectId || ACTIVE_PROJECT?.id || null;
 
     // Resolve the in-play dimension catalogue from the canonical FAILURE_DIMENSIONS
@@ -135,11 +141,12 @@ export default function ClusterExplorer() {
                             );
                         })}
                     </div>
-                    {hasRun && result.available && (
-                        <div className="mt-3 flex flex-wrap items-center gap-2 text-[10.5px] text-muted-lab">
-                            <Pill tone="muted">baseline {pctR(result.baseline.rate)} · n={result.baseline.n}</Pill>
-                            <Pill tone="muted">FDR q≤{result.fdr.q} · {result.fdr.discoveries} discoveries</Pill>
-                            <Pill tone="muted">dims: {result.dimensionsUsed.map((d) => d.label).join(", ") || "—"}</Pill>
+                    {hasRun && (
+                        <div className="mt-3 flex flex-wrap items-center gap-2 text-[10.5px] text-muted-lab" data-testid="cluster-variant-summary">
+                            <Pill tone="info">Variant: {resolved.selectedVariantLabel || "Baseline"} · {decidedCount} decided</Pill>
+                            {result.available && <Pill tone="muted">baseline {pctR(result.baseline.rate)} · n={result.baseline.n}</Pill>}
+                            {result.available && <Pill tone="muted">FDR q≤{result.fdr.q} · {result.fdr.discoveries} discoveries</Pill>}
+                            {result.available && <Pill tone="muted">dims: {result.dimensionsUsed.map((d) => d.label).join(", ") || "—"}</Pill>}
                         </div>
                     )}
                 </NeonPanel>
