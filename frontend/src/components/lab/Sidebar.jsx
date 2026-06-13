@@ -5,7 +5,7 @@ import {
     FlaskConical, GitCompareArrows, ShieldCheck, Dices, Settings as Cog,
     Beaker, Boxes, ChevronRight, MonitorCog, Lock, CalendarRange, ShieldAlert,
     MousePointerClick, TestTubeDiagonal, Newspaper, FolderKanban,
-    BookOpen, ChevronLeft, Microscope, Lightbulb, Clock,
+    BookOpen, ChevronLeft, Microscope, Lightbulb, Clock, Gauge,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme, THEMES } from "@/context/ThemeContext";
@@ -19,6 +19,8 @@ const NAV_GROUPS = [
     {
         section: "Workspace",
         items: [
+            // COCKPIT-1: top-level read-only research summary, above the labs.
+            { to: "/cockpit",   label: "Research Cockpit", icon: Gauge },
             { to: "/",          label: "Overview",        icon: LayoutDashboard },
             { to: "/projects",  label: "Projects",        icon: FolderKanban },
             { to: "/runs",      label: "Runs",            icon: ListOrdered },

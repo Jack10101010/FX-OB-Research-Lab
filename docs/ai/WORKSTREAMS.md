@@ -107,6 +107,29 @@
 - **Owns:** `data/obRetest.js`, `data/obRetestMonetization.js`, `data/obRetestTradeability.js`,
   `components/lab/retest/*`, `OB-RETEST-ANALYSIS-*.md`.
 
+## Research Cockpit (COCKPIT-1)
+
+- **Status:** active. **Phase 1 shipped** — top-level read-only Research Cockpit at `/cockpit` that
+  sits above the labs and surfaces 6–8 ranked insight cards by reusing existing pure analytics
+  (`researchSignals`, `lossTriage` triage/BE-verdict/sinkholes, `failureDrivers`, `distanceBreakdown`)
+  over the active run's trades. Pure selector `buildRunInsights(inputs)` — no new metric, no new
+  threshold (mirrors `TRIAGE_LOW_SAMPLE_N` / `EXPLORER_LIFT_HIGHLIGHT`), no persistence, no backend.
+  Source links navigate to the owning lab only (no deep-drawer plumbing yet). Design ref:
+  `RUN-INSIGHTS-COCKPIT-DESIGN-AUDIT-1.md`.
+- **Lead:** Claude (design/analytics/frontend).
+- **Owns:** `frontend/src/data/runInsights.js`,
+  `frontend/src/data/__validation__/runInsights.validate.mjs`,
+  `frontend/src/pages/ResearchCockpit.jsx`, and the `/cockpit` route line in `frontend/src/App.js`
+  + the one Research Cockpit nav entry in `frontend/src/components/lab/Sidebar.jsx`.
+- **Do NOT touch:** backend / exporters / candle-data pipeline / BE-matrix restructure / any lab
+  internals / `pages/Insights.jsx` (saved-findings page) / the store / persistence. Consumes the
+  per-lab pure helpers as read-only outputs; never reaches into a lab's render state.
+- **Shared/caution:** reads (does not modify) `data/researchSignals.js`, `data/lossTriage.js`,
+  `data/fillStateBreakdown.js`, `data/distanceBreakdown.js`,
+  `components/lab/failures/shared/excursionAnalytics.js`, `data/projectWorkflow.js`.
+- **Next (Phase 2, not started):** deep-link params into each lab (owned by each lab's stream);
+  reuse the existing Save-Finding flow with an additive `source: "research_cockpit"`.
+
 ## Ghost / Backend Research
 
 - **Status:** docs/research. `ghost_tracker*.py`, `GHOST*.md`. Keep isolated from frontend commits.
