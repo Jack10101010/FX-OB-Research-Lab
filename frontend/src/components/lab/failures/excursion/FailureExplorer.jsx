@@ -54,7 +54,9 @@ function DeltaCell({ delta }) {
     return <span className="font-num tabular-nums" style={{ color, fontWeight: near ? 400 : 600 }}>{delta > 0 ? "+" : ""}{delta}%</span>;
 }
 
-function ExplorerSelect({ label, value, onChange, options, includeNone = false }) {
+// Exported so the Loss Triage cohort drilldown can reuse the exact same selector UI
+// (shared visual language). Behavior unchanged.
+export function ExplorerSelect({ label, value, onChange, options, includeNone = false }) {
     return (
         <label className="flex flex-col gap-1">
             <span className="text-[9.5px] font-ui uppercase tracking-[0.05em] text-[hsl(var(--text-2))]">{label}</span>

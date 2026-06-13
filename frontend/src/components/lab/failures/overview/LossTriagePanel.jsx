@@ -13,11 +13,21 @@ import React, { useMemo, useState } from "react";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { AlertTriangle, Info, ShieldAlert, Ban, ArrowUpRight, Search, X, Eye } from "lucide-react";
 import { buildLossTriage, buildBeVerdict, buildContextSinkholes } from "@/data/lossTriage";
-// Reuse the existing grouping/lift engine (no new engine) + the existing lift coloring
-// + the canonical sample-floor set. ExplorerSelect is private to FailureExplorer, so we
-// replicate a tiny styled <select> (DimSelect) to avoid touching that shared component.
+// Reuse the existing grouping/lift engine (no new engine) + the existing lift coloring,
+// canonical sample-floor set, and the shared ExplorerSelect control (same visual language
+// as Failure Explorer). Pill matches the explorer's "controlled · max 2 dimensions" chip.
 import { buildBucketExplorerRows, EXPLORER_FLOORS } from "../shared/excursionAnalytics";
-import { LiftCell } from "../excursion/FailureExplorer";
+import { LiftCell, ExplorerSelect } from "../excursion/FailureExplorer";
+import { Pill } from "@/components/lab/DataTable";
+
+// Rank-by options for the cohort table (loss-share focused — not generic explorer metrics).
+const COHORT_RANK_OPTIONS = [
+    { key: "pctLosses", label: "% of losses" },
+    { key: "count",     label: "Count" },
+    { key: "lift",      label: "Lift" },
+    { key: "pctCohort", label: "% of cohort" },
+    { key: "lossR",     label: "Loss-R" },
+];
 
 // Per-cell tone (presentation only).
 const CELL_TONE = {
@@ -149,31 +159,20 @@ function SinkholeCard({ sinkholes }) {
     );
 }
 
-// Minimal styled select — replica of FailureExplorer's private ExplorerSelect so the
-// cohort drilldown has the same Dimension A / Dimension B controls without importing
-// (or modifying) the shared component.
-function DimSelect({ label, value, onChange, options, includeNone = false }) {
-    return (
-        <div className="flex flex-col gap-1">
-            <span className="text-[9.5px] font-ui uppercase tracking-[0.05em] text-[hsl(var(--text-2))]">{label}</span>
-            <select
-                value={value ?? ""}
-                onChange={(e) => onChange(e.target.value)}
-                className="px-2 py-1.5 text-[11px] font-ui clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.5)] text-[hsl(var(--text))]">
-                {includeNone && <option value="">None</option>}
-                {options.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
-            </select>
-        </div>
-    );
-}
-
 // Loss-type-share table. For each setup (current Dimension A × Dimension B): how many of
 // that setup's total losses are the selected loss type, plus run-wide lift. Rows come from
 // the reused engine; we only derive the two count-shares and render. Net R / Wins / PF are
 // hidden — in legacy (cohort) mode the engine cannot attribute per-setup winner R, so
 // they'd be blank/misleading here.
-function CohortTable({ rows, cohortLabel, cohortTotal, sampleFloor }) {
+function CohortTable({ rows, cohortLabel, cohortTotal, sampleFloor, rankBy = "pctLosses" }) {
     const r1 = (n) => Math.round(n * 10) / 10;
+    const metric = (row) => ({
+        pctLosses: row.pctOfLosses,
+        count: row.bucketLosses,
+        lift: row.lift,
+        pctCohort: row.pctOfCohort,
+        lossR: row.bucketLossR,
+    }[rankBy] ?? row.pctOfLosses);
     const enriched = (Array.isArray(rows) ? rows : [])
         .filter((row) => row.bucketLosses > 0)
         .map((row) => ({
@@ -182,10 +181,10 @@ function CohortTable({ rows, cohortLabel, cohortTotal, sampleFloor }) {
             pctOfLosses: row.fullLosses > 0 ? r1((row.bucketLosses / row.fullLosses) * 100) : 0,
             pctOfCohort: cohortTotal > 0 ? r1((row.bucketLosses / cohortTotal) * 100) : 0,
         }))
-        // Default sort: highest % of setup losses first, then raw count — low-sample sunk.
+        // Sort by the chosen metric (default % of setup losses), then count — low-sample sunk.
         .sort((a, b) =>
             (Number(b.rankable) - Number(a.rankable))
-            || (b.pctOfLosses - a.pctOfLosses)
+            || (metric(b) - metric(a))
             || (b.bucketLosses - a.bucketLosses));
 
     if (!enriched.length) {
@@ -244,6 +243,7 @@ function CohortDrawer({ cells, selectedKey, onSelect, onClose, allTrades }) {
     const [dimA, setDimA] = useState(COHORT_DIM_A);
     const [dimB, setDimB] = useState(COHORT_DIM_B);
     const [floor, setFloor] = useState(COHORT_SAMPLE_FLOOR);
+    const [rankBy, setRankBy] = useState("pctLosses");
 
     const cell = cells.find((c) => c.key === selectedKey);
 
@@ -313,10 +313,12 @@ function CohortDrawer({ cells, selectedKey, onSelect, onClose, allTrades }) {
                     Read <span className="text-[hsl(var(--text-2))]">Lift</span> for run-wide overrepresentation. Peak-not-path applies to recovered cohorts.
                 </p>
             </div>
-            {/* Explorer-style controls — Dimension A / B + sample floor (default Session × Direction). */}
+            {/* Explorer-style controls — same controls + visual language as Failure Explorer:
+                Dimension A / Dimension B / Rank by / sample floor (default Session × Direction). */}
             <div className="flex flex-wrap items-end gap-3 px-3 pt-3">
-                <DimSelect label="Dimension A" value={result.dimA ?? ""} onChange={setDimA} options={available} />
-                <DimSelect label="Dimension B" value={result.dimB ?? ""} onChange={setDimB} options={dimBOptions} includeNone />
+                <ExplorerSelect label="Dimension A" value={result.dimA ?? ""} onChange={setDimA} options={available} />
+                <ExplorerSelect label="Dimension B" value={result.dimB ?? ""} onChange={setDimB} options={dimBOptions} includeNone />
+                <ExplorerSelect label="Rank by" value={rankBy} onChange={setRankBy} options={COHORT_RANK_OPTIONS} />
                 <div className="flex flex-col gap-1">
                     <span className="text-[9.5px] font-ui uppercase tracking-[0.05em] text-[hsl(var(--text-2))]">Sample floor</span>
                     <div className="flex items-center gap-1">
@@ -332,10 +334,11 @@ function CohortDrawer({ cells, selectedKey, onSelect, onClose, allTrades }) {
                         ))}
                     </div>
                 </div>
+                <div className="ml-auto self-end pb-1.5"><Pill tone="muted">controlled · max 2 dimensions</Pill></div>
             </div>
             {/* Loss-type-share table — reuses buildBucketExplorerRows (legacy grouping + lift). */}
             <div className="p-3">
-                <CohortTable rows={result.rows} cohortLabel={cell.label} cohortTotal={cell.count} sampleFloor={floor} />
+                <CohortTable rows={result.rows} cohortLabel={cell.label} cohortTotal={cell.count} sampleFloor={floor} rankBy={rankBy} />
             </div>
         </div>
     );
