@@ -11,7 +11,7 @@
 
 import React, { useMemo, useState } from "react";
 import { NeonPanel } from "@/components/lab/NeonPanel";
-import { AlertTriangle, Info, ShieldAlert, Ban, ArrowUpRight, Search, X } from "lucide-react";
+import { AlertTriangle, Info, ShieldAlert, Ban, ArrowUpRight, Search, X, Eye } from "lucide-react";
 import { buildLossTriage, buildBeVerdict, buildContextSinkholes } from "@/data/lossTriage";
 import { FailureExplorer } from "../excursion/FailureExplorer";
 
@@ -185,12 +185,12 @@ function CohortDrawer({ cells, selectedKey, onSelect, onClose, allTrades }) {
     };
     const caveatIntro = (
         <span className="text-[10px] font-ui text-muted-lab leading-snug">
-            Overrepresented characteristics of <strong>{cell.label}</strong> vs the whole run.{" "}
-            {COHORT_CAVEATS.join(" ")}
+            <strong className="text-[hsl(var(--text-2))]">Rows show where this selected loss type clusters.</strong>{" "}
+            Overrepresented characteristics of <strong>{cell.label}</strong> vs the whole run. {COHORT_CAVEATS.join(" ")}
         </span>
     );
     return (
-        <div className="border clip-bevel-sm bg-[hsl(var(--panel-2)/0.25)] border-[hsl(var(--accent-primary)/0.4)]"
+        <div className="border clip-bevel-sm bg-[hsl(var(--panel-2)/0.25)] border-[hsl(var(--accent-primary)/0.6)] ring-1 ring-[hsl(var(--accent-primary)/0.25)]"
             style={{ borderTop: `2px solid hsl(var(--${tone})/0.6)` }}>
             {/* Header */}
             <div className="flex items-start justify-between gap-3 p-3 border-b border-[hsl(var(--border-soft))]">
@@ -222,6 +222,19 @@ function CohortDrawer({ cells, selectedKey, onSelect, onClose, allTrades }) {
                         </button>
                     );
                 })}
+            </div>
+            {/* Scope banner — make it impossible to misread that this is ONE loss type only. */}
+            <div className="mx-3 mt-3 p-2.5 clip-bevel-sm border-l-2 border-[hsl(var(--accent-primary)/0.7)] bg-[hsl(var(--accent-primary)/0.1)]">
+                <div className="flex items-center gap-1.5 text-[11px] font-ui font-semibold text-[hsl(var(--accent-primary))]">
+                    <Eye size={12} className="shrink-0" />
+                    Viewing {cell.label} cohort only
+                </div>
+                <p className="mt-1 text-[10px] font-ui text-[hsl(var(--text-2))] leading-snug">
+                    This breakdown only includes the selected loss type. It does not show all trades or all losses for each setup.
+                </p>
+                <p className="mt-0.5 text-[10px] font-ui text-muted-lab leading-snug">
+                    Use <span className="text-[hsl(var(--text-2))]">Lift</span> / <span className="text-[hsl(var(--text-2))]">% Universe</span> to compare this cohort against the full run.
+                </p>
             </div>
             {/* Reused FailureExplorer (bucket scope). prefs seeded to Session × Direction / Lift / floor 15. */}
             <div className="p-1">
