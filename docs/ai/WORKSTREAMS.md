@@ -107,15 +107,23 @@
 - **Owns:** `data/obRetest.js`, `data/obRetestMonetization.js`, `data/obRetestTradeability.js`,
   `components/lab/retest/*`, `OB-RETEST-ANALYSIS-*.md`.
 
-## Research Cockpit (COCKPIT-1)
+## Research Cockpit (COCKPIT-1 → V2.0A)
 
-- **Status:** active. **Phase 1 shipped** — top-level read-only Research Cockpit at `/cockpit` that
-  sits above the labs and surfaces 6–8 ranked insight cards by reusing existing pure analytics
-  (`researchSignals`, `lossTriage` triage/BE-verdict/sinkholes, `failureDrivers`, `distanceBreakdown`)
-  over the active run's trades. Pure selector `buildRunInsights(inputs)` — no new metric, no new
-  threshold (mirrors `TRIAGE_LOW_SAMPLE_N` / `EXPLORER_LIFT_HIGHLIGHT`), no persistence, no backend.
-  Source links navigate to the owning lab only (no deep-drawer plumbing yet). Design ref:
-  `RUN-INSIGHTS-COCKPIT-DESIGN-AUDIT-1.md`.
+- **Status:** active. **Phase 1 shipped** (`b500e36`) — top-level read-only Research Cockpit at
+  `/cockpit` surfacing ranked insight cards from existing pure analytics. **V2.0A in progress** —
+  upgrades the thin card list into a *category command-centre shell*: Action Queue + topic sections
+  (Sessions/Timing, Direction, Structure, Loss Clusters) reusing only the safest single-run helpers.
+  Pure selector `buildRunInsights(inputs)` keeps its flat semantic-ordered contract; V2.0A adds a
+  `topic` tag per card plus two pure view fns (`buildActionQueue`, `groupByTopic`) + `COCKPIT_TOPICS`.
+  Still no new metric, no new threshold (mirrors `TRIAGE_LOW_SAMPLE_N` / `EXPLORER_LIFT_HIGHLIGHT`),
+  no persistence, no backend, no deep-link plumbing. Design refs:
+  `RUN-INSIGHTS-COCKPIT-DESIGN-AUDIT-1.md`, `RESEARCH-COCKPIT-V2-INSIGHT-CATEGORIES-AUDIT-1.md`.
+- **V2.0A categories (this slice):** Sessions/Timing (`buildSessionBreakdown` + `buildContextSinkholes`),
+  Direction & Structure (`buildLoserRunUp` cohort groups), Loss Clusters (`buildFailureDrivers` +
+  `buildPairDrivers`). Phase-1 cards (BE verdict, distance-at-arm, fill-state signals) kept working,
+  routed to an "Other signals" catch-all + the Action Queue. **Explicitly deferred:** Protection BE/FFT
+  *sections*, Optimal TP, Entry Model, Order Blocks/Retest, cluster map, deep links, Save Findings,
+  cross-run stability.
 - **Lead:** Claude (design/analytics/frontend).
 - **Owns:** `frontend/src/data/runInsights.js`,
   `frontend/src/data/__validation__/runInsights.validate.mjs`,
@@ -125,10 +133,11 @@
   internals / `pages/Insights.jsx` (saved-findings page) / the store / persistence. Consumes the
   per-lab pure helpers as read-only outputs; never reaches into a lab's render state.
 - **Shared/caution:** reads (does not modify) `data/researchSignals.js`, `data/lossTriage.js`,
-  `data/fillStateBreakdown.js`, `data/distanceBreakdown.js`,
+  `data/fillStateBreakdown.js`, `data/distanceBreakdown.js`, `data/loserRunUp.js`,
   `components/lab/failures/shared/excursionAnalytics.js`, `data/projectWorkflow.js`.
-- **Next (Phase 2, not started):** deep-link params into each lab (owned by each lab's stream);
-  reuse the existing Save-Finding flow with an additive `source: "research_cockpit"`.
+- **Next (V2.1+, not started):** cluster map panel (2-D explorer reuse); then deep-link params +
+  Save-Finding reuse (`source: "research_cockpit"`); BE/FFT/TP/Entry/OB categories; V3 backend items
+  after BE-matrix parity.
 
 ## Ghost / Backend Research
 

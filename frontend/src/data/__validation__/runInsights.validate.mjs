@@ -21,7 +21,12 @@
 
 import {
     buildRunInsights,
+    buildActionQueue,
+    groupByTopic,
     CATEGORY_ORDER,
+    COCKPIT_TOPICS,
+    PER_TOPIC_CAP,
+    ACTION_QUEUE_LIMIT,
     MAX_CARDS,
     COCKPIT_LOW_SAMPLE_N,
     COCKPIT_LIFT_HIGHLIGHT,
@@ -59,13 +64,11 @@ const beVerdictHurts = {
     baselineNetR: 12.0, best: { label: "BE wick 1.0R", deltaNetR: -2.4, n: 40 },
     note: "Global BE verdict is global-only — selective BE remains untested.",
 };
-const failureDrivers = {
-    totalLossR: 40, minSample: 8,
-    drivers: [
-        { dimKey: "session", dimLabel: "Session", value: "New York", count: 12, lossR: 14, contributionPct: 35, lift: 2.1, lossRateLift: 1.4 },
-        { dimKey: "structure", dimLabel: "Structure", value: "BOS", count: 20, lossR: 18, contributionPct: 45, lift: 1.2, lossRateLift: 1.1 },
-    ],
-};
+// Loss clusters — buildExplorer-derived cells (real winners-inclusive lift).
+const lossClusters = [
+    { dimKey: "session",   dimLabel: "Session",   value: "New York", losers: 12, lossR: 14, contributionPct: 35, lift: 2.1, rankable: true },
+    { dimKey: "structure", dimLabel: "Structure", value: "BOS",      losers: 20, lossR: 18, contributionPct: 45, lift: 1.2, rankable: true },
+];
 const lossTriage = {
     available: true,
     totals: { losses: 40 },
@@ -83,7 +86,7 @@ const fullMeta = {
 
 const full = buildRunInsights({
     meta: fullMeta, researchSignals, contextSinkholes,
-    beVerdict: beVerdictHurts, failureDrivers, lossTriage,
+    beVerdict: beVerdictHurts, lossClusters, lossTriage,
 });
 
 // ── 1. ordering ─────────────────────────────────────────────────────────────
@@ -144,15 +147,15 @@ const sink = full.find((c) => c.id.startsWith("hurting:sinkhole:"));
 ok(!!sink && /Outside Short/.test(sink.headline), "worst sinkhole (Outside Short, -3.1R) becomes a hurting card");
 
 ok(COCKPIT_LIFT_HIGHLIGHT === 1.5, "lift gate mirrors EXPLORER_LIFT_HIGHLIGHT (1.5)");
-const opp = full.find((c) => c.id.startsWith("opportunity:driver:"));
-ok(!!opp && opp.category === "opportunity", "highest-lift driver → an opportunity card");
-ok(/New York/.test(opp.headline) && /2\.1/.test(opp.evidence), "driver card picks the HIGH-LIFT cohort (2.1×), not the high-loss-R low-lift one");
+const opp = full.find((c) => c.id.startsWith("opportunity:cluster:"));
+ok(!!opp && opp.category === "opportunity", "highest-lift loss cluster → an opportunity card");
+ok(/New York/.test(opp.headline) && /2\.1/.test(opp.evidence), "cluster card picks the HIGH-LIFT cohort (2.1×), not the high-loss-R low-lift one");
 
 const lowLiftOnly = buildRunInsights({
     meta: fullMeta,
-    failureDrivers: { drivers: [{ dimKey: "structure", dimLabel: "Structure", value: "BOS", count: 20, lossR: 18, contributionPct: 45, lift: 1.1 }] },
+    lossClusters: [{ dimKey: "structure", dimLabel: "Structure", value: "BOS", losers: 20, lossR: 18, contributionPct: 45, lift: 1.1, rankable: true }],
 });
-ok(!lowLiftOnly.some((c) => c.id.startsWith("opportunity:driver:")), "drivers below the lift floor produce no opportunity card");
+ok(!lowLiftOnly.some((c) => c.id.startsWith("opportunity:cluster:")), "clusters below the lift floor produce no opportunity card");
 
 const fl = full.find((c) => c.id === "opportunity:false-loser");
 ok(!!fl && /false losers/i.test(fl.headline), "false-loser cell becomes an opportunity card");
@@ -179,6 +182,100 @@ ok(full.every((c) => c.source && typeof c.source.route === "string" && c.source.
 console.log("cap + uniqueness");
 ok(full.length <= MAX_CARDS, `output capped at MAX_CARDS (${MAX_CARDS})`);
 ok(new Set(full.map((c) => c.id)).size === full.length, "no duplicate card ids");
+ok(full.every((c) => typeof c.topic === "string" && c.topic.length > 0), "every card carries a topic tag (V2.0A)");
+
+// ── 9. V2.0A category producers ───────────────────────────────────────────────
+console.log("V2.0A category producers");
+const sessionBreakdown = [
+    { session: "London",   count: 30, wins: 18, losses: 12, winRate: 0.6,  netR: 6.0,  avgR: 0.20 },  // best
+    { session: "Outside",  count: 24, wins: 6,  losses: 18, winRate: 0.25, netR: -8.0, avgR: -0.33 }, // worst
+    { session: "Asia",     count: 8,  wins: 4,  losses: 4,  winRate: 0.5,  netR: 0.2,  avgR: 0.02 },  // below floor → ignored
+    { session: "Unknown",  count: 40, wins: 20, losses: 20, winRate: 0.5,  netR: -1.0, avgR: -0.02 }, // excluded
+];
+const cohortStats = (trades, wins, losses, avgR) => ({ trades, wins, losses, winRate: wins / (wins + losses), avgR });
+const loserRunUp = {
+    available: true,
+    groups: [
+        { id: "all", label: "All", rows: [{ label: "All", stats: cohortStats(80, 40, 40, 0.05) }] },
+        { id: "direction", label: "Direction", rows: [
+            { label: "Long",  stats: cohortStats(44, 26, 18, 0.30) },   // stronger
+            { label: "Short", stats: cohortStats(36, 12, 24, -0.40) },  // weaker, net-negative
+        ] },
+        { id: "structure", label: "Structure", rows: [
+            { label: "BOS",   stats: cohortStats(50, 30, 20, 0.22) },   // stronger
+            { label: "CHoCH", stats: cohortStats(20, 8, 12, -0.30) },   // weaker, above floor
+        ] },
+    ],
+};
+// Gating fixture: one cohort below the low-sample floor → produces no card.
+const loserRunUpGated = {
+    available: true,
+    groups: [
+        { id: "structure", label: "Structure", rows: [
+            { label: "BOS",   stats: cohortStats(50, 30, 20, 0.22) },
+            { label: "CHoCH", stats: cohortStats(10, 4, 6, -0.30) },    // n=10 < 15 → gated
+        ] },
+    ],
+};
+const v2LossClusters = [
+    { dimKey: "direction", dimLabel: "Direction", value: "Short", losers: 20, lossR: 16, contributionPct: 67, lift: 2.4, rankable: true },
+    { dimKey: "structure", dimLabel: "Structure", value: "BOS",   losers: 9,  lossR: 6,  contributionPct: 15, lift: 1.1, rankable: true }, // below lift floor
+];
+
+const v2 = buildRunInsights({ meta: fullMeta, researchSignals, contextSinkholes, beVerdict: beVerdictHurts, sessionBreakdown, loserRunUp, lossClusters: v2LossClusters });
+
+const sessHurt = v2.find((c) => c.id === "hurting:session:Outside");
+ok(!!sessHurt && sessHurt.topic === "sessions_timing", "worst session (Outside, net-neg) → hurting card in sessions_timing");
+ok(!v2.some((c) => c.id === "hurting:session:Asia" || c.id === "working:session:Asia"), "below-floor session (Asia, n=8) is gated out");
+const sessWork = v2.find((c) => c.id === "working:session:London");
+ok(!!sessWork && sessWork.topic === "sessions_timing", "best session (London) → working card in sessions_timing");
+
+const dirHurt = v2.find((c) => c.id === "hurting:direction:Short");
+const dirWork = v2.find((c) => c.id === "working:direction:Long");
+ok(!!dirHurt && dirHurt.topic === "direction" && /Short/.test(dirHurt.headline), "weaker direction (Short) → hurting card in direction");
+ok(!!dirWork && dirWork.topic === "direction", "stronger direction (Long) → working card in direction");
+
+const structWork = v2.find((c) => c.id === "working:structure:BOS");
+const structHurt = v2.find((c) => c.id === "hurting:structure:CHoCH");
+ok(!!structWork && structWork.topic === "structure", "stronger structure (BOS) → working card in structure");
+ok(!!structHurt && structHurt.topic === "structure", "weaker structure (CHoCH) → hurting card in structure");
+const gated = buildRunInsights({ meta: fullMeta, loserRunUp: loserRunUpGated });
+ok(!gated.some((c) => c.id === "hurting:structure:CHoCH"), "below-floor cohort (CHoCH, n=10) is gated out");
+ok(!gated.some((c) => c.id === "working:structure:BOS"), "single remaining cohort emits no 'stronger side' card (no contrast)");
+
+const cluster = v2.find((c) => c.id === "opportunity:cluster:direction:Short");
+ok(!!cluster && cluster.topic === "loss_clusters" && /2\.4/.test(cluster.evidence), "top loss cluster (lift 2.4) → loss_clusters opportunity card");
+ok(!v2.some((c) => c.id === "opportunity:cluster:structure:BOS"), "below-lift cluster is gated out");
+
+ok(v2.every((c) => typeof c.topic === "string"), "all V2 cards carry a topic");
+ok(v2.every((c) => !BANNED.test(c.headline) && !BANNED.test(c.evidence) && !BANNED.test(c.caveat)), "no V2 card overclaims");
+
+// ── 10. Action Queue ──────────────────────────────────────────────────────────
+console.log("action queue");
+const queue = buildActionQueue(v2);
+ok(queue.length > 0 && queue.length <= ACTION_QUEUE_LIMIT, `action queue capped at ACTION_QUEUE_LIMIT (${ACTION_QUEUE_LIMIT})`);
+ok(queue.every((c) => c.category !== "warning"), "action queue excludes warning cards");
+ok(["hurting", "opportunity"].includes(queue[0].category), "action queue leads with a hurting/opportunity card");
+const firstWorkingIdx = queue.findIndex((c) => c.category === "working");
+const lastHurtOppIdx = Math.max(...queue.map((c, i) => (["hurting", "opportunity"].includes(c.category) ? i : -1)));
+ok(firstWorkingIdx === -1 || firstWorkingIdx > lastHurtOppIdx || lastHurtOppIdx === -1, "working cards never rank above hurting/opportunity in the queue");
+
+// ── 11. groupByTopic sections ─────────────────────────────────────────────────
+console.log("groupByTopic sections");
+const sections = groupByTopic(v2);
+const sectionKeys = sections.map((s) => s.key);
+ok(COCKPIT_TOPICS.every((t) => sectionKeys.includes(t.key)), "all four V2.0A topic sections are always present");
+ok(sections.every((s) => s.cards.length <= PER_TOPIC_CAP), `each section capped at PER_TOPIC_CAP (${PER_TOPIC_CAP})`);
+ok(sections.every((s) => (s.cards.length === 0) === (s.needsData === true)), "needsData flag matches emptiness exactly");
+ok(sections.find((s) => s.key === "sessions_timing").cards.length >= 1, "sessions_timing section is populated in the full case");
+ok(sections.every((s) => s.cards.every((c) => c.category !== "warning")), "no warning leaks into a topic section");
+const general = sections.find((s) => s.key === "general");
+ok(!!general && general.cards.some((c) => c.id === "be:verdict"), "Phase-1 BE card is preserved in the 'Other signals' section");
+
+const emptySections = groupByTopic(buildRunInsights({ meta: fullMeta }));
+ok(emptySections.filter((s) => COCKPIT_TOPICS.some((t) => t.key === s.key)).every((s) => s.needsData),
+   "with no category data, all four sections render a needs-data state");
+ok(Array.isArray(buildActionQueue()) && Array.isArray(groupByTopic()), "view fns are safe with no args");
 
 // ── summary ───────────────────────────────────────────────────────────────────
 if (failures) {
