@@ -7,6 +7,7 @@ import { AppShell } from "@/components/lab/AppShell";
 import { RouteErrorBoundary } from "@/components/lab/RouteErrorBoundary";
 import Overview from "@/pages/Overview";
 import ResearchCockpit from "@/pages/ResearchCockpit";
+import ClusterExplorer from "@/pages/ClusterExplorer";
 import WorkflowGuide from "@/pages/WorkflowGuide";
 import StrategyLogic from "@/pages/StrategyLogic";
 import StrategyBuilder from "@/pages/StrategyBuilder";
@@ -54,6 +55,7 @@ function App() {
                     <Routes>
                         <Route path="/" element={withRouteBoundary(<Overview />)} />
                         <Route path="/cockpit" element={withRouteBoundary(<ResearchCockpit />)} />
+                        <Route path="/cluster-explorer" element={withRouteBoundary(<ClusterExplorer />)} />
                         <Route path="/workflow-guide" element={withRouteBoundary(<WorkflowGuide />)} />
                         <Route path="/strategy-logic" element={withRouteBoundary(<StrategyLogic />)} />
                         <Route path="/projects" element={withRouteBoundary(<Projects />)} />
