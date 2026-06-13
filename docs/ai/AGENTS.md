@@ -254,6 +254,38 @@ If any capability was removed, explain why and confirm approval was obtained.
 
 ---
 
+## Live UI Verification for Product/UI Work
+
+For any task that changes visible UI — especially **explorers, tables, drilldowns, cards,
+controls, filters, dashboards, research panels** — the agent must verify the **running UI**
+whenever feasible.
+
+**Do not claim "done" from code diff, parser checks, or build alone.**
+
+Before the final report, verify:
+- the intended page renders
+- the changed component is visible
+- the intended interaction works
+- key states are checked
+- the UI matches the product request
+
+For explorer or drilldown work, verify at least:
+- **default state**
+- **one changed** dimension / filter / control state
+- **one selected / cohort state**
+- **empty / unavailable state**, if feasible
+
+If live verification is not possible, **state exactly why** and identify the remaining manual
+check.
+
+**Final report for UI work must include:**
+- what was verified live
+- what was not verified live
+- screenshots or precise observations where possible
+- whether the user should visually confirm before push
+
+---
+
 ## Custom Commands
 
 These are **logical commands, not native Claude commands.** When the user writes one of:
