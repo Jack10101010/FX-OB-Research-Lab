@@ -5,7 +5,7 @@
 > Attach to a workstream (or add one) before coding. Never touch another stream's files
 > without explicit scope.
 
-*Last updated: 2026-06-12.*
+*Last updated: 2026-06-13.*
 
 ## Failures Lab V4  (committed; paused)
 
@@ -109,10 +109,13 @@
 
 ## Research Cockpit (COCKPIT-1 → V2.0A)
 
-- **Status:** active. **Phase 1 shipped** (`b500e36`) — top-level read-only Research Cockpit at
-  `/cockpit` surfacing ranked insight cards from existing pure analytics. **V2.0A in progress** —
-  upgrades the thin card list into a *category command-centre shell*: Action Queue + topic sections
-  (Sessions/Timing, Direction, Structure, Loss Clusters) reusing only the safest single-run helpers.
+- **Status:** Phase 1 + V2.0A **shipped (committed, not pushed)**; paused pending push approval / next
+  phase. **Phase 1** (`b500e36`) — top-level read-only Research Cockpit at `/cockpit` surfacing ranked
+  insight cards from existing pure analytics. **V2.0A** (`fe71537`) — upgraded the thin card list into a
+  *category command-centre*: Action Queue + topic sections (Sessions/Timing, Direction, Structure, Loss
+  Clusters) + an "Other signals" catch-all, reusing only the safest single-run helpers. **Loss-cluster
+  lift now uses `buildExplorer`** (true winners-inclusive lift); the Phase-1 lift card was dormant
+  because `buildFailureDrivers`/`buildPairDrivers` over losers-only return `lift=1`. See `D-015`.
   Pure selector `buildRunInsights(inputs)` keeps its flat semantic-ordered contract; V2.0A adds a
   `topic` tag per card plus two pure view fns (`buildActionQueue`, `groupByTopic`) + `COCKPIT_TOPICS`.
   Still no new metric, no new threshold (mirrors `TRIAGE_LOW_SAMPLE_N` / `EXPLORER_LIFT_HIGHLIGHT`),

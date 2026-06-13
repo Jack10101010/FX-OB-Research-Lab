@@ -6,9 +6,32 @@ Append-only. Newest at top. Each entry: what we decided, why, and the consequenc
 > Validated **research conclusions** (what the data says) live in `FINDINGS.md`. Decisions cite
 > findings — e.g. D-003 is the *decision* to lead with Vacant, justified by F-001/F-002.
 
-*Last updated: 2026-06-12.*
+*Last updated: 2026-06-13.*
 
 ---
+
+### D-015 · Research Cockpit is a read-only command centre that selects over existing analytics
+A new page at **`/cockpit`** (distinct from `/insights`, which is the saved-findings library) sits
+**above** the labs and surfaces ranked insight cards. It is a **pure selector/ranker/templater over
+already-computed analytics outputs** — it computes **no new metric**, defines **no new threshold**
+(it mirrors `TRIAGE_LOW_SAMPLE_N` / `EXPLORER_LIFT_HIGHLIGHT`), runs **no backend/replay/sweep**, and
+**persists nothing**. **Phase 1** (`b500e36`) ships static cards; **V2.0A** (`fe71537`) adds category
+sections (Sessions/Timing · Direction · Structure · Loss Clusters) + a cross-category **Action Queue** +
+an "Other signals" catch-all that preserves Phase-1 cards. Engine = `data/runInsights.js`
+(`buildRunInsights` flat list + pure view fns `buildActionQueue` / `groupByTopic`); page consumes
+existing pure helpers (`researchSignals`, `lossTriage`, `buildSessionBreakdown`, `buildLoserRunUp`,
+`buildExplorer`, `distanceBreakdown`). **Why:** give the user a top-level "what's working / hurting /
+to-investigate" surface without forking analytics or converting exploratory labs into a fixed report —
+source links route into the owning lab, the lab keeps the interactivity. **Lift correction:**
+loss-cluster lift cards must use **`buildExplorer`** (or full-universe context), **not** the
+baseline-less loser-only `buildFailureDrivers`/`buildPairDrivers`, which return `lift=1` for every cell
+and left the Phase-1 lift card dormant. **Consequence:** the cockpit is an **additive frontend layer**,
+**safe relative to the candle-data / BE-matrix restructure** (it reads post-normalization frontend
+helpers, never `backend/`, the exporter, the BE cube, the candle pipeline, lab internals, `/insights`,
+or the store). Deferred (separate phases, see BACKLOG): BE/FFT/TP/Entry/OB sections, the 2-D cluster
+map (V2.1), deep-link plumbing + Save-Findings reuse (V2.2), and backend-dependent RR-sweep / BE-cube /
+cross-run work (V3, after restructure parity). **Evidence:** `b500e36`, `fe71537`; design refs
+`RUN-INSIGHTS-COCKPIT-DESIGN-AUDIT-1.md`, `RESEARCH-COCKPIT-V2-INSIGHT-CATEGORIES-AUDIT-1.md`.
 
 ### D-014 · Distance-at-arm is a signed magnitude with an explicit Edge Zone, surfaced TE-only
 The frontend consumes `price_distance_from_ob_at_arm_pips` as a **signed** value: **0 = price still

@@ -4,7 +4,7 @@
 > git-coordination doc (dirty files, commits ahead). This one is the product/research
 > state. Verify against live git before trusting it.
 
-*Last updated: 2026-06-12.*
+*Last updated: 2026-06-13 (synced after Research Cockpit Phase 1 + V2.0A and OB Lab Insights).*
 
 ## Project
 
@@ -21,10 +21,15 @@ confirmed/candidate/genuine breakdown ("6 confirmed of 32 losses · model `fixed
 **Not waiting on any backend export.** Remaining work is research interpretation, not export/import.
 (Classification Tab V2 is paused with Phase 2 shipped.)
 
-**Shipped 2026-06-12 (pushed to `origin/codex-dev`, HEAD `96fc733`) — next focus is interpreting these,
+**Shipped 2026-06-12 (was pushed to `origin/codex-dev` at `96fc733`) — next focus is interpreting these,
 not more plumbing:** Distance-at-arm consumption (`449dc58`, D-014), Triggered-edge entry-universe
 expansion (`6a69ab4`, D-013), OB-Retest v2.1 monetization insights (`287dfe3`), Failures Lab Loser
 Run-Up breakdown (`2004d28`), and two build-integrity fixes (`7eeb596`, `96fc733`). See Completed.
+
+**⚠ Origin state (2026-06-13):** `codex-dev` is now **15 commits ahead of `origin/codex-dev`** and is
+**NOT pushed**. The unpushed range (`origin/codex-dev..HEAD`, HEAD `fe71537`) includes the Failures-Lab
+V5 loss-triage drilldown series (`1b7b17e`…`6a03912`), the OB Lab Insights synthesis layer (`abc5be5`),
+and the two Research Cockpit commits (`b500e36`, `fe71537`). Push is gated — needs approval.
 
 Parallel state (all committed): **Master Controls Phase 13** (single composer-driven preview;
 `previewLens` still the single read path), **Protection Lab selective BE / BE Trade Explorer**,
@@ -33,6 +38,23 @@ under its own stream.
 
 ## Completed
 
+- **Research Cockpit — Phase 1** (`b500e36`; D-015) — new read-only page at `/cockpit` (distinct from
+  `/insights` saved findings) sitting **above** the labs. Pure selector `data/runInsights.js`
+  (`buildRunInsights`) over already-computed analytics (`researchSignals`, `lossTriage`
+  triage/BE-verdict/sinkholes, `distanceBreakdown`) → ranked static insight cards. No new metric, no new
+  threshold (mirrors `TRIAGE_LOW_SAMPLE_N` / `EXPLORER_LIFT_HIGHLIGHT`), no persistence, no backend.
+  Validator `runInsights.validate.mjs`; route + Sidebar nav added. Additive-only frontend.
+- **Research Cockpit — V2.0A category command-centre** (`fe71537`; D-015) — upgraded the thin card list
+  into a command centre: Action Queue (cross-category top-N, hurting/opportunity first) + topic sections
+  **Sessions/Timing · Direction · Structure · Loss Clusters** + an "Other signals" catch-all preserving
+  Phase-1 cards. New producers reuse existing pure helpers (`buildSessionBreakdown`, `buildLoserRunUp`
+  cohort groups, `buildExplorer`). **Fix:** loss-cluster lift now comes from `buildExplorer` (true
+  winners-inclusive lift) — the Phase-1 lift card was dormant because `buildFailureDrivers`/`buildPairDrivers`
+  over losers-only return `lift=1`. Pure view fns `buildActionQueue` / `groupByTopic`; validator 60/60;
+  build + SSR verified (populated / low-sample / no-run). Deferred: BE/FFT/TP/Entry/OB sections, cluster
+  map, deep links, Save-Findings reuse (see BACKLOG).
+- **OB Lab Insights synthesis layer** (`abc5be5`) — Order Block Insights synthesis layer (separate stream;
+  committed locally in the same unpushed window).
 - **Distance-at-arm — frontend consumption** (`449dc58`; D-014) — `importer.js` maps
   `price_distance_from_ob_at_arm_pips`; RunDetail renders the signed distance breakdown (occupied=0 /
   edge / 2–5 / 5–10 / 10+ pips), TE-only gated. **Enables in-app F-004 validation; F-004 stays provisional.**

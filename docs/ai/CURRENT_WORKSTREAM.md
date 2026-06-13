@@ -2,13 +2,39 @@
 
 > The single active focus. Update this first when focus changes. Source for `/status`.
 
-*Last updated: 2026-06-12.*
+*Last updated: 2026-06-13.*
 
-## Focus
+## Focus (2026-06-13 — needs confirmation)
+
+**Research Cockpit work is committed locally; the next focus needs confirmation.** Since the last
+sync, a read-only **Research Cockpit** (`/cockpit`) was built above the labs and committed:
+- **Phase 1** (`b500e36`) — static ranked insight cards from existing analytics.
+- **V2.0A** (`fe71537`) — category command-centre: Action Queue + topic sections (Sessions/Timing ·
+  Direction · Structure · Loss Clusters) + an "Other signals" catch-all. See `D-015`,
+  `RUN-INSIGHTS-COCKPIT-DESIGN-AUDIT-1.md`, `RESEARCH-COCKPIT-V2-INSIGHT-CATEGORIES-AUDIT-1.md`.
+- **OB Lab Insights synthesis layer** (`abc5be5`) also landed in this window (separate stream).
+
+**Git reality:** `codex-dev` is **15 commits ahead of `origin/codex-dev`** (NOT pushed) — the earlier
+"shipped/pushed, HEAD `96fc733`" wording below is stale. Unpushed range includes the Failures-Lab V5
+loss-triage drilldown series, `abc5be5`, and the two cockpit commits. **Push is gated — get approval.**
+
+**Candidate next focus (confirm before starting):**
+1. Research Cockpit refinement — V2.1 cluster map, or V2.0B (more safe categories), or wire deep links.
+2. The documented research-interpretation thread below (decision-layer on the new metrics).
+Do not start new infrastructure unless explicitly requested.
+
+**Active parallel streams (other chats — do not touch their dirty files):** Research Banner /
+Phase 14 Wave 2 terminology (`ResearchContextBanner.jsx`, `ResearchRunHeader.jsx`, `researchBanner/*`);
+Entry / FFT / Paired Runs (`entries/*`); plus a dirty `RunDetail.jsx` (−8 lines) whose ownership is
+**ambiguous** — attribute it to the banner or entries stream before anyone stages it.
+
+---
+
+## Focus (2026-06-12 — research interpretation, still valid)
 
 **Next focus: research interpretation / decision-layer work on the newly surfaced metrics — not more
-plumbing.** As of 2026-06-12 the data plumbing the docs kept pointing at is shipped and synced to
-`origin/codex-dev` (HEAD `96fc733`). The Distance-at-arm consumption, OB-Retest v2.1 monetization, and
+plumbing.** As of 2026-06-12 the data plumbing the docs kept pointing at is shipped (locally; see the
+2026-06-13 note above re: origin gap — earlier text claimed HEAD `96fc733` pushed). The Distance-at-arm consumption, OB-Retest v2.1 monetization, and
 Loser Run-Up surfaces are all live; the open question is no longer "wire the export" but "what do these
 cohorts mean and what rule do they justify." Do not start new infrastructure unless explicitly requested.
 

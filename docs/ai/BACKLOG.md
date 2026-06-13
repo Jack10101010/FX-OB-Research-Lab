@@ -80,6 +80,20 @@ Groomed by ChatGPT. Priority: P1 (next up) · P2 (soon) · P3 (later).
   **Deliverables:** canonical term list · alias list · inconsistency report · recommended standard
   naming. **Goal:** a user should never wonder whether two different labels mean the same concept.
 
+- **Research Cockpit — future phases** *(Owner: Claude · follows D-015; Phase 1 `b500e36` + V2.0A
+  `fe71537` shipped)* — additive, read-only, restructure-safe. In order:
+  - **V2.0B** — remaining single-run categories (Entry Model via `researchSignals` entry-model rows;
+    Order Blocks via `buildObBreakdown`/penetration; Protection BE-opportunity + FFT-when-paired; TP
+    *capture profile* via MFE raw-R, upper-bound framed only — never an "optimal TP" claim).
+  - **V2.1 — Cluster Map** — a 2-D edge/danger matrix reusing `buildExplorer` (real lift) + curated
+    pairs + progressive refine; summarised in the cockpit, full interaction in Failures Lab. **Not** an
+    N-way matrix (overfit/sparse).
+  - **V2.2 — Deep links + Save-Findings reuse** — `source.params` open the exact lab drawer/tab (work
+    owned by each lab's stream); wire "Save" to the existing `addProjectFinding` with additive
+    `source: "research_cockpit"`. Do not build a parallel save path or touch `/insights`.
+  - **V3 (after BE-matrix parity)** — backend-dependent: true RR-sweep "optimal TP" from `SWEEP_*`;
+    BE-matrix-cube cards once the new export lands; cross-run insight stability + history (persistence).
+
 ## P3
 
 - **Model family comparison** — TE delays vs penetration vs baseline, side by side.
