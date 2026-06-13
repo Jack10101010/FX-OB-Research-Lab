@@ -58,8 +58,17 @@ const exc = loadCjs(`${BASE}/excursionAnalytics.js`, (spec) => {
 // predicate (isPerformanceTrade) that the Explorer denominator must use.
 const tc = loadCjs("src/data/tradeClassification.js", () => ({}));
 const { isPerformanceTrade } = tc;
-// roadmapStore is import-free (localStorage guarded → empty overrides in node).
-const roadmap = loadCjs("src/data/roadmapStore.js", () => ({}));
+// roadmapStore now mirrors to a durable backend (D-012): at module load it calls
+// makeDomainBackend(...) from backendDomainSync and invokes .kickoff() / exports
+// .subscribe at top level. Stub backendDomainSync with a no-op backend of the real
+// shape ({ hydrate, scheduleSync, subscribe, kickoff }) so the module loads in node
+// (localStorage is still guarded → empty overrides). Harness-only; no behavior change.
+const roadmap = loadCjs("src/data/roadmapStore.js", (spec) => {
+    if (spec.includes("backendDomainSync")) {
+        return { makeDomainBackend: () => ({ hydrate: () => {}, scheduleSync: () => {}, subscribe: () => () => {}, kickoff: () => {} }) };
+    }
+    return {};
+});
 
 const {
     getMfeR, getTargetRR, mfePctOfTarget, bucketMfePct, bucketMfeRaw,
@@ -710,7 +719,11 @@ ok(dts.title === "Distance to Stop Roadmap", "roadmap title seeded");
 ok(dts.items.length >= 19, `roadmap seeded with all items (got ${dts.items.length})`);
 ok(dts.items.some((i) => i.label === "Net R" && i.status === "complete"), "High-priority Net R seeded as complete");
 ok(dts.items.some((i) => i.label === "Profit Factor" && i.status === "complete"), "Profit Factor seeded as complete");
-ok(dts.items.some((i) => i.label === "Break-even replay backtesting" && i.status === "planned"), "Future-research item seeded as planned");
+// BE replay backtesting shipped (D-011 / commit 8584775), so the seed now marks it
+// complete — assert that. The "a planned item seeds" intent moves to the still-planned
+// variant-aware exact BE item.
+ok(dts.items.some((i) => i.label === "Break-even replay backtesting" && i.status === "complete"), "Break-even replay backtesting seeded as complete (shipped)");
+ok(dts.items.some((i) => i.label === "Variant-aware exact Break-even (per entry model)" && i.status === "planned"), "Future-research item seeded as planned");
 ok(dts.items.some((i) => i.label === "Setup: Max Loss Streak" && i.status === "idea"), "Funded-survival item seeded as idea (roadmap only, not implemented)");
 ok(dts.items.some((i) => i.label === "FTMO-style failure probability" && i.status === "idea"), "FTMO funded-survival item present as idea");
 ok(ROADMAP_STATUSES.length === 4, "four roadmap columns (idea / planned / in_progress / complete)");
