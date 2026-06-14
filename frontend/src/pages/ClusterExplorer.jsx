@@ -9,12 +9,15 @@ import { Pill } from "@/components/lab/DataTable";
 import { useDataset, getRunDisplayName, addProjectFinding } from "@/data/store";
 import { buildResearchFindingPayload } from "@/data/projectWorkflow";
 import { resolveDisplayTrades } from "@/data/resolveDisplayTrades";
-import { isPerformanceTrade } from "@/data/tradeClassification";
+import { isPerformanceTrade, isWinTrade, isLossTrade } from "@/data/tradeClassification";
+import { computeConfidence } from "@/data/researchSignals";
 import { FAILURE_DIMENSIONS } from "@/components/lab/failures/shared/failuresDimensions";
 import {
     buildClusterExplorer, selectAvailableDimensions, distanceBandDim,
     CLUSTER_TARGETS, CLUSTER_TARGET_ORDER, DEFAULT_DIMENSION_KEYS,
+    LIFT_MIN, SPLIT_MIN_PER_HALF,
 } from "@/data/clusterExplorer";
+import { scoreNearMisses, INTEREST_LABELS } from "@/data/clusterPrioritisation";
 
 // CLUSTER-1 MVP — Research Cluster Explorer.
 // A discovery surface that runs the guided greedy beam search (data/clusterExplorer.js)
@@ -46,6 +49,28 @@ const EXCURSION_TARGETS = new Set(["give_backs", "false_losers", "round_trips"])
 const REASON_RANK = { effect_too_small: 0, no_marginal_gain: 1, low_confidence: 2, below_floor: 3 };
 
 const predKey = (p) => (p || []).map((x) => `${x.dim}=${x.value}`).sort().join("|");
+
+// Interest chip chrome (CLUSTER-2B research triage — never validation).
+const INTEREST_TONE = { high: "warning", investigate: "info", weak: "muted" };
+const THEME_TONE = { frequent: "info", recurring: "muted", occasional: "muted" };
+
+// Replicated temporal split-half stability (mirrors clusterExplorer's internal
+// stabilityFlag, which isn't exported). Pure; used only to enrich rejected cohorts
+// for triage — it does not feed any statistical gate.
+function splitHalfStability(cohortTrades, tgt, baseRate, minHalf = SPLIT_MIN_PER_HALF) {
+    const ordered = [...cohortTrades].sort((a, b) => String(a?.entry ?? "").localeCompare(String(b?.entry ?? "")));
+    const mid = Math.floor(ordered.length / 2);
+    const halves = [ordered.slice(0, mid), ordered.slice(mid)];
+    const dirs = halves.map((h) => {
+        const u = h.filter((t) => tgt.universe(t));
+        if (u.length < minHalf) return null;
+        const r = u.filter((t) => tgt.hit(t)).length / u.length;
+        return r > baseRate ? "over" : "under";
+    });
+    if (dirs[0] == null || dirs[1] == null) return "unstable";
+    if (dirs[0] === dirs[1]) return dirs[0] === "over" ? "stable" : "stable_under";
+    return "one_half_only";
+}
 
 export default function ClusterExplorer() {
     const { ACTIVE_RUN, ACTIVE_PROJECT, ACTIVE_TRADE_VARIANT, getRunData } = useDataset();
@@ -132,15 +157,28 @@ export default function ClusterExplorer() {
             const uni = cohort.filter((t) => tgt.universe(t));
             const n = uni.length;
             const rate = n ? uni.filter((t) => tgt.hit(t)).length / n : 0;
+            // Enrich with confidence + stability (CLUSTER-2B triage inputs), reusing the
+            // exact engine machinery (computeConfidence + replicated split-half).
+            const perf = cohort.filter((t) => isPerformanceTrade(t));
+            const wins = perf.filter((t) => isWinTrade(t)).length;
+            const losses = perf.filter((t) => isLossTrade(t)).length;
+            const avgR = perf.length ? perf.reduce((s, t) => s + (Number(t?.r ?? t?.netR ?? t?.net_r) || 0), 0) / perf.length : 0;
             out.push({
+                predicate: pred,
                 label: pred.map((x) => x.value).join(" · "),
                 parent: (p.parentPredicate || []).map((x) => x.value).join(" · ") || "—",
                 n, rate, lift: baseRate ? rate / baseRate : 0, reason: p.reason,
+                confidence: computeConfidence({ count: cohort.length, wins, losses, avgR }).level,
+                stability: splitHalfStability(cohort, tgt, baseRate),
             });
         }
         out.sort((a, b) => (REASON_RANK[a.reason] - REASON_RANK[b.reason]) || (b.lift - a.lift) || (b.n - a.n));
         return out.slice(0, 10);
     }, [result, trades, accByKey, target]);
+
+    // CLUSTER-2B: research-triage ranking + recurring themes (recurrence excluded from
+    // the per-row score). Pure read-over of the reconstructed near-misses.
+    const prioritised = useMemo(() => scoreNearMisses(nearMisses, { liftMin: LIFT_MIN }), [nearMisses]);
 
     // An excursion-dependent target with zero events on this run/variant = missing data.
     const missingExcursion = EXCURSION_TARGETS.has(target) && result.available && (result.baseline?.targetN ?? 0) === 0;
@@ -275,14 +313,34 @@ export default function ClusterExplorer() {
                                             <FunnelStat label="Survivors" value={funnel.final} tone="danger" />
                                         </div>
 
-                                        {nearMisses.length > 0 && (
+                                        {prioritised.themes.length > 0 && (
+                                            <div data-testid="cluster-themes" className="py-3 px-3 border border-[hsl(var(--border-mid))] bg-[hsl(var(--panel-2)/0.24)] clip-bevel-sm">
+                                                <div className="text-[10px] font-ui uppercase tracking-wider text-muted-lab mb-1.5">Recurring themes — what keeps showing up</div>
+                                                <div className="space-y-1">
+                                                    {prioritised.themes.map((th) => (
+                                                        <div key={`${th.dim}=${th.factor}`} className="flex flex-wrap items-center gap-2 text-[11px]">
+                                                            <span className="font-semibold text-[hsl(var(--text-1))]">{th.factor}</span>
+                                                            <span className="text-muted-lab font-num">appears in {th.count}/{th.total} rejected · avg lift {th.avgLift}× · avg n {th.avgN}</span>
+                                                            <Pill tone={THEME_TONE[th.status] || "muted"}>{th.status}</Pill>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                                <div className="mt-2 text-[10px] text-muted-lab italic leading-relaxed">
+                                                    ⚠ Related cohorts share trades (nested in the search) — these are recurrences, not independent
+                                                    confirmations. A curiosity prompt for what to investigate next, not evidence.
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {prioritised.scored.length > 0 && (
                                             <div data-testid="cluster-near-misses">
-                                                <div className="text-[10px] font-ui uppercase tracking-wider text-muted-lab mb-1">Closest candidates (did not survive)</div>
+                                                <div className="text-[10px] font-ui uppercase tracking-wider text-muted-lab mb-1">Closest candidates — research triage (not findings)</div>
                                                 <div className="overflow-x-auto">
                                                     <table className="w-full text-[10.5px] font-num tabular-nums">
                                                         <thead>
                                                             <tr className="text-left text-muted-lab">
-                                                                <th className="py-1 pr-2 font-ui">Cluster</th>
+                                                                <th className="py-1 pr-2 font-ui">Interest</th>
+                                                                <th className="py-1 px-2 font-ui">Cluster</th>
                                                                 <th className="py-1 px-2">n</th>
                                                                 <th className="py-1 px-2">rate</th>
                                                                 <th className="py-1 px-2">base</th>
@@ -292,9 +350,14 @@ export default function ClusterExplorer() {
                                                             </tr>
                                                         </thead>
                                                         <tbody>
-                                                            {nearMisses.map((m, i) => (
+                                                            {prioritised.scored.map((m, i) => (
                                                                 <tr key={i} className="border-t border-[hsl(var(--border-soft))]">
-                                                                    <td className="py-1 pr-2 text-[hsl(var(--text-1))]">{m.label}</td>
+                                                                    <td className="py-1 pr-2">
+                                                                        <Pill tone={INTEREST_TONE[m.interest] || "muted"}>
+                                                                            {INTEREST_LABELS[m.interest].emoji} {INTEREST_LABELS[m.interest].label}
+                                                                        </Pill>
+                                                                    </td>
+                                                                    <td className="py-1 px-2 text-[hsl(var(--text-1))]">{m.label}</td>
                                                                     <td className="py-1 px-2">{m.n}</td>
                                                                     <td className="py-1 px-2">{pctR(m.rate)}</td>
                                                                     <td className="py-1 px-2 text-muted-lab">{pctR(result.baseline.rate)}</td>
@@ -307,7 +370,8 @@ export default function ClusterExplorer() {
                                                     </table>
                                                 </div>
                                                 <div className="mt-1.5 text-[10px] text-muted-lab italic">
-                                                    Shown for transparency — these are below the evidence bar, not findings.
+                                                    Ranked by a research-interest heuristic (lift closeness · sample · confidence · stability) —
+                                                    not evidence. Confirm across runs in the Hypothesis Lab.
                                                 </div>
                                             </div>
                                         )}
