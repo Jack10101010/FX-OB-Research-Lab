@@ -1,13 +1,15 @@
-// sessionProfiles.validate.mjs — SESSION-STRATEGY-CARDS Phase 2A.
+// sessionProfiles.validate.mjs — SESSION-STRATEGY-PORTFOLIO Phase 2A.1.
 //
-// Verifies the cards resolver:
-//   • byte-identical when disabled / no effective change
-//   • legacy Phase-1 `cells` back-compat
-//   • NY PM is a FIRST-CLASS governed session (mask / select / report)
-//   • enable/disable per cohort + per session
-//   • entry SELECT from a pre-exported variant (and not-available fallback)
-//   • BE EXACT-cell SELECT (and not-available → keep entry trades, NO replay)
-//   • integration through resolveTradeUniverse
+// Verifies the named-profile model:
+//   • normalize: baseline seeded, empty global default, byte-identical-off
+//   • migration: Phase-1 cells AND Phase-2A inline entry/be → deterministic refs
+//   • ref-chain: cohort override → card default → global default → none
+//   • named-profile lookup + dangling-ref drop
+//   • entry SELECT via ref; EXACT BE SELECT via ref (no replay); not-available fallback
+//   • disable cohort / disable session; NY PM first-class
+//   • global default applies to all cohorts; countOverrides counts EXPLICIT only
+//   • control summary (Live vs Control); pair-agnostic (no symbol literal)
+//   • resolveTradeUniverse integration
 //
 // Run from frontend/:  node src/data/__validation__/sessionProfiles.validate.mjs
 
@@ -40,178 +42,149 @@ const tu = loadCjs("src/data/tradeUniverse.js");
 const be = loadCjs("src/data/beResolve.js");
 const {
     applySessionProfiles, normalizeProfiles, isProfilesActive, countOverrides,
-    canonicalSession, cohortOf, buildEntryKey, SESSION_KEYS,
+    resolveCohortConfig, resolveControlSummary, cohortOf,
+    entryProfileId, beProfileId, BASELINE_ENTRY_ID, SESSION_KEYS,
 } = sp;
 const { resolveTradeUniverse } = tu;
 const { beScenarioKey } = be;
 
 let failures = 0;
-const ok = (cond, msg) => {
-    if (cond) console.log(`  ✓ ${msg}`);
-    else { failures++; console.error(`  ✗ FAIL: ${msg}`); }
-};
+const ok = (cond, msg) => { if (cond) console.log(`  ✓ ${msg}`); else { failures++; console.error(`  ✗ FAIL: ${msg}`); } };
 
 // ── fixtures ─────────────────────────────────────────────────────────────────
-const SESS = [
-    ["London Killzone", "london"], ["London Lull", "lull"], ["New York", "newYork"],
-    ["NY PM", "ny_pm"], ["Asia", "asia"], ["Outside", "outside"],
-];
-const COH = [
-    ["bos_long", "BOS", "Long"], ["bos_short", "BOS", "Short"],
-    ["choch_long", "CHoCH", "Long"], ["choch_short", "CHoCH", "Short"],
-];
-// One trade per (session × cohort) in each universe; ids prefixed so we can
-// detect which universe a trade came from.
-function buildUniverseTrades(prefix, r) {
-    const out = [];
-    for (const [sessRaw] of SESS) {
-        for (const [, structure, direction] of COH) {
-            out.push({ id: `${prefix}-${sessRaw}-${structure}-${direction}`, fillSession: sessRaw, structure, direction, r, outcome: r >= 0 ? "Win" : "Loss" });
-        }
-    }
-    return out;
-}
-const BASE = buildUniverseTrades("b", 1);     // baseline universe
-const TE = buildUniverseTrades("te", 2);      // TE 25 d2 universe (distinct ids)
+const SESS = [["London Killzone","london"],["London Lull","lull"],["New York","newYork"],["NY PM","ny_pm"],["Asia","asia"],["Outside","outside"]];
+const COH = [["bos_long","BOS","Long"],["bos_short","BOS","Short"],["choch_long","CHoCH","Long"],["choch_short","CHoCH","Short"]];
+let _id = 0;
+const build = (prefix, r) => { const o=[]; for (const [s] of SESS) for (const [,st,d] of COH) o.push({ id:`${prefix}-${++_id}`, fillSession:s, structure:st, direction:d, r, outcome:r>=0?"Win":"Loss" }); return o; };
+const BASE = build("b", 1);
+const TE = build("te", 2);
 const TE_KEY = "entry_triggered_edge_25p0_d2";
-const BE_KEY = beScenarioKey("wick", 1.0);    // "be_wick_1p00R"
-// One BE-cell trade for NY PM BOS Short on the TE variant.
-const BE_TRADES = [{ id: "be-NYPM-bos-short", fillSession: "NY PM", structure: "BOS", direction: "Short", r: 0, outcome: "Win" }];
-
+const BE_KEY = beScenarioKey("wick", 1.0); // be_wick_1p00R
+const BE_TRADES = [{ id:"be-NYPM", fillSession:"NY PM", structure:"BOS", direction:"Short", r:0, outcome:"Win" }];
 const bundle = {
-    trades: BASE.slice(),
-    tradesByVariant: { single_position: BASE.slice() },
-    primaryVariant: "single_position",
+    trades: BASE.slice(), tradesByVariant: { single_position: BASE.slice() }, primaryVariant: "single_position", symbol: "GBPUSD",
     entryResults: { tradesByMode: { entry_baseline: BASE.slice(), [TE_KEY]: TE.slice() } },
     beResults: { single_position: { [TE_KEY]: { [BE_KEY]: {} } } },
     beTradesByMode: { single_position: { [TE_KEY]: { [BE_KEY]: BE_TRADES.slice() } } },
 };
-const universe = () => ({
-    universeType: "baseline", label: "Baseline",
-    scenario: { family: "baseline", threshold: null, fillMode: null },
-    variant: "single_position",
-    trades: BASE.slice(), stats: { total: BASE.length }, warnings: [],
-    baselineTrades: BASE.slice(), baselineStats: { total: BASE.length },
-});
-const countCohort = (trades, ck) => trades.filter((t) => cohortOf(t) === ck).length;
-const idsCohort = (trades, ck) => trades.filter((t) => cohortOf(t) === ck).map((t) => t.id);
+const universe = () => ({ universeType:"baseline", label:"Baseline", scenario:{family:"baseline",threshold:null,fillMode:null}, variant:"single_position", trades:BASE.slice(), stats:{total:BASE.length}, warnings:[], baselineTrades:BASE.slice(), baselineStats:{total:BASE.length} });
+const countCohort = (t, ck) => t.filter((x) => cohortOf(x) === ck).length;
+const idsCohort = (t, ck) => t.filter((x) => cohortOf(x) === ck).map((x) => x.id);
+const TE_ENTRY = { model:"triggered_edge", threshold:25, arm:"d2" };
+const TE_ID = entryProfileId(TE_ENTRY);   // entry_te_25_d2
+const BE_ID = beProfileId({ trigger:"wick", armR:1.0 }); // be_wick_1
 
-// ── 1. NY PM is first-class ───────────────────────────────────────────────────
-console.log("\n[1] NY PM first-class");
-ok(SESSION_KEYS.includes("ny_pm"), "ny_pm is a governed session key");
-ok(canonicalSession("NY PM") === "ny_pm", "NY PM → ny_pm");
-ok(countCohort(BASE, "ny_pm|bos_short") === 1, "fixture has an NY PM BOS Short trade");
+// ── 1. normalize shape + ids ─────────────────────────────────────────────────
+console.log("\n[1] normalize + identity");
+const e0 = normalizeProfiles(null);
+ok(e0.profiles.entry[BASELINE_ENTRY_ID]?.model === "baseline", "baseline entry profile seeded");
+ok(e0.globalDefaultRef.entry === null && e0.globalDefaultRef.be === null, "empty global default");
+ok(e0.control.baselineProfileRef === BASELINE_ENTRY_ID, "control defaults to baseline");
+ok(TE_ID === "entry_te_25_d2", "deterministic entry id");
+ok(BE_ID === "be_wick_1", "deterministic be id");
 
-// ── 2. byte-identical when inactive ──────────────────────────────────────────
-console.log("\n[2] byte-identical (inactive)");
+// ── 2. migration ──────────────────────────────────────────────────────────────
+console.log("\n[2] migration");
+const migA = normalizeProfiles({ enabled:true, cards:{ asia:{ enabled:true, default:{}, overrides:{ choch_long:{ entry:TE_ENTRY, be:{trigger:"wick",armR:1} } } } } });
+ok(!!migA.profiles.entry[TE_ID] && !!migA.profiles.be[BE_ID], "inline entry/be hoisted into library");
+ok(migA.cards.asia.overrides.choch_long.entryRef === TE_ID && migA.cards.asia.overrides.choch_long.beRef === BE_ID, "inline rewritten to refs");
+const migL = normalizeProfiles({ enabled:true, cells:{ asia:{ choch_long:"disabled" } } });
+ok(migL.cards.asia.overrides.choch_long.enabled === false, "legacy cells → enabled:false");
+const dangling = normalizeProfiles({ enabled:true, cards:{ asia:{ overrides:{ choch_long:{ entryRef:"nope" } } } } });
+ok(!("entryRef" in (dangling.cards.asia?.overrides?.choch_long || {})), "dangling ref dropped");
+
+// ── 3. byte-identical when inactive ──────────────────────────────────────────
+console.log("\n[3] byte-identical (inactive)");
 const u0 = universe();
-ok(applySessionProfiles({ universe: u0, profiles: { enabled: false, cards: {} }, bundle }) === u0, "disabled → same ref");
-ok(applySessionProfiles({ universe: u0, profiles: { enabled: true, cards: {} }, bundle }) === u0, "no cards → same ref");
-ok(applySessionProfiles({ universe: u0, scenario: {}, bundle }) === u0, "no profiles on scenario → same ref");
+ok(applySessionProfiles({ universe:u0, profiles: normalizeProfiles({enabled:false}), bundle }) === u0, "disabled → same ref");
+ok(applySessionProfiles({ universe:u0, profiles: normalizeProfiles({enabled:true}), bundle }) === u0, "enabled but empty → same ref");
+ok(applySessionProfiles({ universe:u0, profiles: dangling, bundle }) === u0, "only a dangling ref → same ref");
 
-// ── 3. disable cohort: NY PM BOS Short only ──────────────────────────────────
-console.log("\n[3] disable NY PM BOS Short (mask)");
-const r3 = applySessionProfiles({
-    universe: universe(), bundle, variant: "single_position",
-    profiles: { enabled: true, cards: { ny_pm: { enabled: true, default: {}, overrides: { bos_short: { enabled: false } } } } },
-});
-ok(r3 !== universe(), "new universe");
-ok(countCohort(r3.trades, "ny_pm|bos_short") === 0, "NY PM BOS Short removed");
-ok(r3.trades.length === BASE.length - 1, "exactly one removed");
-ok(countCohort(r3.trades, "newYork|bos_short") === 1, "New York BOS Short untouched (NOT folded with NY PM)");
-ok(r3.sessionCards?.removed === 1, "attribution removed=1");
+// ── 4. ref-chain entry SELECT ────────────────────────────────────────────────
+console.log("\n[4] entry SELECT via ref");
+const pEntry = normalizeProfiles({ enabled:true, profiles:{ entry:{ [TE_ID]:TE_ENTRY } }, cards:{ asia:{ enabled:true, default:{}, overrides:{ choch_long:{ entryRef:TE_ID } } } } });
+const r4 = applySessionProfiles({ universe:universe(), bundle, variant:"single_position", profiles:pEntry });
+ok(idsCohort(r4.trades, "asia|choch_long").every((id) => id.startsWith("te-")), "Asia CHoCH Long sourced from TE via ref");
+ok(idsCohort(r4.trades, "asia|bos_short").every((id) => id.startsWith("b-")), "Asia BOS Short still baseline");
+ok(r4.sessionCards?.swapped === 1, "swapped=1");
 
-// ── 4. session-level disable removes all 4 cohorts ───────────────────────────
-console.log("\n[4] disable whole London session");
-const r4 = applySessionProfiles({
-    universe: universe(), bundle, variant: "single_position",
-    profiles: { enabled: true, cards: { london: { enabled: false, default: {}, overrides: {} } } },
-});
-ok(["bos_long", "bos_short", "choch_long", "choch_short"].every((c) => countCohort(r4.trades, `london|${c}`) === 0), "all 4 London cohorts removed");
-ok(r4.trades.length === BASE.length - 4, "four removed");
-ok(countCohort(r4.trades, "lull|bos_long") === 1, "London Lull untouched");
+// ── 5. card default inheritance ──────────────────────────────────────────────
+console.log("\n[5] card default inheritance");
+const pDef = normalizeProfiles({ enabled:true, profiles:{ entry:{ [TE_ID]:TE_ENTRY } }, cards:{ asia:{ enabled:true, default:{ entryRef:TE_ID }, overrides:{ bos_long:{ entryRef:"" } } } } });
+const cfgInherit = resolveCohortConfig(pDef, "asia", "bos_short"); // inherits card default
+ok(cfgInherit.entry && cfgInherit.entry.arm === "d2", "cohort inherits card default entry");
 
-// ── 5. entry SELECT from exported variant ────────────────────────────────────
-console.log("\n[5] entry SELECT (Asia CHoCH Long → TE 25 d2)");
-const r5 = applySessionProfiles({
-    universe: universe(), bundle, variant: "single_position",
-    profiles: { enabled: true, cards: { asia: { enabled: true, default: {}, overrides: { choch_long: { entry: { model: "triggered_edge", threshold: 25, arm: "d2" } } } } } },
-});
-ok(idsCohort(r5.trades, "asia|choch_long").every((id) => id.startsWith("te-")), "Asia CHoCH Long now sourced from TE universe");
-ok(idsCohort(r5.trades, "asia|bos_short").every((id) => id.startsWith("b-")), "Asia BOS Short still baseline");
-ok(idsCohort(r5.trades, "london|choch_long").every((id) => id.startsWith("b-")), "London CHoCH Long still baseline (same cohort, diff session)");
-ok(r5.trades.length === BASE.length, "count unchanged (1-for-1 swap)");
-ok(r5.sessionCards?.swapped === 1, "attribution swapped=1");
-ok(buildEntryKey({ model: "triggered_edge", threshold: 25, arm: "d2" }) === TE_KEY, "buildEntryKey → entry_triggered_edge_25p0_d2");
+// ── 6. global default applies to all cohorts ─────────────────────────────────
+console.log("\n[6] global default");
+const pGlobal = normalizeProfiles({ enabled:true, profiles:{ entry:{ [TE_ID]:TE_ENTRY } }, globalDefaultRef:{ entry:TE_ID } });
+ok(isProfilesActive(pGlobal) === true, "global default makes it active");
+const r6 = applySessionProfiles({ universe:universe(), bundle, variant:"single_position", profiles:pGlobal });
+ok(r6.trades.every((t) => t.id.startsWith("te-")), "every governed cohort swapped to TE via global default");
+ok(countOverrides(pGlobal) === 0, "countOverrides ignores global-default inheritance");
 
-// ── 6. entry NOT available → keep base + warning ─────────────────────────────
-console.log("\n[6] entry not available (fallback, no fabrication)");
-const r6 = applySessionProfiles({
-    universe: universe(), bundle, variant: "single_position",
-    profiles: { enabled: true, cards: { outside: { enabled: true, default: {}, overrides: { choch_short: { entry: { model: "triggered_edge", threshold: 99, arm: "d2" } } } } } },
-});
-ok(idsCohort(r6.trades, "outside|choch_short").every((id) => id.startsWith("b-")), "missing variant → kept base trades");
-ok(r6.warnings.some((w) => w.code === "SESSION_CARD_ENTRY_UNAVAILABLE"), "entry-unavailable warning emitted");
-ok((r6.sessionCards?.unavailable || []).some((u) => u.kind === "entry"), "attribution records entry unavailable");
+// ── 7. EXACT BE SELECT via ref (no replay) ───────────────────────────────────
+console.log("\n[7] BE exact via ref");
+const pBe = normalizeProfiles({ enabled:true, profiles:{ entry:{ [TE_ID]:TE_ENTRY }, be:{ [BE_ID]:{trigger:"wick",armR:1} } },
+    cards:{ ny_pm:{ enabled:true, default:{}, overrides:{ bos_short:{ entryRef:TE_ID, beRef:BE_ID } } } } });
+const r7 = applySessionProfiles({ universe:universe(), bundle, variant:"single_position", profiles:pBe });
+ok(idsCohort(r7.trades, "ny_pm|bos_short").includes("be-NYPM"), "NY PM BOS Short from EXACT BE cell");
+ok(r7.sessionCards?.beApplied === 1, "beApplied=1");
 
-// ── 7. BE EXACT-cell SELECT (only if it exists) ──────────────────────────────
-console.log("\n[7] BE exact-cell SELECT");
-const r7 = applySessionProfiles({
-    universe: universe(), bundle, variant: "single_position",
-    profiles: { enabled: true, cards: { ny_pm: { enabled: true, default: {}, overrides: { bos_short: { entry: { model: "triggered_edge", threshold: 25, arm: "d2" }, be: { trigger: "wick", armR: 1.0 } } } } } },
-});
-ok(idsCohort(r7.trades, "ny_pm|bos_short").includes("be-NYPM-bos-short"), "NY PM BOS Short sourced from EXACT BE cell");
-ok(r7.sessionCards?.beApplied === 1, "attribution beApplied=1");
+// ── 8. BE not available → keep entry, NO replay ──────────────────────────────
+console.log("\n[8] BE not available");
+const BE2 = beProfileId({ trigger:"close", armR:2 });
+const pBeBad = normalizeProfiles({ enabled:true, profiles:{ be:{ [BE2]:{trigger:"close",armR:2} } },
+    cards:{ london:{ enabled:true, default:{}, overrides:{ bos_long:{ beRef:BE2 } } } } });
+const r8 = applySessionProfiles({ universe:universe(), bundle, variant:"single_position", profiles:pBeBad });
+ok(idsCohort(r8.trades, "london|bos_long").every((id) => id.startsWith("b-")), "missing BE cell → kept base (no replay)");
+ok(r8.warnings.some((w) => w.code === "SESSION_CARD_BE_UNAVAILABLE"), "BE-unavailable warning");
 
-// ── 8. BE NOT available → keep entry trades, NO replay ───────────────────────
-console.log("\n[8] BE not available (no replay)");
-const r8 = applySessionProfiles({
-    universe: universe(), bundle, variant: "single_position",
-    profiles: { enabled: true, cards: { london: { enabled: true, default: {}, overrides: { bos_long: { be: { trigger: "close", armR: 2.0 } } } } } },
-});
-ok(idsCohort(r8.trades, "london|bos_long").every((id) => id.startsWith("b-")), "missing BE cell → kept (base) entry trades");
-ok(r8.warnings.some((w) => w.code === "SESSION_CARD_BE_UNAVAILABLE"), "BE-unavailable warning emitted");
-ok((r8.sessionCards?.unavailable || []).some((u) => u.kind === "be"), "attribution records BE unavailable");
+// ── 9. entry not available → fallback ────────────────────────────────────────
+console.log("\n[9] entry not available");
+const MISS = "entry_te_99_d2";
+const pMiss = normalizeProfiles({ enabled:true, profiles:{ entry:{ [MISS]:{model:"triggered_edge",threshold:99,arm:"d2"} } },
+    cards:{ outside:{ enabled:true, default:{}, overrides:{ choch_short:{ entryRef:MISS } } } } });
+const r9 = applySessionProfiles({ universe:universe(), bundle, variant:"single_position", profiles:pMiss });
+ok(idsCohort(r9.trades, "outside|choch_short").every((id) => id.startsWith("b-")), "missing entry variant → kept base");
+ok(r9.warnings.some((w) => w.code === "SESSION_CARD_ENTRY_UNAVAILABLE"), "entry-unavailable warning");
 
-// ── 9. precedence: override beats card default ───────────────────────────────
-console.log("\n[9] precedence override > default");
-const r9 = applySessionProfiles({
-    universe: universe(), bundle, variant: "single_position",
-    profiles: { enabled: true, cards: { asia: { enabled: true, default: { enabled: false }, overrides: { choch_long: { enabled: true } } } } },
-});
-ok(countCohort(r9.trades, "asia|choch_long") === 1, "override re-enables a cohort the card default disabled");
-ok(countCohort(r9.trades, "asia|bos_long") === 0, "card-default disable applies to non-overridden cohorts");
+// ── 10. disable cohort + session; NY PM first-class ──────────────────────────
+console.log("\n[10] disable + NY PM");
+const rDisCohort = applySessionProfiles({ universe:universe(), bundle, variant:"single_position",
+    profiles: normalizeProfiles({ enabled:true, cards:{ ny_pm:{ enabled:true, default:{}, overrides:{ bos_short:{ enabled:false } } } } }) });
+ok(countCohort(rDisCohort.trades, "ny_pm|bos_short") === 0 && countCohort(rDisCohort.trades, "newYork|bos_short") === 1, "NY PM BOS Short removed, New York untouched");
+const rDisSess = applySessionProfiles({ universe:universe(), bundle, variant:"single_position",
+    profiles: normalizeProfiles({ enabled:true, cards:{ london:{ enabled:false, default:{}, overrides:{} } } }) });
+ok(rDisSess.trades.length === BASE.length - 4, "whole London session removed (4 cohorts)");
+ok(SESSION_KEYS.includes("ny_pm"), "ny_pm is first-class");
 
-// ── 10. legacy Phase-1 `cells` back-compat ───────────────────────────────────
-console.log("\n[10] legacy cells back-compat");
-const legacy = normalizeProfiles({ enabled: true, cells: { asia: { choch_long: "disabled" } } });
-ok(legacy.cards?.asia?.overrides?.choch_long?.enabled === false, "legacy 'disabled' → overrides.enabled=false");
-const r10 = applySessionProfiles({ universe: universe(), bundle, variant: "single_position", profiles: legacy });
-ok(countCohort(r10.trades, "asia|choch_long") === 0, "legacy config still masks");
+// ── 11. control summary ──────────────────────────────────────────────────────
+console.log("\n[11] control summary");
+const ctrl = resolveControlSummary(bundle, normalizeProfiles({ enabled:true }));
+ok(ctrl.available === true && ctrl.trades.every((t) => t.id.startsWith("b-")), "control resolves to baseline universe");
+ok(ctrl.entryKey === "baseline", "control entryKey is baseline");
 
-// ── 11. integration through resolveTradeUniverse ─────────────────────────────
-console.log("\n[11] resolveTradeUniverse integration");
-const noP = resolveTradeUniverse({ bundle, scenario: { family: "baseline", positionVariant: "single_position" }, fallbackVariant: "single_position" });
-ok(noP.trades.length === BASE.length, "no cards → full universe");
-ok(!noP.sessionCards, "no attribution when absent");
-const withP = resolveTradeUniverse({
-    bundle, fallbackVariant: "single_position",
-    scenario: { family: "baseline", positionVariant: "single_position", sessionProfiles: { enabled: true, cards: { ny_pm: { enabled: false, default: {}, overrides: {} } } } },
-});
-ok(withP.trades.length === BASE.length - 4, "resolveTradeUniverse disables whole NY PM session (4 cohorts)");
-ok(withP.sessionCards?.active === true, "attribution present via resolveTradeUniverse");
+// ── 12. countOverrides explicit only ─────────────────────────────────────────
+console.log("\n[12] countOverrides");
+ok(countOverrides(pEntry) === 1, "one explicit cohort override counted");
+ok(countOverrides(normalizeProfiles({ enabled:true, cards:{ london:{ enabled:false, default:{}, overrides:{} } } })) === 4, "session disable counts as 4");
 
-// ── 12. helpers / activity ────────────────────────────────────────────────────
-console.log("\n[12] helpers");
-ok(isProfilesActive({ enabled: true, cards: { asia: { enabled: true, default: {}, overrides: { choch_long: { enabled: false } } } } }) === true, "active when a cohort disabled");
-ok(isProfilesActive({ enabled: true, cards: { asia: { enabled: true, default: {}, overrides: {} } } }) === false, "inactive when nothing set");
-ok(countOverrides({ enabled: true, cards: { asia: { enabled: true, default: {}, overrides: { choch_long: { enabled: false }, bos_short: { entry: { model: "baseline" } } } } } }) === 2, "override count = 2");
+// ── 13. resolveTradeUniverse integration ─────────────────────────────────────
+console.log("\n[13] resolveTradeUniverse integration");
+const noP = resolveTradeUniverse({ bundle, scenario:{ family:"baseline", positionVariant:"single_position" }, fallbackVariant:"single_position" });
+ok(noP.trades.length === BASE.length && !noP.sessionCards, "no portfolio → full universe, no attribution");
+const withP = resolveTradeUniverse({ bundle, fallbackVariant:"single_position",
+    scenario:{ family:"baseline", positionVariant:"single_position", sessionProfiles: pEntry } });
+ok(withP.sessionCards?.swapped === 1, "portfolio applied via resolveTradeUniverse");
 
-// ── 13. no backend dependency (structural) ───────────────────────────────────
-console.log("\n[13] no backend / no replay in module");
+// ── 14. structural: no backend / replay / symbol literals ────────────────────
+console.log("\n[14] structural");
 const srcText = fs.readFileSync(path.resolve("src/data/sessionProfiles.js"), "utf8");
 ok(!/fetch\(|sidecar|axios|XMLHttpRequest|\/runs/.test(srcText), "no network/run calls");
-ok(!/beReplay|replay\(/i.test(srcText), "no replay invoked in resolver");
+ok(!/beReplay|replay\(/i.test(srcText), "no replay invoked");
+ok(!/EURUSD|GBPUSD/.test(srcText), "no pair/symbol literals in resolver");
+const uiText = fs.readFileSync(path.resolve("src/components/lab/sessionProfiles/SessionStrategyCards.jsx"), "utf8");
+ok(!/EURUSD|GBPUSD/.test(uiText), "no pair/symbol literals in cards UI");
 
 console.log(`\n${failures === 0 ? "ALL PASS" : `${failures} FAILURE(S)`}`);
 process.exit(failures === 0 ? 0 : 1);

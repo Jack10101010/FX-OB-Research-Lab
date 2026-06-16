@@ -67,24 +67,105 @@ export const ARM_OPTIONS = [
     { key: "d6", label: "C6" },
 ];
 
-// ── Profile object (cards model) ──────────────────────────────────────────────
+// ── Portfolio object (2A.1 — named-profile model) ──────────────────────────────
 // {
 //   enabled: boolean,
+//   globalDefaultRef: { entry: id|null, be: id|null },   // inheritance root
+//   profiles: {                                          // named, reusable, pair-agnostic
+//     entry: { [id]: EntrySel },                         // always seeds "entry_baseline"
+//     be:    { [id]: BeSel },
+//   },
+//   control: { baselineProfileRef: id },                 // research control (panel-local)
 //   cards: {
 //     [sessionKey]: {
-//       enabled: boolean,                 // session on/off (default true)
-//       default: CohortCfg,               // card-level defaults
-//       overrides: { [cellKey]: CohortCfg }
+//       enabled: boolean,                                // session on/off (default true)
+//       default: CohortRef,                              // card-level defaults
+//       overrides: { [cellKey]: CohortRef },
 //     }
 //   }
 // }
-// CohortCfg = { enabled?: bool, entry?: EntrySel|null, be?: BeSel|null }
+// CohortRef = { enabled?: bool, entryRef?: id, beRef?: id }   (absent ref = inherit up)
 //   EntrySel = {model:"baseline"} | {model:"triggered_edge",threshold,arm} | {model:"penetration",threshold}
 //   BeSel    = {trigger:"wick"|"close", armR:Number}
-// Absent fields = inherit (override ⟶ card default ⟶ base universe).
+//
+// Inheritance: cohort override ⟶ card default ⟶ globalDefaultRef ⟶ (none = base universe).
+// All settings are pair-agnostic; availability is resolved against the active
+// bundle (the selected pair's export). Legacy Phase-1 `cells` and Phase-2A inline
+// `entry`/`be` are auto-migrated to deterministic profile refs on normalize.
+
+export const BASELINE_ENTRY_ID = "entry_baseline";
 
 export function emptyProfiles() {
-    return { enabled: false, cards: {} };
+    return {
+        enabled: false,
+        globalDefaultRef: { entry: null, be: null },
+        profiles: { entry: { [BASELINE_ENTRY_ID]: { model: "baseline" } }, be: {} },
+        control: { baselineProfileRef: BASELINE_ENTRY_ID },
+        cards: {},
+    };
+}
+
+// ── Named-profile identity + labels ────────────────────────────────────────────
+
+/** Numeric token for ids/labels: 25 → "25", 0.5 → "0p5", 3.3 → "3p3". */
+function numTok(n) {
+    const v = Number(n);
+    if (!Number.isFinite(v)) return "x";
+    return v % 1 === 0 ? String(v) : String(v).replace(".", "p");
+}
+
+/** Deterministic id for an entry profile (so identical settings dedupe). */
+export function entryProfileId(sel) {
+    if (!sel || !sel.model) return null;
+    if (sel.model === "baseline") return BASELINE_ENTRY_ID;
+    if (sel.model === "triggered_edge") return `entry_te_${numTok(sel.threshold)}_${sel.arm}`;
+    if (sel.model === "penetration") return `entry_pen_${numTok(sel.threshold)}`;
+    return null;
+}
+export function beProfileId(sel) {
+    if (!sel) return null;
+    return `be_${sel.trigger}_${numTok(sel.armR)}`;
+}
+
+const ARM_LABEL = { same: "C0", next: "C1", d2: "C2", d3: "C3", d4: "C4", d5: "C5", d6: "C6" };
+export function entryProfileLabel(sel) {
+    if (!sel) return "—";
+    if (sel.model === "baseline") return "Baseline";
+    if (sel.model === "triggered_edge") return `TE ${sel.threshold}% · ${ARM_LABEL[sel.arm] || sel.arm}`;
+    if (sel.model === "penetration") return `Pen ${sel.threshold}%`;
+    return "—";
+}
+export function beProfileLabel(sel) {
+    if (!sel) return "None";
+    return `BE ${sel.armR}R ${sel.trigger}`;
+}
+
+// ── Profile library CRUD (pure; return a new portfolio object) ──────────────────
+export function listEntryProfiles(profiles) {
+    const map = profiles?.profiles?.entry || {};
+    return Object.keys(map).map((id) => ({ id, sel: map[id], label: entryProfileLabel(map[id]) }));
+}
+export function listBeProfiles(profiles) {
+    const map = profiles?.profiles?.be || {};
+    return Object.keys(map).map((id) => ({ id, sel: map[id], label: beProfileLabel(map[id]) }));
+}
+export function addEntryProfile(profiles, sel) {
+    const clean = normEntrySel(sel);
+    if (!clean) return profiles;
+    const id = entryProfileId(clean);
+    return { ...profiles, profiles: { ...profiles.profiles, entry: { ...profiles.profiles.entry, [id]: clean } } };
+}
+export function addBeProfile(profiles, sel) {
+    const clean = normBeSel(sel);
+    if (!clean) return profiles;
+    const id = beProfileId(clean);
+    return { ...profiles, profiles: { ...profiles.profiles, be: { ...profiles.profiles.be, [id]: clean } } };
+}
+export function removeProfile(profiles, kind, id) {
+    if (kind === "entry" && id === BASELINE_ENTRY_ID) return profiles; // baseline is permanent
+    const next = { ...profiles.profiles, [kind]: { ...profiles.profiles[kind] } };
+    delete next[kind][id];
+    return { ...profiles, profiles: next };
 }
 
 function normEntrySel(raw) {
@@ -114,25 +195,68 @@ function normBeSel(raw) {
     return { trigger, armR };
 }
 
-function normCohortCfg(raw) {
-    if (!raw || typeof raw !== "object") return {};
-    const out = {};
-    if (raw.enabled === false || raw.enabled === true) out.enabled = raw.enabled;
-    const entry = normEntrySel(raw.entry);
-    if (entry) out.entry = entry;
-    const be = normBeSel(raw.be);
-    if (be) out.be = be;
-    return out;
-}
-
-/** Coerce any persisted/loaded value into a clean cards object. Accepts the
- *  legacy Phase-1 `{enabled, cells:{[s]:{[c]:"enabled"|"disabled"}}}` shape. */
+/**
+ * Coerce any persisted/loaded value into a clean named-profile portfolio object.
+ * Migrates BOTH legacy shapes deterministically (no data loss, no surprises):
+ *   • Phase-1 `{enabled, cells:{[s]:{[c]:"enabled"|"disabled"}}}`
+ *   • Phase-2A inline `{enabled, cards:{[s]:{default,overrides:{[c]:{entry,be}}}}}`
+ * Inline `entry`/`be` objects are auto-hoisted into the named library with their
+ * deterministic id and replaced by `entryRef`/`beRef`.
+ */
 export function normalizeProfiles(raw) {
     if (!raw || typeof raw !== "object") return emptyProfiles();
 
-    // Legacy Phase-1 shape → cards.
+    const out = emptyProfiles(); // seeds baseline entry profile + empty defaults
+
+    // 1. Seed the named library from any provided `profiles` map (validated).
+    const seed = (kind, normFn) => {
+        const src = raw.profiles?.[kind];
+        if (src && typeof src === "object") {
+            for (const id of Object.keys(src)) {
+                const clean = normFn(src[id]);
+                if (clean) out.profiles[kind][id] = clean;
+            }
+        }
+    };
+    seed("entry", normEntrySel);
+    seed("be", normBeSel);
+
+    // Hoist an inline sel into the library, returning its id (or null).
+    const hoistEntry = (sel) => { const c = normEntrySel(sel); if (!c) return null; const id = entryProfileId(c); out.profiles.entry[id] = c; return id; };
+    const hoistBe = (sel) => { const c = normBeSel(sel); if (!c) return null; const id = beProfileId(c); out.profiles.be[id] = c; return id; };
+
+    // Resolve a slot's entry/be into a library ref: prefer inline (hoist), else a
+    // valid ref string. Dangling refs are dropped on the final pass below.
+    const refsFor = (obj) => {
+        const r = {};
+        if (obj && typeof obj === "object") {
+            if (obj.entry) { const id = hoistEntry(obj.entry); if (id) r.entryRef = id; }
+            else if (typeof obj.entryRef === "string") r.entryRef = obj.entryRef;
+            if (obj.be) { const id = hoistBe(obj.be); if (id) r.beRef = id; }
+            else if (typeof obj.beRef === "string") r.beRef = obj.beRef;
+            if (obj.enabled === false || obj.enabled === true) r.enabled = obj.enabled;
+        }
+        return r;
+    };
+
+    // 2. Global default — canonical `globalDefaultRef:{entry:id,be:id}` (id strings),
+    //    or legacy inline `globalDefault:{entry:sel,be:sel}` (hoisted).
+    let gdEntry = null, gdBe = null;
+    const rawGd = raw.globalDefaultRef;
+    if (rawGd && typeof rawGd === "object") {
+        if (typeof rawGd.entry === "string") gdEntry = rawGd.entry;
+        if (typeof rawGd.be === "string") gdBe = rawGd.be;
+    }
+    const legacyGd = raw.globalDefault;
+    if (legacyGd && typeof legacyGd === "object") {
+        if (legacyGd.entry) { const id = hoistEntry(legacyGd.entry); if (id) gdEntry = id; }
+        if (legacyGd.be) { const id = hoistBe(legacyGd.be); if (id) gdBe = id; }
+    }
+    out.globalDefaultRef = { entry: gdEntry, be: gdBe };
+
+    // 3. Cards.
     if (raw.cells && !raw.cards) {
-        const cards = {};
+        // Phase-1 cells → enable/disable overrides.
         for (const s of SESSION_KEYS) {
             const row = raw.cells[s];
             if (!row || typeof row !== "object") continue;
@@ -141,30 +265,48 @@ export function normalizeProfiles(raw) {
                 if (row[c] === "disabled") overrides[c] = { enabled: false };
                 else if (row[c] === "enabled") overrides[c] = { enabled: true };
             }
-            if (Object.keys(overrides).length) cards[s] = { enabled: true, default: {}, overrides };
+            if (Object.keys(overrides).length) out.cards[s] = { enabled: true, default: {}, overrides };
         }
-        return { enabled: raw.enabled === true, cards };
+    } else {
+        const rawCards = raw.cards && typeof raw.cards === "object" ? raw.cards : {};
+        for (const s of SESSION_KEYS) {
+            const card = rawCards[s];
+            if (!card || typeof card !== "object") continue;
+            const overrides = {};
+            const rawOv = card.overrides && typeof card.overrides === "object" ? card.overrides : {};
+            for (const c of CELL_KEYS) {
+                const cfg = refsFor(rawOv[c]);
+                if (Object.keys(cfg).length) overrides[c] = cfg;
+            }
+            const def = refsFor(card.default);
+            const enabled = card.enabled === false ? false : true;
+            if (enabled === false || Object.keys(def).length || Object.keys(overrides).length) {
+                out.cards[s] = { enabled, default: def, overrides };
+            }
+        }
     }
 
-    const rawCards = raw.cards && typeof raw.cards === "object" ? raw.cards : {};
-    const cards = {};
-    for (const s of SESSION_KEYS) {
-        const card = rawCards[s];
-        if (!card || typeof card !== "object") continue;
-        const overrides = {};
-        const rawOv = card.overrides && typeof card.overrides === "object" ? card.overrides : {};
-        for (const c of CELL_KEYS) {
-            const cfg = normCohortCfg(rawOv[c]);
-            if (Object.keys(cfg).length) overrides[c] = cfg;
-        }
-        const def = normCohortCfg(card.default);
-        const enabled = card.enabled === false ? false : true;
-        // Keep a card only if it carries any signal.
-        if (enabled === false || Object.keys(def).length || Object.keys(overrides).length) {
-            cards[s] = { enabled, default: def, overrides };
-        }
+    // 4. Control ref (default baseline; must exist in the library).
+    const cRef = raw.control?.baselineProfileRef;
+    out.control = { baselineProfileRef: (cRef && out.profiles.entry[cRef]) ? cRef : BASELINE_ENTRY_ID };
+
+    // 5. Drop dangling refs (point at a profile that doesn't exist → inherit).
+    const validEntry = (id) => id && out.profiles.entry[id] ? id : null;
+    const validBe = (id) => id && out.profiles.be[id] ? id : null;
+    out.globalDefaultRef.entry = validEntry(out.globalDefaultRef.entry);
+    out.globalDefaultRef.be = validBe(out.globalDefaultRef.be);
+    for (const s of Object.keys(out.cards)) {
+        const card = out.cards[s];
+        const fix = (slot) => {
+            if ("entryRef" in slot && !validEntry(slot.entryRef)) delete slot.entryRef;
+            if ("beRef" in slot && !validBe(slot.beRef)) delete slot.beRef;
+        };
+        fix(card.default);
+        for (const c of Object.keys(card.overrides)) fix(card.overrides[c]);
     }
-    return { enabled: raw.enabled === true, cards };
+
+    out.enabled = raw.enabled === true;
+    return out;
 }
 
 // ── Canonicalizers ───────────────────────────────────────────────────────────
@@ -324,20 +466,36 @@ export function beAvailable(bundle, variant, entryKey, be) {
 
 // ── Cohort config resolution ──────────────────────────────────────────────────
 
-/** Resolve a cohort: override ⟶ card default ⟶ inherit. */
+/** Look up a ref in the named library → EntrySel/BeSel (or null). */
+function lookupEntry(profiles, ref) { return ref ? (profiles?.profiles?.entry?.[ref] || null) : null; }
+function lookupBe(profiles, ref) { return ref ? (profiles?.profiles?.be?.[ref] || null) : null; }
+
+/**
+ * Resolve a cohort through the ref chain: cohort override ⟶ card default ⟶
+ * globalDefaultRef ⟶ none. Returns resolved EntrySel/BeSel (so the resolver and
+ * availability checks keep using `cfg.entry` / `cfg.be` unchanged) plus the refs.
+ */
 export function resolveCohortConfig(profiles, sessionKey, cellKey) {
+    const gd = profiles?.globalDefaultRef || {};
     const card = profiles?.cards?.[sessionKey];
-    if (!card) return { disabled: false, entry: null, be: null };
-    if (card.enabled === false) return { disabled: true, entry: null, be: null };
-    const ov = card.overrides?.[cellKey] || {};
-    const def = card.default || {};
-    const enabled = ov.enabled ?? def.enabled ?? true;
-    if (enabled === false) return { disabled: true, entry: null, be: null };
-    return {
-        disabled: false,
-        entry: ov.entry ?? def.entry ?? null,
-        be: ov.be ?? def.be ?? null,
-    };
+    const none = (disabled) => ({ disabled, entry: null, be: null, entryRef: null, beRef: null });
+
+    let entryRef = gd.entry ?? null;
+    let beRef = gd.be ?? null;
+
+    if (card) {
+        if (card.enabled === false) return none(true);
+        const ov = card.overrides?.[cellKey] || {};
+        const def = card.default || {};
+        const enabled = ov.enabled ?? def.enabled ?? true;
+        if (enabled === false) return none(true);
+        entryRef = ov.entryRef ?? def.entryRef ?? entryRef;
+        beRef = ov.beRef ?? def.beRef ?? beRef;
+    }
+
+    const entry = lookupEntry(profiles, entryRef);
+    const be = lookupBe(profiles, beRef);
+    return { disabled: false, entry, be, entryRef: entry ? entryRef : null, beRef: be ? beRef : null };
 }
 
 /** Active = enabled AND at least one cohort resolves to a real change. */
@@ -352,16 +510,41 @@ export function isProfilesActive(profiles) {
     return false;
 }
 
-/** Count of cohorts that resolve to a non-inherit state (for the override chip). */
+/** Count of EXPLICIT per-cohort overrides (not global-default inheritance), for
+ *  the override chip. Counts a cohort whose own override object sets anything,
+ *  plus whole-session disables. Card-level defaults and the global default are
+ *  inheritance, not per-cohort overrides, so they are not counted here. */
 export function countOverrides(profiles) {
     let n = 0;
     for (const s of SESSION_KEYS) {
+        const card = profiles?.cards?.[s];
+        if (!card) continue;
+        if (card.enabled === false) { n += CELL_KEYS.length; continue; }
         for (const c of CELL_KEYS) {
-            const cfg = resolveCohortConfig(profiles, s, c);
-            if (cfg.disabled || cfg.entry || cfg.be) n += 1;
+            const ov = card.overrides?.[c];
+            if (ov && (ov.enabled === false || ov.enabled === true || ov.entryRef || ov.beRef)) n += 1;
         }
     }
     return n;
+}
+
+/**
+ * Panel-local research control: the baseline (or configured control) entry
+ * universe for the active bundle. Returns { trades, stats, available, entryKey }
+ * so the cards panel can show a "Live vs Control" delta WITHOUT touching RunDetail.
+ */
+export function resolveControlSummary(bundle, profiles) {
+    const ref = profiles?.control?.baselineProfileRef || BASELINE_ENTRY_ID;
+    const sel = lookupEntry(profiles, ref) || { model: "baseline" };
+    const key = buildEntryKey(sel);
+    const trades = bundle ? entryUniverseTrades(bundle, key) : null;
+    return {
+        entryKey: key,
+        label: entryProfileLabel(sel),
+        available: Array.isArray(trades),
+        trades: trades || [],
+        stats: summarizeTradeSanity(trades || []),
+    };
 }
 
 // ── Main resolver ────────────────────────────────────────────────────────────
