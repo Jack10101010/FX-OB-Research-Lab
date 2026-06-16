@@ -24,6 +24,7 @@ import {
     buildWinnerMaeDistribution,
 } from "../shared/excursionAnalytics";
 import { FailureExplorer, LiftCell } from "./FailureExplorer";
+import { FalseLosersDeepDive } from "./FalseLosersDeepDive";
 
 // Arm levels (R) tested by the Break-even Opportunity table. 0.25–1R always shown;
 // 1.5R / 2R only when at least one loser reached them ("if useful").
@@ -730,6 +731,9 @@ export function ExcursionAnalysis({ losers = [], allLosers = [], allTrades = [],
 
             {/* ── 5. Break-even opportunity by arm level (upper bound) ──────── */}
             <BeOpportunityTable be={be} ranges={beRanges} />
+
+            {/* ── 5b. False Losers Deep Dive (MFE-band BE opportunity, upper bound) ── */}
+            <FalseLosersDeepDive losers={source} config={config} onExploreBucket={setSelected} />
 
             {/* ── 6. Winner MAE / Stop Pressure (gates on maeR separately) ──── */}
             <MaeStopPressurePanel mae={mae} />

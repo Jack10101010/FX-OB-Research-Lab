@@ -303,6 +303,68 @@ export function buildBeExclusiveRanges(losers, { config } = {}) {
     return { ...base, rows, consideredN: withMfe.length, totalLossR: round1(totalLossR) };
 }
 
+// ── False Losers Deep Dive (V5) ─────────────────────────────────────────────────
+// Groups losers by EXCLUSIVE MFE band (reuses BE_EXCLUSIVE_BANDS / bucketBeExclusive)
+// and reports, per band: count, % of MFE-carrying losers, avg MFE, avg loss, loss-R
+// and damage contribution. `beImpact` carries the cumulative "net saved if a BE were
+// armed at +X R" rows (delegated to buildBeOpportunity in forced-raw mode).
+//
+// UPPER BOUND ONLY — peak MFE, no post-peak path, no winner cost. Both the per-band
+// table and beImpact inherit `upperBound: true`; callers MUST label them as such and
+// say exact validation needs a BE backtest / replay scenario. Empty / MFE-less input
+// returns mode "none" with zeroed bands and an empty beImpact (no crash).
+export const DEEP_DIVE_BE_LEVELS = [0.25, 0.5, 1, 1.5, 2];
+
+export function buildFalseLoserDeepDive(losers, { config, beLevels = DEEP_DIVE_BE_LEVELS } = {}) {
+    const list = Array.isArray(losers) ? losers : [];
+    const total = list.length;
+    const enriched = enrich(list, config);                 // { lossR, mfeR, targetRR, pct }
+    const withMfe = enriched.filter((e) => e.mfeR != null);
+    const eligible = withMfe.length;
+    const coverage = { total, withMfe: eligible, pct: total ? round1((eligible / total) * 100) : 0 };
+
+    // Stable zeroed band set so the UI table always renders a consistent shape.
+    const zeroedBuckets = () => BE_EXCLUSIVE_BANDS.map((b) => ({
+        key: b.key, label: b.label, flag: b.flag ?? null,
+        count: 0, pctOfLosers: 0, avgMfeR: null, avgLossR: null, lossR: 0, contributionPct: 0,
+    }));
+
+    if (!eligible) {
+        return { mode: "none", upperBound: true, coverage, buckets: zeroedBuckets(), beImpact: [], totalLossR: 0 };
+    }
+
+    const totalLossR = withMfe.reduce((s, e) => s + e.lossR, 0);
+    const acc = Object.fromEntries(BE_EXCLUSIVE_BANDS.map((b) => [b.key, { count: 0, lossR: 0, mfeSum: 0 }]));
+    for (const e of withMfe) {
+        const k = bucketBeExclusive(e.mfeR);
+        if (k == null) continue;                           // defensive; finite mfeR always matches
+        const a = acc[k];
+        a.count += 1;
+        a.lossR += e.lossR;
+        a.mfeSum += e.mfeR;
+    }
+
+    const buckets = BE_EXCLUSIVE_BANDS.map((b) => {
+        const a = acc[b.key];
+        return {
+            key: b.key,
+            label: b.label,
+            flag: b.flag ?? null,
+            count: a.count,
+            pctOfLosers: eligible ? round1((a.count / eligible) * 100) : 0,
+            avgMfeR: a.count ? round2(a.mfeSum / a.count) : null,
+            avgLossR: a.count ? round2(a.lossR / a.count) : null,
+            lossR: round1(a.lossR),
+            contributionPct: totalLossR > 0 ? round1((a.lossR / totalLossR) * 100) : 0,
+        };
+    });
+
+    // Cumulative "net saved if armed at +X R" (upper bound) — reuses the audited builder.
+    const beImpact = buildBeOpportunity(list, beLevels, { config, mode: "raw" }).rows;
+
+    return { mode: "raw", upperBound: true, coverage, buckets, beImpact, totalLossR: round1(totalLossR) };
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // V3 — Raw-R primary distribution + drilldown / failure-driver / pair-driver engine
 // All ranked by DAMAGE (loss-R contribution), never by loss rate. Upper-bound note

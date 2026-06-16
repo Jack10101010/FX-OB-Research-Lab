@@ -75,6 +75,7 @@ const {
     buildMfeDistribution, buildBeOpportunity,
     buildBeExclusiveRanges, bucketBeExclusive,
     buildRawRDistribution, buildBucketDrilldown, losersInRawBucket, buildFailureDrivers, buildPairDrivers,
+    buildFalseLoserDeepDive, DEEP_DIVE_BE_LEVELS,
     buildExplorer, buildBucketExplorerRows, buildRefinedBucketRows, availableRefineDimensions, bucketRowAction, pickWorstSetupRow, buildLoserMfeReachTable, buildMfeByDimension, buildDistanceInsights,
     isHighlightCell, EXPLORER_LIFT_HIGHLIGHT,
     getMaeR, bucketMaeDepth, buildWinnerMaeDistribution, getMaeForStopPressure, buildMaeByDimension,
@@ -829,6 +830,77 @@ console.log("MAE by dimension — gating");
 ok(buildMaeByDimension(maeDimWinners, "session").available === false, "9. unavailable dim (session stubbed Unknown) → available:false");
 ok(buildMaeByDimension([{ r: 2, structureTag: "choch" }], "structure").available === false, "9. no winners with MAE → available:false");
 ok(buildMaeByDimension([], "structure").available === false && buildMaeByDimension([], "structure").rows.length === 0, "empty winners → available:false, no rows");
+
+// ── V5: False Losers Deep Dive (per-band BE opportunity, upper bound) ────────────
+console.log("V5 buildFalseLoserDeepDive");
+const ddLosers = [
+    { r: -1, mfeR: 0.0 },   // never
+    { r: -1, mfeR: 0.1 },   // 0_025
+    { r: -2, mfeR: 0.4 },   // 025_05  (big damage: -2R)
+    { r: -1, mfeR: 0.7 },   // 05_1
+    { r: -1, mfeR: 1.2 },   // 1_15
+    { r: -1, mfeR: 1.8 },   // 15_2
+    { r: -1, mfeR: 2.5 },   // 2plus
+    { r: -1 },              // no MFE → excluded
+];
+const ddSnap = JSON.stringify(ddLosers);
+const dd = buildFalseLoserDeepDive(ddLosers, { config: {} });
+const ddB = (k) => dd.buckets.find((b) => b.key === k);
+
+ok(Array.isArray(DEEP_DIVE_BE_LEVELS) && DEEP_DIVE_BE_LEVELS.join() === "0.25,0.5,1,1.5,2", "DEEP_DIVE_BE_LEVELS = [0.25,0.5,1,1.5,2]");
+ok(dd.mode === "raw" && dd.upperBound === true, "deep dive: mode raw + upperBound flag");
+ok(dd.coverage.total === 8 && dd.coverage.withMfe === 7 && dd.coverage.pct === 87.5, "coverage: 7/8 MFE = 87.5%");
+ok(dd.buckets.length === 7, "7 exclusive MFE bands");
+
+// bucket assignment (each loser counts once)
+ok(ddB("never").count === 1 && ddB("0_025").count === 1, "bands: never=1, 0–0.25R=1");
+ok(ddB("025_05").count === 1 && ddB("05_1").count === 1, "bands: 0.25–0.5R=1, 0.5–1R=1");
+ok(ddB("1_15").count === 1 && ddB("15_2").count === 1 && ddB("2plus").count === 1, "bands: 1–1.5R / 1.5–2R / 2R+ each = 1");
+const ddBandSum = dd.buckets.reduce((s, b) => s + b.count, 0);
+ok(ddBandSum === dd.coverage.withMfe, `band counts sum to eligible (${ddBandSum} === 7)`);
+
+// avgMfeR = mean finite mfeR in band
+ok(ddB("025_05").avgMfeR === 0.4, `025_05 avgMfeR 0.4 (got ${ddB("025_05").avgMfeR})`);
+ok(ddB("2plus").avgMfeR === 2.5, `2plus avgMfeR 2.5 (got ${ddB("2plus").avgMfeR})`);
+ok(ddB("never").avgMfeR === 0, "never band avgMfeR 0");
+
+// avgLossR = band lossR / count
+ok(ddB("025_05").avgLossR === 2 && ddB("025_05").lossR === 2, "025_05 avgLossR 2 (the -2R loser)");
+ok(ddB("05_1").avgLossR === 1, "05_1 avgLossR 1");
+
+// contribution % (loss-R weighted) sums to ~100
+ok(ddB("025_05").contributionPct === 25, "025_05 contribution 25% (2 of 8 total loss-R)");
+const ddContrib = dd.buckets.reduce((s, b) => s + b.contributionPct, 0);
+ok(Math.abs(ddContrib - 100) <= 0.5, `band contribution % sums to ~100 (got ${ddContrib})`);
+
+// beImpact = cumulative net-saved-if-armed-at-X, monotonic non-increasing, R-labelled
+const ddImpact = (L) => dd.beImpact.find((r) => r.level === L);
+ok(dd.beImpact.length === 5, "beImpact has 5 levels (default DEEP_DIVE_BE_LEVELS)");
+ok(ddImpact(0.25).label === "+0.25R" && ddImpact(2).label === "+2R", "beImpact levels labelled in R");
+ok(ddImpact(0.25).reached === 5 && ddImpact(1).reached === 3 && ddImpact(2).reached === 1, "beImpact reached: ≥0.25R=5, ≥1R=3, ≥2R=1");
+ok(ddImpact(0.25).savableLossRUpperBound === 6, "beImpact ≥0.25R savable upper-bound = 6 (2+1+1+1+1)");
+ok(dd.beImpact.every((r, i, a) => i === 0 || a[i - 1].reached >= r.reached), "beImpact reached is monotonic non-increasing by level");
+ok(dd.beImpact.every((r, i, a) => i === 0 || a[i - 1].savableLossRUpperBound >= r.savableLossRUpperBound), "beImpact savable is monotonic non-increasing by level");
+ok(dd.totalLossR === 8, "deep dive totalLossR = 8 (eligible losers only)");
+
+// custom beLevels honoured
+const ddCustom = buildFalseLoserDeepDive(ddLosers, { config: {}, beLevels: [1] });
+ok(ddCustom.beImpact.length === 1 && ddCustom.beImpact[0].level === 1 && ddCustom.beImpact[0].reached === 3, "custom beLevels honoured (≥1R reached by 3)");
+
+// empty input safety
+const ddEmpty = buildFalseLoserDeepDive([], { config: {} });
+ok(ddEmpty.mode === "none" && ddEmpty.coverage.total === 0, "empty input → mode none, total 0");
+ok(ddEmpty.buckets.length === 7 && ddEmpty.buckets.every((b) => b.count === 0 && b.avgMfeR === null && b.avgLossR === null), "empty input → 7 zeroed bands (no crash)");
+ok(ddEmpty.beImpact.length === 0 && ddEmpty.totalLossR === 0, "empty input → empty beImpact, totalLossR 0");
+
+// MFE-less input safety
+const ddNoMfe = buildFalseLoserDeepDive([{ r: -1 }, { r: -2 }], { config: {} });
+ok(ddNoMfe.mode === "none" && ddNoMfe.coverage.withMfe === 0 && ddNoMfe.coverage.total === 2, "MFE-less input → mode none, withMfe 0, total 2");
+ok(ddNoMfe.buckets.length === 7 && ddNoMfe.buckets.every((b) => b.count === 0), "MFE-less input → zeroed bands");
+ok(ddNoMfe.beImpact.length === 0, "MFE-less input → empty beImpact");
+
+// no mutation of source
+ok(JSON.stringify(ddLosers) === ddSnap, "deep dive: source losers array not mutated");
 
 console.log(`\n${failures === 0 ? "ALL PASS" : failures + " FAILURE(S)"}`);
 process.exit(failures === 0 ? 0 : 1);
