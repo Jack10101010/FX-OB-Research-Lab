@@ -36,6 +36,7 @@ import { useDataset, setScenario } from "./store";
 import { derivePrimaryResultView } from "./tradeUniverse";
 import { useTradeUniverse } from "./useTradeUniverse";
 import { resolveResultViewFrom, normalizeDefaultView } from "./runVariantResolve";
+import { useLazyEntryVariant } from "./useLazyRows";
 
 /**
  * The Result View a run opens on when the store scenario does not yet target it.
@@ -77,7 +78,13 @@ export function useRunVariant(runId) {
     // Same resolver RunDetail used; resultView is passed as the scenario override.
     const universe = useTradeUniverse(runId, resultView);
 
-    return { resultView, setResultView, universe, runData };
+    // LARGE-RUN-IMPORT Phase 2 — for a lazy/large run, fetch the selected entry
+    // variant's rows on demand when they aren't resident yet. No-op for small/
+    // eager runs and once rows are loaded. Surfaced as `lazyStatus` for UIs that
+    // want a spinner; existing consumers can ignore it (additive return field).
+    const lazyStatus = useLazyEntryVariant(runId, universe, runData);
+
+    return { resultView, setResultView, universe, runData, lazyStatus };
 }
 
 export default useRunVariant;

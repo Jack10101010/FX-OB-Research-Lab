@@ -39,22 +39,32 @@
  */
 
 import { useMemo } from "react";
-import { useDataset, getTradeUniverse } from "./store";
+import { useDataset, getTradeUniverse, getTradeUniverseSignature } from "./store";
 
 export function useTradeUniverse(runId = null, scenarioOverride = null) {
-    // Subscribe to the store so the hook re-runs on every notify (scenario
-    // change, run switch, variant change, etc.). We don't actually use the
-    // dataset shape here — `getTradeUniverse` reads `state` directly — but
-    // we depend on `dataset` so the memo invalidates after each store update.
-    const dataset = useDataset();
+    // Subscribe to the store so the component re-renders on every notify
+    // (scenario change, run switch, variant change, lazy load, etc.). We don't
+    // use the returned object's identity as a memo key any more — see below.
+    useDataset();
+
+    // LAZY-RUN-PERFORMANCE Phase 1 — memo on a stable content signature rather
+    // than the buildDerived() object (which is a NEW reference on every notify).
+    // The signature changes only when an input getTradeUniverse actually reads
+    // changes (run, scenario/variant selection, or this run's trade collections
+    // — including lazy merges). Unrelated store updates leave it identical, so
+    // the resolver no longer re-runs (and downstream memos don't bust) for
+    // notifies that don't affect this run's universe. `scenarioOverride` content
+    // is encoded in the signature, so an inline-object override with unchanged
+    // content no longer forces a recompute either.
+    const signature = getTradeUniverseSignature(runId, scenarioOverride);
 
     return useMemo(
         () => getTradeUniverse(runId, scenarioOverride),
-        // dataset is a fresh reference each notify (buildDerived returns a new
-        // object), so this memo correctly invalidates per store change.
-        // runId/scenarioOverride let parent components pin to a specific run
-        // or do "what-if" comparisons against a hypothetical scenario.
-        [dataset, runId, scenarioOverride],
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- `signature`
+        // fully encodes runId + scenarioOverride content + the run's trade data;
+        // depending on the raw scenarioOverride object would reintroduce
+        // identity-churn recomputes this fix removes.
+        [signature],
     );
 }
 

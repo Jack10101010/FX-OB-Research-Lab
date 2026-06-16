@@ -5,7 +5,7 @@ import { MetricChip } from "@/components/lab/MetricChip";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
 import { LabRunHero } from "@/components/lab/LabRunHero";
 import { useDataset } from "@/data/store";
-import { useTradeUniverse } from "@/data/useTradeUniverse";
+import useRunVariant from "@/data/useRunVariant";
 import ResearchResultViewBanner from "@/components/lab/ResearchResultViewBanner";
 import { buildBannerRunIdentity } from "@/components/lab/researchBanner/bannerRun";
 import {
@@ -89,7 +89,13 @@ export default function ProtectionLab() {
     // the banner reflects the selection (blue) and only shows orange on baseline.
     // Panels that need exporter fields a given variant's CSV lacks fall back to
     // their existing "Limited data" guards.
-    const universe = useTradeUniverse();
+    // RUN-IDENTITY: derive the active Result View through the SAME canonical hook
+    // RunDetail uses (useRunVariant → resolveResultViewFrom + derivePrimaryResultView),
+    // so Protection Lab resolves the EXACT same entry variant / fill mode / arm the
+    // user selected (e.g. TE 25% C2) instead of bare useTradeUniverse()'s own default,
+    // which previously diverged to "both"→next (C1, 0 trades). Also lazily loads the
+    // selected variant's rows so trade counts match RunDetail.
+    const { universe } = useRunVariant(activeRunId);
     const trades = React.useMemo(() => (Array.isArray(universe?.trades) ? universe.trades : EMPTY_TRADES), [universe]);
     const candles = React.useMemo(() => (Array.isArray(CANDLES) ? CANDLES : []), [CANDLES]);
     const [whatIfFilters, setWhatIfFilters] = React.useState({});

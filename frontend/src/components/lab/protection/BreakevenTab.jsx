@@ -16,13 +16,14 @@ import {
     buildBeScenarioSummary,
     beReplayAvailability,
 } from "@/data/beReplay";
-import { resolveBeScenarioSource, hasAnyExactBe, entryVariantHasExact, describeBeAvailability } from "@/data/beResolve";
+import { resolveBeScenarioSource, hasAnyExactBe, entryVariantHasExact, describeBeAvailability, parseBeScenarioKey } from "@/data/beResolve";
+import { useLazyBeScenario } from "@/data/useLazyRows";
 import { buildBeAffectedTrades } from "@/data/protectionTimeline";
 import { buildSelectiveBeUniverse, buildSessionAttribution, buildBeTradeExplorerRows, DEFAULT_ARM_LEVELS } from "@/data/selectiveBeUniverse";
 import { BeTradeExplorer } from "@/components/lab/protection/BeTradeExplorer";
 import { BE_ARM_LEVEL_CHOICES } from "@/data/configTranslator";
 import { summarizeTradeSanity } from "@/data/tradeClassification";
-import { useDataset, setFocusedBeTrade, setScenario } from "@/data/store";
+import { useDataset, setFocusedBeTrade, setScenario, findBeFileForRun } from "@/data/store";
 import { buildProtectionLabel } from "@/data/protectionLayers";
 import { familyFromKey, extractThreshold, fillModeFromKey } from "@/data/tradeUniverse";
 import { useNavigate } from "react-router-dom";
@@ -251,6 +252,20 @@ function CohortChips({ label, options, selected, onToggle }) {
     );
 }
 
+// Human-readable label for an entry-variant key (for the EXACT-coverage notice).
+function entryVariantLabel(key) {
+    if (!key || key === "baseline" || key === "entry_baseline") return "Baseline";
+    const fam = familyFromKey(key);
+    const thr = extractThreshold(key);
+    if (fam === "triggered_edge") {
+        const fm = fillModeFromKey(key);
+        const fmLabel = fm === "same" ? " Same" : fm === "next" ? " Next" : "";
+        return `Triggered Edge${thr != null ? ` ${thr}%` : ""}${fmLabel}`;
+    }
+    if (fam === "penetration") return `Penetration${thr != null ? ` ${thr}%` : ""}`;
+    return key;
+}
+
 // Shared formatters for the selective-BE comparison primitives.
 const fmtBeR   = (v) => (v == null || !Number.isFinite(Number(v)) ? "—" : `${v >= 0 ? "+" : ""}${(Math.round(v * 100) / 100).toFixed(2)}R`);
 const fmtBePct = (v) => (v == null ? "—" : `${Math.round(v)}%`);
@@ -423,6 +438,7 @@ function SelectiveBeCohortPanel({
     scenarioArm, onSetArmLevel,
     cohortAttribution = null, globalAttribution = null, globalSummaryDelta = null, showAttribution = true, onToggleAttribution,
     onOpenAsResultView, openAsResultViewEnabled = false, activeProtectionLabel = null, onClearResultViewLayer,
+    exactCoverage = null,
 }) {
     if (!compare) return null;
     const o = compare.original;
@@ -508,18 +524,29 @@ function SelectiveBeCohortPanel({
                         {BE_ARM_LEVEL_CHOICES.map((lvl) => {
                             const active = beCohorts.armLevel === lvl;
                             const isScenarioArm = lvl === scenarioArm;
+                            // Only arm levels with a GENERATED BE scenario (current trigger)
+                            // are selectable — matches the main Arm Level card. Un-run arms
+                            // (e.g. 0.25R) are greyed instead of offered.
+                            const armSet = exactCoverage?.armsByTrigger?.[triggerBasis];
+                            const covered = !exactCoverage?.hasAny
+                                || (!!armSet && [...armSet].some((a) => Math.abs(Number(a) - Number(lvl)) < 1e-6));
                             return (
                                 <button
                                     key={lvl}
                                     type="button"
-                                    onClick={() => onSetArmLevel(lvl)}
+                                    disabled={!covered}
+                                    onClick={() => { if (covered) onSetArmLevel(lvl); }}
                                     className={cn(
                                         "px-2.5 py-1 rounded-[4px] border text-[10.5px] font-ui transition-colors",
-                                        active
-                                            ? "bg-[hsl(var(--accent-secondary)/0.16)] border-[hsl(var(--accent-secondary)/0.5)] text-[hsl(var(--accent-secondary))]"
-                                            : "bg-[hsl(var(--panel-2)/0.4)] border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))] hover:text-[hsl(var(--text))]",
+                                        !covered
+                                            ? "opacity-40 cursor-not-allowed bg-[hsl(var(--panel-2)/0.2)] border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))]"
+                                            : active
+                                                ? "bg-[hsl(var(--accent-secondary)/0.16)] border-[hsl(var(--accent-secondary)/0.5)] text-[hsl(var(--accent-secondary))]"
+                                                : "bg-[hsl(var(--panel-2)/0.4)] border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))] hover:text-[hsl(var(--text))]",
                                     )}
-                                    title={isScenarioArm ? "Scenario arm level (default)" : `Apply the ${scenarioArm}R BE only to trades that reached ${lvl}R`}
+                                    title={!covered
+                                        ? `${lvl}R BE was not generated for this run — re-run with this arm to enable it`
+                                        : isScenarioArm ? "Scenario arm level (default)" : `Apply the ${scenarioArm}R BE only to trades that reached ${lvl}R`}
                                 >
                                     {lvl}R{isScenarioArm ? " ·" : ""}
                                 </button>
@@ -539,16 +566,23 @@ function SelectiveBeCohortPanel({
                         <span className="w-[64px] shrink-0 text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--text-2))]">Arm Trigger</span>
                         {[{ value: "wick", label: "Wick" }, { value: "close", label: "Candle Close" }].map((opt) => {
                             const active = triggerBasis === opt.value;
+                            // Grey out a trigger basis that has no EXACT BE generated for
+                            // this entry view (matches the main scenario selector).
+                            const covered = !exactCoverage?.hasAny || exactCoverage.triggers.has(opt.value);
                             return (
                                 <button
                                     key={opt.value}
                                     type="button"
-                                    onClick={() => onSetTrigger(opt.value)}
+                                    disabled={!covered}
+                                    onClick={() => { if (covered) onSetTrigger(opt.value); }}
+                                    title={!covered ? `${opt.label} BE was not generated for this entry view — re-run with this trigger to enable EXACT` : undefined}
                                     className={cn(
                                         "px-2.5 py-1 rounded-[4px] border text-[10.5px] font-ui transition-colors",
-                                        active
-                                            ? "bg-[hsl(var(--accent-secondary)/0.16)] border-[hsl(var(--accent-secondary)/0.5)] text-[hsl(var(--accent-secondary))]"
-                                            : "bg-[hsl(var(--panel-2)/0.4)] border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))] hover:text-[hsl(var(--text))]",
+                                        !covered
+                                            ? "opacity-40 cursor-not-allowed bg-[hsl(var(--panel-2)/0.2)] border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))]"
+                                            : active
+                                                ? "bg-[hsl(var(--accent-secondary)/0.16)] border-[hsl(var(--accent-secondary)/0.5)] text-[hsl(var(--accent-secondary))]"
+                                                : "bg-[hsl(var(--panel-2)/0.4)] border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))] hover:text-[hsl(var(--text))]",
                                     )}
                                 >
                                     {opt.label}
@@ -663,20 +697,87 @@ export function BreakevenTab({
     const beResultsMap     = beResults     ?? activeRun?.beResults     ?? EMPTY_BE_MAP;
     const beTradesByModeMap = beTradesByMode ?? activeRun?.beTradesByMode ?? EMPTY_BE_MAP;
     const beExecutionMode  = executionMode ?? activeRun?.primaryVariant ?? null;
-    const beEntryVariantKey = entryVariantKey || "baseline";
-    const viewLabel = resultViewLabel || (beEntryVariantKey === "baseline" ? "Baseline" : beEntryVariantKey);
+    const requestedEntryVariantKey = entryVariantKey || "baseline";
+    const requestedViewLabel = resultViewLabel || entryVariantLabel(requestedEntryVariantKey);
 
-    // Does the CURRENT result view (its entry variant) have backend exact BE?
+    // Does this run have ANY exact BE?
     const beDataPresentAnywhere = React.useMemo(
         () => hasAnyExactBe(beResultsMap, beTradesByModeMap),
         [beResultsMap, beTradesByModeMap],
     );
+    // Entry variants that HAVE exact BE on this run (mode-level; independent of the
+    // active result view). availableEntryVariantKeys = union of entry keys with BE.
+    const beVariantsWithExact = React.useMemo(
+        () => describeBeAvailability(beResultsMap, beTradesByModeMap, { executionMode: beExecutionMode })
+            .availableEntryVariantKeys || [],
+        [beResultsMap, beTradesByModeMap, beExecutionMode],
+    );
+    // Default entry variant for the BE view. When BE was run for variants, a VARIANT
+    // is the default — baseline is only a fallback (shown when it's the active view's
+    // own variant, or when no variant BE exists):
+    //   1. active result view's variant, if non-baseline and has BE
+    //   2. else first non-baseline variant with BE   (prefer variants)
+    //   3. else active view's variant if it has BE   (baseline view + baseline-only BE)
+    //   4. else baseline
+    const defaultBeVariant = React.useMemo(() => {
+        const has = (k) => beVariantsWithExact.includes(k);
+        const nonBaseline = beVariantsWithExact.filter((k) => k && k !== "baseline");
+        if (requestedEntryVariantKey !== "baseline" && has(requestedEntryVariantKey)) return requestedEntryVariantKey;
+        if (nonBaseline.length) return nonBaseline[0];
+        if (has(requestedEntryVariantKey)) return requestedEntryVariantKey;
+        return "baseline";
+    }, [beVariantsWithExact, requestedEntryVariantKey]);
+    // User-overridable selection of which entry variant's BE to view (chips below).
+    // Resets when the run / active result view changes so a new run re-defaults.
+    const [beVariantSelection, setBeVariantSelection] = React.useState(null);
+    React.useEffect(() => { setBeVariantSelection(null); }, [entryVariantKey, activeRunId]);
+    // Keep the selection valid if the available variants change.
+    const beEntryVariantKey = (beVariantSelection && beVariantsWithExact.includes(beVariantSelection))
+        ? beVariantSelection
+        : defaultBeVariant;
+    const viewLabel = entryVariantLabel(beEntryVariantKey);
+
     const hasExact = React.useMemo(
         () => entryVariantHasExact(beResultsMap, beTradesByModeMap, {
             executionMode: beExecutionMode, entryVariantKey: beEntryVariantKey,
         }),
         [beResultsMap, beTradesByModeMap, beExecutionMode, beEntryVariantKey],
     );
+    // BE-EXACT-COVERAGE — which (trigger, arm) BE scenarios were actually generated
+    // for the CURRENT entry variant. Drives greying-out of un-run arm/trigger options
+    // so the user can't select a scenario that silently falls back to REPLAY. Derived
+    // from the generated scenario keys (independent of trigger/arm → no TDZ here).
+    const beExactCoverage = React.useMemo(() => {
+        const d = describeBeAvailability(beResultsMap, beTradesByModeMap, {
+            executionMode: beExecutionMode, entryVariantKey: beEntryVariantKey,
+        });
+        const keys = new Set([...(d.beResultsScenarioKeys || []), ...(d.beTradesScenarioKeys || [])]);
+        // Include the lazy/cube scenario index: a large run defers BE trade rows, so
+        // only the loaded scenario(s) appear in beResults/beTradesByMode — the full
+        // set of GENERATED arms/triggers lives in beScenarioIndex. Without this, the
+        // selectors would grey every arm except the one already loaded (bug: "only
+        // 0.5R selectable"). Filter the index to the current entry variant + mode.
+        const idx = Array.isArray(activeRun?.beScenarioIndex) ? activeRun.beScenarioIndex : [];
+        for (const s of idx) {
+            if (!s || !s.scenarioKey) continue;
+            if (beExecutionMode && s.executionMode && s.executionMode !== beExecutionMode) continue;
+            if ((s.entryVariantKey || "baseline") !== beEntryVariantKey) continue;
+            keys.add(s.scenarioKey);
+        }
+        const triggers = new Set();
+        const armsByTrigger = {};
+        for (const k of keys) {
+            const p = parseBeScenarioKey(k);
+            if (!p || p.armLevelR == null) continue;
+            triggers.add(p.triggerBasis);
+            (armsByTrigger[p.triggerBasis] || (armsByTrigger[p.triggerBasis] = new Set())).add(p.armLevelR);
+        }
+        return { hasAny: keys.size > 0, triggers, armsByTrigger };
+    }, [beResultsMap, beTradesByModeMap, beExecutionMode, beEntryVariantKey, activeRun]);
+    const isArmExact = React.useCallback((arm, trigger) => {
+        const set = beExactCoverage.armsByTrigger[trigger];
+        return !!set && [...set].some((a) => Math.abs(Number(a) - Number(arm)) < 1e-6);
+    }, [beExactCoverage]);
     // ── All hooks unconditionally before any early return ─────────────────
 
     // Candle loading (mirrors useRetestData pattern).
@@ -728,6 +829,14 @@ export function BreakevenTab({
     const [armLevelR, setArmLevelR]       = React.useState(DEFAULT_ARM);
     const [triggerBasis, setTriggerBasis] = React.useState(DEFAULT_TRIGGER);
 
+    // LARGE-RUN-IMPORT Phase 2 — for a lazy/large run, lazily fetch the SELECTED
+    // BE scenario's rows (one CSV) so EXACT replaces the REPLAY/unavailable
+    // fallback. No-op for small/eager runs and once the scenario is loaded.
+    // beTradesByModeMap updates via the store notify, re-resolving EXACT below.
+    const beLazyStatus = useLazyBeScenario(activeRunId, activeRun, {
+        executionMode: beExecutionMode, entryVariantKey: beEntryVariantKey, triggerBasis, armLevelR,
+    });
+
     // ── BE EXACT diagnostic ───────────────────────────────────────────────
     // Logs exactly why the tab is showing EXACT or REPLAY for the current run +
     // selection, so a "why no EXACT?" can be answered from the browser console
@@ -758,10 +867,13 @@ export function BreakevenTab({
             source: resolved.source,
             reason: resolved.reason,
             matchedScenarioKey: resolved.scenarioKey,
+            // LARGE-RUN-IMPORT Phase 2 — lazy BE load status for this selection.
+            lazyLoading: beLazyStatus.loading,
+            lazyError: beLazyStatus.error,
         });
         // eslint-disable-next-line no-console
         console.groupEnd();
-    }, [activeRunId, armLevelR, triggerBasis, beExecutionMode, beEntryVariantKey, beResultsMap, beTradesByModeMap, viewLabel]);
+    }, [activeRunId, armLevelR, triggerBasis, beExecutionMode, beEntryVariantKey, beResultsMap, beTradesByModeMap, viewLabel, beLazyStatus.loading, beLazyStatus.error]);
 
     // Fast check only — no candle walking, safe to run synchronously.
     const availability = React.useMemo(
@@ -1083,6 +1195,27 @@ export function BreakevenTab({
     const isExact = selectedSource === "EXACT";
     const anyExact = Array.isArray(scenarios) && scenarios.some((sc) => sc.source === "EXACT");
 
+    // ── LAZY-BE-EXACT — explicit exact-trade load state for the SELECTED scenario.
+    // The comparison cards + EXACT chart require selectedBeScenario.trades to be a
+    // loaded array. On a lazy/cube run those rows are deferred, so an EXACT scenario
+    // can be detected by summary while its trades are still null. Make that state
+    // explicit instead of silently vanishing the cards / falling back to REPLAY.
+    const selExactSummary = selectedBeScenario?.source === "EXACT";
+    const selExactTradesLoaded = selExactSummary && Array.isArray(selectedBeScenario?.trades);
+    const isLazyRun = Boolean(activeRun?.lazy);
+    const beFileForSel = isLazyRun
+        ? findBeFileForRun(activeRun, {
+            executionMode: beExecutionMode, entryVariantKey: beEntryVariantKey, triggerBasis, armLevelR,
+        })
+        : null;
+    // Exact trades are obtainable: either already detected (summary) or a matching
+    // BE file is indexed for lazy load. Used to suppress silent REPLAY.
+    const exactObtainable = selExactSummary || Boolean(beFileForSel);
+    const exactFailed = exactObtainable && !selExactTradesLoaded && Boolean(beLazyStatus?.error);
+    const exactPending = exactObtainable && !selExactTradesLoaded && !exactFailed
+        && (Boolean(beLazyStatus?.loading) || Boolean(beFileForSel) || selExactSummary && isLazyRun);
+    const exactLoaded = selExactTradesLoaded;
+
     const verdict = classifyVerdict(s);
     const verdictColorClass = {
         success: "text-[hsl(var(--success))]",
@@ -1125,6 +1258,72 @@ export function BreakevenTab({
 
     return (
         <div className="flex flex-col gap-4 pb-8">
+            {/* BE entry-view selector — BE defaults to a VARIANT when variants were
+                run (baseline is a fallback). When the BE view differs from the active
+                result view, say so; the chips below switch between variants with BE. */}
+            {beDataPresentAnywhere && beVariantsWithExact.length > 0 && (
+                <div className="flex flex-col gap-1.5 px-3 py-2 clip-bevel-sm border border-[hsl(var(--accent-secondary)/0.4)] bg-[hsl(var(--accent-secondary)/0.07)]">
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--text-2))]">BE entry view</span>
+                        {beVariantsWithExact.map((vk) => {
+                            const active = vk === beEntryVariantKey;
+                            return (
+                                <button
+                                    key={vk}
+                                    type="button"
+                                    onClick={() => setBeVariantSelection(vk)}
+                                    className={cn(
+                                        "px-2.5 py-1 rounded-[4px] border text-[10.5px] font-ui font-semibold transition-colors",
+                                        active
+                                            ? "bg-[hsl(var(--accent-secondary)/0.18)] border-[hsl(var(--accent-secondary)/0.55)] text-[hsl(var(--accent-secondary))]"
+                                            : "bg-[hsl(var(--panel-2)/0.4)] border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))] hover:text-[hsl(var(--text))]",
+                                    )}
+                                >
+                                    {entryVariantLabel(vk)}
+                                </button>
+                            );
+                        })}
+                    </div>
+                    {beEntryVariantKey !== requestedEntryVariantKey && (
+                        <span className="text-[10px] font-ui text-[hsl(var(--text-2)/0.8)]">
+                            Showing BE for <span className="text-[hsl(var(--text-1))]">{viewLabel}</span>; the active result view is{" "}
+                            <span className="text-[hsl(var(--text-1))]">{requestedViewLabel}</span> (no auto-fallback — pick a chip to change).
+                        </span>
+                    )}
+                </div>
+            )}
+
+            {/* LAZY-RUN-PERFORMANCE Phase 1 — compact loading/error banner for the
+                on-demand BE scenario fetch (large/lazy runs). Uses beLazyStatus
+                from useLazyBeScenario; renders nothing for small/eager runs. */}
+            {(beLazyStatus?.loading || beLazyStatus?.error || exactPending || exactFailed) && (
+                <div
+                    data-testid="lazy-be-status"
+                    className={`flex items-center gap-2 px-3 py-2 clip-bevel-sm border ${
+                        (beLazyStatus?.error || exactFailed)
+                            ? "border-[hsl(var(--danger)/0.5)] bg-[hsl(var(--danger)/0.08)]"
+                            : "border-[hsl(var(--accent-secondary)/0.5)] bg-[hsl(var(--accent-secondary)/0.08)]"
+                    }`}
+                >
+                    {(beLazyStatus?.error || exactFailed) ? (
+                        <span className="text-[11px] font-ui text-[hsl(var(--danger))]">
+                            Could not load EXACT break-even trades for this scenario
+                            {beLazyStatus?.error ? `: ${beLazyStatus.error}` : "."} Showing the REPLAY estimate as a labelled fallback — ensure the sidecar is running, then reselect the scenario.
+                        </span>
+                    ) : (
+                        <>
+                            <span className="inline-block w-3 h-3 rounded-full border-2 border-[hsl(var(--accent-secondary))] border-t-transparent animate-spin" />
+                            <span className="text-[11px] font-ui text-[hsl(var(--text-2))]">
+                                Loading EXACT break-even trades on demand… comparison will refresh when rows arrive.
+                            </span>
+                        </>
+                    )}
+                </div>
+            )}
+
+            {/* (The "no EXACT for this entry view" case is handled by the dedicated
+                empty-state early return above — it shows no data + a Show-baseline-BE
+                opt-in rather than a silent REPLAY/baseline substitution.) */}
 
             {/* ── 0. Break-even headline KPIs — mirror the model/variant strip above
                    so the BE-adjusted result sits directly under it for comparison. */}
@@ -1223,21 +1422,29 @@ export function BreakevenTab({
                             {ARM_LEVELS.map((arm) => {
                                 const sc = Array.isArray(scenarios) ? scenarios.find((x) => x.armLevelR === arm) : null;
                                 const active = arm === armLevelR;
+                                // Greyed when EXACT BE exists for this entry view but this
+                                // arm wasn't generated for the current trigger — selecting it
+                                // would silently fall back to REPLAY, so disable it instead.
+                                const covered = !beExactCoverage.hasAny || isArmExact(arm, triggerBasis);
                                 return (
                                     <button
                                         key={arm}
                                         type="button"
-                                        onClick={() => setArmLevelR(arm)}
+                                        disabled={!covered}
+                                        onClick={() => { if (covered) setArmLevelR(arm); }}
+                                        title={!covered ? `${arm}R ${triggerBasis} BE was not generated for this entry view — re-run with this arm to enable EXACT` : undefined}
                                         className={cn(
                                             "flex flex-col items-center px-3.5 py-2 rounded-[4px] border text-[11px] font-ui font-semibold transition-colors",
-                                            active
-                                                ? "bg-[hsl(var(--accent-primary)/0.16)] border-[hsl(var(--accent-primary)/0.5)] text-[hsl(var(--accent-primary))]"
-                                                : "bg-[hsl(var(--panel-2)/0.4)] border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))] hover:text-[hsl(var(--text))]",
+                                            !covered
+                                                ? "opacity-40 cursor-not-allowed bg-[hsl(var(--panel-2)/0.2)] border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))]"
+                                                : active
+                                                    ? "bg-[hsl(var(--accent-primary)/0.16)] border-[hsl(var(--accent-primary)/0.5)] text-[hsl(var(--accent-primary))]"
+                                                    : "bg-[hsl(var(--panel-2)/0.4)] border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))] hover:text-[hsl(var(--text))]",
                                         )}
                                     >
                                         <span>{arm}R</span>
                                         <span className="text-[9.5px] font-normal mt-0.5 opacity-60">
-                                            {sc && sc.summary ? `${sc.summary.beExitCount} exits` : computing ? "…" : "—"}
+                                            {!covered ? "not run" : sc && sc.summary ? `${sc.summary.beExitCount} exits` : computing ? "…" : "—"}
                                         </span>
                                     </button>
                                 );
@@ -1253,16 +1460,23 @@ export function BreakevenTab({
                         <div className="flex items-center gap-2 flex-wrap">
                             {TRIGGER_OPTIONS.map((opt) => {
                                 const active = triggerBasis === opt.value;
+                                // Greyed when EXACT BE exists for this view but this trigger
+                                // basis wasn't generated — avoids a silent REPLAY fallback.
+                                const covered = !beExactCoverage.hasAny || beExactCoverage.triggers.has(opt.value);
                                 return (
                                     <button
                                         key={opt.value}
                                         type="button"
-                                        onClick={() => setTriggerBasis(opt.value)}
+                                        disabled={!covered}
+                                        onClick={() => { if (covered) setTriggerBasis(opt.value); }}
+                                        title={!covered ? `${opt.label} BE was not generated for this entry view — re-run with this trigger to enable EXACT` : undefined}
                                         className={cn(
                                             "px-3 py-1.5 rounded-[4px] border text-[11px] font-ui font-semibold transition-colors",
-                                            active
-                                                ? "bg-[hsl(var(--accent-secondary)/0.16)] border-[hsl(var(--accent-secondary)/0.5)] text-[hsl(var(--accent-secondary))]"
-                                                : "bg-[hsl(var(--panel-2)/0.4)] border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))] hover:text-[hsl(var(--text))]",
+                                            !covered
+                                                ? "opacity-40 cursor-not-allowed bg-[hsl(var(--panel-2)/0.2)] border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))]"
+                                                : active
+                                                    ? "bg-[hsl(var(--accent-secondary)/0.16)] border-[hsl(var(--accent-secondary)/0.5)] text-[hsl(var(--accent-secondary))]"
+                                                    : "bg-[hsl(var(--panel-2)/0.4)] border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))] hover:text-[hsl(var(--text))]",
                                         )}
                                     >
                                         {opt.label}
@@ -1445,7 +1659,34 @@ export function BreakevenTab({
                     openAsResultViewEnabled={openAsResultViewEnabled}
                     activeProtectionLabel={activeProtectionLabel}
                     onClearResultViewLayer={onClearResultViewLayer}
+                    exactCoverage={beExactCoverage}
                 />
+            )}
+
+            {/* LAZY-BE-EXACT — when an EXACT scenario is detected but its trade rows
+                are still pending (or failed to load), keep the comparison area
+                VISIBLE with an explicit explanation rather than silently hiding the
+                cards. Prevents the "looks like REPLAY / cards vanished" regression. */}
+            {!beCompare && (exactPending || exactFailed) && (
+                <NeonPanel
+                    title="Break-even Comparison"
+                    action={<Pill tone={exactFailed ? "danger" : "secondary"}>{exactFailed ? "EXACT LOAD FAILED" : "LOADING EXACT"}</Pill>}
+                >
+                    {exactFailed ? (
+                        <div className="flex flex-col gap-2 py-2">
+                            <p className="text-[13px] font-display text-[hsl(var(--text-2))] leading-relaxed">
+                                EXACT break-even trade rows for this scenario could not be loaded, so the
+                                cohort comparison cards are unavailable.
+                            </p>
+                            <p className="text-[11px] font-ui text-[hsl(var(--text-2)/0.7)]">
+                                Ensure the local sidecar is running, then reselect the arm/trigger to retry.
+                                Any figures shown elsewhere on this page are the labelled REPLAY estimate, not EXACT.
+                            </p>
+                        </div>
+                    ) : (
+                        <ComputingRow label="Loading EXACT break-even trades for comparison…" />
+                    )}
+                </NeonPanel>
             )}
 
             {/* ── 7. Research methodology disclosure (collapsible) ─────────── */}
