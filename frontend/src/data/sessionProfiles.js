@@ -470,32 +470,149 @@ export function beAvailable(bundle, variant, entryKey, be) {
 function lookupEntry(profiles, ref) { return ref ? (profiles?.profiles?.entry?.[ref] || null) : null; }
 function lookupBe(profiles, ref) { return ref ? (profiles?.profiles?.be?.[ref] || null) : null; }
 
+// Ref-field provenance shape: { ref, sel, source, explicit, inherited }.
+function refField(ref, sel, source, explicit) {
+    return { ref: sel ? ref : null, sel, source, explicit, inherited: !explicit && sel != null };
+}
+const NONE_REF = () => ({ ref: null, sel: null, source: "none", explicit: false, inherited: false });
+
 /**
- * Resolve a cohort through the ref chain: cohort override ⟶ card default ⟶
- * globalDefaultRef ⟶ none. Returns resolved EntrySel/BeSel (so the resolver and
- * availability checks keep using `cfg.entry` / `cfg.be` unchanged) plus the refs.
+ * SHARED resolution chain (single source of truth for resolveCohortConfig AND
+ * resolveCohortProvenance). Mirrors the inheritance order exactly:
+ *   enable:  card.enabled===false ⟶ ov.enabled ⟶ def.enabled ⟶ default-on
+ *   ref:     cohort override ⟶ card default ⟶ globalDefaultRef ⟶ none
+ * Baseline Control (profiles.control) is intentionally NOT read here — it is a
+ * comparison reference, never part of inheritance.
+ *
+ * @returns {{
+ *   cohort: string, disabled: boolean,
+ *   enable: { value: boolean, source: "default-on"|"cohort"|"session-default"|"session-disabled" },
+ *   entry:  { ref, sel, source: "cohort"|"session-default"|"global-default"|"none", explicit, inherited },
+ *   be:     { ...same shape... },
+ * }}
  */
-export function resolveCohortConfig(profiles, sessionKey, cellKey) {
+function _resolveCohortChain(profiles, sessionKey, cellKey) {
+    const cohort = `${sessionKey}|${cellKey}`;
     const gd = profiles?.globalDefaultRef || {};
     const card = profiles?.cards?.[sessionKey];
-    const none = (disabled) => ({ disabled, entry: null, be: null, entryRef: null, beRef: null });
 
-    let entryRef = gd.entry ?? null;
-    let beRef = gd.be ?? null;
-
-    if (card) {
-        if (card.enabled === false) return none(true);
-        const ov = card.overrides?.[cellKey] || {};
-        const def = card.default || {};
-        const enabled = ov.enabled ?? def.enabled ?? true;
-        if (enabled === false) return none(true);
-        entryRef = ov.entryRef ?? def.entryRef ?? entryRef;
-        beRef = ov.beRef ?? def.beRef ?? beRef;
+    // ── enable ────────────────────────────────────────────────────────────────
+    let enable;
+    if (card && card.enabled === false) {
+        enable = { value: false, source: "session-disabled" };
+    } else {
+        const ov = card?.overrides?.[cellKey] || {};
+        const def = card?.default || {};
+        if (ov.enabled === true || ov.enabled === false) enable = { value: ov.enabled, source: "cohort" };
+        else if (def.enabled === true || def.enabled === false) enable = { value: def.enabled, source: "session-default" };
+        else enable = { value: true, source: "default-on" };
+    }
+    if (!enable.value) {
+        return { cohort, disabled: true, enable, entry: NONE_REF(), be: NONE_REF() };
     }
 
-    const entry = lookupEntry(profiles, entryRef);
-    const be = lookupBe(profiles, beRef);
-    return { disabled: false, entry, be, entryRef: entry ? entryRef : null, beRef: be ? beRef : null };
+    // ── refs (enabled cohorts only) ─────────────────────────────────────────────
+    const ov = card?.overrides?.[cellKey] || {};
+    const def = card?.default || {};
+    const resolveRef = (lookup, ovRef, defRef, gdRef) => {
+        if (ovRef) { const sel = lookup(profiles, ovRef); if (sel) return refField(ovRef, sel, "cohort", true); }
+        if (defRef) { const sel = lookup(profiles, defRef); if (sel) return refField(defRef, sel, "session-default", false); }
+        if (gdRef) { const sel = lookup(profiles, gdRef); if (sel) return refField(gdRef, sel, "global-default", false); }
+        return NONE_REF();
+    };
+    const entry = resolveRef(lookupEntry, ov.entryRef, def.entryRef, gd.entry);
+    const be = resolveRef(lookupBe, ov.beRef, def.beRef, gd.be);
+    return { cohort, disabled: false, enable, entry, be };
+}
+
+/**
+ * Resolve a cohort through the ref chain: cohort override ⟶ card default ⟶
+ * globalDefaultRef ⟶ none. PUBLIC return shape is unchanged (adapter over
+ * _resolveCohortChain) — resolver + availability keep using `cfg.entry`/`cfg.be`.
+ */
+export function resolveCohortConfig(profiles, sessionKey, cellKey) {
+    const chain = _resolveCohortChain(profiles, sessionKey, cellKey);
+    if (chain.disabled) return { disabled: true, entry: null, be: null, entryRef: null, beRef: null };
+    return {
+        disabled: false,
+        entry: chain.entry.sel,
+        be: chain.be.sel,
+        entryRef: chain.entry.ref,
+        beRef: chain.be.ref,
+    };
+}
+
+/**
+ * Provenance for a cohort — what runs, set vs inherited, and the source level.
+ * Pure; assumes a normalized portfolio. Does NOT read Baseline Control.
+ */
+export function resolveCohortProvenance(profiles, sessionKey, cellKey) {
+    return _resolveCohortChain(profiles, sessionKey, cellKey);
+}
+
+/**
+ * Per-cohort availability against the ACTIVE bundle (the selected pair's export).
+ * Pair-aware via the bundle only; config stays pair-agnostic.
+ *
+ * @returns {{ cohort, entry:{status,ref,key}, be:{status,ref,key} }}
+ *   status: "available" | "unavailable" | "na"  ("na" = disabled or no profile/base)
+ */
+export function resolveCohortAvailability(profiles, bundle, variant, sessionKey, cellKey) {
+    const chain = _resolveCohortChain(profiles, sessionKey, cellKey);
+    const cohort = chain.cohort;
+    if (chain.disabled) {
+        return { cohort, entry: { status: "na", ref: null, key: null }, be: { status: "na", ref: null, key: null } };
+    }
+    const entrySel = chain.entry.sel;
+    const beSel = chain.be.sel;
+    const entryKey = entrySel ? buildEntryKey(entrySel) : "baseline";
+
+    const entryAv = entrySel
+        ? { status: entryAvailable(bundle, entrySel) ? "available" : "unavailable", ref: chain.entry.ref, key: entryKey }
+        : { status: "na", ref: null, key: null };
+
+    const beAv = beSel
+        ? { status: beAvailable(bundle, variant, entryKey, beSel) ? "available" : "unavailable", ref: chain.be.ref, key: entryKey }
+        : { status: "na", ref: null, key: null };
+
+    return { cohort, entry: entryAv, be: beAv };
+}
+
+/** Active pair label from the bundle (pair-agnostic config; never stored). */
+function pairFromBundle(bundle) {
+    return bundle?.symbol || bundle?.runSummary?.symbol || bundle?.config?.symbol || null;
+}
+
+/**
+ * Effective portfolio map: provenance + availability + a human-facing `effective`
+ * summary for every session × cohort, plus the active pair label and stable order.
+ * Pure; composes the two per-cohort functions. No backend, no replay.
+ */
+export function buildEffectivePortfolioMap(profiles, bundle, variant) {
+    const cells = {};
+    for (const s of SESSION_KEYS) {
+        for (const c of CELL_KEYS) {
+            const provenance = _resolveCohortChain(profiles, s, c);
+            const availability = resolveCohortAvailability(profiles, bundle, variant, s, c);
+            const usingBaseEntry = provenance.disabled
+                ? false
+                : (provenance.entry.source === "none" || availability.entry.status === "unavailable");
+            const effective = {
+                disabled: provenance.disabled,
+                entryRef: provenance.entry.ref,
+                entryLabel: provenance.entry.sel ? entryProfileLabel(provenance.entry.sel) : "Base universe",
+                entrySource: provenance.entry.source,
+                entryStatus: availability.entry.status,
+                beRef: provenance.be.ref,
+                beLabel: provenance.be.sel ? beProfileLabel(provenance.be.sel) : "None",
+                beSource: provenance.be.source,
+                beStatus: availability.be.status,
+                usingBaseEntry,
+            };
+            cells[`${s}|${c}`] = { session: s, cell: c, provenance, availability, effective };
+        }
+    }
+    return { pair: pairFromBundle(bundle), cells, order: { sessions: [...SESSION_KEYS], cells: [...CELL_KEYS] } };
 }
 
 /** Active = enabled AND at least one cohort resolves to a real change. */
