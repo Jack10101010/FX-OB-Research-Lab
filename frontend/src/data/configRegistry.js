@@ -277,6 +277,21 @@ export const CONFIG_REGISTRY = [
         inputType: "boolean", options: null, validation: null, subgroup: "Research Export",
     },
     //
+    // Performance: parallel scenario execution (speed-only; outputs byte-identical
+    // to serial). When on, the backend auto-picks a conservative worker count.
+    {
+        key: "parallelScenarios", label: "parallel scenarios", group: "advanced", tier: 3,
+        emitted: true, backendKey: "parallel_scenarios", defaultValue: false,
+        editable: true, masterControlsVisible: false, advancedMode: true,
+        inputType: "boolean", options: null, validation: null, subgroup: "Performance",
+    },
+    {
+        key: "maxWorkers", label: "max worker processes", group: "advanced", tier: 3,
+        emitted: false, backendKey: "max_workers", defaultValue: 0,
+        editable: true, masterControlsVisible: false, advancedMode: true,
+        inputType: "number", options: null, validation: { min: 0, max: 8, step: 1 }, subgroup: "Performance",
+    },
+    //
     // Triggered-edge model fields.
     // triggeredEdgeEntries folds "triggered_edge" into entry_models array; no standalone key.
     {

@@ -707,6 +707,18 @@ export function buildBacktesterConfig(cfg) {
         session_filter_enabled:     Boolean(cfg.sessionFilter),
         allowed_sessions:           allowedSessions,
         news_blackout_enabled:      Boolean(cfg.newsBlackout),
+        // ── Performance: parallel scenario execution ───────────────────────────
+        // Speed-only. When on, the backend runs independent scenario passes across
+        // worker processes and auto-picks a conservative worker count (max(1,cpu-2));
+        // outputs are byte-identical to serial. max_workers is only emitted when the
+        // user explicitly overrides (>1) — never 0, which the backend rejects.
+        parallel_scenarios:         Boolean(cfg.parallelScenarios),
+        ...(Number(cfg.maxWorkers) > 1 ? { max_workers: Number(cfg.maxWorkers) } : {}),
+        // Reverse-touch cancel is DEPRECATED — always emit false so new runs never
+        // re-enable the reverse-conflict gate (which would block BE multiarm). This
+        // is explicit rather than relying on the backend default. Old imported runs
+        // keep their historical value; this only affects newly launched runs.
+        reverse_touch_cancel_enabled: false,
         // BUG 2 FIX: persist entryMode so reloaded bundles round-trip correctly.
         // BUG 3 FIX: persist selectedEntryModel so single-mode selection survives reload.
         _entry_mode:                cfg.entryMode || "single",
@@ -848,6 +860,8 @@ export function buildRunConfigLoadReport(current, run) {
     applyFirstPresent(patch, source, "entryResearchExports",       ["entry_models", "entryModels"],                                                   mapConfigEntryResearchExports);
     applyFirstPresent(patch, source, "entryPenetrationThresholds", ["entry_penetration_thresholds", "entryPenetrationThresholds"],                    mapConfigEntryThresholds);
     applyFirstPresent(patch, source, "useBatchedEntryPenetration", ["batch_entry_penetration", "batchEntryPenetration"],                             toBool);
+    applyFirstPresent(patch, source, "parallelScenarios",          ["parallel_scenarios", "parallelScenarios"],                                       toBool);
+    applyFirstPresent(patch, source, "maxWorkers",                 ["max_workers", "maxWorkers"],                                                     toNumber);
     applyFirstPresent(patch, source, "triggeredEdgeEntries",       ["entry_models", "entryModels"],                                                   mapConfigTriggeredEdgeEntries);
     applyFirstPresent(patch, source, "triggeredEdgeThresholds",    ["triggered_edge_trigger_thresholds", "triggeredEdgeTriggerThresholds"],           mapConfigEntryThresholds);
     applyFirstPresent(patch, source, "triggeredEdgeEntryLevelPct", ["triggered_edge_entry_level_pct", "triggeredEdgeEntryLevelPct"],                 toNumber);

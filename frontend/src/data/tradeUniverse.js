@@ -578,9 +578,20 @@ export function resolveTradeUniverse(params = {}) {
     }
     if (resolvedFamily && resolvedFamily !== "baseline" && !hasCombined
         && ftModes.includes("same") && ftModes.includes("next")) {
+        // Map exported fill modes → arm labels (same=C0, next=C1, d2..d6=C2..C6),
+        // so the copy reflects ALL exported arms rather than a stale "C0/C1" pair.
+        const armList = ftModes
+            .map((fm) => {
+                if (fm === "same") return "C0";
+                if (fm === "next") return "C1";
+                const dm = typeof fm === "string" ? fm.match(/^d(\d+)$/) : null;
+                return dm ? `C${dm[1]}` : null;
+            })
+            .filter(Boolean);
+        const armSuffix = armList.length ? ` Exported arms: ${armList.join(", ")}.` : "";
         warnings.push({
             code: "BOTH_UNAVAILABLE_NO_COMBINED",
-            message: "Arm C0 and Arm C1 were exported as separate CSVs; merging them would double-count each OB.",
+            message: `Each Triggered Edge arm is exported as its own CSV. Combined views are disabled because merging arms would double-count each order block.${armSuffix}`,
         });
     }
     if (!isBaseline && (!trades || trades.length === 0)) {
