@@ -1,7 +1,8 @@
 import React, { useCallback, useRef, useState } from "react";
 import { Upload, CheckCircle2, AlertCircle, Trash2, Layers, X, ImageOff } from "lucide-react";
 import { ingestRunBundle } from "@/data/importer";
-import { addRunBundle, removeRunBundle, clearAllRuns, useDataset } from "@/data/store";
+import { addRunBundle, removeRunBundle, clearAllRuns, useDataset, registerLazyRunFiles } from "@/data/store";
+import LazyImportStatus from "@/components/lab/LazyImportStatus";
 import { cn } from "@/lib/utils";
 
 const KIND_LABEL = {
@@ -26,14 +27,21 @@ export function ImportZone() {
     const [error, setError] = useState(null);
     const [importWarnings, setImportWarnings] = useState([]);
     const [pendingDuplicate, setPendingDuplicate] = useState(null);
+    const [largeNotice, setLargeNotice] = useState(null);
 
     const importedRuns = Object.values(ds.runs)
         .sort((a, b) => (b.importedAt || "").localeCompare(a.importedAt || ""));
 
     const completeImport = useCallback((bundle, result) => {
+        // LARGE-RUN-IMPORT Phase 1 — register deferred file handles for lazy reads
+        // BEFORE the bundle lands, so on-demand BE loads find them immediately.
+        if (result.large && result.lazyFileHandles) {
+            registerLazyRunFiles(bundle.id, result.lazyFileHandles);
+        }
         addRunBundle(bundle);
         setImportWarnings(result.validationWarnings || []);
         setPendingDuplicate(null);
+        setLargeNotice(result.large ? { runId: bundle.id, meta: result.largeRunMeta } : null);
         setHistory((h) => [{
             ok: true,
             runId: bundle.id,
@@ -49,7 +57,7 @@ export function ImportZone() {
 
     const handleFiles = useCallback(async (list) => {
         if (!list?.length) return;
-        setBusy(true); setError(null); setImportWarnings([]); setPendingDuplicate(null);
+        setBusy(true); setError(null); setImportWarnings([]); setPendingDuplicate(null); setLargeNotice(null);
         try {
             const result = await ingestRunBundle(list);
             if (!result.ok) {
@@ -93,6 +101,12 @@ export function ImportZone() {
 
     return (
         <div className="space-y-3">
+            {/* LAZY-IMPORT GUARDRAIL — visible status near the import controls so the
+                lazy/index-only path can't creep back unnoticed. Loud if ON. */}
+            <div className="flex items-center justify-between gap-2">
+                <div className="text-[10px] font-ui uppercase tracking-wider text-muted-lab">Import</div>
+                <LazyImportStatus runLazy={Boolean(largeNotice)} />
+            </div>
             <div
                 onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
                 onDragLeave={() => setDragOver(false)}
@@ -129,6 +143,23 @@ export function ImportZone() {
                     onChange={(e) => handleFiles(e.target.files)}
                 />
             </div>
+
+            {/* LAZY-IMPORT GUARDRAIL — a largeNotice can only exist if the run actually
+                imported lazily (lazy is OFF by default), so scream loudly if it does. */}
+            {largeNotice && <LazyImportStatus runLazy />}
+
+            {/* LARGE-RUN-IMPORT Phase 1 — metadata-only import notice */}
+            {largeNotice && (
+                <div className="flex items-start gap-2 px-3 py-2 border border-[hsl(var(--accent-secondary)/0.5)] bg-[hsl(var(--accent-secondary)/0.08)] clip-bevel-sm" data-testid="import-large-notice">
+                    <Layers className="w-3.5 h-3.5 text-[hsl(var(--accent-secondary))] shrink-0 mt-0.5" />
+                    <div className="text-[11px] font-ui text-[hsl(var(--text-2))]">
+                        <span className="text-[hsl(var(--accent-secondary))] uppercase tracking-wider">Large run detected — indexing metadata only.</span>{" "}
+                        {largeNotice.meta?.fileCount ?? "?"} files · {largeNotice.meta?.totalBytes ? `${(largeNotice.meta.totalBytes / 1048576).toFixed(0)} MB` : "size n/a"}
+                        {largeNotice.meta?.beScenarioCount ? ` · ${largeNotice.meta.beScenarioCount} BE scenarios load on demand` : ""}
+                        {largeNotice.meta?.candlesDeferred ? " · candles deferred" : ""}.
+                    </div>
+                </div>
+            )}
 
             {/* Persist warning (size budget) */}
             {ds.persistWarning && (

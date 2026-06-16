@@ -1072,6 +1072,14 @@ export function detectFileKind(name) {
         // generic `ob_` test and would otherwise be misclassified as order_blocks.
         if (n.includes("ob_retest_summary"))                  return "ob_retest_summary";
         if (n.includes("ob_retests"))                         return "ob_retest";
+        // Aggregate / sample / sanity OB artifacts (Phase-0 namespacing now writes
+        // these into the run folder). They are NOT per-order-block tables and
+        // legitimately have no id/ob_id column (e.g. ob_by_year.csv = yearly counts).
+        // MUST precede the generic `ob_` catch below, otherwise they're classified
+        // as order_blocks and rejected with "missing id/ob_id" on import. They are
+        // informational only → benign kind that falls through to `unrecognized`.
+        if (n.includes("ob_by_year") || n.includes("ob_sample")
+            || n.includes("ob_sanity") || n.includes("ob_width"))  return "ob_aux";
         if (n.includes("order_block") || n.includes("ob_"))  return "order_blocks";
         if (n.includes("trades_single_position"))            return "trades_single_position";
         if (n.includes("trades_allow_multi_position"))       return "trades_allow_multi_position";
@@ -1083,6 +1091,76 @@ export function detectFileKind(name) {
     }
     return "unknown";
 }
+
+// ─────────────────────── Large-run guardrail (LARGE-RUN-IMPORT Phase 1) ──────
+// Cube-scale bundles (100s of CSVs, multi-million-row candles, 100s of BE files)
+// cannot be eagerly parsed in the browser without OOM. assessBundleSize() flags
+// such bundles from the file list ALONE (sizes, no reads); ingestRunBundle() then
+// indexes metadata only and defers candles/BE/variant rows to lazy on-demand
+// loads. Small bundles are untouched.
+export const LARGE_BUNDLE_THRESHOLDS = {
+    fileCount: 50,
+    totalBytes: 150 * 1024 * 1024,   // 150 MB
+    beFileCount: 50,
+    candlesBytes: 25 * 1024 * 1024,  // 25 MB
+};
+
+// LAZY-DISABLE — the automatic large-bundle → lazy/index-only import path is OFF by
+// default. Cube-scale lazy imports caused repeated run/data-identity regressions and
+// the user is no longer on the cube workflow, so normal imports must be eager and
+// deterministic. assessBundleSize() still reports `isLarge` (banner/diagnostics keep
+// working) but it NO LONGER triggers a lazy import unless this flag is true. The lazy
+// machinery stays dormant behind this flag + the explicit `forceLazy` caller option,
+// so a future cube-only mode can opt back in without a rewrite.
+export const ENABLE_LAZY_IMPORT = false;
+
+const baseName = (name) => String(name || "").split(/[\\/]/).pop();
+
+// LARGE-RUN-IMPORT Phase 1B — recover the SOURCE run-folder name from a folder
+// picker. webkitdirectory sets webkitRelativePath = "<runFolder>/config.json",
+// whose first segment is the real sidecar/output folder id (e.g.
+// 20260613_162437_EURUSD_15min_RR3.3_SB1). Browsers never expose an absolute
+// path, so we keep only the folder NAME — the sidecar resolves it under
+// outputs/runs. Returns "" for drag-drop of loose files (no relative path).
+export function extractSourceRunFolderName(fileList) {
+    for (const f of Array.from(fileList || [])) {
+        const rel = String(f?.webkitRelativePath || f?.relativePath || "").replace(/\\/g, "/");
+        if (rel.includes("/")) {
+            const first = rel.split("/").filter(Boolean)[0];
+            if (first) return first;
+        }
+    }
+    return "";
+}
+
+export function assessBundleSize(fileList, thresholds = LARGE_BUNDLE_THRESHOLDS) {
+    const files = Array.from(fileList || []);
+    let totalBytes = 0;
+    let beFileCount = 0;
+    let candlesBytes = 0;
+    let candlesPresent = false;
+    for (const f of files) {
+        const size = Number(f?.size) || 0;  // sidecar pseudo-files have no size → 0
+        totalBytes += size;
+        const name = baseName(f?.name);
+        const kind = detectFileKind(name);
+        if (kind === "trades_be") beFileCount += 1;
+        if (kind === "candles") { candlesPresent = true; candlesBytes += size; }
+    }
+    const reasons = [];
+    if (files.length > thresholds.fileCount) reasons.push(`file count ${files.length} > ${thresholds.fileCount}`);
+    if (totalBytes > thresholds.totalBytes) reasons.push(`total ${(totalBytes / 1048576).toFixed(0)}MB > ${(thresholds.totalBytes / 1048576).toFixed(0)}MB`);
+    if (beFileCount > thresholds.beFileCount) reasons.push(`BE files ${beFileCount} > ${thresholds.beFileCount}`);
+    if (candlesBytes > thresholds.candlesBytes) reasons.push(`candles ${(candlesBytes / 1048576).toFixed(0)}MB > ${(thresholds.candlesBytes / 1048576).toFixed(0)}MB`);
+    return { isLarge: reasons.length > 0, fileCount: files.length, totalBytes, beFileCount, candlesPresent, candlesBytes, reasons };
+}
+
+// Kinds parsed eagerly even on the large-run path (small, required for a usable
+// run shell + BE summaries). Everything else is indexed and lazy-loaded.
+const LAZY_EAGER_KINDS = new Set([
+    "config", "summary", "order_blocks",
+    "trades_single_position", "trades_allow_multi_position", "trades_one_per_direction", "trades_unknown",
+]);
 
 function isNewsCalendarFile(name) {
     const file = String(name || "").split(/[\\/]/).pop().toLowerCase();
@@ -1156,9 +1234,78 @@ function buildIntegrity({ collected, primaryTrades, netR, primaryVariant }) {
 
 // ─────────────────────── Bundle ingestion ───────────────────────
 
-export async function ingestRunBundle(fileList) {
+// LARGE-RUN-IMPORT Phase 1 — parse + enrich ONE BE scenario CSV on demand, using
+// the same parseTradesCSV + OB enrichment as the eager path so lazily-loaded BE
+// rows are byte-shape-identical to eagerly-loaded ones. Pure; no store/React.
+export function enrichBeTradeRowsLazy(csvText, { orderBlocks, config, summary } = {}) {
+    const trades = parseTradesCSV(String(csvText || ""));
+    const obLookup = buildOrderBlockLookup(orderBlocks || []);
+    const pipSize = readPipSize(config || {}, summary || {});
+    return enrichTradesWithOrderBlocks(trades, obLookup, pipSize);
+}
+
+// LARGE-RUN-IMPORT Phase 2B — parse an ENTRY-variant CSV name into a UI-listable
+// scenario descriptor (threshold + delay/fill-mode + label + sourceFile), so a
+// lazy run can expose the FULL triggered-edge universe before rows load. Returns
+// null for base/BE/candles. Pure.
+export function parseEntryFilename(fileName) {
+    const info = entryTradeFileInfo(fileName);
+    if (!info) return null;
+    const mode = info.mode; // e.g. entry_triggered_edge_25p0_d3
+    const m = /^entry_triggered_edge_(\d+)p(\d+)(?:_(same|next|d\d+))?$/i.exec(mode);
+    const threshold = m ? Number(`${parseInt(m[1], 10)}.${m[2]}`) : null;
+    const fillMode = m ? (m[3] || "both").toLowerCase() : null;
+    const fillLabel = fillMode === "same" ? "C0 (same)"
+        : fillMode === "next" ? "C1 (next)"
+        : (typeof fillMode === "string" && fillMode.startsWith("d")) ? fillMode.toUpperCase()
+        : "both";
+    return {
+        name: baseName(fileName),
+        type: "entry",
+        executionMode: info.baseVariant,
+        entryVariantKey: mode,
+        sourceFile: baseName(fileName),
+        threshold,
+        fillMode,
+        label: threshold != null ? `TE ${Math.round(threshold)}% ${fillLabel}` : mode,
+    };
+}
+
+// LARGE-RUN-IMPORT Phase 2 — storage keys for a lazily-loaded ENTRY variant CSV,
+// mirroring the eager handler so lazy rows land under the SAME keys the resolver
+// reads (`entryResults.tradesByMode[mode]` and `[baseVariant__mode]`). Returns
+// null for non-entry files (base/BE/candles). Pure; testable in isolation.
+export function entryVariantStorageKeys(fileName) {
+    const info = entryTradeFileInfo(fileName);
+    if (!info) return null;
+    const mode = info.mode;
+    return { baseVariant: info.baseVariant, mode, keys: [`${info.baseVariant}__${mode}`, mode] };
+}
+
+export async function ingestRunBundle(fileList, options = {}) {
     const files = Array.from(fileList);
+    // LARGE-RUN-IMPORT Phase 1 — detect cube-scale bundles from sizes alone and
+    // switch to a metadata-only ("lazy") import that never eager-parses candles
+    // or BE/variant rows. `forceLazy`/`forceEager` allow tests + callers to pin it.
+    const sizeInfo = assessBundleSize(files);
+    // LAZY-DISABLE — auto-lazy (size threshold) is gated behind ENABLE_LAZY_IMPORT
+    // (default false). `forceLazy` remains an EXPLICIT opt-in for a future cube-only
+    // path; `forceEager` always wins. With the flag off, no normal run imports lazy.
+    const autoLazy = ENABLE_LAZY_IMPORT && sizeInfo.isLarge;
+    const lazy = options.forceEager ? false : (options.forceLazy || autoLazy);
+    // Phase 1B — source run-folder identity (for sidecar reload of lazy runs).
+    const sourceRunFolderName = options.sourceRunFolderName || extractSourceRunFolderName(files);
     const collected = {
+        lazy,
+        sizeInfo,
+        manifest: null,
+        sourceRunFolderName,
+        // Lazy index (no rows): BE scenario files + raw File handles for on-demand reads.
+        beScenarioIndex: [],
+        entryScenarioIndex: [],
+        candlesMeta: null,
+        deferredFiles: [],          // { name, kind, size } recorded but not parsed
+        lazyFileHandles: new Map(), // name → File/pseudo-file for lazy reads (NOT persisted)
         config: null, summary: null, orderBlocks: null, candles: null,
         obRetests: null, obRetestSummary: null,
         tradesByVariant: {},
@@ -1186,6 +1333,49 @@ export async function ingestRunBundle(fileList) {
 
     for (const f of files) {
         const kind = detectFileKind(f.name);
+        // Phase 1B — manifest.json (tiny) carries the backend run_id; parse it on
+        // BOTH paths so reload identity survives even when summary lacks an id.
+        if (baseName(f.name).toLowerCase() === "manifest.json") {
+            try {
+                collected.manifest = JSON.parse(await f.text());
+                collected.recognized.push({ name: f.name, kind: "manifest" });
+            } catch (e) {
+                collected.readErrors.push({ name: f.name, error: String(e.message || e) });
+            }
+            continue;
+        }
+        // ── Large-run path: index heavy artifacts, never read their bytes ──────
+        // candles.csv (millions of rows) + 100s of BE/variant CSVs are the OOM
+        // source. On the lazy path we record only filename metadata + a File
+        // handle for later on-demand parsing, and skip the eager read entirely.
+        if (collected.lazy && !LAZY_EAGER_KINDS.has(kind)) {
+            const size = Number(f?.size) || null;
+            collected.lazyFileHandles.set(f.name, f);
+            if (kind === "candles") {
+                collected.candlesMeta = { name: f.name, size };
+            } else if (kind === "trades_be") {
+                const info = beTradeFileInfo(f.name) || {};
+                collected.beScenarioIndex.push({
+                    name: f.name,
+                    executionMode: info.executionMode ?? null,
+                    entryVariantKey: info.entryVariantKey ?? null,
+                    scenarioKey: info.scenarioKey ?? null,
+                    triggerBasis: info.triggerBasis ?? null,
+                    armLevelR: info.armLevelR ?? null,
+                    size,
+                });
+            } else {
+                collected.deferredFiles.push({ name: f.name, kind, size });
+                // Phase 2B — index entry-variant files so the full TE universe is
+                // listable + lazily selectable before any rows are parsed.
+                if (kind === "trades_entry") {
+                    const desc = parseEntryFilename(f.name);
+                    if (desc) collected.entryScenarioIndex.push({ ...desc, size });
+                }
+            }
+            collected.recognized.push({ name: f.name, kind, deferred: true, size });
+            continue;
+        }
         let text;
         try { text = await f.text(); } catch (e) {
             collected.readErrors.push({ name: f.name, error: String(e.message || e) });
@@ -1562,9 +1752,40 @@ export async function ingestRunBundle(fileList) {
     const integrity = buildIntegrity({ collected, primaryTrades, netR, primaryVariant });
     const sourceFiles = collected.recognized.map((file) => file.name);
 
+    // Phase 1B — source run identity for sidecar reload. Folder name (from the
+    // picker) is the most reliable id (the sidecar resolves it under
+    // outputs/runs); manifest/summary run_id is a secondary identifier. All
+    // empty when files were drag-dropped loose → reload falls back to the
+    // frontend id (old behaviour preserved).
+    // `sourceRunFolderName` is already in scope (declared at the top of
+    // ingestRunBundle from the picker's webkitRelativePath).
+    const sourceRunId = [
+        collected.manifest?.run_id, collected.manifest?.runId,
+        sm.run_id, sm.runId, sm.sidecar_run_id, cfg.run_id,
+    ].map((v) => String(v ?? "").trim()).find(Boolean) || "";
+    // Bare folder name only — never an absolute path (browser can't supply one,
+    // and the sidecar only accepts folder ids inside its outputs/runs root).
+    const reloadFolder = sourceRunFolderName || "";
+
+    // Human-friendly run name set from the Strategy Builder (RUN-NAME feature).
+    // manifest.json/progress.json carry display_name; surface it so manual and
+    // cross-session imports render the chosen name. Empty for older bundles.
+    const runDisplayName = [
+        collected.manifest?.display_name, collected.manifest?.displayName,
+        sm.display_name, sm.displayName,
+    ].map((v) => String(v ?? "").trim()).find(Boolean) || "";
+
     const runSummary = {
         id,
         originalRunId,
+        ...(runDisplayName ? { displayName: runDisplayName, name: runDisplayName } : {}),
+        // Reload identity (Phase 1B) — consumed by reloadMetadataForRun.
+        sourceRunFolderName,
+        sourceRunId,
+        sidecarRunId: sourceRunId || sourceRunFolderName || "",
+        folderName: sourceRunFolderName,
+        outputFolder: reloadFolder,
+        sourceOutputFolder: reloadFolder,
         symbol:       sm.symbol || cfg.symbol,
         detectionTf:  sm.detection_tf || cfg.detection_tf,
         executionTf:  sm.execution_tf || cfg.execution_tf || "1m",
@@ -1681,6 +1902,40 @@ export async function ingestRunBundle(fileList) {
         orderBlocks: mappedOBs,
         candles: hasCandles ? collected.candles : null,
         hasCandles,
+        // ── LARGE-RUN-IMPORT Phase 1 — lazy/metadata-only import flags ─────────
+        // On a large bundle, candles + BE/variant rows are NOT parsed; only
+        // metadata is indexed here and rows load on demand. beResults (summaries
+        // from summary.json) ARE present, so BE summary cards still resolve EXACT.
+        // Small bundles keep lazy:false and every field below is inert/empty.
+        lazy: collected.lazy,
+        largeRunMeta: collected.lazy ? {
+            reasons: collected.sizeInfo.reasons,
+            fileCount: collected.sizeInfo.fileCount,
+            totalBytes: collected.sizeInfo.totalBytes,
+            beFileCount: collected.sizeInfo.beFileCount,
+            beScenarioCount: collected.beScenarioIndex.length,
+            deferredVariantCount: collected.deferredFiles.length,
+            candlesDeferred: !!collected.candlesMeta,
+        } : null,
+        beScenarioIndex: collected.beScenarioIndex,
+        entryScenarioIndex: collected.entryScenarioIndex,
+        deferredFiles: collected.deferredFiles,
+        candlesMeta: collected.candlesMeta,
+        candlesLazy: collected.lazy && !!collected.candlesMeta,
+        // Provenance flags surfaced for quick UI/diagnostics (also in config).
+        provenance: {
+            beMultiarmEnabled: cfg?.be_multiarm_enabled ?? null,
+            reverseTouchCancelEnabled: cfg?.reverse_touch_cancel_enabled ?? null,
+            executionModes: cfg?.execution_modes ?? null,
+        },
+        // Phase 1B — source run identity (top-level mirror of runSummary fields)
+        // so reloadMetadataForRun resolves the real folder id, not the frontend id.
+        sourceRunFolderName,
+        sourceRunId,
+        sidecarRunId: sourceRunId || sourceRunFolderName || "",
+        folderName: sourceRunFolderName,
+        outputFolder: reloadFolder,
+        sourceOutputFolder: reloadFolder,
         // Backend-verified OB retest artifacts (Phase 2.4). null when the run was
         // exported without them → Retest Lab falls back to frontend derivation.
         obRetests: collected.obRetests,
@@ -1694,6 +1949,11 @@ export async function ingestRunBundle(fileList) {
     return {
         ok: true,
         bundle,
+        large: collected.lazy,
+        largeRunMeta: bundle.largeRunMeta,
+        // File handles for lazy on-demand reads (NOT persisted; session-scoped).
+        // Caller (ImportZone) registers these with the store keyed by bundle.id.
+        lazyFileHandles: collected.lazyFileHandles,
         recognized: collected.recognized,
         unrecognized: collected.unrecognized,
         validationErrors: collected.validationErrors,

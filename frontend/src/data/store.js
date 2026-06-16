@@ -18,8 +18,8 @@ import {
     listCandleRunIds as idbListCandleRunIds,
 } from "./artifactStore";
 import { buildTradesByObId, deriveOBLifecycle } from "./obLifecycle";
-import { ingestRunBundle } from "./importer";
-import { getRunBundleByRunId, getRunCandlesByRunId } from "./sidecarClient";
+import { ingestRunBundle, enrichBeTradeRowsLazy, beTradeFileInfo, entryVariantStorageKeys } from "./importer";
+import { getRunBundleByRunId, getRunCandlesByRunId, getRunFileByRunId, getRunManifestByRunId } from "./sidecarClient";
 import { fetchProjectsFromBackend, saveProjectsToBackend } from "./projectsBackend";
 import { summarizeTradeClassifications } from "./tradeClassification";
 // Phase RB-1 — Results Basis foundation. The store owns the canonical
@@ -395,6 +395,30 @@ function readFirstMetric(...values) {
     return "";
 }
 
+// LARGE-RUN-IMPORT Phase 2B — the entry-variant keys a run exposes, gathered
+// from the lazy entry index AND the nested entry_results summary. Persisted
+// (tiny) so the full TE universe lists after a refresh, even before a sidecar
+// manifest reload. Reconstructs a minimal nested summary on the way back.
+function extractEntryVariantKeys(run) {
+    const out = new Set();
+    (run?.entryScenarioIndex || []).forEach((s) => { if (s?.entryVariantKey) out.add(s.entryVariantKey); });
+    const summary = run?.entryResults?.summary;
+    if (summary && typeof summary === "object") {
+        Object.keys(summary).forEach((k) => { if (k === "baseline" || k.startsWith("entry_")) out.add(k); });
+        Object.values(summary).forEach((v) => {
+            if (v && typeof v === "object") {
+                Object.keys(v).forEach((k) => { if (k === "baseline" || k.startsWith("entry_")) out.add(k); });
+            }
+        });
+    }
+    return [...out].filter(Boolean);
+}
+
+function entrySummaryFromKeys(keys, wrapperKey) {
+    if (!Array.isArray(keys) || !keys.length) return {};
+    return { [wrapperKey || "allow_multi_position"]: Object.fromEntries(keys.map((k) => [k, {}])) };
+}
+
 function buildRunIndexEntry(run) {
     const summary = headlineSummary(run);
     const reloadMeta = reloadMetadataForRun(run);
@@ -410,6 +434,12 @@ function buildRunIndexEntry(run) {
         persisted: true,
         hasFullData: false,
         storageMode: "index_only",
+        // Phase 1B — remember this was a large/lazy import so reload uses the
+        // lightweight manifest path (the full /bundle endpoint 413s on cubes).
+        lazy: Boolean(run?.lazy),
+        // Phase 2B — persist the entry-variant key list (tiny) so the full TE
+        // universe lists immediately after a refresh, before any sidecar reload.
+        entryVariantKeys: extractEntryVariantKeys(run),
         memoryHasFullData: hasFullData,
         originalRunId: reloadMeta.originalRunId,
         sidecarJobId: reloadMeta.sidecarJobId,
@@ -418,6 +448,10 @@ function buildRunIndexEntry(run) {
         outputFolder: reloadMeta.outputFolder,
         sourceOutputFolder: reloadMeta.sourceOutputFolder,
         folderName: reloadMeta.folderName,
+        // Phase 1B — persist source identity so reload after refresh resolves the
+        // real run folder (not the frontend imported_<ts> id).
+        sourceRunFolderName: reloadMeta.sourceRunFolderName,
+        sourceRunId: reloadMeta.sourceRunId,
         reloadAvailable,
         warning: reloadAvailable ? "" : "Full data not in memory. Re-import from sidecar/output folder.",
     };
@@ -463,6 +497,8 @@ function indexEntryToRun(entry) {
         outputFolder: reloadMeta.outputFolder,
         sourceOutputFolder: reloadMeta.sourceOutputFolder,
         folderName: reloadMeta.folderName,
+        sourceRunFolderName: reloadMeta.sourceRunFolderName,
+        sourceRunId: reloadMeta.sourceRunId,
         source: entry.source,
         projectId: entry.projectId,
         runRole: entry.runRole,
@@ -482,6 +518,8 @@ function indexEntryToRun(entry) {
         outputFolder: reloadMeta.outputFolder,
         sourceOutputFolder: reloadMeta.sourceOutputFolder,
         folderName: reloadMeta.folderName,
+        sourceRunFolderName: reloadMeta.sourceRunFolderName,
+        sourceRunId: reloadMeta.sourceRunId,
         projectId: entry.projectId,
         runRole: entry.runRole,
         experimentType: entry.experimentType,
@@ -496,7 +534,13 @@ function indexEntryToRun(entry) {
         equityCurve: [],
         equityCurveByVariant: {},
         protectionResults: { summary: {}, tradesByMode: {}, equityCurveByMode: {}, sourceFiles: [], tradesOmittedForStorage: true },
-        entryResults: { summary: {}, tradesByMode: {}, equityCurveByMode: {}, sourceFiles: [], tradesOmittedForStorage: true },
+        // Phase 2B — reconstruct a minimal entry summary from the persisted key
+        // list so the full TE universe is listable right after refresh (the
+        // resolver descends this nested shape; values are empty stat stubs).
+        entryResults: {
+            summary: entrySummaryFromKeys(entry.entryVariantKeys, entry.primaryVariant),
+            tradesByMode: {}, equityCurveByMode: {}, sourceFiles: [], tradesOmittedForStorage: true,
+        },
         // BE Exact Replay (BE-FRONTEND-INTEGRATION). Index-only stub defaults so
         // consumers never crash before full data loads; old runs have no BE data.
         beResults: {},
@@ -509,6 +553,7 @@ function indexEntryToRun(entry) {
         candlesStorage: entry.candlesStorage,
         hasFullData: false,
         storageMode: "index_only",
+        lazy: Boolean(entry.lazy),
         reloadAvailable,
         indexOnly: true,
         indexWarning: entry.warning || "",
@@ -533,13 +578,19 @@ function reloadMetadataForRun(run) {
         run?.folder,
         summary.folder,
     );
+    // Phase 1B — the source run-folder name (from the folder picker) is the most
+    // reliable reload id: the sidecar resolves it directly under outputs/runs.
     const folderName = readReloadValue(
+        run?.sourceRunFolderName,
+        summary.sourceRunFolderName,
         run?.folderName,
         summary.folderName,
         outputFolderName(sourceOutputFolder),
         outputFolderName(outputFolder),
     );
     const sidecarRunId = readReloadValue(
+        run?.sourceRunId,
+        summary.sourceRunId,
         run?.sidecarRunId,
         run?.sidecar_run_id,
         run?.run_id,
@@ -557,6 +608,9 @@ function reloadMetadataForRun(run) {
         outputFolder,
         sourceOutputFolder,
         folderName,
+        // First-class source identity (persisted + restored across refresh).
+        sourceRunFolderName: readReloadValue(run?.sourceRunFolderName, summary.sourceRunFolderName, folderName),
+        sourceRunId: readReloadValue(run?.sourceRunId, summary.sourceRunId, sidecarRunId),
     };
 }
 
@@ -1135,6 +1189,57 @@ export function getTradeUniverse(runId = null, scenarioOverride = null) {
         scenario,
         fallbackVariant,
     });
+}
+
+// LAZY-RUN-PERFORMANCE Phase 1 — a cheap, stable signature of every input
+// getTradeUniverse() actually depends on, so useTradeUniverse can memo on it
+// instead of the whole buildDerived() object (which is a fresh reference on
+// EVERY notify). It changes only when: the resolved run, the scenario/variant
+// selection, or this run's trade collections change (e.g. a lazy load merges
+// rows). Unrelated store updates leave it identical → no re-resolve/re-render
+// work. O(#variants), never O(#rows) — reads lengths/keys, not row contents.
+function tradeDataToken(bundle) {
+    if (!bundle) return "none";
+    const parts = [];
+    parts.push("t" + (Array.isArray(bundle.trades) ? bundle.trades.length : 0));
+    const tbv = bundle.tradesByVariant || {};
+    parts.push("v" + Object.keys(tbv).sort().map((k) => `${k}:${tbv[k]?.length || 0}`).join(","));
+    const em = bundle.entryResults?.tradesByMode || {};
+    parts.push("e" + Object.keys(em).sort().map((k) => `${k}:${em[k]?.length || 0}`).join(","));
+    const pm = bundle.protectionResults?.tradesByMode || {};
+    parts.push("p" + Object.keys(pm).sort().map((k) => `${k}:${pm[k]?.length || 0}`).join(","));
+    // BE is nested mode→entry→scenario; key paths are enough to detect a merge.
+    const be = bundle.beTradesByMode || {};
+    parts.push("b" + Object.keys(be).sort().map((m) => {
+        const byEntry = be[m] || {};
+        return `${m}{${Object.keys(byEntry).sort().map((ev) => `${ev}:${Object.keys(byEntry[ev] || {}).sort().join("+")}`).join(";")}}`;
+    }).join(","));
+    // Entry-variant inventory (the selectable LIST) — count is enough.
+    const es = bundle.entryResults?.summary;
+    parts.push("s" + (es && typeof es === "object" ? Object.keys(es).length : 0));
+    return parts.join("|");
+}
+
+export function getTradeUniverseSignature(runId = null, scenarioOverride = null) {
+    const effectiveRunId = runId || state.activeRunId || null;
+    const bundle = effectiveRunId ? bundleFor(effectiveRunId) : null;
+    const scenario = scenarioOverride || state.scenario || null;
+    const fallbackVariant = state.selectedTradeVariant || bundle?.primaryVariant || null;
+    // Scenario is a small object; JSON captures family/threshold/fillMode/
+    // directionalStorageKey/layers/runId so any selection change re-resolves.
+    let scn = "";
+    try { scn = scenario ? JSON.stringify(scenario) : ""; } catch { scn = String(scenario); }
+    return `${effectiveRunId}::${fallbackVariant}::${scn}::${tradeDataToken(bundle)}`;
+}
+
+// LAZY-SNAPSHOT-FIX — cheap, deterministic token of the RAW run's trade
+// collections (NOT the lensed bundle). Changes whenever lazy variant/baseline/BE
+// rows merge into state.runs[runId], so Master Controls can recompose its preview
+// lens after a lazy load instead of serving a stale snapshot. Uses getRawRunData
+// (never bundleFor) so the token reflects real loaded data, not the lens itself.
+export function getRawTradeDataToken(runId) {
+    const id = runId || state.activeRunId || null;
+    return id ? tradeDataToken(getRawRunData(id)) : "none";
 }
 
 // Re-export the resolver helpers for callers that don't want to import
@@ -1778,6 +1883,203 @@ export function setScenarioRun(runId) {
     notify();
 }
 
+// ── LARGE-RUN-IMPORT Phase 1 — lazy run file registry + on-demand BE loading ──
+// Session-scoped (NEVER persisted): maps runId → Map(fileName → File handle) for
+// the files a large bundle deferred at import. File handles can't be structured-
+// cloned to IndexedDB, so they live here only and vanish on refresh (after which
+// lazy loads fall back to the sidecar /file endpoint).
+const LAZY_RUN_FILES = new Map();
+// In-flight de-dupe so concurrent consumers of the same scenario share one fetch.
+const LAZY_BE_INFLIGHT = new Map();
+
+export function registerLazyRunFiles(runId, fileMap) {
+    if (!runId || !fileMap || typeof fileMap.forEach !== "function") return;
+    const existing = LAZY_RUN_FILES.get(runId) || new Map();
+    fileMap.forEach((file, name) => existing.set(name, file));
+    LAZY_RUN_FILES.set(runId, existing);
+}
+
+export function getLazyRunFileNames(runId) {
+    const m = LAZY_RUN_FILES.get(runId);
+    return m ? [...m.keys()] : [];
+}
+
+function sidecarRunIdFor(run) {
+    return run?.sidecarRunId || run?.summary?.sidecarRunId || run?.summary?.run_id
+        || run?.originalRunId || run?.id || null;
+}
+
+async function readLazyFileText(runId, name, run) {
+    // Prefer the in-session File handle (no network); fall back to the sidecar.
+    const handle = LAZY_RUN_FILES.get(runId)?.get(name);
+    if (handle && typeof handle.text === "function") return handle.text();
+    const sidecarId = sidecarRunIdFor(run);
+    if (!sidecarId) throw new Error("File not available in session and no sidecar run id to reload it.");
+    const payload = await getRunFileByRunId(sidecarId, name);
+    return payload?.content ?? "";
+}
+
+/**
+ * Lazily load ONE BE scenario's trade rows for a large/lazy run and merge them
+ * into state.runs[id].beTradesByMode[em][evk][scenarioKey]. Idempotent: returns
+ * immediately if already loaded. Concurrent calls for the same file share one
+ * fetch. Throws on read/parse failure so callers can show an error state.
+ */
+export async function ensureBeScenarioTrades(runId, fileName) {
+    const run = runId ? state.runs[runId] : null;
+    if (!run || !fileName) return null;
+    const info = beTradeFileInfo(fileName);
+    if (!info) throw new Error(`Not a BE scenario file: ${fileName}`);
+    const { executionMode: em, entryVariantKey: evk, scenarioKey } = info;
+
+    const already = run.beTradesByMode?.[em]?.[evk]?.[scenarioKey];
+    if (Array.isArray(already)) return already;
+
+    const inflightKey = `${runId}::${fileName}`;
+    if (LAZY_BE_INFLIGHT.has(inflightKey)) return LAZY_BE_INFLIGHT.get(inflightKey);
+
+    const task = (async () => {
+        const text = await readLazyFileText(runId, fileName, run);
+        const trades = enrichBeTradeRowsLazy(text, {
+            orderBlocks: run.orderBlocks || [],
+            config: run.config || {},
+            summary: run.summary || {},
+        });
+        // Merge immutably into the run's BE map (copy only the touched branch).
+        const current = state.runs[runId];
+        if (!current) return trades;
+        const byMode = { ...(current.beTradesByMode || {}) };
+        const byEntry = { ...(byMode[em] || {}) };
+        const byScenario = { ...(byEntry[evk] || {}) };
+        byScenario[scenarioKey] = trades;
+        byEntry[evk] = byScenario;
+        byMode[em] = byEntry;
+        state = { ...state, runs: { ...state.runs, [runId]: { ...current, beTradesByMode: byMode } } };
+        notify();
+        return trades;
+    })();
+    LAZY_BE_INFLIGHT.set(inflightKey, task);
+    try {
+        return await task;
+    } finally {
+        LAZY_BE_INFLIGHT.delete(inflightKey);
+    }
+}
+
+/**
+ * LARGE-RUN-IMPORT Phase 2 — lazily load ONE entry-variant trade CSV for a
+ * large/lazy run and merge it into entryResults.tradesByMode (the same keys the
+ * resolver reads), so triggered-edge variants become usable on selection.
+ * Idempotent + de-duped; reads the in-session File handle first, else the
+ * sidecar /file endpoint (after refresh). Throws on read/parse failure.
+ */
+export async function ensureVariantTrades(runId, fileName) {
+    const run = runId ? state.runs[runId] : null;
+    if (!run || !fileName) return null;
+    const keys = entryVariantStorageKeys(fileName);
+    if (!keys) return null; // base/BE/candles — not an entry variant file
+    const existing = run.entryResults?.tradesByMode?.[keys.mode];
+    if (Array.isArray(existing) && existing.length) return existing;
+
+    const inflightKey = `var::${runId}::${fileName}`;
+    if (LAZY_BE_INFLIGHT.has(inflightKey)) return LAZY_BE_INFLIGHT.get(inflightKey);
+
+    const task = (async () => {
+        const text = await readLazyFileText(runId, fileName, run);
+        const trades = enrichBeTradeRowsLazy(text, {
+            orderBlocks: run.orderBlocks || [],
+            config: run.config || {},
+            summary: run.summary || {},
+        });
+        const current = state.runs[runId];
+        if (!current) return trades;
+        const er = current.entryResults || {};
+        const byMode = { ...(er.tradesByMode || {}) };
+        keys.keys.forEach((k) => { byMode[k] = trades; });
+        state = {
+            ...state,
+            runs: { ...state.runs, [runId]: { ...current, entryResults: { ...er, tradesByMode: byMode } } },
+        };
+        notify();
+        return trades;
+    })();
+    LAZY_BE_INFLIGHT.set(inflightKey, task);
+    try { return await task; } finally { LAZY_BE_INFLIGHT.delete(inflightKey); }
+}
+
+/**
+ * LARGE-RUN-IMPORT Phase 2C — lazily load the BASE primary trade CSV
+ * (trades_<mode>.csv) for a lazy run so Baseline shows rows. In-session the base
+ * file is parsed eagerly (this returns early); it matters after a refresh, when
+ * the restored stub has tradesByVariant:{} — then it fetches via the sidecar
+ * /file endpoint. Merges into tradesByVariant[mode] (+ top-level trades when
+ * that mode is primary). Idempotent + de-duped.
+ */
+export async function ensureBaselineTrades(runId, fileName) {
+    const run = runId ? state.runs[runId] : null;
+    if (!run || !fileName) return null;
+    const base = String(fileName).split(/[\\/]/).pop();
+    const m = /^trades_(single_position|allow_multi_position|one_per_direction)\.csv$/i.exec(base);
+    if (!m) return null;
+    const variant = m[1].toLowerCase();
+    const existing = run.tradesByVariant?.[variant];
+    if (Array.isArray(existing) && existing.length) return existing;
+
+    const inflightKey = `base::${runId}::${base}`;
+    if (LAZY_BE_INFLIGHT.has(inflightKey)) return LAZY_BE_INFLIGHT.get(inflightKey);
+
+    const task = (async () => {
+        const text = await readLazyFileText(runId, base, run);
+        const trades = enrichBeTradeRowsLazy(text, {
+            orderBlocks: run.orderBlocks || [], config: run.config || {}, summary: run.summary || {},
+        });
+        const current = state.runs[runId];
+        if (!current) return trades;
+        const tbv = { ...(current.tradesByVariant || {}), [variant]: trades };
+        const isPrimary = !current.primaryVariant || current.primaryVariant === variant;
+        state = {
+            ...state,
+            runs: {
+                ...state.runs,
+                [runId]: {
+                    ...current,
+                    tradesByVariant: tbv,
+                    primaryVariant: current.primaryVariant || variant,
+                    ...(isPrimary ? { trades } : {}),
+                },
+            },
+        };
+        notify();
+        return trades;
+    })();
+    LAZY_BE_INFLIGHT.set(inflightKey, task);
+    try { return await task; } finally { LAZY_BE_INFLIGHT.delete(inflightKey); }
+}
+
+/** Find the BE scenario filename in a lazy run's index for a UI selection. */
+export function findBeFileForRun(run, { executionMode, entryVariantKey, triggerBasis, armLevelR } = {}) {
+    const idx = run?.beScenarioIndex;
+    if (!Array.isArray(idx) || !idx.length) return null;
+    const wantEntry = entryVariantKey || "baseline";
+    const trig = String(triggerBasis || "").toLowerCase();
+    const arm = Number(armLevelR);
+    if (!Number.isFinite(arm)) return null;
+    // entryVariantKey (baseline↔null), triggerBasis and armLevelR (epsilon) must
+    // always match. executionMode is matched STRICTLY first; if that misses we
+    // retry IGNORING execution mode — BE files are unique per (variant, trigger,
+    // arm) within a run, so a mode-label mismatch (selection passing a blank or
+    // different mode than the indexed one) must not drop an otherwise-unambiguous
+    // file and silently force a REPLAY fallback (LAZY-BE-EXACT regression fix).
+    const matchesCore = (s) =>
+        (s.entryVariantKey || "baseline") === wantEntry
+        && String(s.triggerBasis || "").toLowerCase() === trig
+        && Math.abs(Number(s.armLevelR) - arm) < 1e-6;
+    const strict = idx.find((s) => matchesCore(s) && (!executionMode || s.executionMode === executionMode));
+    if (strict) return strict.name;
+    const tolerant = idx.find(matchesCore);
+    return tolerant ? tolerant.name : null;
+}
+
 export function addRunBundle(bundle) {
     if (!bundle?.id) return;
     clearPreviewLensSilently(); // a newly added real run must not be overlaid by a stale lens
@@ -1907,9 +2209,95 @@ export function replaceRunBundleData(runId, bundle) {
     return nextBundle;
 }
 
+// Phase 1B — restore a LAZY (large-run) index stub from the sidecar manifest.
+// The full /bundle endpoint 413s on cube-scale runs, so lazy runs reload the
+// compact manifest instead: it rehydrates the BE scenario index + provenance +
+// candle metadata so on-demand BE loads (via the sidecar /file endpoint) work
+// again after a refresh. Trade rows themselves stay lazy.
+export async function reloadLazyRunFromManifest(runId) {
+    const current = runId ? state.runs[runId] : null;
+    if (!current) throw new Error("Run is not available in the local index.");
+    const identifiers = runReloadIdentifiers(runId, current);
+    if (!identifiers.length) throw new Error("This run has no source run id or output folder reference.");
+
+    let manifest = null;
+    let lastError = null;
+    let matched = "";
+    for (const identifier of identifiers) {
+        try {
+            manifest = await getRunManifestByRunId(identifier);
+            matched = identifier;
+            break;
+        } catch (error) { lastError = error; }
+    }
+    if (!manifest) throw lastError || new Error("Could not reload run manifest from sidecar.");
+
+    const beScenarioIndex = (manifest.be_matrix?.scenarios || []).map((s) => ({
+        name: s.name,
+        executionMode: s.execution_mode ?? null,
+        entryVariantKey: s.entry_variant_key ?? null,
+        scenarioKey: s.scenario_key ?? null,
+        triggerBasis: s.trigger_basis ?? null,
+        armLevelR: s.arm_level_r ?? null,
+        size: s.size ?? null,
+    }));
+    const folderName = outputFolderName(manifest.folder) || matched;
+    // Restore the primary execution-mode variant so deriveSourceFile() can
+    // reconstruct entry-variant filenames (trades_<variant>__<entryKey>.csv)
+    // after a refresh, when the in-session bundle/handles are gone.
+    const primaryVariant = (manifest.available_variants && manifest.available_variants[0]) || current.primaryVariant || null;
+    // Phase 2B — restore the entry universe so all TE variants list after refresh.
+    const entryScenarioIndex = (manifest.entry_scenarios?.scenarios || []).map((s) => ({
+        name: s.name,
+        type: "entry",
+        executionMode: s.execution_mode ?? null,
+        entryVariantKey: s.entry_variant_key ?? null,
+        sourceFile: s.name,
+        threshold: s.threshold ?? null,
+        fillMode: s.fill_mode ?? null,
+        label: s.label ?? null,
+        size: s.size ?? null,
+    }));
+    const manifestEntrySummary = (manifest.entry_results && Object.keys(manifest.entry_results).length)
+        ? manifest.entry_results
+        : entrySummaryFromKeys(entryScenarioIndex.map((s) => s.entryVariantKey).filter(Boolean), primaryVariant);
+    const prevEntry = current.entryResults || {};
+    const patch = {
+        lazy: true,
+        reloadAvailable: true,
+        indexOnly: false,
+        storageMode: "lazy_manifest",
+        primaryVariant,
+        // Preserve any already-loaded entry rows; refresh the summary + index.
+        entryResults: { ...prevEntry, summary: manifestEntrySummary, tradesByMode: prevEntry.tradesByMode || {} },
+        entryScenarioIndex,
+        beScenarioIndex,
+        candlesMeta: manifest.candles ? { name: manifest.candles.name, size: manifest.candles.size } : null,
+        candlesLazy: Boolean(manifest.candles),
+        provenance: {
+            beMultiarmEnabled: manifest.provenance?.be_multiarm_enabled ?? null,
+            reverseTouchCancelEnabled: manifest.provenance?.reverse_touch_cancel_enabled ?? null,
+            executionModes: manifest.provenance?.execution_modes ?? null,
+        },
+        largeRunMeta: {
+            reasons: ["manifest reload"],
+            fileCount: manifest.file_count ?? null,
+            beScenarioCount: manifest.be_matrix?.scenario_count ?? beScenarioIndex.length,
+            candlesDeferred: Boolean(manifest.candles),
+        },
+        sourceRunFolderName: folderName || current.sourceRunFolderName || "",
+        sourceRunId: manifest.run_id || current.sourceRunId || "",
+        folderName: folderName || current.folderName || "",
+    };
+    return updateRunBundle(runId, patch);
+}
+
 export async function reloadFullRunFromSidecar(runId) {
     const current = runId ? state.runs[runId] : null;
     if (!current) throw new Error("Run is not available in the local index.");
+
+    // Phase 1B — lazy/large runs can't use the heavy /bundle endpoint (413).
+    if (current.lazy) return reloadLazyRunFromManifest(runId);
 
     const identifiers = runReloadIdentifiers(runId, current);
     if (!identifiers.length) {
@@ -2456,6 +2844,11 @@ function stripBundleForIdb(bundle) {
 
 function persistRunBundleToIdb(runId, bundle) {
     if (!runId || !bundle) return;
+    // LARGE-RUN-IMPORT Phase 1 — never structured-clone a lazy/large bundle into
+    // IndexedDB. Lazy runs carry only metadata + the primary variant; their heavy
+    // collections load on demand from File handles / the sidecar, so persisting
+    // the mirror adds little and risks a multi-second clone or quota blowup.
+    if (bundle.lazy) return;
     // Only persist bundles that carry full data; index-only stubs add nothing
     // and would overwrite a previously-saved full bundle with an empty one.
     if (!bundleHasFullData(bundle)) return;
