@@ -99,6 +99,18 @@ credentials.json
 RESEARCH_PLATFORM_AUDIT.pdf
 frontend/.sp*.cjs
 
+# Accidental root node manifests (real app manifest is frontend/package.json)
+/package.json
+/package-lock.json
+
+# Scratch validation harnesses (prevent re-accumulation)
+/frontend/_*.mjs
+/frontend/_*.cjs
+/frontend/be_debug.mjs
+/frontend/be_sanity.mjs
+/frontend/src/_*.mjs
+/frontend/src/data/__validation__/_*.mjs
+
 # macOS metadata
 ._*
 
