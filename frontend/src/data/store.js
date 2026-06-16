@@ -1883,10 +1883,17 @@ export function setAccountSettings(patch) {
     notify();
 }
 
-// ── Session profile actions (SESSION-STRATEGY-PROFILES Phase 1) ────────────────
-/** Read the current (normalized) session-profile matrix. */
+// ── Session profile actions (SESSION-STRATEGY-CARDS) ───────────────────────────
+/** Read the current (normalized) session cards config. */
 export function getSessionProfiles() {
     return state.sessionProfiles || emptyProfiles();
+}
+
+/** The active run's resolved bundle (or null). Used by Session Cards to check
+ *  which entry/BE variants exist in this export. Read-only. */
+export function getActiveBundle() {
+    const id = state.activeRunId || null;
+    return id ? bundleFor(id) : null;
 }
 
 /**

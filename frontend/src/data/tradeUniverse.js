@@ -643,7 +643,7 @@ export function resolveTradeUniverse(params = {}) {
     // "protected_result" universe — same contract, different trade list — so
     // every page that reads `universe.trades` stays consistent (no parallel BE).
     const layers = normalizeLayers(scenario || {});
-    if (!layers.length) return applySessionProfiles({ universe: baseUniverse, scenario });
+    if (!layers.length) return applySessionProfiles({ universe: baseUniverse, scenario, bundle, variant });
 
     const folded = applyProtectionLayers({ baseUniverse, bundle, layers });
     const protectedTrades = folded.trades || [];
@@ -671,7 +671,7 @@ export function resolveTradeUniverse(params = {}) {
         },
     };
 
-    return applySessionProfiles({ universe: protectedUniverse, scenario });
+    return applySessionProfiles({ universe: protectedUniverse, scenario, bundle, variant });
 }
 
 /**
