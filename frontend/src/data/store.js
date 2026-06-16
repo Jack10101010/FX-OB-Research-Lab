@@ -37,6 +37,7 @@ import {
     describeTradeUniverse,
 } from "./tradeUniverse";
 import { applyScenarioPatchLayerSafety } from "./runVariantResolve";
+import { normalizeProfiles, isProfilesActive, emptyProfiles } from "./sessionProfiles";
 
 const LS_KEY = "fxob_runs";
 const LS_RUN_INDEX = "fxob_runs_index_v1";
@@ -45,6 +46,7 @@ const LS_PROJECTS = "fxob_projects";
 const LS_ACTIVE = "fxob_active_run_id";
 const LS_ACTIVE_PROJECT = "fxob_active_project_id";
 const LS_SCENARIO = "fxob_scenario_v1";
+const LS_SESSION_PROFILES = "fxob_session_profiles_v1";
 // Phase RB-1 — Results Basis + Account Settings persistence.
 const LS_RESULTS_BASIS = "fxob_results_basis_v1";
 const LS_ACCOUNT_SETTINGS = "fxob_account_settings_v1";
@@ -172,6 +174,21 @@ function loadPersistedScenario(fallbackRunId) {
     return { ...DEFAULT_SCENARIO, runId: fallbackRunId || null };
 }
 
+// ── Session profiles (SESSION-STRATEGY-PROFILES Phase 1) ───────────────────────
+// A frontend-only per-session × structure × direction enable matrix. Persisted in
+// its OWN slice (NOT inside `scenario`) so it survives run switches, which reset
+// the scenario to DEFAULT_SCENARIO. Merged into the scenario at universe read-time
+// (see getTradeUniverse / getTradeUniverseSignature) so the pure resolver only
+// needs to know about `scenario.sessionProfiles`. Default is disabled → byte-
+// identical to pre-feature behavior.
+function loadPersistedSessionProfiles() {
+    try {
+        return normalizeProfiles(safeJsonParse(localStorage.getItem(LS_SESSION_PROFILES), null));
+    } catch {
+        return emptyProfiles();
+    }
+}
+
 // ── Results Basis + Account Settings (Phase RB-1) ──────────────────────────
 // "Results Basis" answers HOW trades are measured (Raw R vs Current Equity).
 // Defaults to "raw_r" so nothing about visible analytics changes in this phase.
@@ -218,6 +235,8 @@ let state = {
     focusedFftEvent: null,
     // Structured scenario — the canonical answer to "what is the Strategy Map showing?"
     scenario: loadPersistedScenario((() => { try { return localStorage.getItem(LS_ACTIVE) || null; } catch { return null; } })()),
+    // Session profiles — frontend-only enable matrix (own slice; see loader above).
+    sessionProfiles: loadPersistedSessionProfiles(),
     // Results Basis axis (Phase RB-1) — HOW trades are measured. No page reads
     // these yet; they default to current behavior (Raw R).
     resultsBasis: loadPersistedResultsBasis(),
@@ -1177,6 +1196,15 @@ export function clearPreviewLens() {
  * @param {object|null} [scenarioOverride]   overrides `state.scenario` for this call.
  * @returns {object} TradeUniverse — see `data/tradeUniverse.js` for shape.
  */
+// SESSION-STRATEGY-PROFILES Phase 1 — inject the active session-profile matrix
+// into the scenario at read-time. Returns the SAME scenario reference when no
+// profiles are active, so resolveTradeUniverse stays on its byte-identical path.
+function scenarioWithSessionProfiles(scenario) {
+    const profiles = state.sessionProfiles;
+    if (!isProfilesActive(profiles)) return scenario;
+    return { ...(scenario || {}), sessionProfiles: profiles };
+}
+
 export function getTradeUniverse(runId = null, scenarioOverride = null) {
     const effectiveRunId = runId || state.activeRunId || null;
     const bundle = effectiveRunId ? bundleFor(effectiveRunId) : null;
@@ -1186,7 +1214,7 @@ export function getTradeUniverse(runId = null, scenarioOverride = null) {
         || null;
     return resolveTradeUniverse({
         bundle,
-        scenario,
+        scenario: scenarioWithSessionProfiles(scenario),
         fallbackVariant,
     });
 }
@@ -1227,8 +1255,11 @@ export function getTradeUniverseSignature(runId = null, scenarioOverride = null)
     const fallbackVariant = state.selectedTradeVariant || bundle?.primaryVariant || null;
     // Scenario is a small object; JSON captures family/threshold/fillMode/
     // directionalStorageKey/layers/runId so any selection change re-resolves.
+    // Merge in session profiles so the signature changes when the matrix changes
+    // (and stays identical when it is inactive — same scenario reference).
+    const scenarioForSig = scenarioWithSessionProfiles(scenario);
     let scn = "";
-    try { scn = scenario ? JSON.stringify(scenario) : ""; } catch { scn = String(scenario); }
+    try { scn = scenarioForSig ? JSON.stringify(scenarioForSig) : ""; } catch { scn = String(scenarioForSig); }
     return `${effectiveRunId}::${fallbackVariant}::${scn}::${tradeDataToken(bundle)}`;
 }
 
@@ -1849,6 +1880,23 @@ export function setAccountSettings(patch) {
         accountSettings: normalizeAccountSettings({ ...state.accountSettings, ...patch }),
     };
     persistAccountSettings();
+    notify();
+}
+
+// ── Session profile actions (SESSION-STRATEGY-PROFILES Phase 1) ────────────────
+/** Read the current (normalized) session-profile matrix. */
+export function getSessionProfiles() {
+    return state.sessionProfiles || emptyProfiles();
+}
+
+/**
+ * Replace the session-profile matrix with a normalized version of `next`.
+ * Frontend-only; never triggers a backend run. Persists + notifies so every
+ * useTradeUniverse consumer re-resolves against the new mask.
+ */
+export function setSessionProfiles(next) {
+    state = { ...state, sessionProfiles: normalizeProfiles(next) };
+    persistSessionProfiles();
     notify();
 }
 
@@ -2813,6 +2861,14 @@ function persistAccountSettings() {
         localStorage.setItem(LS_ACCOUNT_SETTINGS, JSON.stringify(state.accountSettings));
     } catch {
         // Account settings are non-critical display prefs.
+    }
+}
+
+function persistSessionProfiles() {
+    try {
+        localStorage.setItem(LS_SESSION_PROFILES, JSON.stringify(state.sessionProfiles));
+    } catch {
+        // Session profiles are a non-critical frontend-only overlay.
     }
 }
 

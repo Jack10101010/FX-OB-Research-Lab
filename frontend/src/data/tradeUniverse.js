@@ -69,6 +69,10 @@ import {
     buildProtectedSourceKey,
     buildProtectionLabel,
 } from "./protectionLayers";
+// SESSION-STRATEGY-PROFILES Phase 1 — frontend-only masking layer applied as the
+// final step of universe resolution. Returns the SAME universe reference when no
+// session profiles are active, so the no-profile path stays byte-identical.
+import { applySessionProfiles } from "./sessionProfiles";
 
 // ───────────────────────────────────────────────────────────────────────────────
 // Pure helpers (extracted from useResolvedScenario.js so both consumers share
@@ -639,14 +643,14 @@ export function resolveTradeUniverse(params = {}) {
     // "protected_result" universe — same contract, different trade list — so
     // every page that reads `universe.trades` stays consistent (no parallel BE).
     const layers = normalizeLayers(scenario || {});
-    if (!layers.length) return baseUniverse;
+    if (!layers.length) return applySessionProfiles({ universe: baseUniverse, scenario });
 
     const folded = applyProtectionLayers({ baseUniverse, bundle, layers });
     const protectedTrades = folded.trades || [];
     const protectedSourceKey = buildProtectedSourceKey(baseUniverse.sourceKey, layers);
     const protectionLabel = layers.map(buildProtectionLabel).join(" + ");
 
-    return {
+    const protectedUniverse = {
         ...baseUniverse,
         universeType: "protected_result",
         baseUniverseType: baseUniverse.universeType,
@@ -666,6 +670,8 @@ export function resolveTradeUniverse(params = {}) {
             exploratory: true,
         },
     };
+
+    return applySessionProfiles({ universe: protectedUniverse, scenario });
 }
 
 /**
