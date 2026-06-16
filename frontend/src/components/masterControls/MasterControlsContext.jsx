@@ -11,6 +11,7 @@ import {
     useDataset,
     getRunData,
     getRawRunData,
+    getRawTradeDataToken,
     addRunBundle,
     setPreviewLens,
     clearPreviewLens,
@@ -53,9 +54,13 @@ const COMPOSED_INSTANT_KEYS = new Set([
 // Combined signature across every instant field (run id + cost + filter + FFT + RR).
 // Used so a manually-cleared composed bundle isn't rebuilt until one of the relevant
 // fields or the run changes (mirrors the per-lens signatures above, unified).
-function composedSignature(runId, cfg) {
+function composedSignature(runId, cfg, rawDataToken = "") {
     return JSON.stringify({
         runId: runId || null,
+        // LAZY-SNAPSHOT-FIX — RAW trade-data token so the signature (and the manual
+        // suppression keyed on it) changes when lazy variant rows merge, forcing a
+        // recompose instead of serving a stale preview-lens snapshot.
+        rawDataToken: rawDataToken || null,
         spread: cfg?.spread ?? null,
         slippage: cfg?.slippage ?? null,
         commission: cfg?.commission ?? null,
@@ -206,6 +211,12 @@ export function MasterControlsProvider({ children }) {
 
     // ── Store subscriptions ─────────────────────────────────────────────────
     const { activeRunId } = useDataset();
+
+    // LAZY-SNAPSHOT-FIX — recomputed each render (the context re-renders on every
+    // store notify, including lazy variant merges). Feeds the composed-preview
+    // build effect + suppression signature so the preview lens recomposes when the
+    // active run's RAW trade rows change, instead of serving a stale snapshot.
+    const rawDataToken = getRawTradeDataToken(activeRunId);
 
     // ── Draft config state ──────────────────────────────────────────────────
     // null  → no edits; the effective config falls back to activeConfig
@@ -417,9 +428,9 @@ export function MasterControlsProvider({ children }) {
      * until one of them or the active run changes (Phase 12B-2).
      */
     const clearComposedPreview = useCallback(() => {
-        composedSuppressRef.current = composedSignature(activeRunId, effectiveConfig);
+        composedSuppressRef.current = composedSignature(activeRunId, effectiveConfig, rawDataToken);
         setComposedPreviewResult(null);
-    }, [activeRunId, effectiveConfig]);
+    }, [activeRunId, effectiveConfig, rawDataToken]);
 
     /**
      * Promote the completed preview bundle into a permanent run — Phase 4C.
@@ -600,8 +611,10 @@ export function MasterControlsProvider({ children }) {
             setComposedPreviewResult(null);
             return;
         }
-        // Respect a manual dismissal of this exact combination.
-        if (composedSuppressRef.current === composedSignature(activeRunId, effectiveConfig)) return;
+        // Respect a manual dismissal of this exact combination (incl. raw-data
+        // state, so a dismissal from a pre-lazy-load snapshot doesn't block the
+        // recompose once new variant rows arrive).
+        if (composedSuppressRef.current === composedSignature(activeRunId, effectiveConfig, rawDataToken)) return;
 
         const sourceBundle = getRawRunData(activeRunId);
         if (!sourceBundle) {
@@ -621,7 +634,10 @@ export function MasterControlsProvider({ children }) {
         };
 
         setComposedPreviewResult(composePreviewBundle(sourceBundle, input));
-    }, [activeRunId, dirtyFieldList, effectiveConfig, highestRerunTier]); // eslint-disable-line react-hooks/exhaustive-deps
+        // LAZY-SNAPSHOT-FIX — rawDataToken added so a lazy variant/row merge into
+        // the RAW store re-runs this effect and recomposes the lens (it composes
+        // from getRawRunData, which now carries the freshly-loaded rows).
+    }, [activeRunId, dirtyFieldList, effectiveConfig, highestRerunTier, rawDataToken]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // ── Phase 8B — apply the temporary bundle to the whole app via the store lens ─
     // `previewLens` is read live from the store. The context re-renders on every store
