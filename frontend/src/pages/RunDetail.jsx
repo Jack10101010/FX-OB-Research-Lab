@@ -6,7 +6,6 @@ import { MetricChip } from "@/components/lab/MetricChip";
 import { EquityCurveV2, MiniLine } from "@/components/lab/EquityCurve";
 import { DataTable, Pill } from "@/components/lab/DataTable";
 import { NeonButton, NeonInput, NeonSelect, FilterToggle } from "@/components/lab/controls";
-import { TradeSanityCard } from "@/components/lab/TradeSanityCard";
 import { compactTimeframe, formatRunDateRange, getRunDisplayName, reloadFullRunFromSidecar, updateRunBundle, useDataset } from "@/data/store";
 import { setActiveRunId, setSelectedTradeVariant, setFocusedFftEvent } from "@/data/store";
 import { getNextStep, resolveRunReference, summarizeRunForDelta, buildRunDelta } from "@/data/projectWorkflow";
@@ -276,7 +275,7 @@ export default function RunDetail() {
     //
     // `universe` drives selector labels, metadata, warnings, and — via
     // displayTrades — all analytics sections (KPIs, equity, ledger).
-    const { resultView, setResultView, universe } = useRunVariant(runId);
+    const { resultView, setResultView, universe, lazyStatus } = useRunVariant(runId);
     // FFT-IA Phase 2 — shared FFT analysis feeding the compact overview card below.
     const fftOverview = useFftAnalysis(runId, resultView);
     // Build the flat list of selectable Result View options for this bundle.
@@ -312,11 +311,13 @@ export default function RunDetail() {
                 const ftModeSet = new Set(ftModes);
                 ftModes.forEach((fillMode) => {
                     // RW-9: expanded labels for candle-fill clarity.
-                    const fillStr = fillMode === "next" ? " · Next candle"
-                        : fillMode === "same" ? " · Same candle"
+                    // Arm-timing labels (C0–C6), matching the Strategy Map +
+                    // result-view header convention: same=C0, next=C1, d2..d6=C2..C6.
+                    const delayMatch = typeof fillMode === "string" ? fillMode.match(/^d(\d+)$/) : null;
+                    const fillStr = fillMode === "same" ? " · Arm C0"
+                        : fillMode === "next" ? " · Arm C1"
                         : fillMode === "both" ? " · Both"
-                        : fillMode === "d2"   ? " · Delay +2"
-                        : fillMode === "d3"   ? " · Delay +3"
+                        : delayMatch ? ` · Arm C${delayMatch[1]}`
                         : "";
                     views.push({
                         key: `${family}_${threshold}_${fillMode ?? "both"}`,
@@ -344,7 +345,7 @@ export default function RunDetail() {
                             if (!ftModeSet.has("same")) {
                                 views.push({
                                     key: `${family}_${threshold}_same`,
-                                    label: `${familyLabel}${threshStr} · Same candle`,
+                                    label: `${familyLabel}${threshStr} · Arm C0`,
                                     family,
                                     threshold,
                                     fillMode: "same",
@@ -354,7 +355,7 @@ export default function RunDetail() {
                             if (!ftModeSet.has("next")) {
                                 views.push({
                                     key: `${family}_${threshold}_next`,
-                                    label: `${familyLabel}${threshStr} · Next candle`,
+                                    label: `${familyLabel}${threshStr} · Arm C1`,
                                     family,
                                     threshold,
                                     fillMode: "next",
@@ -386,11 +387,13 @@ export default function RunDetail() {
     // ── RW-10A: grouped navigation + active option ───────────────────────────
     const resultViewGroups = React.useMemo(() => {
         const FILL_SLOTS = [
-            { fillMode: null,   displayLabel: "Both" },
-            { fillMode: "same", displayLabel: "Same candle" },
-            { fillMode: "next", displayLabel: "Next candle" },
-            { fillMode: "d2",   displayLabel: "Delay +2" },
-            { fillMode: "d3",   displayLabel: "Delay +3" },
+            { fillMode: "same", displayLabel: "Arm C0" },
+            { fillMode: "next", displayLabel: "Arm C1" },
+            { fillMode: "d2",   displayLabel: "Arm C2" },
+            { fillMode: "d3",   displayLabel: "Arm C3" },
+            { fillMode: "d4",   displayLabel: "Arm C4" },
+            { fillMode: "d5",   displayLabel: "Arm C5" },
+            { fillMode: "d6",   displayLabel: "Arm C6" },
         ];
         const groups = [];
         const baselineOpt = resultViewOptions.find((o) => o.family === "baseline");
@@ -462,10 +465,10 @@ export default function RunDetail() {
         if (fam === "penetration") return thr != null ? `Penetration ${thr}%` : "Penetration";
         if (fam === "triggered_edge") {
             const base = thr != null ? `Triggered Edge ${thr}%` : "Triggered Edge";
-            const mode = fm === "same" ? " · Same Candle"
-                       : fm === "next" ? " · Next Candle"
-                       : fm === "d2"   ? " · Delay +2"
-                       : fm === "d3"   ? " · Delay +3"
+            const dm = typeof fm === "string" ? fm.match(/^d(\d+)$/) : null;
+            const mode = fm === "same" ? " · Arm C0"
+                       : fm === "next" ? " · Arm C1"
+                       : dm ? ` · Arm C${dm[1]}`
                        : " · Both";
             return base + mode;
         }
@@ -582,20 +585,18 @@ export default function RunDetail() {
     };
     const isActiveRun = run.id === ACTIVE_RUN.id;
     React.useEffect(() => {
-        const hasRunSpecificData = Boolean(
-            runData
-            && !runData.indexOnly
-            && runData.storageMode !== "index_only"
-            && (
-                (Array.isArray(runData.trades) && runData.trades.length)
-                || Object.values(runData.tradesByVariant || {}).some((trades) => Array.isArray(trades) && trades.length)
-                || (Array.isArray(runData.orderBlocks) && runData.orderBlocks.length)
-            )
-        );
-        if (runId && runId !== ACTIVE_RUN.id && hasRunSpecificData) {
+        // RUN-IDENTITY: the route's runId is authoritative — make it the GLOBAL active
+        // run whenever it exists in the store, even for lazy/index-only runs whose rows
+        // are still deferred. The previous gate required loaded trades/OBs, so opening a
+        // lazy run never claimed the global active run, and other pages (Protection Lab,
+        // etc., which read the global activeRunId — not this route) showed the prior /
+        // fallback run. We no longer require loaded rows; we only require the run to be
+        // known to the store so we never activate a bogus id.
+        const runExistsInStore = Boolean(runData) || RUNS.some((r) => r.id === runId);
+        if (runId && runId !== ACTIVE_RUN.id && runExistsInStore) {
             setActiveRunId(runId);
         }
-    }, [ACTIVE_RUN.id, runData, runId]);
+    }, [ACTIVE_RUN.id, runData, runId, RUNS]);
     const selectedRunVariant =
         ACTIVE_TRADE_VARIANT && runData?.tradesByVariant?.[ACTIVE_TRADE_VARIANT]
             ? ACTIVE_TRADE_VARIANT
@@ -1528,12 +1529,33 @@ export default function RunDetail() {
                 )}
             />
 
-            {/* RUN-SANITY-CARD-1: Trade sanity — direction/structure/outcome breakdown */}
-            <TradeSanityCard
-                trades={displayTrades}
-                resultView={resultView}
-                className="mx-6 mb-3 preview-surface"
-            />
+            {/* LAZY-RUN-PERFORMANCE Phase 1 — compact loading/error banner for
+                on-demand variant loads on large/lazy runs (entry variants + the
+                base primary). Uses the status surfaced by useRunVariant →
+                useLazyEntryVariant; renders nothing for small/eager runs. */}
+            {(lazyStatus?.loading || lazyStatus?.error) && (
+                <div
+                    data-testid="lazy-variant-status"
+                    className={`mx-6 mt-2 flex items-center gap-2 px-3 py-2 clip-bevel-sm border ${
+                        lazyStatus.error
+                            ? "border-[hsl(var(--danger)/0.5)] bg-[hsl(var(--danger)/0.08)]"
+                            : "border-[hsl(var(--accent-secondary)/0.5)] bg-[hsl(var(--accent-secondary)/0.08)]"
+                    }`}
+                >
+                    {lazyStatus.error ? (
+                        <span className="text-[11px] font-ui text-[hsl(var(--danger))]">
+                            Could not load this variant: {lazyStatus.error}. Ensure the sidecar is running.
+                        </span>
+                    ) : (
+                        <>
+                            <span className="inline-block w-3 h-3 rounded-full border-2 border-[hsl(var(--accent-secondary))] border-t-transparent animate-spin" />
+                            <span className="text-[11px] font-ui text-[hsl(var(--text-2))]">
+                                Loading variant rows on demand…
+                            </span>
+                        </>
+                    )}
+                </div>
+            )}
 
             {/* RW-13 → RUN-VARIANT-HEADER Phase 2: Result View header, extracted into a
                 reusable controlled component. The store scenario is the single source of
