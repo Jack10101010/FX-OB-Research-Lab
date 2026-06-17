@@ -28,6 +28,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import PortfolioCompare from "./PortfolioCompare";
 
 const btn = "clip-bevel-sm px-2.5 py-1 text-[11px] font-ui border border-[hsl(var(--border-mid))] text-[hsl(var(--text-1))] hover:border-[hsl(var(--accent-secondary))] transition-colors inline-flex items-center gap-1.5 disabled:opacity-40 disabled:pointer-events-none";
 
@@ -47,6 +48,7 @@ export default function PortfolioBar() {
     const dirty = isWorkingCopyDirty();
 
     const [managerOpen, setManagerOpen] = useState(false);
+    const [compareOpen, setCompareOpen] = useState(false);
     const [saveAs, setSaveAs] = useState({ open: false, name: "", desc: "" });
     const [guard, setGuard] = useState({ open: false, targetId: null });
     const [rename, setRename] = useState({ id: null, name: "" });
@@ -95,6 +97,7 @@ export default function PortfolioBar() {
                     <DropdownMenuItem onSelect={openSaveAs}>Save As…</DropdownMenuItem>
                     {loaded && dirty && <DropdownMenuItem onSelect={() => revertPortfolio()}>Revert changes</DropdownMenuItem>}
                     <DropdownMenuSeparator />
+                    <DropdownMenuItem onSelect={() => setCompareOpen(true)}>Compare…</DropdownMenuItem>
                     <DropdownMenuItem onSelect={() => setManagerOpen(true)}>Manage…</DropdownMenuItem>
                 </DropdownMenuContent>
             </DropdownMenu>
@@ -137,6 +140,9 @@ export default function PortfolioBar() {
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
+
+            {/* Compare */}
+            <PortfolioCompare open={compareOpen} onOpenChange={setCompareOpen} />
 
             {/* Manager */}
             <PortfolioManager
