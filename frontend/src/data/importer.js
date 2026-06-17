@@ -56,6 +56,48 @@ const outcomeLabel = (s) => {
 };
 const isNum = (v) => v != null && isFinite(Number(v));
 const numOrNull = (v) => (isNum(v) ? Number(v) : null);
+
+// ── Multi-RR target export axis (2B.1a) — importer mapping ────────────────────
+// Backend (2B.0) emits per-trade flattened columns exit_r_rr_<token> and a
+// run-level target_set. Token convention MUST match the backend rr_token exactly:
+//   1.0 → "1", 2.0 → "2", 3.3 → "3p3", 0.5 → "0p5", 1.5 → "1p5".
+export function rrToken(rr) {
+    const v = Number(rr);
+    if (!isFinite(v)) return null;
+    return Number.isInteger(v) ? String(v) : String(v).replace(".", "p");
+}
+
+// Positive floats only, deduped, ascending, capped to `cap` (matches backend).
+export function normalizeTargetSet(raw, cap = 6) {
+    const out = [];
+    const seen = new Set();
+    for (const x of (Array.isArray(raw) ? raw : [])) {
+        const v = Number(x);
+        if (!isFinite(v) || v <= 0) continue;
+        const key = Math.round(v * 1e6) / 1e6;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(v);
+    }
+    out.sort((a, b) => a - b);
+    return out.slice(0, cap);
+}
+
+// Map dynamic exit_r_rr_<token> columns on a parsed (lowercased-key) row into
+// { token: number }. Only finite numeric values are included; {} when none. The
+// column suffix is the key verbatim, so it always matches the backend token.
+export function extractExitRByTarget(row) {
+    const out = {};
+    if (!row || typeof row !== "object") return out;
+    for (const k of Object.keys(row)) {
+        const m = /^exit_r_rr_(.+)$/.exec(k);
+        if (!m) continue;
+        const v = row[k];
+        if (v == null || v === "" || !isFinite(Number(v))) continue;
+        out[m[1]] = Number(v);
+    }
+    return out;
+}
 const boolOrNull = (v) => {
     if (v == null || v === "") return null;
     if (typeof v === "boolean") return v;
@@ -411,6 +453,7 @@ export function parseTradesCSV(text) {
         const displayObId = formatEntityId("OB", rawObId);
         const derivedTradeId = rawObId != null && rawObId !== "" ? formatEntityId("T", rawObId) : "";
         const fillSession = String(pick(r, "fill_session", "fillSession", "trade_session", "tradeSession", "entry_session", "entrySession") || "");
+        const exitRByTarget = extractExitRByTarget(r); // 2B.1a — multi-RR target outcomes
         const rawSession = String(pick(r, "session") || "");
         const originNewsWindow = boolOrNull(pick(r, "ob_origin_news_window", "obOriginNewsWindow", "obCreatedDuringNews")) ?? false;
         const detectionNewsWindow = boolOrNull(pick(r, "ob_detection_news_window", "obDetectionNewsWindow", "obDetectedDuringNews")) ?? false;
@@ -464,6 +507,9 @@ export function parseTradesCSV(text) {
             r_if_no_target: numOrNull(pick(r, "r_if_no_target", "rIfNoTarget")),
             rIfNoTargetModel: String(pick(r, "r_if_no_target_model", "rIfNoTargetModel") || ""),
             r_if_no_target_model: String(pick(r, "r_if_no_target_model", "rIfNoTargetModel") || ""),
+            // 2B.1a — exact multi-RR target outcomes: { token: exitR }. {} when the
+            // backend emitted no exit_r_rr_* columns (pre-2B bundles unchanged).
+            exit_r_by_target: exitRByTarget,
             // Post-stop continuation (backend V5 Phase 2; LOSS rows only). Max favorable R
             // AFTER the stop candle, measured from the ORIGINAL entry, over a finite horizon
             // (post_stop_lookahead_bars; default 50). Powers Confirmed False Loser detection.
@@ -1853,6 +1899,8 @@ export async function ingestRunBundle(fileList, options = {}) {
         originalRunId,
         config: cfg,
         summary: runSummary,
+        // 2B.1a — run-level RR target axis (normalized). [] when absent → no-op.
+        targetSet: normalizeTargetSet(sm.target_set ?? cfg.target_set ?? collected.manifest?.target_set ?? []),
         trades: primaryTrades,
         tradesByVariant,
         primaryVariant,

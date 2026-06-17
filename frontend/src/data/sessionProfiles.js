@@ -98,8 +98,8 @@ export const BASELINE_ENTRY_ID = "entry_baseline";
 export function emptyProfiles() {
     return {
         enabled: false,
-        globalDefaultRef: { entry: null, be: null },
-        profiles: { entry: { [BASELINE_ENTRY_ID]: { model: "baseline" } }, be: {} },
+        globalDefaultRef: { entry: null, be: null, target: null },
+        profiles: { entry: { [BASELINE_ENTRY_ID]: { model: "baseline" } }, be: {}, target: {} },
         control: { baselineProfileRef: BASELINE_ENTRY_ID },
         cards: {},
     };
@@ -195,6 +195,37 @@ function normBeSel(raw) {
     return { trigger, armR };
 }
 
+// ── Target profiles (2B.1b) — RR targets only; no time-horizon targets ──────────
+function normTargetSel(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    if (String(raw.type || "rr").toLowerCase() !== "rr") return null; // RR only
+    const value = Number(raw.value);
+    if (!Number.isFinite(value) || value <= 0) return null;
+    return { type: "rr", value };
+}
+/** Deterministic id; token MUST match the backend rr_token (1.0→"1", 3.3→"3p3"). */
+export function targetProfileId(sel) {
+    const clean = normTargetSel(sel);
+    return clean ? `target_rr_${numTok(clean.value)}` : null;
+}
+export function targetProfileLabel(sel) {
+    if (!sel || sel.value == null) return "None";
+    return `${sel.value}R`;
+}
+export function listTargetProfiles(profiles) {
+    const map = profiles?.profiles?.target || {};
+    return Object.keys(map).map((id) => ({ id, sel: map[id], label: targetProfileLabel(map[id]) }));
+}
+export function addTargetProfile(profiles, sel) {
+    const clean = normTargetSel(sel);
+    if (!clean) return profiles;
+    const id = targetProfileId(clean);
+    return { ...profiles, profiles: { ...profiles.profiles, target: { ...(profiles.profiles?.target || {}), [id]: clean } } };
+}
+export function removeTargetProfile(profiles, id) {
+    return removeProfile(profiles, "target", id);
+}
+
 /**
  * Coerce any persisted/loaded value into a clean named-profile portfolio object.
  * Migrates BOTH legacy shapes deterministically (no data loss, no surprises):
@@ -220,13 +251,15 @@ export function normalizeProfiles(raw) {
     };
     seed("entry", normEntrySel);
     seed("be", normBeSel);
+    seed("target", normTargetSel);
 
     // Hoist an inline sel into the library, returning its id (or null).
     const hoistEntry = (sel) => { const c = normEntrySel(sel); if (!c) return null; const id = entryProfileId(c); out.profiles.entry[id] = c; return id; };
     const hoistBe = (sel) => { const c = normBeSel(sel); if (!c) return null; const id = beProfileId(c); out.profiles.be[id] = c; return id; };
+    const hoistTarget = (sel) => { const c = normTargetSel(sel); if (!c) return null; const id = targetProfileId(c); out.profiles.target[id] = c; return id; };
 
-    // Resolve a slot's entry/be into a library ref: prefer inline (hoist), else a
-    // valid ref string. Dangling refs are dropped on the final pass below.
+    // Resolve a slot's entry/be/target into a library ref: prefer inline (hoist),
+    // else a valid ref string. Dangling refs are dropped on the final pass below.
     const refsFor = (obj) => {
         const r = {};
         if (obj && typeof obj === "object") {
@@ -234,25 +267,29 @@ export function normalizeProfiles(raw) {
             else if (typeof obj.entryRef === "string") r.entryRef = obj.entryRef;
             if (obj.be) { const id = hoistBe(obj.be); if (id) r.beRef = id; }
             else if (typeof obj.beRef === "string") r.beRef = obj.beRef;
+            if (obj.target) { const id = hoistTarget(obj.target); if (id) r.targetRef = id; }
+            else if (typeof obj.targetRef === "string") r.targetRef = obj.targetRef;
             if (obj.enabled === false || obj.enabled === true) r.enabled = obj.enabled;
         }
         return r;
     };
 
-    // 2. Global default — canonical `globalDefaultRef:{entry:id,be:id}` (id strings),
-    //    or legacy inline `globalDefault:{entry:sel,be:sel}` (hoisted).
-    let gdEntry = null, gdBe = null;
+    // 2. Global default — canonical `globalDefaultRef:{entry,be,target}` (id strings),
+    //    or legacy inline `globalDefault:{entry,be,target}` (hoisted).
+    let gdEntry = null, gdBe = null, gdTarget = null;
     const rawGd = raw.globalDefaultRef;
     if (rawGd && typeof rawGd === "object") {
         if (typeof rawGd.entry === "string") gdEntry = rawGd.entry;
         if (typeof rawGd.be === "string") gdBe = rawGd.be;
+        if (typeof rawGd.target === "string") gdTarget = rawGd.target;
     }
     const legacyGd = raw.globalDefault;
     if (legacyGd && typeof legacyGd === "object") {
         if (legacyGd.entry) { const id = hoistEntry(legacyGd.entry); if (id) gdEntry = id; }
         if (legacyGd.be) { const id = hoistBe(legacyGd.be); if (id) gdBe = id; }
+        if (legacyGd.target) { const id = hoistTarget(legacyGd.target); if (id) gdTarget = id; }
     }
-    out.globalDefaultRef = { entry: gdEntry, be: gdBe };
+    out.globalDefaultRef = { entry: gdEntry, be: gdBe, target: gdTarget };
 
     // 3. Cards.
     if (raw.cells && !raw.cards) {
@@ -293,13 +330,16 @@ export function normalizeProfiles(raw) {
     // 5. Drop dangling refs (point at a profile that doesn't exist → inherit).
     const validEntry = (id) => id && out.profiles.entry[id] ? id : null;
     const validBe = (id) => id && out.profiles.be[id] ? id : null;
+    const validTarget = (id) => id && out.profiles.target[id] ? id : null;
     out.globalDefaultRef.entry = validEntry(out.globalDefaultRef.entry);
     out.globalDefaultRef.be = validBe(out.globalDefaultRef.be);
+    out.globalDefaultRef.target = validTarget(out.globalDefaultRef.target);
     for (const s of Object.keys(out.cards)) {
         const card = out.cards[s];
         const fix = (slot) => {
             if ("entryRef" in slot && !validEntry(slot.entryRef)) delete slot.entryRef;
             if ("beRef" in slot && !validBe(slot.beRef)) delete slot.beRef;
+            if ("targetRef" in slot && !validTarget(slot.targetRef)) delete slot.targetRef;
         };
         fix(card.default);
         for (const c of Object.keys(card.overrides)) fix(card.overrides[c]);
@@ -459,6 +499,15 @@ export function entryAvailable(bundle, entry) {
     return entryUniverseTrades(bundle, key) != null;
 }
 
+// Target available when the run exported it: its token is in bundle.targetSet.
+export function targetAvailable(bundle, sel) {
+    if (!sel) return true; // no target → uses the run's baked target
+    const set = bundle?.targetSet;
+    if (!Array.isArray(set) || !set.length) return false;
+    const tok = numTok(sel.value);
+    return set.some((v) => numTok(v) === tok);
+}
+
 export function beAvailable(bundle, variant, entryKey, be) {
     if (!be) return true; // inherit / none
     return beCellTrades(bundle, variant, entryKey, be) != null;
@@ -469,6 +518,7 @@ export function beAvailable(bundle, variant, entryKey, be) {
 /** Look up a ref in the named library → EntrySel/BeSel (or null). */
 function lookupEntry(profiles, ref) { return ref ? (profiles?.profiles?.entry?.[ref] || null) : null; }
 function lookupBe(profiles, ref) { return ref ? (profiles?.profiles?.be?.[ref] || null) : null; }
+function lookupTarget(profiles, ref) { return ref ? (profiles?.profiles?.target?.[ref] || null) : null; }
 
 // Ref-field provenance shape: { ref, sel, source, explicit, inherited }.
 function refField(ref, sel, source, explicit) {
@@ -508,7 +558,7 @@ function _resolveCohortChain(profiles, sessionKey, cellKey) {
         else enable = { value: true, source: "default-on" };
     }
     if (!enable.value) {
-        return { cohort, disabled: true, enable, entry: NONE_REF(), be: NONE_REF() };
+        return { cohort, disabled: true, enable, entry: NONE_REF(), be: NONE_REF(), target: NONE_REF() };
     }
 
     // ── refs (enabled cohorts only) ─────────────────────────────────────────────
@@ -522,7 +572,8 @@ function _resolveCohortChain(profiles, sessionKey, cellKey) {
     };
     const entry = resolveRef(lookupEntry, ov.entryRef, def.entryRef, gd.entry);
     const be = resolveRef(lookupBe, ov.beRef, def.beRef, gd.be);
-    return { cohort, disabled: false, enable, entry, be };
+    const target = resolveRef(lookupTarget, ov.targetRef, def.targetRef, gd.target);
+    return { cohort, disabled: false, enable, entry, be, target };
 }
 
 /**
@@ -532,13 +583,15 @@ function _resolveCohortChain(profiles, sessionKey, cellKey) {
  */
 export function resolveCohortConfig(profiles, sessionKey, cellKey) {
     const chain = _resolveCohortChain(profiles, sessionKey, cellKey);
-    if (chain.disabled) return { disabled: true, entry: null, be: null, entryRef: null, beRef: null };
+    if (chain.disabled) return { disabled: true, entry: null, be: null, target: null, entryRef: null, beRef: null, targetRef: null };
     return {
         disabled: false,
         entry: chain.entry.sel,
         be: chain.be.sel,
+        target: chain.target.sel,
         entryRef: chain.entry.ref,
         beRef: chain.be.ref,
+        targetRef: chain.target.ref,
     };
 }
 
@@ -561,10 +614,16 @@ export function resolveCohortAvailability(profiles, bundle, variant, sessionKey,
     const chain = _resolveCohortChain(profiles, sessionKey, cellKey);
     const cohort = chain.cohort;
     if (chain.disabled) {
-        return { cohort, entry: { status: "na", ref: null, key: null }, be: { status: "na", ref: null, key: null } };
+        return {
+            cohort,
+            entry: { status: "na", ref: null, key: null },
+            be: { status: "na", ref: null, key: null },
+            target: { status: "na", ref: null, token: null },
+        };
     }
     const entrySel = chain.entry.sel;
     const beSel = chain.be.sel;
+    const targetSel = chain.target.sel;
     const entryKey = entrySel ? buildEntryKey(entrySel) : "baseline";
 
     const entryAv = entrySel
@@ -575,7 +634,11 @@ export function resolveCohortAvailability(profiles, bundle, variant, sessionKey,
         ? { status: beAvailable(bundle, variant, entryKey, beSel) ? "available" : "unavailable", ref: chain.be.ref, key: entryKey }
         : { status: "na", ref: null, key: null };
 
-    return { cohort, entry: entryAv, be: beAv };
+    const targetAv = targetSel
+        ? { status: targetAvailable(bundle, targetSel) ? "available" : "unavailable", ref: chain.target.ref, token: numTok(targetSel.value) }
+        : { status: "na", ref: null, token: null };
+
+    return { cohort, entry: entryAv, be: beAv, target: targetAv };
 }
 
 /** Active pair label from the bundle (pair-agnostic config; never stored). */
@@ -607,6 +670,10 @@ export function buildEffectivePortfolioMap(profiles, bundle, variant) {
                 beLabel: provenance.be.sel ? beProfileLabel(provenance.be.sel) : "None",
                 beSource: provenance.be.source,
                 beStatus: availability.be.status,
+                targetRef: provenance.target.ref,
+                targetLabel: provenance.target.sel ? targetProfileLabel(provenance.target.sel) : "Run default",
+                targetSource: provenance.target.source,
+                targetStatus: availability.target.status,
                 usingBaseEntry,
             };
             cells[`${s}|${c}`] = { session: s, cell: c, provenance, availability, effective };
@@ -621,7 +688,7 @@ export function isProfilesActive(profiles) {
     for (const s of SESSION_KEYS) {
         for (const c of CELL_KEYS) {
             const cfg = resolveCohortConfig(profiles, s, c);
-            if (cfg.disabled || cfg.entry || cfg.be) return true;
+            if (cfg.disabled || cfg.entry || cfg.be || cfg.target) return true;
         }
     }
     return false;
@@ -639,7 +706,7 @@ export function countOverrides(profiles) {
         if (card.enabled === false) { n += CELL_KEYS.length; continue; }
         for (const c of CELL_KEYS) {
             const ov = card.overrides?.[c];
-            if (ov && (ov.enabled === false || ov.enabled === true || ov.entryRef || ov.beRef)) n += 1;
+            if (ov && (ov.enabled === false || ov.enabled === true || ov.entryRef || ov.beRef || ov.targetRef)) n += 1;
         }
     }
     return n;
@@ -698,7 +765,7 @@ export function applySessionProfiles({ universe, scenario, profiles, bundle = nu
     for (const s of SESSION_KEYS) {
         for (const c of CELL_KEYS) {
             const cfg = resolveCohortConfig(cards, s, c);
-            if (cfg.disabled || cfg.entry || cfg.be) replace.set(`${s}|${c}`, cfg);
+            if (cfg.disabled || cfg.entry || cfg.be || cfg.target) replace.set(`${s}|${c}`, cfg);
         }
     }
 
@@ -710,7 +777,7 @@ export function applySessionProfiles({ universe, scenario, profiles, bundle = nu
 
     const warnings = [...(universe.warnings || [])];
     const attr = {
-        active: true, removed: 0, swapped: 0, beApplied: 0,
+        active: true, removed: 0, swapped: 0, beApplied: 0, targetRescored: 0,
         removedByCohort: {}, unavailable: [],
     };
     const belongs = (t, ck) => cohortOf(t) === ck;
@@ -751,10 +818,30 @@ export function applySessionProfiles({ universe, scenario, profiles, bundle = nu
             }
         }
 
+        // ── Target rescore (2B.1b) — Entry → BE → Target → Stats ─────────────────
+        // Exact only: replace r with the trade's exit_r_by_target[token]. No replay.
+        // Unavailable target (not in this pair's export) → keep baked r + flag.
+        if (cfg.target) {
+            const tok = numTok(cfg.target.value);
+            if (targetAvailable(bundle, cfg.target)) {
+                list = list.map((t) => {
+                    const exitR = t.exit_r_by_target?.[tok];
+                    if (exitR != null) {
+                        attr.targetRescored += 1;
+                        return { ...t, r: exitR, net_r: exitR, netR: exitR };
+                    }
+                    return t; // this trade lacks the target column → keep baked r
+                });
+            } else {
+                attr.unavailable.push({ cohort: ck, kind: "target", token: tok, value: cfg.target.value });
+                warnings.push({ code: "SESSION_CARD_TARGET_UNAVAILABLE", message: `Target ${cfg.target.value}R not in this pair's export for ${ck}; kept exported target.` });
+            }
+        }
+
         for (const t of list) result.push(t);
     }
 
-    const changed = attr.removed || attr.swapped || attr.beApplied || attr.unavailable.length;
+    const changed = attr.removed || attr.swapped || attr.beApplied || attr.targetRescored || attr.unavailable.length;
     if (!changed) return universe; // defensive: nothing actually applied → byte-identical
 
     const removedCohorts = Object.keys(attr.removedByCohort).length;
