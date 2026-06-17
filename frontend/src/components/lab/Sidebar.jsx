@@ -34,6 +34,7 @@ const NAV_GROUPS = [
         items: [
             { to: "/strategy",       label: "Strategy Builder", icon: Wrench },
             { to: "/strategy-logic", label: "Strategy Logic",   icon: BookOpen },
+            { to: "/session-portfolio-preview", label: "Session Portfolio Preview", icon: Beaker, badge: "Preview" },
         ],
     },
     {
