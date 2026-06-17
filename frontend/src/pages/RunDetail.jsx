@@ -5,6 +5,7 @@ import { LabRunHero } from "@/components/lab/LabRunHero";
 import { MetricChip } from "@/components/lab/MetricChip";
 import { EquityCurveV2, MiniLine } from "@/components/lab/EquityCurve";
 import { DataTable, Pill } from "@/components/lab/DataTable";
+import SessionResults from "@/components/lab/sessionProfiles/SessionResults";
 import { NeonButton, NeonInput, NeonSelect, FilterToggle } from "@/components/lab/controls";
 import { compactTimeframe, formatRunDateRange, getRunDisplayName, reloadFullRunFromSidecar, updateRunBundle, useDataset } from "@/data/store";
 import { setActiveRunId, setSelectedTradeVariant, setFocusedFftEvent } from "@/data/store";
@@ -1454,6 +1455,7 @@ export default function RunDetail() {
         { id: "outcomes", label: "Outcomes" },
         { id: "monthly", label: "Monthly" },
         { id: "baseline-splits", label: "Baseline Splits" },
+        { id: "session-results", label: "Session Results" },
         { id: "entry-timing", label: "Entry Timing" },
         { id: "research",    label: "Research" },
     ]), []);
@@ -2153,6 +2155,8 @@ export default function RunDetail() {
                     onTabChange={setActiveResultsTab}
                 >
                 {showResultsSection("baseline-splits") && <SessionSplit trades={displayTrades} />}
+
+                {showResultsSection("session-results") && <SessionResults />}
 
                 {showResultsSection("config") && <NeonPanel className="xl:col-span-3" title="Configuration" action={<Pill tone="muted">Compact</Pill>}>
                     <div className="space-y-3">

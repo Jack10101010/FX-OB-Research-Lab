@@ -2,12 +2,14 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { LabRunHero } from "@/components/lab/LabRunHero";
 import { NeonPanel, SectionTitle } from "@/components/lab/NeonPanel";
+import SessionStrategyCards from "@/components/lab/sessionProfiles/SessionStrategyCards";
 import { Field, NeonInput, NeonSelect, Segment, NeonToggle, NeonButton } from "@/components/lab/controls";
 import { HelpCircle, Play, Save, FileInput, Copy, ShieldAlert, Trash2, Check, ChevronDown, ChevronUp, FolderPlus } from "lucide-react";
 import { usePresets } from "@/data/presets";
 import { Pill } from "@/components/lab/DataTable";
-import { cancelSidecarRun, getSidecarRun, getSidecarRunBundle, startSidecarRun } from "@/data/sidecarClient";
+import { cancelSidecarRun, getMarketDataStatus, getSidecarHealth, getSidecarRun, getSidecarRunBundle, renameSidecarRun, startSidecarRun } from "@/data/sidecarClient";
 import { ingestRunBundle } from "@/data/importer";
+import LazyImportStatus from "@/components/lab/LazyImportStatus";
 import {
     addRunBundle,
     assignRunToProject,
@@ -16,7 +18,11 @@ import {
     getUniqueRunDisplayName,
     setActiveProjectId,
     useDataset,
+    getSessionProfiles,
+    getLoadedPortfolio,
 } from "@/data/store";
+import { compileScenarioToRunConfig } from "@/data/scenarioCompile";
+import SessionScenarioBuilder from "@/components/lab/sessionProfiles/SessionScenarioBuilder";
 import {
     buildBacktesterConfig,
     buildRunConfigLoadReport,
@@ -36,15 +42,84 @@ import {
 
 const LAST_CONFIG_KEY = "fxob_strategy_builder_last_config";
 const LAST_RUN_KEY = "fxob_strategy_builder_last_run";
+// IMPORT-IDENTITY: identity of the run THIS Strategy Builder submitted and is awaiting
+// import. Distinct from the display-only LAST_RUN snapshot. Used to rebind runJob to the
+// EXACT submitted job after navigation/remount — never to the newest run folder (runs[0]).
+const SUBMITTED_JOB_KEY = "fxob_strategy_builder_submitted_job";
 
-function getDefaultDates() {
-    // TODO: replace DATASET_MAX_DATE with actual max candle timestamp from dataset metadata
-    // once the sidecar exposes a /datasets/:file/info endpoint.
-    const DATASET_MAX_DATE = "2026-05-18"; // EURUSD_1m.csv coverage ceiling
-    const to = new Date(DATASET_MAX_DATE + "T00:00:00Z");
+// Derive default { dateFrom, dateTo } from a candle timestamp: To = date portion of
+// the latest candle, From = 3 months earlier (date-only, UTC). Returns null on bad
+// input so callers can fall back. e.g. "2026-06-16T08:34:00+00:00" → To 2026-06-16,
+// From 2026-03-16.
+function deriveDatesFromLatestCandle(latestIso) {
+    if (!latestIso) return null;
+    const dateOnly = String(latestIso).slice(0, 10); // YYYY-MM-DD
+    const to = new Date(`${dateOnly}T00:00:00Z`);
+    if (Number.isNaN(to.getTime())) return null;
     const from = new Date(to);
     from.setUTCMonth(from.getUTCMonth() - 3);
-    return { dateFrom: from.toISOString().slice(0, 10), dateTo: DATASET_MAX_DATE };
+    return { dateFrom: from.toISOString().slice(0, 10), dateTo: dateOnly };
+}
+
+function getDefaultDates() {
+    // FALLBACK ONLY — used when the sidecar market-data status is unavailable. The
+    // live default comes from deriveDatesFromLatestCandle(status.last_candle) in the
+    // StrategyBuilder mount effect (getMarketDataStatus).
+    const DATASET_MAX_DATE = "2026-05-18"; // fallback EURUSD_1m.csv coverage ceiling
+    return deriveDatesFromLatestCandle(`${DATASET_MAX_DATE}T00:00:00Z`)
+        || { dateFrom: "2026-02-18", dateTo: DATASET_MAX_DATE };
+}
+
+// Symbols with confirmed backend data + a manifest/status endpoint. Only these are
+// offered: all share pip_size 0.0001 / tick_size 0.00001 (the backend default), so the
+// run is correct without sending pip/tick. Do NOT add a symbol here until it has data
+// AND matches that pip/tick convention (e.g. JPY pairs would need a pip_size override).
+const SUPPORTED_SYMBOLS = ["EURUSD", "GBPUSD"];
+const DEFAULT_SYMBOL = "EURUSD";
+
+// Canonical 1m master path for a symbol. Falls back to the default symbol for any
+// unsupported value so the submitted candle_file always matches a real dataset.
+function getCandleFileForSymbol(symbol) {
+    const sym = SUPPORTED_SYMBOLS.includes(symbol) ? symbol : DEFAULT_SYMBOL;
+    return `data/candles/${sym}_1m.csv`;
+}
+
+// RUN-NAME: human-friendly default name, e.g.
+//   EURUSD_M15_RR_3.3_18 Feb 26 → 18 May 26 · 3 months
+function formatDayMonYY(iso) {
+    if (!iso) return "";
+    const d = new Date(`${iso}T00:00:00`);
+    if (Number.isNaN(d.getTime())) return "";
+    const mon = d.toLocaleString("en-US", { month: "short" });
+    return `${d.getDate()} ${mon} ${String(d.getFullYear()).slice(-2)}`;
+}
+
+function humanDateSpan(fromIso, toIso) {
+    if (!fromIso || !toIso) return "";
+    const a = new Date(`${fromIso}T00:00:00`);
+    const b = new Date(`${toIso}T00:00:00`);
+    if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime()) || b < a) return "";
+    const days = Math.round((b - a) / 86400000);
+    if (days < 31) return `${days} day${days === 1 ? "" : "s"}`;
+    const months = Math.round(days / 30.44);
+    if (months < 12) return `${months} month${months === 1 ? "" : "s"}`;
+    const years = Math.floor(months / 12);
+    const remM = months % 12;
+    return remM ? `${years}y ${remM}m` : `${years} year${years === 1 ? "" : "s"}`;
+}
+
+function buildDefaultRunName(cfg) {
+    if (!cfg) return "";
+    const rrPart = (cfg.rr || cfg.rr === 0) ? `RR_${cfg.rr}` : "";
+    const head = [cfg.symbol, cfg.detectionTf, rrPart].filter(Boolean).join("_");
+    const from = formatDayMonYY(cfg.dateFrom);
+    const to = formatDayMonYY(cfg.dateTo);
+    const range = from && to ? `${from} → ${to}` : "";
+    const span = humanDateSpan(cfg.dateFrom, cfg.dateTo);
+    let name = head;
+    if (range) name += `${name ? "_" : ""}${range}`;
+    if (span) name += ` · ${span}`;
+    return name;
 }
 
 export default function StrategyBuilder() {
@@ -52,12 +127,12 @@ export default function StrategyBuilder() {
     const [cfg, setCfg] = useState(() => {
         const { dateFrom, dateTo } = getDefaultDates();
         return {
-        symbol: "EURUSD",
+        symbol: DEFAULT_SYMBOL,
         detectionTf: "M15",
         executionTf: "1m",
         dateFrom,
         dateTo,
-        dataFile: "data/candles/EURUSD_1m.csv",
+        dataFile: getCandleFileForSymbol(DEFAULT_SYMBOL),
         swing: 50,
         obFilter: "ATR",
         minObSizePips: 0,
@@ -140,12 +215,49 @@ export default function StrategyBuilder() {
         beArmLevels: [...BE_ARM_LEVEL_CHOICES],
         beTriggerBases: ["wick", "close"],
         beDelayCandles: 0,
-        // Which entry trade sets get exact BE: "baseline" (default) or "all"
-        // (every active entry variant). Default baseline — "all" multiplies passes.
-        beVariants: "baseline",
+        // Which entry trade sets get exact BE: "all" (every active entry variant,
+        // default) or "baseline" only. Default "all" so EXACT BE covers whatever
+        // entry view is analysed in Protection Lab (avoids the REPLAY coverage gap
+        // when the run's entry model isn't baseline). "all" multiplies BE passes.
+        beVariants: "all",
         };
     });
     const set = (k) => (v) => setCfg((c) => ({ ...c, [k]: v }));
+
+    // Symbol change repoints the candle file to that symbol's 1m master in the same
+    // update, so the submitted candle_file always matches the selected symbol.
+    const onSymbolChange = (value) => setCfg((c) => ({
+        ...c,
+        symbol: value,
+        dataFile: getCandleFileForSymbol(value),
+    }));
+
+    // ── Default date range from the selected symbol's latest available candle ──
+    // On mount AND whenever the symbol changes, ask the sidecar for THAT symbol's
+    // market-data status and set default To = latest candle date, From = 3 months
+    // earlier. We apply the live dates UNLESS the user has manually edited the date
+    // inputs (`datesUserEdited`), so manual edits are never clobbered — including
+    // across symbol switches. Using an explicit edit flag (rather than comparing the
+    // current dates to a remembered auto value) guarantees the FIRST mount applies
+    // the live dates deterministically. Any sidecar/manifest failure keeps the
+    // current dates.
+    const datesUserEdited = useRef(false);
+    useEffect(() => {
+        let cancelled = false;
+        getMarketDataStatus(cfg.symbol)
+            .then((status) => {
+                if (cancelled || !status?.available || !status?.last_candle) return;
+                if (datesUserEdited.current) return; // never overwrite manual edits
+                const derived = deriveDatesFromLatestCandle(status.last_candle);
+                if (!derived) return;
+                setCfg((prev) => {
+                    if (prev.dateFrom === derived.dateFrom && prev.dateTo === derived.dateTo) return prev;
+                    return { ...prev, dateFrom: derived.dateFrom, dateTo: derived.dateTo };
+                });
+            })
+            .catch(() => { /* sidecar/manifest unavailable → keep current dates */ });
+        return () => { cancelled = true; };
+    }, [cfg.symbol]);
 
     // ── Break-even multi-select toggles ───────────────────────────────────────
     const toggleBeArm = (level) => setCfg((c) => {
@@ -174,6 +286,15 @@ export default function StrategyBuilder() {
     const [runJob, setRunJob] = useState(null);
     const [runError, setRunError] = useState("");
     const [runBusy, setRunBusy] = useState(false);
+    const [runName, setRunName] = useState("");          // RUN-NAME: friendly name set before submit
+    const [runNameDirty, setRunNameDirty] = useState(false); // user edited → stop auto-syncing to default
+    const [renameDraft, setRenameDraft] = useState("");  // RUN-NAME: live-rename editor draft
+    const [renameBusy, setRenameBusy] = useState(false);
+    // Lightweight active-run visibility, set from /health.active_job_id on mount.
+    // Guarantees the UI shows a run is active even if the full getSidecarRun fetch
+    // fails or returns an unexpected shape (the regression this fixes).
+    const [activeSidecarJobId, setActiveSidecarJobId] = useState(null);
+    const [rehydrateDetailsFailed, setRehydrateDetailsFailed] = useState(false);
     const [importBusy, setImportBusy] = useState(false);
     const [importError, setImportError] = useState("");
     const [importedRunId, setImportedRunId] = useState("");
@@ -200,6 +321,9 @@ export default function StrategyBuilder() {
     const sanityRun = runJob ? reduceRunSnapshot(runJob, importedRunId) : (lastRun || {});
     const generatedPlan = useMemo(() => estimateScenarioPlan(sidecarConfig), [sidecarConfig]);
     const runInProgress = ["queued", "running"].includes(runJob?.status);
+    // Active per the full job OR the lightweight rehydration fallback — keeps the
+    // submit button from looking idle while a sidecar run is active.
+    const sidecarActive = runInProgress || Boolean(activeSidecarJobId);
     const selectedLoadRun = loadRunId ? getRunData(loadRunId) : null;
     const selectedLoadProject = selectedLoadRun?.projectId
         ? PROJECTS.find((project) => project.id === selectedLoadRun.projectId)
@@ -226,6 +350,89 @@ export default function StrategyBuilder() {
         return () => window.clearInterval(timer);
     }, [runJob?.job_id, runInProgress]);
 
+    // ── Mount-time run rehydration ───────────────────────────────────────────
+    // runJob is local state seeded only by the submit action, so navigating away
+    // and back lost an active/completed sidecar run. On mount, ask the sidecar:
+    //   (1) is a run still active? → restore it; the poll effect above resumes.
+    //   (2) else, did the latest run finish while away and isn't imported yet?
+    //       → seed it so the "Import Completed Run" button reappears.
+    // Refs read the freshest RUNS / runJob without re-running this one-shot effect.
+    const runsRef = useRef(RUNS);
+    runsRef.current = RUNS;
+    const runJobRef = useRef(runJob);
+    runJobRef.current = runJob;
+    useEffect(() => {
+        let cancelled = false;
+        const isFinished = (j) => j?.status === "completed" || j?.status === "succeeded";
+        const alreadyImported = (job) => (runsRef.current || []).some((r) => {
+            const d = getRunData(r._bundleId || r.id) || r;
+            return (job.job_id && d.sidecarJobId === job.job_id)
+                || (job.run_id && (d.sidecarRunId === job.run_id || d.run_id === job.run_id))
+                || (job.output_folder && d.outputFolder === job.output_folder);
+        });
+        (async () => {
+            try {
+                const health = await getSidecarHealth().catch(() => null);
+                const activeJobId = health?.active_job_id;
+                const submitted = readStoredJson(SUBMITTED_JOB_KEY);
+                const submittedId = submitted?.job_id || null;
+
+                // (1) IMPORT-IDENTITY — rebind to the EXACT job THIS builder submitted.
+                // Never bind to the newest run folder (runs[0]); that is what caused the
+                // wrong-run import. We fetch the specific submitted job by id and restore
+                // whatever it is (running/queued → resume poll; completed → importable;
+                // failed/cancelled → status only, import stays disabled).
+                if (submittedId) {
+                    if (!cancelled && !runJobRef.current) {
+                        setActiveSidecarJobId(activeJobId === submittedId ? submittedId : null);
+                    }
+                    const job = await getSidecarRun(submittedId).catch(() => null);
+                    if (cancelled || runJobRef.current) return;
+                    if (!job?.job_id) {
+                        // Sidecar no longer knows this job (restart/cleared) — drop the stale id.
+                        try { localStorage.removeItem(SUBMITTED_JOB_KEY); } catch { /* noop */ }
+                        return;
+                    }
+                    // If the submitted job already imported, nothing to restore.
+                    if (isFinished(job) && alreadyImported(job)) return;
+                    setRunJob(job);
+                    setRunError("");
+                    return;
+                }
+
+                // (2) No submitted job from this builder, but a sidecar run is actively
+                // RUNNING → restore it for visibility/cancel only. We do NOT restore a
+                // finished non-submitted run, and we NEVER auto-bind runs[0] as importable.
+                if (activeJobId) {
+                    if (!cancelled && !runJobRef.current) setActiveSidecarJobId(activeJobId);
+                    const job = await getSidecarRun(activeJobId).catch(() => null);
+                    if (cancelled || runJobRef.current) return;
+                    if (job?.job_id && !isFinished(job)) {
+                        setRunJob(job);
+                        setRunError("");
+                    } else if (!job?.job_id) {
+                        setRehydrateDetailsFailed(true);
+                    }
+                    return;
+                }
+                // (3) No submitted job and no active run → nothing to import. Do NOT
+                // auto-select the latest completed run (data-integrity requirement).
+            } catch (error) {
+                if (!cancelled) setRunError(formatSidecarError(error));
+            }
+        })();
+        return () => { cancelled = true; };
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Once the full job is known (rehydrated, polled, or freshly submitted), the
+    // lightweight fallback is redundant — clear it so only the rich card shows.
+    useEffect(() => {
+        if (runJob) {
+            setActiveSidecarJobId(null);
+            setRehydrateDetailsFailed(false);
+        }
+    }, [runJob]);
+
     useEffect(() => {
         if (!didHydrateConfig.current) {
             didHydrateConfig.current = true;
@@ -240,7 +447,44 @@ export default function StrategyBuilder() {
         const snapshot = reduceRunSnapshot(runJob, importedRunId);
         writeStoredJson(LAST_RUN_KEY, snapshot);
         setLastRun(snapshot);
+        // IMPORT-IDENTITY: keep the submitted-job record current (esp. output_folder
+        // learned during polling); clear it once this run has been imported so it is
+        // not re-restored as importable on the next remount.
+        if (runJob.job_id) {
+            const sj = readStoredJson(SUBMITTED_JOB_KEY);
+            if (sj && sj.job_id === runJob.job_id) {
+                if (importedRunId) {
+                    try { localStorage.removeItem(SUBMITTED_JOB_KEY); } catch { /* noop */ }
+                } else {
+                    writeStoredJson(SUBMITTED_JOB_KEY, {
+                        ...sj,
+                        run_id: runJob.run_id || sj.run_id,
+                        output_folder: runJob.output_folder || sj.output_folder || null,
+                        display_name: runJob.display_name || sj.display_name || "",
+                        status: runJob.status,
+                    });
+                }
+            }
+        }
     }, [runJob, importedRunId]);
+
+    // RUN-NAME: seed the rename editor with the active run's name whenever a
+    // different run becomes active (fresh submit or rehydrate). Keyed on job_id
+    // so it never clobbers an in-progress edit of the same run.
+    useEffect(() => {
+        setRenameDraft((runJob?.display_name || "").trim());
+    }, [runJob?.job_id]);
+
+    // RUN-NAME: computed default name from the current config. Tracks symbol / TF /
+    // RR / date range, e.g. "EURUSD_M15_RR_3.3_18 Feb 26 → 18 May 26 · 3 months".
+    const defaultRunName = useMemo(
+        () => buildDefaultRunName(cfg),
+        [cfg.symbol, cfg.detectionTf, cfg.rr, cfg.dateFrom, cfg.dateTo],
+    );
+    // Keep the Run Name field synced to the computed default until the user edits it.
+    useEffect(() => {
+        if (!runNameDirty) setRunName(defaultRunName);
+    }, [defaultRunName, runNameDirty]);
 
     const onSave = () => {
         const name = (presetName || selectedPreset || `${cfg.symbol}_${cfg.detectionTf}_RR${cfg.rr}`).trim();
@@ -306,26 +550,78 @@ export default function StrategyBuilder() {
             const sidecarPayload = Object.fromEntries(
                 Object.entries(sidecarConfig).filter(([k]) => !k.startsWith("_"))
             );
-            const started = await startSidecarRun(sidecarPayload);
-            setRunJob(started);
+            // SESSION-STRATEGY-SCENARIO: when the Session Portfolio is active, compile
+            // the current working copy and attach it to the outgoing config so the
+            // backend runs the exact per-cohort rules. Gated on enabled === true →
+            // when the portfolio is disabled, the payload is byte-identical to before
+            // (no key added). Metadata lives INSIDE the scenario block (top-level
+            // unknown keys are rejected by the backend config schema).
+            const _scnProfiles = getSessionProfiles();
+            if (_scnProfiles && _scnProfiles.enabled === true) {
+                const _scn = compileScenarioToRunConfig(_scnProfiles, {}).session_strategy_scenario;
+                if (_scn && _scn.enabled === true) {
+                    const _loaded = getLoadedPortfolio();
+                    _scn.meta = {
+                        portfolio_id: _loaded?.id || null,
+                        portfolio_name: _loaded?.name || null,
+                        scenario_name: (runName || "").trim() || _loaded?.name || null,
+                    };
+                    sidecarPayload.session_strategy_scenario = _scn;
+                }
+            }
+            const started = await startSidecarRun(sidecarPayload, runName);
+            const startedJob = started ? { display_name: (runName || "").trim(), ...started } : started;
+            setRunJob(startedJob);
+            // IMPORT-IDENTITY: remember exactly which job we submitted so remount
+            // rehydration re-binds to THIS job (not the newest run folder).
+            if (startedJob?.job_id) {
+                writeStoredJson(SUBMITTED_JOB_KEY, {
+                    job_id: startedJob.job_id,
+                    run_id: startedJob.run_id || startedJob.job_id,
+                    output_folder: startedJob.output_folder || null,
+                    created_at: startedJob.created_at || new Date().toISOString(),
+                    display_name: startedJob.display_name || "",
+                });
+            }
+            setRenameDraft((runName || "").trim());
         } catch (error) {
             setRunError(formatSidecarError(error));
         } finally {
             setRunBusy(false);
         }
     };
-    const onCancelRun = async () => {
-        const runId = runJob?.run_id || runJob?.job_id;
+    const onCancelRun = async (idOverride) => {
+        const runId = (typeof idOverride === "string" && idOverride) || runJob?.run_id || runJob?.job_id;
         if (!runId) return;
         setRunBusy(true);
         setRunError("");
         try {
             const cancelled = await cancelSidecarRun(runId);
             setRunJob(cancelled);
+            setActiveSidecarJobId(null);
         } catch (error) {
             setRunError(formatSidecarError(error));
         } finally {
             setRunBusy(false);
+        }
+    };
+    // RUN-NAME: live rename of the active/most-recent run (before, during, or after).
+    const onRenameRun = async () => {
+        const runId = runJob?.run_id || runJob?.job_id || activeSidecarJobId;
+        if (!runId) return;
+        const name = (renameDraft || "").trim();
+        setRenameBusy(true);
+        setRunError("");
+        try {
+            const updated = await renameSidecarRun(runId, name);
+            const applied = (updated?.display_name ?? name) || "";
+            setRunJob((prev) => (prev ? { ...prev, display_name: applied } : prev));
+            setRunName(applied);
+            showFlash(applied ? `Renamed · ${applied}` : "Run name cleared");
+        } catch (error) {
+            setRunError(formatSidecarError(error));
+        } finally {
+            setRenameBusy(false);
         }
     };
     const onImportCompletedRun = async () => {
@@ -335,6 +631,33 @@ export default function StrategyBuilder() {
         setImportedRunId("");
         try {
             const payload = await getSidecarRunBundle(runJob.job_id);
+            // IMPORT-IDENTITY GUARD — never import a bundle that isn't the selected run.
+            // Cross-check the resolved bundle's identity (manifest job_id/run_id and the
+            // run-folder name) against the runJob we intend to import. Folder names are
+            // job-id-prefixed; runJob.output_folder may be an absolute path while the
+            // bundle folder is relative, so compare basenames.
+            const expectedId = runJob.run_id || runJob.job_id;
+            const baseName = (p) => String(p || "").replace(/[\\/]+$/, "").split(/[\\/]/).pop();
+            const manifestFile = (payload.files || []).find((f) => /(^|[\\/])manifest\.json$/i.test(f.name || ""));
+            let manifestId = null;
+            if (manifestFile) {
+                try {
+                    const mj = JSON.parse(manifestFile.content || "{}");
+                    manifestId = mj.job_id || mj.run_id || null;
+                } catch { /* manifest unparseable → fall back to folder checks */ }
+            }
+            const expFolderName = baseName(runJob.output_folder);
+            const gotFolderName = baseName(payload.folder);
+            const identityMatches =
+                (manifestId && expectedId && manifestId === expectedId)
+                || (expFolderName && gotFolderName && expFolderName === gotFolderName)
+                || (expectedId && gotFolderName && gotFolderName.includes(expectedId));
+            if (!identityMatches) {
+                throw new Error(
+                    "Import blocked: completed bundle does not match the selected run. "
+                    + "Re-open the run from the Runs list and import it there."
+                );
+            }
             const files = (payload.files || []).map((file) => (
                 new File([file.content || ""], file.name, { type: "text/plain" })
             ));
@@ -346,7 +669,9 @@ export default function StrategyBuilder() {
                 ].filter(Boolean);
                 throw new Error(messages[0] || "Completed run bundle could not be imported.");
             }
-            const baseDisplayName = result.bundle.displayName
+            const baseDisplayName = (runJob?.display_name || "").trim()
+                || (runName || "").trim()
+                || result.bundle.displayName
                 || result.bundle.name
                 || result.bundle.summary?.displayName
                 || result.bundle.summary?.name
@@ -417,12 +742,129 @@ export default function StrategyBuilder() {
                 actions={
                     <div className="flex flex-col items-end gap-2">
                         <ConfigScopeRibbon cfg={cfg} />
-                        <NeonButton icon={Play} tone="primary" onClick={onRunLocal} disabled={runBusy || runInProgress} data-testid="builder-run-backtest">
-                            {runBusy ? "Starting..." : runInProgress ? "Running..." : "Run Backtest Locally"}
+                        {getSessionProfiles()?.enabled === true && (
+                            <span
+                                className="clip-bevel-sm px-2 py-0.5 text-[10px] font-ui uppercase tracking-wider border border-[hsl(var(--accent-primary)/0.5)] bg-[hsl(var(--accent-primary)/0.12)] text-[hsl(var(--accent-primary))]"
+                                title="The active Session Portfolio will be compiled and attached to this run."
+                                data-testid="scenario-attached-indicator"
+                            >
+                                Scenario attached{getLoadedPortfolio()?.name ? `: ${getLoadedPortfolio().name}` : ""}
+                            </span>
+                        )}
+                        <NeonButton icon={Play} tone="primary" onClick={onRunLocal} disabled={runBusy || sidecarActive} data-testid="builder-run-backtest">
+                            {runBusy ? "Starting..." : sidecarActive ? "Running..." : "Run Backtest Locally"}
                         </NeonButton>
                     </div>
                 }
             />
+
+            {/* Current Run — prominent top-of-page monitor, visible by default
+                whenever a run is active/completed (incl. rehydrated runs). */}
+            {runJob && (
+                <div className="px-6 mb-4">
+                    <NeonPanel
+                        title="Current Run"
+                        action={<Pill tone={runStatusTone(runJob)}>{runStatusLabel(runJob)}</Pill>}
+                    >
+                        <div className="space-y-2">
+                            {/* RUN-NAME: live rename — editable before, during, and after the run. */}
+                            <div className="flex items-center gap-2">
+                                <span className="shrink-0 text-[10.5px] font-ui uppercase tracking-wide text-muted-lab">Name</span>
+                                <div className="flex-1 min-w-0">
+                                    <NeonInput
+                                        type="text"
+                                        placeholder="Name this run…"
+                                        value={renameDraft}
+                                        onChange={(e) => setRenameDraft(e.target.value)}
+                                        onKeyDown={(e) => { if (e.key === "Enter") onRenameRun(); }}
+                                        maxLength={200}
+                                    />
+                                </div>
+                                <NeonButton
+                                    tone="secondary"
+                                    onClick={onRenameRun}
+                                    disabled={renameBusy || (renameDraft || "").trim() === (runJob.display_name || "").trim()}
+                                >
+                                    {renameBusy ? "Saving…" : "Rename"}
+                                </NeonButton>
+                            </div>
+                            <RunProgressCard job={runJob} />
+                            {runJob.possibly_stalled && (
+                                <div className="border border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.07)] clip-bevel-sm px-3 py-2 text-[10.5px] text-[hsl(var(--warning))]">
+                                    No progress update for {formatDuration(runJob.seconds_since_update)}. The run may be stalled.
+                                </div>
+                            )}
+                            {runJob.can_cancel && (
+                                <div className="flex justify-end">
+                                    <NeonButton icon={Trash2} tone="warning" onClick={onCancelRun} disabled={runBusy}>
+                                        Cancel Run
+                                    </NeonButton>
+                                </div>
+                            )}
+                            {isCompletedRun(runJob) && (
+                                <div className="space-y-2 border border-[hsl(var(--success)/0.35)] bg-[hsl(var(--success)/0.06)] clip-bevel-sm px-3 py-2">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <div className="text-[11px] font-ui text-[hsl(var(--success))]">
+                                            Run completed. Import the completed output folder into Research Lab.
+                                        </div>
+                                        {/* LAZY-IMPORT GUARDRAIL — show the import mode right on the
+                                            completed-run card. Calm green when OFF (default). */}
+                                        <LazyImportStatus />
+                                    </div>
+                                    {/* Loud, unmissable warning if the just-imported run came back lazy. */}
+                                    {importedRunId && getRunData(importedRunId)?.lazy && (
+                                        <LazyImportStatus runLazy />
+                                    )}
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <NeonButton icon={FileInput} tone="success" onClick={onImportCompletedRun} disabled={importBusy}>
+                                            {importBusy ? "Importing..." : "Import Completed Run"}
+                                        </NeonButton>
+                                        {importedRunId && (
+                                            <>
+                                                <Pill tone="success">Imported</Pill>
+                                                <Link to={`/runs/${encodeURIComponent(importedRunId)}`}><NeonButton tone="primary">Open Run</NeonButton></Link>
+                                                <Link to="/runs"><NeonButton tone="ghost">All Runs</NeonButton></Link>
+                                                <Link to="/strategy-map"><NeonButton tone="ghost">Strategy Map</NeonButton></Link>
+                                                <Link to="/trade-inspector"><NeonButton tone="ghost">Trade Inspector</NeonButton></Link>
+                                            </>
+                                        )}
+                                    </div>
+                                    {importError && (
+                                        <div className="border border-[hsl(var(--danger)/0.4)] bg-[hsl(var(--danger)/0.06)] clip-bevel-sm px-2 py-1.5 text-[10.5px] font-ui text-[hsl(var(--danger))]">
+                                            {importError}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    </NeonPanel>
+                </div>
+            )}
+
+            {/* Minimal fallback — sidecar reports an active job but the full job
+                details aren't available (fetch failed / shape mismatch). Always
+                keeps a visible running indication. */}
+            {activeSidecarJobId && !runJob && (
+                <div className="px-6 mb-4">
+                    <NeonPanel title="Current Run" action={<Pill tone="secondary">Running</Pill>}>
+                        <div className="border border-[hsl(var(--accent-secondary)/0.28)] bg-[hsl(var(--accent-secondary)/0.06)] clip-bevel-sm px-3 py-2.5 space-y-1.5">
+                            <div className="flex items-center justify-between gap-2">
+                                <span className="text-[13px] font-ui font-semibold text-[hsl(var(--text))]">Backtest running in sidecar</span>
+                                <Pill tone="secondary">Running</Pill>
+                            </div>
+                            <div className="text-[11px] font-code text-[hsl(var(--text-2))] break-all">Job: {activeSidecarJobId}</div>
+                            <div className="text-[10.5px] font-ui text-muted-lab">
+                                {rehydrateDetailsFailed ? "Backtest running in sidecar, details unavailable." : "Loading run details…"}
+                            </div>
+                            <div className="flex justify-end">
+                                <NeonButton icon={Trash2} tone="warning" onClick={() => onCancelRun(activeSidecarJobId)} disabled={runBusy}>
+                                    Cancel Run
+                                </NeonButton>
+                            </div>
+                        </div>
+                    </NeonPanel>
+                </div>
+            )}
 
             <div className="px-6 mb-4">
                 <div className="clip-bevel p-[1px] bg-gradient-to-r from-[hsl(var(--border-mid))] via-[hsl(var(--accent-secondary)/0.25)] to-[hsl(var(--border-mid))]">
@@ -560,8 +1002,34 @@ export default function StrategyBuilder() {
                 <BuilderFocusCard id="basic" activeId={activeBuilderCard} onActivate={setActiveBuilderCard}>
                 <NeonPanel title="Basic Settings" className="flex-1">
                     <div className="grid grid-cols-1 sm:grid-cols-6 gap-3">
+                        <Field
+                            label="Run Name"
+                            className="sm:col-span-6"
+                            hint="Auto-named from symbol, timeframe, RR and date range. Edit to override; you can also rename a run while it's executing."
+                        >
+                            <div className="relative">
+                                <NeonInput
+                                    type="text"
+                                    value={runName}
+                                    placeholder={defaultRunName || "Name this run…"}
+                                    onChange={(e) => { setRunNameDirty(true); setRunName(e.target.value); }}
+                                    maxLength={200}
+                                    className="w-full pr-20"
+                                />
+                                {runNameDirty && (
+                                    <button
+                                        type="button"
+                                        onClick={() => { setRunNameDirty(false); setRunName(defaultRunName); }}
+                                        title="Reset to the auto-generated name"
+                                        className="absolute right-1.5 top-1/2 -translate-y-1/2 clip-bevel-sm px-2 py-1 text-[10px] font-ui uppercase tracking-wider border border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:border-[hsl(var(--accent-secondary))] hover:text-white transition-colors"
+                                    >
+                                        Reset
+                                    </button>
+                                )}
+                            </div>
+                        </Field>
                         <Field label="Symbol" className="sm:col-span-2">
-                            <NeonSelect testId="bld-symbol" value={cfg.symbol} onChange={set("symbol")} options={["EURUSD", "GBPUSD", "USDJPY", "XAUUSD", "AUDUSD"]} />
+                            <NeonSelect testId="bld-symbol" value={cfg.symbol} onChange={onSymbolChange} options={SUPPORTED_SYMBOLS} />
                         </Field>
                         <Field label="Detection TF" className="sm:col-span-2">
                             <NeonSelect value={cfg.detectionTf} onChange={set("detectionTf")} options={["M5", "M15", "M30", "H1", "H4"]} />
@@ -570,10 +1038,10 @@ export default function StrategyBuilder() {
                             <NeonSelect value={cfg.executionTf} onChange={set("executionTf")} options={["1m", "5m"]} />
                         </Field>
                         <Field label="From" className="sm:col-span-3">
-                            <NeonInput type="date" value={cfg.dateFrom} onChange={(e) => set("dateFrom")(e.target.value)} />
+                            <NeonInput type="date" value={cfg.dateFrom} onChange={(e) => { datesUserEdited.current = true; set("dateFrom")(e.target.value); }} />
                         </Field>
                         <Field label="To" className="sm:col-span-3">
-                            <NeonInput type="date" value={cfg.dateTo} onChange={(e) => set("dateTo")(e.target.value)} />
+                            <NeonInput type="date" value={cfg.dateTo} onChange={(e) => { datesUserEdited.current = true; set("dateTo")(e.target.value); }} />
                         </Field>
                         <Field label="Data Source File" className="sm:col-span-6">
                             <NeonInput value={cfg.dataFile} onChange={(e) => set("dataFile")(e.target.value)} />
@@ -872,14 +1340,14 @@ export default function StrategyBuilder() {
                                             <Segment
                                                 options={[
                                                     { value: "baseline", label: "Baseline only" },
-                                                    { value: "all", label: "All entry variants" },
+                                                    { value: "all", label: "All selected entry variants" },
                                                 ]}
                                                 value={cfg.beVariants}
                                                 onChange={set("beVariants")}
                                             />
                                             <p className="mt-1 text-[10.5px] text-muted-lab">
                                                 {cfg.beVariants === "all"
-                                                    ? "Runs BE against every active entry model × threshold × delay. Generating BE for all entry variants can be expensive — for large research packs prefer selected variants or matrix generation."
+                                                    ? "Runs BE against every entry variant this run generates (baseline + each selected entry model × threshold × delay) — not every variant the engine supports. Covers whatever entry view you analyse in Protection Lab, but multiplies BE passes; for large research packs prefer baseline or matrix generation."
                                                     : "Runs BE against the baseline entry trade set only. Variant result views fall back to REPLAY."}
                                             </p>
                                         </div>
@@ -895,6 +1363,8 @@ export default function StrategyBuilder() {
                     </>
                 </NeonPanel>
                 </BuilderFocusCard>
+                {/* SESSION-STRATEGY-CARDS Phase 2A — frontend-only per-session cards */}
+                <SessionStrategyCards />
                 </div>{/* end left Filters col */}
                 <div className="flex flex-col gap-4">
                 {/* ── Entry Configuration panel ─────────────────────────────── */}
@@ -1418,6 +1888,18 @@ export default function StrategyBuilder() {
                         <Field label="Spread (pips)"><NeonInput type="number" step="0.05" value={cfg.spread} onChange={(e) => set("spread")(Number(e.target.value))} /></Field>
                         <Field label="Slippage (pips)"><NeonInput type="number" step="0.05" value={cfg.slippage} onChange={(e) => set("slippage")(Number(e.target.value))} /></Field>
                         <Field label="Commission (R/trade)" className="col-span-2"><NeonInput type="number" step="0.01" value={cfg.commission} onChange={(e) => set("commission")(Number(e.target.value))} /></Field>
+                        <div className="col-span-2 flex items-center justify-between border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
+                            <div>
+                                <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Parallel scenarios (faster)</div>
+                                <div className="text-[10.5px] text-muted-lab">Run scenario passes across CPU cores. Outputs identical to serial; auto-picks a conservative worker count.</div>
+                            </div>
+                            <NeonToggle checked={Boolean(cfg.parallelScenarios)} onChange={set("parallelScenarios")} testId="bld-parallel-toggle" />
+                        </div>
+                        {cfg.parallelScenarios && (
+                            <Field label="Max workers (0 = auto)" className="col-span-2">
+                                <NeonInput type="number" step="1" min="0" max="8" value={cfg.maxWorkers ?? 0} onChange={(e) => set("maxWorkers")(Number(e.target.value))} />
+                            </Field>
+                        )}
                         <div className="col-span-2 flex items-center justify-between border border-[hsl(var(--border-soft))] clip-bevel-sm p-3 opacity-50 pointer-events-none" aria-disabled="true">
                             <div>
                                 <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Monte Carlo</div>
@@ -1433,7 +1915,9 @@ export default function StrategyBuilder() {
 
                 <BuilderFocusCard id="sanity" activeId={activeBuilderCard} onActivate={setActiveBuilderCard} className="lg:col-span-3">
                 <NeonPanel
-                    title="Last Run Sanity Check"
+                    collapsible
+                    defaultCollapsed
+                    title="Last Run Diagnostics"
                     action={
                         <div className="flex items-center gap-2">
                             <NeonButton icon={Copy} tone="ghost" onClick={onCopyGeneratedConfig}>Copy Generated Config</NeonButton>
@@ -1442,77 +1926,92 @@ export default function StrategyBuilder() {
                     }
                 >
                     <div className="mb-3 text-[10.5px] text-muted-lab">
-                        Sanity check uses the latest generated config and local sidecar response. Full trade/order-block stats appear after import.
+                        Diagnostics use the latest generated config and local sidecar response. Full trade/order-block stats appear after import.
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
-                        <StatusMeta k="Status" v={sanityRun.status || "—"} />
-                        <StatusMeta k="Job ID" v={sanityRun.job_id || "—"} />
-                        <StatusMeta k="Output folder" v={sanityRun.output_folder || "—"} />
-                        <StatusMeta k="Symbol" v={sanityConfig.symbol || sanityRun.current_symbol || "—"} />
-                        <StatusMeta k="Detection TF" v={sanityConfig.detection_timeframe || "—"} />
-                        <StatusMeta k="Execution TF" v={sanityConfig.execution_timeframe || "—"} />
-                        <StatusMeta k="Execution mode" v={formatExecutionMode((sanityConfig.execution_modes || [])[0])} />
-                        <StatusMeta k="Structure filter" v={formatStructureFilter(sanityConfig.structure_filter)} />
-                        <StatusMeta k="Allowed struct/dir" v={Array.isArray(sanityConfig.allowed_structure_directions) && sanityConfig.allowed_structure_directions.length ? sanityConfig.allowed_structure_directions.join(", ") : "all"} />
-                        <StatusMeta k="BOS Long skip" v={sanityRun.structure_direction_filter_skipped?.bos_long ?? "—"} />
-                        <StatusMeta k="BOS Short skip" v={sanityRun.structure_direction_filter_skipped?.bos_short ?? "—"} />
-                        <StatusMeta k="CHoCH Long skip" v={sanityRun.structure_direction_filter_skipped?.choch_long ?? "—"} />
-                        <StatusMeta k="CHoCH Short skip" v={sanityRun.structure_direction_filter_skipped?.choch_short ?? "—"} />
-                        <StatusMeta k="Plan passes" v={sanityRun.total_passes ?? generatedPlan.totalPasses ?? "—"} />
-                        <StatusMeta k="Entry passes" v={sanityRun.scenario_plan_summary?.entry ?? generatedPlan.entry ?? "—"} />
-                        <StatusMeta k="Protection passes" v={sanityRun.scenario_plan_summary?.protection ?? generatedPlan.protection ?? "—"} />
-                        <StatusMeta k="Entry Mode" v={cfg.entryMode === "single" ? "Single Model" : "Scenario Batch"} />
-                        {cfg.entryMode === "single" && (
-                            <StatusMeta k="Active Entry Model" v={{ baseline: "Baseline Edge", entry_penetration: "Penetration", triggered_edge: "Triggered Edge" }[cfg.selectedEntryModel] || cfg.selectedEntryModel} />
-                        )}
-                        <StatusMeta k="Entry models" v={formatEntryModels(sanityConfig)} />
-                        <StatusMeta k="Penetration thresholds" v={(sanityConfig.entry_penetration_thresholds || []).join(", ") || "—"} />
-                        <StatusMeta k="Batch entry penetration" v={sanityConfig.batch_entry_penetration ? "On" : "Off"} />
-                        <StatusMeta k="Triggered-edge triggers" v={(sanityConfig.triggered_edge_trigger_thresholds || []).join(", ") || "—"} />
-                        <StatusMeta k="Triggered-edge entry delay" v={formatTriggeredEdgeDelays(sanityConfig.triggered_edge_candle_delays, sanityConfig.triggered_edge_same_candle_modes)} />
-                        <StatusMeta k="Triggered-edge retrace cancel" v={formatTriggeredEdgeRetraceCancel(sanityConfig)} />
-                        <StatusMeta k="First failed tag cancel" v={sanityConfig.triggered_edge_cancel_on_first_failed_tag ? "On" : "Off"} />
-                        <StatusMeta k="Limit Placement Depth" v={formatPercentValue(sanityConfig.ob_entry_depth_pct)} />
-                        <StatusMeta k="Entry Buffer" v={formatPipValue(sanityConfig.entry_buffer_pips)} />
-                        <StatusMeta k="Stop Buffer" v={formatPipValue(sanityConfig.stop_buffer_pips)} />
-                        <StatusMeta k="Verify Limit" v={formatTickValue(sanityConfig.verify_limit_ticks)} />
-                        <StatusMeta k="Min OB Size" v={formatPipValue(sanityConfig.min_ob_size_pips)} />
-                        <StatusMeta k="Max OB Size" v={formatPipValue(sanityConfig.max_ob_size_pips)} />
-                        <StatusMeta k="Position conflict" v={cfg.conflict || "—"} />
-                        <StatusMeta k="Session filter" v={sanityConfig.session_filter_enabled ? "Yes" : "No"} />
-                        <StatusMeta k="Allowed sessions" v={(sanityConfig.allowed_sessions || []).join(", ") || "—"} />
-                        <StatusMeta k="Disabled sessions" v={disabledSessionsFromConfig(sanityConfig).join(", ") || "—"} />
-                        <StatusMeta k="Session filtered skipped" v={sanityRun.session_filtered_skipped ?? "—"} />
-                        <StatusMeta k="News blackout" v={sanityConfig.news_blackout_enabled ? "Yes" : "No"} />
-                        <StatusMeta k="News impacts" v={(sanityConfig.news_blackout_impacts || []).join(", ") || "—"} />
-                        <StatusMeta k="News currencies" v={(sanityConfig.news_blackout_currencies || []).join(", ") || "—"} />
-                        <StatusMeta k="News window" v={formatNewsWindow(sanityConfig)} />
-                        <StatusMeta k="News pause pending" v={sanityConfig.news_pause_pending_orders != null ? (sanityConfig.news_pause_pending_orders ? "Yes" : "No") : "—"} />
-                        <StatusMeta k="News block fills" v={sanityConfig.news_block_new_fills != null ? (sanityConfig.news_block_new_fills ? "Yes" : "No") : "—"} />
-                        <StatusMeta k="News cancel if touched" v={sanityConfig.news_cancel_if_touched_during_blackout != null ? (sanityConfig.news_cancel_if_touched_during_blackout ? "Yes" : "No") : "—"} />
-                        <StatusMeta k="News flatten active" v={sanityConfig.news_flatten_active_trades != null ? (sanityConfig.news_flatten_active_trades ? "Yes" : "No") : "—"} />
-                        <StatusMeta k="Flatten before (min)" v={sanityConfig.news_flatten_minutes_before_blackout ?? "—"} />
-                        <StatusMeta k="News events matched" v={sanityRun.news_events_matched ?? "—"} />
-                        <StatusMeta k="News windows created" v={sanityRun.news_windows_created ?? "—"} />
-                        <StatusMeta k="News blackout skipped" v={sanityRun.news_blackout_skipped ?? "—"} />
-                        <StatusMeta k="News pending paused" v={sanityRun.news_pending_paused ?? "—"} />
-                        <StatusMeta k="News pending rearmed" v={sanityRun.news_pending_rearmed ?? "—"} />
-                        <StatusMeta k="News touch cancelled" v={sanityRun.news_touch_cancelled ?? "—"} />
-                        <StatusMeta k="News fills blocked" v={sanityRun.news_fills_blocked ?? "—"} />
-                        <StatusMeta k="News active flattened" v={sanityRun.news_active_trades_flattened ?? "—"} />
-                        <StatusMeta k="News flattened R" v={sanityRun.news_flattened_r ?? "—"} />
-                        <StatusMeta k="News flatten late" v={sanityRun.news_flatten_late_count ?? "—"} />
-                        <StatusMeta k={sanityRun.duration_seconds != null ? "Duration" : "Elapsed"} v={formatSeconds(sanityRun.duration_seconds ?? sanityRun.elapsed_seconds)} />
-                        <StatusMeta k="Imported run id" v={sanityRun.importedRunId || "—"} />
-                        <StatusMeta k="Directional entry mode" v={sanityConfig.directional_entry_mode || cfg.directionalEntryMode || "symmetric"} />
-                        {(sanityConfig.directional_entry_mode === "asymmetric" || cfg.directionalEntryMode === "asymmetric") && (
-                            <>
-                                <StatusMeta k="Long entry" v={formatDirEntryLabel(cfg.longEntryEnabled, cfg.longEntryModel, cfg.longPenetrationPct, cfg.longTriggeredEdgeThreshold, cfg.longTriggeredEdgeDelays)} />
-                                <StatusMeta k="Short entry" v={formatDirEntryLabel(cfg.shortEntryEnabled, cfg.shortEntryModel, cfg.shortPenetrationPct, cfg.shortTriggeredEdgeThreshold, cfg.shortTriggeredEdgeDelays)} />
-                            </>
-                        )}
+                    <div className="space-y-3">
+                        <DiagnosticsSection title="Run identity">
+                            <StatusMeta k="Status" v={sanityRun.status || "—"} />
+                            <StatusMeta k="Job ID" v={sanityRun.job_id || "—"} />
+                            <StatusMeta k="Output folder" v={sanityRun.output_folder || "—"} />
+                            <StatusMeta k="Imported run id" v={sanityRun.importedRunId || "—"} />
+                            <StatusMeta k="Plan passes" v={sanityRun.total_passes ?? generatedPlan.totalPasses ?? "—"} />
+                            <StatusMeta k="Entry passes" v={sanityRun.scenario_plan_summary?.entry ?? generatedPlan.entry ?? "—"} />
+                            <StatusMeta k="Protection passes" v={sanityRun.scenario_plan_summary?.protection ?? generatedPlan.protection ?? "—"} />
+                            <StatusMeta k={sanityRun.duration_seconds != null ? "Duration" : "Elapsed"} v={formatSeconds(sanityRun.duration_seconds ?? sanityRun.elapsed_seconds)} />
+                        </DiagnosticsSection>
+
+                        <DiagnosticsSection title="Configuration">
+                            <StatusMeta k="Symbol" v={sanityConfig.symbol || sanityRun.current_symbol || "—"} />
+                            <StatusMeta k="Detection TF" v={sanityConfig.detection_timeframe || "—"} />
+                            <StatusMeta k="Execution TF" v={sanityConfig.execution_timeframe || "—"} />
+                            <StatusMeta k="Execution mode" v={formatExecutionMode((sanityConfig.execution_modes || [])[0])} />
+                            <StatusMeta k="Structure filter" v={formatStructureFilter(sanityConfig.structure_filter)} />
+                            <StatusMeta k="Allowed struct/dir" v={Array.isArray(sanityConfig.allowed_structure_directions) && sanityConfig.allowed_structure_directions.length ? sanityConfig.allowed_structure_directions.join(", ") : "all"} />
+                            <StatusMeta k="Entry Mode" v={cfg.entryMode === "single" ? "Single Model" : "Scenario Batch"} />
+                            {cfg.entryMode === "single" && (
+                                <StatusMeta k="Active Entry Model" v={{ baseline: "Baseline Edge", entry_penetration: "Penetration", triggered_edge: "Triggered Edge" }[cfg.selectedEntryModel] || cfg.selectedEntryModel} />
+                            )}
+                            <StatusMeta k="Entry models" v={formatEntryModels(sanityConfig)} />
+                            <StatusMeta k="Penetration thresholds" v={(sanityConfig.entry_penetration_thresholds || []).join(", ") || "—"} />
+                            <StatusMeta k="Batch entry penetration" v={sanityConfig.batch_entry_penetration ? "On" : "Off"} />
+                            <StatusMeta k="Triggered-edge triggers" v={(sanityConfig.triggered_edge_trigger_thresholds || []).join(", ") || "—"} />
+                            <StatusMeta k="Triggered-edge entry delay" v={formatTriggeredEdgeDelays(sanityConfig.triggered_edge_candle_delays, sanityConfig.triggered_edge_same_candle_modes)} />
+                            <StatusMeta k="Triggered-edge retrace cancel" v={formatTriggeredEdgeRetraceCancel(sanityConfig)} />
+                            <StatusMeta k="First failed tag cancel" v={sanityConfig.triggered_edge_cancel_on_first_failed_tag ? "On" : "Off"} />
+                            <StatusMeta k="Limit Placement Depth" v={formatPercentValue(sanityConfig.ob_entry_depth_pct)} />
+                            <StatusMeta k="Entry Buffer" v={formatPipValue(sanityConfig.entry_buffer_pips)} />
+                            <StatusMeta k="Stop Buffer" v={formatPipValue(sanityConfig.stop_buffer_pips)} />
+                            <StatusMeta k="Verify Limit" v={formatTickValue(sanityConfig.verify_limit_ticks)} />
+                            <StatusMeta k="Min OB Size" v={formatPipValue(sanityConfig.min_ob_size_pips)} />
+                            <StatusMeta k="Max OB Size" v={formatPipValue(sanityConfig.max_ob_size_pips)} />
+                            <StatusMeta k="Position conflict" v={cfg.conflict || "—"} />
+                            <StatusMeta k="Session filter" v={sanityConfig.session_filter_enabled ? "Yes" : "No"} />
+                            <StatusMeta k="Allowed sessions" v={(sanityConfig.allowed_sessions || []).join(", ") || "—"} />
+                            <StatusMeta k="Disabled sessions" v={disabledSessionsFromConfig(sanityConfig).join(", ") || "—"} />
+                            <StatusMeta k="Directional entry mode" v={sanityConfig.directional_entry_mode || cfg.directionalEntryMode || "symmetric"} />
+                            {(sanityConfig.directional_entry_mode === "asymmetric" || cfg.directionalEntryMode === "asymmetric") && (
+                                <>
+                                    <StatusMeta k="Long entry" v={formatDirEntryLabel(cfg.longEntryEnabled, cfg.longEntryModel, cfg.longPenetrationPct, cfg.longTriggeredEdgeThreshold, cfg.longTriggeredEdgeDelays)} />
+                                    <StatusMeta k="Short entry" v={formatDirEntryLabel(cfg.shortEntryEnabled, cfg.shortEntryModel, cfg.shortPenetrationPct, cfg.shortTriggeredEdgeThreshold, cfg.shortTriggeredEdgeDelays)} />
+                                </>
+                            )}
+                            <StatusMeta k="News blackout" v={sanityConfig.news_blackout_enabled ? "Yes" : "No"} />
+                            <StatusMeta k="News impacts" v={(sanityConfig.news_blackout_impacts || []).join(", ") || "—"} />
+                            <StatusMeta k="News currencies" v={(sanityConfig.news_blackout_currencies || []).join(", ") || "—"} />
+                            <StatusMeta k="News window" v={formatNewsWindow(sanityConfig)} />
+                            <StatusMeta k="News pause pending" v={sanityConfig.news_pause_pending_orders != null ? (sanityConfig.news_pause_pending_orders ? "Yes" : "No") : "—"} />
+                            <StatusMeta k="News block fills" v={sanityConfig.news_block_new_fills != null ? (sanityConfig.news_block_new_fills ? "Yes" : "No") : "—"} />
+                            <StatusMeta k="News cancel if touched" v={sanityConfig.news_cancel_if_touched_during_blackout != null ? (sanityConfig.news_cancel_if_touched_during_blackout ? "Yes" : "No") : "—"} />
+                            <StatusMeta k="News flatten active" v={sanityConfig.news_flatten_active_trades != null ? (sanityConfig.news_flatten_active_trades ? "Yes" : "No") : "—"} />
+                            <StatusMeta k="Flatten before (min)" v={sanityConfig.news_flatten_minutes_before_blackout ?? "—"} />
+                        </DiagnosticsSection>
+
+                        <DiagnosticsSection title="Outputs">
+                            <StatusMeta k="News events matched" v={sanityRun.news_events_matched ?? "—"} />
+                            <StatusMeta k="News windows created" v={sanityRun.news_windows_created ?? "—"} />
+                            <StatusMeta k="News blackout skipped" v={sanityRun.news_blackout_skipped ?? "—"} />
+                            <StatusMeta k="News pending paused" v={sanityRun.news_pending_paused ?? "—"} />
+                            <StatusMeta k="News pending rearmed" v={sanityRun.news_pending_rearmed ?? "—"} />
+                            <StatusMeta k="News touch cancelled" v={sanityRun.news_touch_cancelled ?? "—"} />
+                            <StatusMeta k="News fills blocked" v={sanityRun.news_fills_blocked ?? "—"} />
+                            <StatusMeta k="News active flattened" v={sanityRun.news_active_trades_flattened ?? "—"} />
+                            <StatusMeta k="News flattened R" v={sanityRun.news_flattened_r ?? "—"} />
+                            <StatusMeta k="News flatten late" v={sanityRun.news_flatten_late_count ?? "—"} />
+                        </DiagnosticsSection>
+
+                        <DiagnosticsSection title="Warnings / sanity checks">
+                            <StatusMeta k="BOS Long skip" v={sanityRun.structure_direction_filter_skipped?.bos_long ?? "—"} />
+                            <StatusMeta k="BOS Short skip" v={sanityRun.structure_direction_filter_skipped?.bos_short ?? "—"} />
+                            <StatusMeta k="CHoCH Long skip" v={sanityRun.structure_direction_filter_skipped?.choch_long ?? "—"} />
+                            <StatusMeta k="CHoCH Short skip" v={sanityRun.structure_direction_filter_skipped?.choch_short ?? "—"} />
+                            <StatusMeta k="Session filtered skipped" v={sanityRun.session_filtered_skipped ?? "—"} />
+                        </DiagnosticsSection>
                     </div>
                 </NeonPanel>
+                </BuilderFocusCard>
+
+                <BuilderFocusCard id="session-scenario" activeId={activeBuilderCard} onActivate={setActiveBuilderCard} className="lg:col-span-3">
+                    <SessionScenarioBuilder />
                 </BuilderFocusCard>
 
                 <BuilderFocusCard id="sidecar-run" activeId={activeBuilderCard} onActivate={setActiveBuilderCard} className="lg:col-span-3">
@@ -1537,21 +2036,12 @@ export default function StrategyBuilder() {
                             )}
                             {runJob && (
                                 <div className="space-y-2">
-                                    <div className={`border ${runStatusNoticeClass(runJob)} clip-bevel-sm px-3 py-2`}>
-                                        <div className="flex flex-wrap items-center justify-between gap-2">
-                                            <div>
-                                                <div className="control-label text-[10px] font-ui uppercase tracking-wider text-muted-lab">Structured run status</div>
-                                                <div className="mt-1 text-[12px] font-ui text-white">
-                                                    {runStatusLabel(runJob)} · {formatRunProgress(runJob)}
-                                                </div>
-                                            </div>
-                                            <Pill tone={runStatusTone(runJob)}>{runStatusLabel(runJob)}</Pill>
-                                        </div>
-                                        <div className="mt-1 text-[11px] text-[hsl(var(--text-2))]">
-                                            {runStatusMessage(runJob)}
-                                        </div>
-                                    </div>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                    <details className="group border border-[hsl(var(--border-soft))] clip-bevel-sm">
+                                        <summary className="cursor-pointer select-none list-none px-3 py-1.5 flex items-center justify-between text-[10px] font-ui uppercase tracking-wider text-muted-lab hover:text-[hsl(var(--text-2))]">
+                                            <span>All run fields</span>
+                                            <ChevronDown className="w-3 h-3 shrink-0" />
+                                        </summary>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 px-2 pb-2">
                                         <StatusMeta k="Job ID" v={runJob.job_id} />
                                         <StatusMeta k="Run ID" v={runJob.run_id || runJob.job_id} />
                                         <StatusMeta k="Status" v={runJob.status} />
@@ -1577,45 +2067,8 @@ export default function StrategyBuilder() {
                                         <StatusMeta k="News flattened R" v={runJob.news_flattened_r ?? "—"} />
                                         <StatusMeta k="News flatten late" v={runJob.news_flatten_late_count ?? "—"} />
                                         <StatusMeta k="Output folder" v={runJob.output_folder || "—"} />
-                                    </div>
-                                    {runJob.possibly_stalled && (
-                                        <div className="border border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.07)] clip-bevel-sm px-3 py-2 text-[10.5px] text-[hsl(var(--warning))]">
-                                            No progress update for {formatDuration(runJob.seconds_since_update)}. The run may be stalled.
                                         </div>
-                                    )}
-                                    {runJob.can_cancel && (
-                                        <div className="flex justify-end">
-                                            <NeonButton icon={Trash2} tone="warning" onClick={onCancelRun} disabled={runBusy}>
-                                                Cancel Run
-                                            </NeonButton>
-                                        </div>
-                                    )}
-                                    {isCompletedRun(runJob) && (
-                                        <div className="space-y-2 border border-[hsl(var(--success)/0.35)] bg-[hsl(var(--success)/0.06)] clip-bevel-sm px-3 py-2">
-                                            <div className="text-[11px] font-ui text-[hsl(var(--success))]">
-                                                Run completed. Import the completed output folder into Research Lab.
-                                            </div>
-                                            <div className="flex flex-wrap items-center gap-2">
-                                                <NeonButton icon={FileInput} tone="success" onClick={onImportCompletedRun} disabled={importBusy}>
-                                                    {importBusy ? "Importing..." : "Import Completed Run"}
-                                                </NeonButton>
-                                                {importedRunId && (
-                                                    <>
-                                                        <Pill tone="success">Imported</Pill>
-                                                        <Link to={`/runs/${encodeURIComponent(importedRunId)}`}><NeonButton tone="primary">Open Run</NeonButton></Link>
-                                                        <Link to="/runs"><NeonButton tone="ghost">All Runs</NeonButton></Link>
-                                                        <Link to="/strategy-map"><NeonButton tone="ghost">Strategy Map</NeonButton></Link>
-                                                        <Link to="/trade-inspector"><NeonButton tone="ghost">Trade Inspector</NeonButton></Link>
-                                                    </>
-                                                )}
-                                            </div>
-                                            {importError && (
-                                                <div className="border border-[hsl(var(--danger)/0.4)] bg-[hsl(var(--danger)/0.06)] clip-bevel-sm px-2 py-1.5 text-[10.5px] font-ui text-[hsl(var(--danger))]">
-                                                    {importError}
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
+                                    </details>
                                     <LogBlock title="stdout tail" text={runJob.stdout_tail} />
                                     <LogBlock title="stderr tail" text={runJob.stderr_tail} tone="warning" />
                                 </div>
@@ -2114,6 +2567,94 @@ function StatusMeta({ k, v }) {
         <div className="border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.28)] clip-bevel-sm px-3 py-2">
             <div className="control-label text-[9.5px] font-ui uppercase tracking-wider text-muted-lab">{k}</div>
             <div className="mt-1 text-[11px] font-code text-[hsl(var(--text-2))] break-all">{String(v ?? "—")}</div>
+        </div>
+    );
+}
+
+// Local clock time `eta_seconds` from now, e.g. "14:32". Null-safe.
+function formatClockTime(etaSeconds) {
+    const s = Number(etaSeconds);
+    if (!Number.isFinite(s) || s < 0) return "—";
+    try {
+        return new Date(Date.now() + s * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    } catch {
+        return "—";
+    }
+}
+
+// 0–100 completion percent, preferring completed/total passes, then job.progress
+// (accepts a 0–1 fraction or a 0–100 value). Null when nothing usable.
+function runProgressPct(job) {
+    if (!job) return null;
+    const done = Number(job.completed_passes ?? job.current_index);
+    const total = Number(job.total_passes);
+    if (Number.isFinite(done) && Number.isFinite(total) && total > 0) {
+        return Math.max(0, Math.min(100, (done / total) * 100));
+    }
+    const p = Number(job.progress);
+    if (Number.isFinite(p)) return Math.max(0, Math.min(100, p <= 1 ? p * 100 : p));
+    return null;
+}
+
+function RunProgressTile({ label, value }) {
+    return (
+        <div className="border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.28)] clip-bevel-sm px-2.5 py-1.5">
+            <div className="text-[9px] font-ui uppercase tracking-wider text-muted-lab">{label}</div>
+            <div className="mt-0.5 text-[14px] font-num font-semibold tabular-nums text-[hsl(var(--text))]">{value}</div>
+        </div>
+    );
+}
+
+// Compact, premium run-progress monitor. Pure presentational — reads only the
+// progress fields already present on the polled/rehydrated runJob. Degrades
+// gracefully when fields (eta, passes, progress) are missing.
+function RunProgressCard({ job }) {
+    if (!job) return null;
+    const pct = runProgressPct(job);
+    const tone = runStatusTone(job);
+    const done = job.completed_passes ?? job.current_index;
+    const total = job.total_passes;
+    const barColor = tone === "success" ? "hsl(var(--success))"
+        : tone === "warning" ? "hsl(var(--warning))"
+        : "hsl(var(--accent-secondary))";
+    return (
+        <div className={`border ${runStatusNoticeClass(job)} clip-bevel-sm px-3 py-2.5 space-y-2.5`}>
+            <div className="flex items-center justify-between gap-2">
+                <div className="flex items-baseline gap-2 min-w-0">
+                    <span className="text-[13px] font-ui font-semibold text-[hsl(var(--text))]">{runStatusLabel(job)}</span>
+                    {(done != null || total != null) && (
+                        <span className="text-[11px] font-num tabular-nums text-[hsl(var(--text-2))] shrink-0">
+                            pass {done ?? "—"} / {total ?? "—"}
+                        </span>
+                    )}
+                </div>
+                <Pill tone={tone}>{pct != null ? `${Math.round(pct)}%` : runStatusLabel(job)}</Pill>
+            </div>
+            {pct != null && (
+                <div className="h-2 w-full bg-[hsl(var(--panel-2))] rounded-full overflow-hidden">
+                    <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, background: barColor }} />
+                </div>
+            )}
+            <div className="text-[11px] font-ui text-[hsl(var(--text-2))] truncate" title={job.current_label || ""}>
+                <span className="text-muted-lab">Current: </span>{job.current_label || "—"}
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <RunProgressTile label="Avg pass" value={formatDuration(job.avg_pass_seconds)} />
+                <RunProgressTile label="ETA left" value={formatDuration(job.eta_seconds)} />
+                <RunProgressTile label="Est. finish" value={formatClockTime(job.eta_seconds)} />
+                <RunProgressTile label="Elapsed" value={formatDuration(job.elapsed_seconds ?? job.progress_elapsed_seconds)} />
+            </div>
+            <div className="text-[10.5px] font-ui text-muted-lab">{runStatusMessage(job)}</div>
+        </div>
+    );
+}
+
+// Labeled sub-grid for the Last Run Diagnostics card sections.
+function DiagnosticsSection({ title, children }) {
+    return (
+        <div className="space-y-1.5">
+            <div className="text-[9.5px] font-ui uppercase tracking-[0.16em] text-[hsl(var(--accent-secondary))]">{title}</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">{children}</div>
         </div>
     );
 }
