@@ -2156,7 +2156,7 @@ export default function RunDetail() {
                 >
                 {showResultsSection("baseline-splits") && <SessionSplit trades={displayTrades} />}
 
-                {showResultsSection("session-results") && <SessionResults />}
+                {showResultsSection("session-results") && <SessionResults trades={displayTrades} bundle={runData} />}
 
                 {showResultsSection("config") && <NeonPanel className="xl:col-span-3" title="Configuration" action={<Pill tone="muted">Compact</Pill>}>
                     <div className="space-y-3">
