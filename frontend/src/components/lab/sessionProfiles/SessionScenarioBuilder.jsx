@@ -94,7 +94,7 @@ function Field({ label, value, warn }) {
         <div className="flex items-baseline gap-2">
             <span className="text-[10.5px] font-ui uppercase tracking-wider text-muted-lab w-24 shrink-0">{label}</span>
             <span className={`text-[12.5px] font-ui ${warn ? "text-[hsl(var(--danger))]" : "text-[hsl(var(--text-1))]"}`}>
-                {value}{warn ? <span className="inline-flex items-center gap-1 ml-1.5 text-[hsl(var(--danger))]"><AlertTriangle size={11} />unavailable for this run</span> : null}
+                {value}{warn ? <span className="inline-flex items-center gap-1 ml-1.5 text-[hsl(var(--danger))]" title="Not in this imported run's preview export. A true backend scenario run can still use this setting."><AlertTriangle size={11} />unavailable in preview — backend can still run it</span> : null}
             </span>
         </div>
     );
