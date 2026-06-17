@@ -25,6 +25,7 @@ import {
 import { archetypeLabel } from "../shared/failuresRegistry";
 import { buildHypothesisCard, writeHypothesisToStorage } from "../shared/failuresExporter";
 import { ConfirmedFalseLosersPanel } from "./ConfirmedFalseLosersPanel";
+import { CohortPriorityQueue } from "./CohortPriorityQueue";
 import { LossTriagePanel } from "./LossTriagePanel";
 import { FailureExplorer } from "../excursion/FailureExplorer";
 import { isPerformanceTrade } from "@/data/tradeClassification";
@@ -255,6 +256,9 @@ export function FailuresOverview({ losers = [], allLosers = [], allTrades = [], 
         <div className="p-6 space-y-5">
             {/* ── Failure Command Center — verdict-first answer ─────────────── */}
             <FailureCommandCenter allTrades={allTrades} allLosers={allLosers} />
+
+            {/* ── Research Priority Queue — "what to investigate next" (V6) ──── */}
+            <CohortPriorityQueue allTrades={allTrades} config={config} />
 
             {/* ── Confirmed False Losers — surfaced here (V5 Phase 2B IA) ────── */}
             <ConfirmedFalseLosersPanel allLosers={allLosers} />
