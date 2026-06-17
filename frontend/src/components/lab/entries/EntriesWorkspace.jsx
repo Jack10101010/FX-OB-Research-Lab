@@ -193,6 +193,7 @@ export function EntriesWorkspace() {
                 <div className="px-6 mt-2 mb-1">
                     <ResearchContextBanner
                         run={buildBannerRunIdentity(activeRun)}
+                        tone={availableModelKeys.length > 0 ? "context" : "baseline"}
                         scopeTitle="Entry Model Comparison"
                         scopeSummary={
                             availableModelKeys.length > 0
