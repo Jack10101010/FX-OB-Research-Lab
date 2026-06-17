@@ -7,7 +7,10 @@ import {
 import { LabRunHero } from "@/components/lab/LabRunHero";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { Pill } from "@/components/lab/DataTable";
+import ResearchResultViewBanner from "@/components/lab/ResearchResultViewBanner";
+import { buildBannerRunIdentity } from "@/components/lab/researchBanner/bannerRun";
 import { useDataset, getRunDisplayName } from "@/data/store";
+import { useRunVariant } from "@/data/useRunVariant";
 import { resolveDisplayTrades } from "@/data/resolveDisplayTrades";
 import { isPerformanceTrade, isWinTrade, isLossTrade } from "@/data/tradeClassification";
 import { buildFillStateBreakdown, buildSessionBreakdown } from "@/data/fillStateBreakdown";
@@ -52,6 +55,8 @@ export default function ResearchCockpit() {
 
     const runId = ACTIVE_RUN?.id || null;
     const runData = useMemo(() => (runId && getRunData ? getRunData(runId) : null), [runId, getRunData]);
+    // Read-only current trade-view context (Result View banner — same as Protection/News).
+    const { universe } = useRunVariant(runId);
     // Variant-aware: read the ACTIVE trade variant (e.g. "TrigE +2"), consistent with
     // RunDetail / Strategy Map — not the bundle's base trades array.
     const resolved = useMemo(() => resolveDisplayTrades(runData, ACTIVE_TRADE_VARIANT), [runData, ACTIVE_TRADE_VARIANT]);
@@ -164,6 +169,12 @@ export default function ResearchCockpit() {
                     </Link>
                 }
             />
+
+            {runId && (
+                <div className="px-6 mt-2 mb-3">
+                    <ResearchResultViewBanner universe={universe} run={buildBannerRunIdentity(ACTIVE_RUN)} />
+                </div>
+            )}
 
             <div className="px-6 space-y-4">
                 {/* Warnings & Caveats — first */}

@@ -6,6 +6,7 @@ import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
 import { Field, NeonSelect, NeonInput } from "@/components/lab/controls";
 import { useDataset, updateRunBundle, deleteRunBundle, clearAllRuns, getRunsBackupPayload, importRunsBackup, getRunDisplayName, compactTimeframe, formatRunDateRange, reloadFullRunFromSidecar, autoReloadIndexedRunsFromSidecar } from "@/data/store";
 import { Check, Download, Edit3, RefreshCw, ShieldAlert, Trash2, Upload, X } from "lucide-react";
+import { summarizeBeCoverage } from "@/components/lab/researchBanner/bannerRun";
 
 const RUN_SORT_OPTIONS = [
     { value: "created_asc", label: "Created ↑ oldest first" },
@@ -353,6 +354,7 @@ export default function Runs() {
                             { key: "trades",      label: "Trades",     align: "right", render: (r) => formatIntegerCell(r.validTradeCount ?? r.trades) },
                             { key: "winRate",     label: "WR",         align: "right", render: (r) => formatPercentCell(r.winRate, 1) },
                             { key: "netR",        label: "Net R",      align: "right", render: (r) => <SafeColoredR value={r.netR} /> },
+                            { key: "be",          label: "BE",         align: "center", render: (r) => <BeCell coverage={r.beCoverage} /> },
                             { key: "maxDd",       label: "Max DD",     align: "right", render: (r) => <MaxDdValue value={r.maxDd} /> },
                             { key: "validation",  label: "Val",        align: "right", render: (r) => <span className="text-[hsl(var(--success))]">{formatPercentCell(r.validation, 1)}</span> },
                         ]}
@@ -409,8 +411,11 @@ function isValidExecutedTrade(trade) {
 }
 
 function computeValidTradeMetrics(trades) {
-    const validTrades = Array.isArray(trades) ? trades.filter(isValidExecutedTrade) : null;
-    if (!validTrades) return {};
+    // LARGE-RUN-IMPORT Phase 2C — a lazy/index-only run carries trades:[] (rows
+    // not resident). Treat "no resident rows" as unknown so the caller falls back
+    // to the summary-derived count, instead of overriding it with a hard 0.
+    if (!Array.isArray(trades) || trades.length === 0) return {};
+    const validTrades = trades.filter(isValidExecutedTrade);
     let cumR = 0;
     let peak = 0;
     let worstDrawdown = 0;
@@ -442,6 +447,14 @@ function enrichRunMetrics(run, getRunData) {
         ...run,
         validTradeCount: tradeMetrics.validTradeCount ?? runMetricValue(run, "trades"),
         maxDd: tradeMetrics.maxDd ?? normalizedFallbackDd,
+        // BE coverage: bundle's loaded maps (beTradesByMode/beResults) plus the
+        // beScenarioIndex from the bundle or the index row, so eager AND lazy/cube
+        // runs both report BE without forcing a load.
+        beCoverage: summarizeBeCoverage({
+            beTradesByMode: bundle?.beTradesByMode,
+            beResults: bundle?.beResults,
+            beScenarioIndex: bundle?.beScenarioIndex || run?.beScenarioIndex,
+        }),
     };
 }
 
@@ -476,6 +489,23 @@ function SafeColoredR({ value }) {
     const number = Number(value);
     if (!Number.isFinite(number)) return <span className="text-muted-lab">—</span>;
     return <ColoredR value={number} />;
+}
+
+// BE column: green tick when any break-even scenario was generated for the run;
+// hover tooltip lists the entry variants (+ scenario count) BE was run for.
+function BeCell({ coverage }) {
+    if (!coverage || !coverage.ran) {
+        return <span className="text-muted-lab" title="No break-even scenarios were generated for this run.">—</span>;
+    }
+    const variants = (coverage.variantLabels || []).join(", ");
+    const scen = coverage.scenarioCount
+        ? ` · ${coverage.scenarioCount} scenario${coverage.scenarioCount === 1 ? "" : "s"} per variant`
+        : "";
+    return (
+        <span className="inline-flex justify-center" title={`Break-even generated for: ${variants}${scen}`}>
+            <Check className="w-3.5 h-3.5 text-[hsl(var(--success))]" />
+        </span>
+    );
 }
 
 function formatNumericCell(value, digits = 1) {

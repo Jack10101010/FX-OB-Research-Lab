@@ -44,6 +44,7 @@ import { FftOverviewCard } from "@/components/lab/fft/FftOverviewCard";
 // the Result View; the header is an extracted, controlled component.
 import { useRunVariant } from "@/data/useRunVariant";
 import ResearchRunHeader from "@/components/lab/ResearchRunHeader";
+import { summarizeBeCoverage } from "@/components/lab/researchBanner/bannerRun";
 import { buildAvailableOptions, collectAllEntryKeys, entryTradesByMode, buildCanonicalKey } from "@/data/tradeUniverse";
 // RW-4A: directional scenario label formatter
 import { formatDirectionalScenarioLabel } from "@/components/lab/entries/analytics/entryFormatters";
@@ -1574,6 +1575,7 @@ export default function RunDetail() {
                 legacyTradeCount={Array.isArray(legacyTradesForRun) ? legacyTradesForRun.length : 0}
                 scopeChip={scopeChip}
                 baselineParityAudit={baselineParityAudit}
+                beCoverage={summarizeBeCoverage(runData || run)}
             />
 
             {isIndexOnlyRun && (
