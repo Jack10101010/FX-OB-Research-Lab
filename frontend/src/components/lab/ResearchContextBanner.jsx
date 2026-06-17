@@ -27,7 +27,9 @@
  *                         e.g. the available entry models. Collapses to "+N more" past maxChips.
  *   chipsLabel = "Models" eyebrow for the chip row
  *   maxChips = 8          show this many chips, then "+N more"
- *   tone = "active"       shell tone ("active" | "neutral" | "warning"); blue by default
+ *   tone = "context"      shell tone; context pages are PURPLE by default. Callers pass
+ *                         "baseline" (orange) for a baseline-only state, "active" (blue)
+ *                         for a single selected model, etc.
  */
 
 import React from "react";
@@ -53,7 +55,7 @@ export default function ResearchContextBanner({
     chips = [],
     chipsLabel = "Models",
     maxChips = 8,
-    tone = "active",
+    tone = "context",
 }) {
     const visibleFacts = facts.filter((f) => f && f.value != null && f.value !== "");
     const chipList = Array.isArray(chips) ? chips.filter(Boolean) : [];
@@ -83,7 +85,16 @@ export default function ResearchContextBanner({
             <div className="text-[10px] font-semibold font-ui uppercase tracking-[0.1em] text-[hsl(var(--text-2))] mb-1">
                 {scopeTitle}
             </div>
-            <div className="font-ui font-bold leading-tight text-[20px] text-[hsl(var(--accent-primary))]">
+            <div className={[
+                "font-ui font-bold leading-tight text-[20px]",
+                // Title follows the shell tone: baseline/warning → orange, context → purple,
+                // else accent blue.
+                (tone === "baseline" || tone === "warning")
+                    ? "text-[hsl(var(--warning))]"
+                    : tone === "context"
+                        ? "text-[hsl(270_85%_75%)]"
+                        : "text-[hsl(var(--accent-primary))]",
+            ].join(" ")}>
                 {scopeSummary}
             </div>
             {/* Models (or other chips) — stacked column on the right. */}

@@ -32,14 +32,15 @@ export function CurrentResultViewPanel({
             <div className="text-[10px] font-semibold font-ui uppercase tracking-[0.1em] text-[hsl(var(--text-2))] mb-1">
                 Current View
             </div>
-            {/* Dominant view label */}
+            {/* Dominant view label. Baseline → orange so it instantly reads as
+                "not on a selected model" (matches the orange shell tone). */}
             <div className={[
                 "font-ui font-bold leading-tight mb-2",
                 isUnavailable
                     ? "text-[hsl(var(--warning))] text-[20px]"
                     : isScenarioView
                         ? "text-[hsl(var(--accent-primary))] text-[20px]"
-                        : "text-white text-[20px]",
+                        : "text-[hsl(var(--warning))] text-[20px]",
             ].join(" ")}>
                 {currentViewDisplay}
             </div>

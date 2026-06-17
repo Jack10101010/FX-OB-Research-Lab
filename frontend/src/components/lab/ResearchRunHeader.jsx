@@ -69,6 +69,7 @@ export default function ResearchRunHeader({
     legacyTradeCount = 0,
     scopeChip = {},
     baselineParityAudit = null,
+    beCoverage = null,
 }) {
     const setResultView = onResultViewChange || (() => {});
 
@@ -133,12 +134,18 @@ export default function ResearchRunHeader({
                             { key: "penetration",    label: "Penetration" },
                             { key: "triggered_edge", label: "Triggered Edge" },
                         ];
+                        // Arm timing (candle index after the trigger). Labels match
+                        // the Strategy Map convention (fillModeDisplayLabel): same=C0,
+                        // next=C1, d2..d6=C2..C6. All delays C0–C6 are listed; each
+                        // renders active when present and dimmed when absent.
                         const FILL_MODE_SLOTS = [
-                            { fillMode: null,   label: "Both" },
-                            { fillMode: "same", label: "Same candle" },
-                            { fillMode: "next", label: "Next candle" },
-                            { fillMode: "d2",   label: "Delay +2" },
-                            { fillMode: "d3",   label: "Delay +3" },
+                            { fillMode: "same", label: "Arm C0" },
+                            { fillMode: "next", label: "Arm C1" },
+                            { fillMode: "d2",   label: "Arm C2" },
+                            { fillMode: "d3",   label: "Arm C3" },
+                            { fillMode: "d4",   label: "Arm C4" },
+                            { fillMode: "d5",   label: "Arm C5" },
+                            { fillMode: "d6",   label: "Arm C6" },
                         ];
 
                         const showThresholdRow = selModel !== "baseline";
@@ -173,18 +180,20 @@ export default function ResearchRunHeader({
                             if (fam === "penetration") return thr != null ? `Penetration ${thr}%` : "Penetration";
                             if (fam === "triggered_edge") {
                                 const base = thr != null ? `Triggered Edge ${thr}%` : "Triggered Edge";
-                                const mode = selFillMode === "same" ? " · Same Candle"
-                                           : selFillMode === "next" ? " · Next Candle"
-                                           : selFillMode === "d2"   ? " · Delay +2"
-                                           : selFillMode === "d3"   ? " · Delay +3"
+                                const dm = typeof selFillMode === "string" ? selFillMode.match(/^d(\d+)$/) : null;
+                                const mode = selFillMode === "same" ? " · Arm C0"
+                                           : selFillMode === "next" ? " · Arm C1"
+                                           : dm ? ` · Arm C${dm[1]}`
                                            : " · Both";
                                 return base + mode;
                             }
                             return identityLabel;
                         })();
 
+                        // Baseline view → orange ("baseline") so it's instantly obvious
+                        // you're not on a selected model (matches ResearchResultViewBanner).
                         const tone = !isScenarioView
-                            ? "neutral"
+                            ? "baseline"
                             : hasSelectedUniverseTrades ? "active" : "warning";
 
                         return (
@@ -263,7 +272,10 @@ export default function ResearchRunHeader({
                                         {/* Row C — Fill Mode (only once model + threshold selected) */}
                                         {showFillModeRow && (
                                             <div className="flex flex-wrap items-center gap-2 pl-3 border-l border-[hsl(var(--border-soft)/0.3)]">
-                                                <span className="text-[9.5px] font-ui uppercase tracking-[0.07em] text-[hsl(var(--text-2)/0.65)] shrink-0 mr-0.5">Fill Mode</span>
+                                                <span
+                                                    className="text-[9.5px] font-ui uppercase tracking-[0.07em] text-[hsl(var(--text-2)/0.65)] shrink-0 mr-0.5 cursor-default"
+                                                    title={"Arm timing = the candle (after the trigger threshold is reached) on which the limit order becomes active.\n\nArm C0 = active on the trigger candle\nArm C1 = active on the next candle\nArm C2–C6 = active 2–6 candles after the trigger\n\nThis is arm timing, not fill timing — a trade can arm on C0 yet still fill on a later candle."}
+                                                >Arm</span>
                                                 {FILL_MODE_SLOTS.map(({ fillMode: fm, label }) => {
                                                     const isAvail  = availFillModes.has(fm);
                                                     const isActive = selFillMode === fm;
@@ -352,6 +364,29 @@ export default function ResearchRunHeader({
                                                 </span>
                                             )}
                                         </div>
+                                        {/* Break-even coverage — stacked under the scope row.
+                                            Run Detail intentionally surfaces baseline BE (allowed
+                                            here); variant BE groups (TE %/arm, e.g. "TE 10% · C2,
+                                            C3") stack beneath it for parity with the other banners. */}
+                                        {beCoverage && (
+                                            <div className="mt-2.5 pt-2 border-t border-[hsl(var(--border-soft)/0.25)]">
+                                                <div className="text-[9.5px] font-ui uppercase tracking-[0.08em] text-muted-lab mb-1">
+                                                    Break-even
+                                                </div>
+                                                {beCoverage.ran ? (
+                                                    <div className="flex flex-col items-start gap-1">
+                                                        {(beCoverage.variants || []).some((v) => v === "baseline" || v === "entry_baseline") && (
+                                                            <Pill tone="muted">Baseline</Pill>
+                                                        )}
+                                                        {(beCoverage.nonBaselineVariantGroups || []).map((g) => (
+                                                            <Pill key={g.groupKey} tone="secondary">{g.label}</Pill>
+                                                        ))}
+                                                    </div>
+                                                ) : (
+                                                    <Pill tone="muted">Not run</Pill>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                                 right={(

@@ -12,6 +12,7 @@
  *   "active"   → a scenario / model is selected and has trades  (accent-primary, blue)
  *   "baseline" → baseline view (no model selected)              (warning, orange)
  *   "warning"  → a scenario is selected but is unavailable       (warning, orange)
+ *   "context"  → multi-model / multi-run context page           (purple)
  *   "neutral"  → fallback / no run                               (border-soft, grey)
  */
 
@@ -22,6 +23,9 @@ const TONE_CLASS = {
     // Baseline view — orange, so it's instantly clear you're NOT on a selected variant.
     baseline: "border-[hsl(var(--warning)/0.55)] bg-[hsl(var(--warning)/0.07)]",
     warning:  "border-[hsl(var(--warning)/0.45)] bg-[hsl(var(--warning)/0.05)]",
+    // Context (comparison/aggregate) pages — fixed purple so they read as a distinct
+    // banner family regardless of the active theme's accent colour.
+    context:  "border-[hsl(270_70%_62%/0.5)] bg-[hsl(270_70%_62%/0.09)]",
     neutral:  "border-[hsl(var(--border-soft)/0.5)] bg-[hsl(var(--panel-2)/0.2)]",
 };
 

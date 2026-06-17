@@ -58,10 +58,12 @@ function familyLabel(family) {
 }
 
 function fillModeLabel(fm) {
-    if (fm === "same") return "Same candle";
-    if (fm === "next") return "Next candle";
+    // Arm-timing convention (matches Strategy Map fillModeDisplayLabel + the
+    // result-view header): same=C0, next=C1, d2..d6=C2..C6.
+    if (fm === "same") return "Arm C0";
+    if (fm === "next") return "Arm C1";
     const dm = typeof fm === "string" ? fm.match(/^d(\d+)$/) : null;
-    if (dm) return `Delay +${dm[1]}`;
+    if (dm) return `Arm C${dm[1]}`;
     return "Both";
 }
 
@@ -145,6 +147,64 @@ export default function ResearchResultViewBanner({
                     </Field>
                 )}
             </div>
+            {/* Break-even coverage row — what BE was actually generated for this run
+                (variants + triggers + arm levels), so it's clear at a glance. */}
+            {run?.beCoverage && (() => {
+                const be = run.beCoverage;
+                // Show the NON-baseline entry models BE was run on; only fall back to
+                // "Baseline" when baseline was the sole entry model with BE.
+                // Grouped chips — one per TE %/family listing exported arms (C0–C6),
+                // e.g. "TE 25% · C0, C1, C2". Falls back to flat labels for old runs.
+                const shownLabels = be.hasNonBaseline
+                    ? (be.nonBaselineGroupedLabels || be.nonBaselineVariantLabels || [])
+                    : (be.groupedVariantLabels || be.variantLabels || []);
+                const baselineOnly = be.ran && !be.hasNonBaseline;
+                const hasTriggersOrArms = (be.triggerLabels || []).length > 0 || (be.arms || []).length > 0;
+                return (
+                    // Stacked: Break-even pills on the first line; Triggers + Arms on the
+                    // line beneath (no longer inline with the variant chips).
+                    <div className="flex flex-col gap-y-1.5 mb-2">
+                        {be.ran ? (
+                            <>
+                                <Field label="Break-even">
+                                    <span className="inline-flex flex-wrap items-center gap-1">
+                                        {shownLabels.map((v) => (
+                                            <Pill key={v} tone="secondary">{v}</Pill>
+                                        ))}
+                                    </span>
+                                </Field>
+                                {hasTriggersOrArms && (
+                                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                                        {(be.triggerLabels || []).length > 0 && (
+                                            <Field label="Triggers">
+                                                <Pill tone="muted">{be.triggerLabels.join(" · ")}</Pill>
+                                            </Field>
+                                        )}
+                                        {(be.arms || []).length > 0 && (
+                                            <Field label="Arms">
+                                                <span className="text-[11px] font-num tabular-nums text-[hsl(var(--text-2))]">
+                                                    {be.arms.join(" / ")}R
+                                                </span>
+                                            </Field>
+                                        )}
+                                    </div>
+                                )}
+                                {/* Baseline-only BE while viewing a non-baseline entry: make
+                                    it clear BE wasn't run for the current entry model. */}
+                                {baselineOnly && isScenarioView && family !== "baseline" && (
+                                    <span className="text-[10px] font-ui text-[hsl(var(--warning))]">
+                                        BE ran on the baseline entry only — re-run with all entry variants for {familyLabel(family)} BE.
+                                    </span>
+                                )}
+                            </>
+                        ) : (
+                            <Field label="Break-even">
+                                <Pill tone="muted">Not run</Pill>
+                            </Field>
+                        )}
+                    </div>
+                );
+            })()}
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 pt-2 border-t border-[hsl(var(--border-soft)/0.25)]">
                 <Field label="Position Mode">
                     <Pill tone="muted">{universe.variant || "Primary"}</Pill>

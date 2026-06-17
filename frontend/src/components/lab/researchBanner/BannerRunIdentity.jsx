@@ -19,6 +19,8 @@ export default function BannerRunIdentity({ run }) {
     if (!run) return null;
     const meta = [run.symbol, run.timeframe].filter(Boolean).join(" · ");
     const dateLine = [run.dateRange, run.monthsSpan].filter(Boolean).join(" · ");
+    // NB: BE coverage is now shown as a dedicated detailed row in
+    // ResearchResultViewBanner (variants + triggers + arms), not a chip here.
     return (
         <div className="mb-3 pb-2.5 border-b border-[hsl(var(--border-soft)/0.3)]">
             <div className="text-[17px] xl:text-[19px] font-ui font-semibold text-[hsl(var(--text-1))] truncate leading-tight">
