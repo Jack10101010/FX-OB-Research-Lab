@@ -38,6 +38,17 @@ import {
 } from "./tradeUniverse";
 import { applyScenarioPatchLayerSafety } from "./runVariantResolve";
 import { normalizeProfiles, isProfilesActive, emptyProfiles } from "./sessionProfiles";
+// PORTFOLIO-SAVE-LOAD (MVP) — named, immutable snapshots of a session portfolio.
+// Pure logic lives in portfolioLibrary.js; state + persistence are owned here
+// (mirrors the sessionProfiles.js ↔ store.js split). The working copy stays
+// `state.sessionProfiles`; `loadedPortfolioId` points at the record it descends
+// from. Library is backend-mirrored via makeDomainBackend; the working copy is not.
+import {
+    normalizeLibrary, normalizeRecord, mergeLibraries, isLibraryEmpty, listRecords,
+    createRecord, duplicateRecord, renameRecord, setRecordDescription, deleteRecord,
+    saveIntoRecord, isDirty as isPortfolioDirtyPure,
+} from "./portfolioLibrary";
+import { makeDomainBackend as makePortfolioBackend } from "./backendDomainSync";
 
 const LS_KEY = "fxob_runs";
 const LS_RUN_INDEX = "fxob_runs_index_v1";
@@ -47,6 +58,9 @@ const LS_ACTIVE = "fxob_active_run_id";
 const LS_ACTIVE_PROJECT = "fxob_active_project_id";
 const LS_SCENARIO = "fxob_scenario_v1";
 const LS_SESSION_PROFILES = "fxob_session_profiles_v1";
+// PORTFOLIO-SAVE-LOAD — the named library map + the single "loaded" pointer.
+const LS_PORTFOLIOS = "fxob_portfolios_v1";
+const LS_LOADED_PORTFOLIO_ID = "fxob_loaded_portfolio_id";
 // Phase RB-1 — Results Basis + Account Settings persistence.
 const LS_RESULTS_BASIS = "fxob_results_basis_v1";
 const LS_ACCOUNT_SETTINGS = "fxob_account_settings_v1";
@@ -189,6 +203,24 @@ function loadPersistedSessionProfiles() {
     }
 }
 
+// ── Portfolio library (PORTFOLIO-SAVE-LOAD MVP) ─────────────────────────────────
+// The library is a separate localStorage slice (id-keyed records). The working
+// copy remains LS_SESSION_PROFILES. `loadedPortfolioId` is the single pointer.
+function loadPersistedPortfolios() {
+    try {
+        return normalizeLibrary(safeJsonParse(localStorage.getItem(LS_PORTFOLIOS), null));
+    } catch {
+        return {};
+    }
+}
+function loadLoadedPortfolioId() {
+    try {
+        return localStorage.getItem(LS_LOADED_PORTFOLIO_ID) || null;
+    } catch {
+        return null;
+    }
+}
+
 // ── Results Basis + Account Settings (Phase RB-1) ──────────────────────────
 // "Results Basis" answers HOW trades are measured (Raw R vs Current Equity).
 // Defaults to "raw_r" so nothing about visible analytics changes in this phase.
@@ -237,6 +269,10 @@ let state = {
     scenario: loadPersistedScenario((() => { try { return localStorage.getItem(LS_ACTIVE) || null; } catch { return null; } })()),
     // Session profiles — frontend-only enable matrix (own slice; see loader above).
     sessionProfiles: loadPersistedSessionProfiles(),
+    // Portfolio library — named snapshots of `sessionProfiles` + the loaded pointer.
+    // Bootstrapped (migration "My Portfolio") + orphan-reconciled just below.
+    portfolios: loadPersistedPortfolios(),
+    loadedPortfolioId: loadLoadedPortfolioId(),
     // Results Basis axis (Phase RB-1) — HOW trades are measured. No page reads
     // these yet; they default to current behavior (Raw R).
     resultsBasis: loadPersistedResultsBasis(),
@@ -258,6 +294,56 @@ let state = {
 const listeners = new Set();
 const notify = () => listeners.forEach((l) => l());
 const AUTO_RELOAD_SESSION_ATTEMPTS = new Set();
+
+// ── Portfolio library persistence + backend mirror + bootstrap ──────────────────
+function persistPortfolios() {
+    try { localStorage.setItem(LS_PORTFOLIOS, JSON.stringify(state.portfolios || {})); } catch { /* non-critical */ }
+    try { portfoliosBackend.scheduleSync(); } catch { /* backend optional */ }
+}
+function persistLoadedPortfolioId() {
+    try {
+        if (state.loadedPortfolioId) localStorage.setItem(LS_LOADED_PORTFOLIO_ID, state.loadedPortfolioId);
+        else localStorage.removeItem(LS_LOADED_PORTFOLIO_ID);
+    } catch { /* non-critical */ }
+}
+// Drop a loaded pointer that no longer resolves (e.g. record deleted on another
+// device and removed by a backend-hydrate merge). Returns true if it changed.
+function reconcileLoadedPointer() {
+    if (state.loadedPortfolioId && !state.portfolios?.[state.loadedPortfolioId]) {
+        state = { ...state, loadedPortfolioId: null };
+        persistLoadedPortfolioId();
+        return true;
+    }
+    return false;
+}
+// Durable mirror — same pattern as presets/projects. Library only; the working
+// copy (LS_SESSION_PROFILES) is intentionally NOT synced.
+const portfoliosBackend = makePortfolioBackend({
+    domain: "portfolios",
+    loadLocal: () => { try { return JSON.parse(localStorage.getItem(LS_PORTFOLIOS) || "{}"); } catch { return {}; } },
+    saveLocal: (map) => {
+        try { localStorage.setItem(LS_PORTFOLIOS, JSON.stringify(map || {})); } catch { /* noop */ }
+        state = { ...state, portfolios: normalizeLibrary(map) };
+        reconcileLoadedPointer();
+        notify();
+    },
+    merge: mergeLibraries,
+    isEmpty: isLibraryEmpty,
+});
+// First-run migration: every existing user receives a "My Portfolio" snapshot of
+// their current working copy. Non-destructive — the working copy is untouched.
+function bootstrapPortfolios() {
+    if (isLibraryEmpty(state.portfolios)) {
+        const { library, id } = createRecord(state.portfolios || {}, { name: "My Portfolio", description: "", profiles: state.sessionProfiles });
+        state = { ...state, portfolios: library, loadedPortfolioId: id };
+        persistPortfolios();
+        persistLoadedPortfolioId();
+    } else {
+        reconcileLoadedPointer(); // boot-time orphan reconciliation
+    }
+}
+bootstrapPortfolios();
+try { portfoliosBackend.kickoff(); } catch { /* backend optional */ }
 
 function normalizeTimestamp(value) {
     if (value == null || value === "") return null;
@@ -1905,6 +1991,133 @@ export function setSessionProfiles(next) {
     state = { ...state, sessionProfiles: normalizeProfiles(next) };
     persistSessionProfiles();
     notify();
+}
+
+// ── Portfolio library actions (PORTFOLIO-SAVE-LOAD MVP) ─────────────────────────
+/** All records, newest-updated first. */
+export function listPortfolios() { return listRecords(state.portfolios); }
+/** The loaded pointer (single source of truth) — or null (Untitled working copy). */
+export function getLoadedPortfolioId() { return state.loadedPortfolioId || null; }
+/** The loaded record (or null). */
+export function getLoadedPortfolio() {
+    const id = state.loadedPortfolioId;
+    return id ? (state.portfolios?.[id] || null) : null;
+}
+/** Derived dirty state — working copy vs the record it descends from (enabled
+ *  excluded; both sides re-normalized). Never stored. */
+export function isWorkingCopyDirty() {
+    return isPortfolioDirtyPure(state.sessionProfiles, getLoadedPortfolio());
+}
+
+// Apply a record's profiles into the working copy WITHOUT changing the live
+// master On/Off (enabled is working-session state, not portfolio identity).
+function applyProfilesPreservingEnabled(profiles) {
+    const enabled = !!(state.sessionProfiles && state.sessionProfiles.enabled);
+    return normalizeProfiles({ ...normalizeProfiles(profiles), enabled });
+}
+
+/** Load a saved portfolio into the working copy. Returns true on success. */
+export function loadPortfolio(id) {
+    const rec = state.portfolios?.[id];
+    if (!rec) return false;
+    state = {
+        ...state,
+        sessionProfiles: applyProfilesPreservingEnabled(rec.profiles),
+        loadedPortfolioId: id,
+    };
+    persistSessionProfiles();
+    persistLoadedPortfolioId();
+    notify();
+    return true;
+}
+
+/** Save the working copy into the loaded record. Returns the id, or null when
+ *  there is no loaded record (the caller should use saveAs instead). */
+export function savePortfolio() {
+    const id = state.loadedPortfolioId;
+    if (!id || !state.portfolios?.[id]) return null;
+    state = { ...state, portfolios: saveIntoRecord(state.portfolios, id, state.sessionProfiles) };
+    persistPortfolios();
+    notify();
+    return id;
+}
+
+/** Save the working copy as a new named record and load it. Returns the new id. */
+export function savePortfolioAs(name, description = "") {
+    const { library, id } = createRecord(state.portfolios || {}, { name, description, profiles: state.sessionProfiles });
+    state = { ...state, portfolios: library, loadedPortfolioId: id };
+    persistPortfolios();
+    persistLoadedPortfolioId();
+    notify();
+    return id;
+}
+
+/** Create a fresh empty portfolio, load it as the working copy. Returns its id. */
+export function createPortfolio(name, description = "") {
+    const { library, id } = createRecord(state.portfolios || {}, { name, description, profiles: emptyProfiles() });
+    state = {
+        ...state,
+        portfolios: library,
+        loadedPortfolioId: id,
+        sessionProfiles: applyProfilesPreservingEnabled(emptyProfiles()),
+    };
+    persistPortfolios();
+    persistLoadedPortfolioId();
+    persistSessionProfiles();
+    notify();
+    return id;
+}
+
+/** Revert the working copy to the loaded record's snapshot. Returns true on success. */
+export function revertPortfolio() {
+    const rec = getLoadedPortfolio();
+    if (!rec) return false;
+    state = { ...state, sessionProfiles: applyProfilesPreservingEnabled(rec.profiles) };
+    persistSessionProfiles();
+    notify();
+    return true;
+}
+
+/** Duplicate a record (new id, de-collided name). Returns the new id, or null. */
+export function duplicatePortfolio(id) {
+    const { library, id: newId } = duplicateRecord(state.portfolios || {}, id);
+    if (!newId) return null;
+    state = { ...state, portfolios: library };
+    persistPortfolios();
+    notify();
+    return newId;
+}
+
+/** Rename a record. Returns true on success. */
+export function renamePortfolio(id, name) {
+    const lib = renameRecord(state.portfolios || {}, id, name);
+    if (lib === state.portfolios) return false;
+    state = { ...state, portfolios: lib };
+    persistPortfolios();
+    notify();
+    return true;
+}
+
+/** Update a record's description. Returns true on success. */
+export function setPortfolioDescription(id, description) {
+    const lib = setRecordDescription(state.portfolios || {}, id, description);
+    if (lib === state.portfolios) return false;
+    state = { ...state, portfolios: lib };
+    persistPortfolios();
+    notify();
+    return true;
+}
+
+/** Delete a record. Clears the loaded pointer if it was the deleted one. */
+export function deletePortfolio(id) {
+    const lib = deleteRecord(state.portfolios || {}, id);
+    if (lib === state.portfolios) return false;
+    const nextLoaded = state.loadedPortfolioId === id ? null : state.loadedPortfolioId;
+    state = { ...state, portfolios: lib, loadedPortfolioId: nextLoaded };
+    persistPortfolios();
+    persistLoadedPortfolioId();
+    notify();
+    return true;
 }
 
 /**
