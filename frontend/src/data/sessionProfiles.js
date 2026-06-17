@@ -226,6 +226,110 @@ export function removeTargetProfile(profiles, id) {
     return removeProfile(profiles, "target", id);
 }
 
+// ── Scenario write helpers (Phase 2 — trader-facing editing) ────────────────────
+// Pure, immutable: every helper returns a NEW normalized portfolio and never
+// mutates its input. A `selection` is a raw sel ({model,…} / {trigger,armR} /
+// {type:"rr",value}); `null` clears that dimension at that level (→ inherit /
+// global / run default). Named profiles are auto-created/reused via the
+// deterministic-id helpers, so identical selections share one profile. These are
+// the single write layer for SessionScenarioBuilder — no UI/library imports.
+
+const _DIM_REF = { entry: "entryRef", be: "beRef", target: "targetRef" };
+
+// Ensure a profile exists for (dim, sel) and return its ref id. sel null → ref null.
+function _ensureProfileRef(profiles, dim, sel) {
+    if (sel == null) return { profiles, ref: null };
+    if (dim === "entry") { const c = normEntrySel(sel); if (!c) return { profiles, ref: null }; return { profiles: addEntryProfile(profiles, c), ref: entryProfileId(c) }; }
+    if (dim === "be") { const c = normBeSel(sel); if (!c) return { profiles, ref: null }; return { profiles: addBeProfile(profiles, c), ref: beProfileId(c) }; }
+    if (dim === "target") { const c = normTargetSel(sel); if (!c) return { profiles, ref: null }; return { profiles: addTargetProfile(profiles, c), ref: targetProfileId(c) }; }
+    return { profiles, ref: null };
+}
+
+function _cloneCard(profiles, sessionKey) {
+    const prev = profiles?.cards?.[sessionKey];
+    return { enabled: prev?.enabled !== false, default: { ...(prev?.default || {}) }, overrides: { ...(prev?.overrides || {}) } };
+}
+
+function _applyRef(slot, dim, ref) {
+    const key = _DIM_REF[dim];
+    const next = { ...slot };
+    if (ref == null) delete next[key]; else next[key] = ref;
+    return next;
+}
+
+/** True when nothing deviates from global: no per-cohort overrides, no whole-
+ *  session disables, no session-level defaults. (The "Use Global for all" state.) */
+export function isAllGlobal(profiles) {
+    if (countOverrides(profiles) !== 0) return false;
+    const cards = profiles?.cards || {};
+    for (const s of SESSION_KEYS) {
+        const card = cards[s];
+        if (!card) continue;
+        if (card.enabled === false) return false;
+        const d = card.default || {};
+        if (d.entryRef || d.beRef || d.targetRef) return false;
+    }
+    return true;
+}
+
+/** Master on/off for the whole scenario overlay. */
+export function setScenarioEnabled(profiles, enabled) {
+    return normalizeProfiles({ ...profiles, enabled: !!enabled });
+}
+
+/** Set/clear a Global default dimension. dim ∈ {entry,be,target}; sel|null. */
+export function setGlobalDefaultValue(profiles, dim, sel) {
+    if (!_DIM_REF[dim]) return normalizeProfiles(profiles);
+    const { profiles: p, ref } = _ensureProfileRef(profiles, dim, sel);
+    const gd = { ...(p.globalDefaultRef || { entry: null, be: null, target: null }) };
+    gd[dim] = ref; // globalDefaultRef keys are entry/be/target (not *Ref)
+    return normalizeProfiles({ ...p, globalDefaultRef: gd });
+}
+
+/** Set/clear a Session-level default dimension. */
+export function setSessionDefaultValue(profiles, sessionKey, dim, sel) {
+    if (!_DIM_REF[dim] || !SESSION_KEYS.includes(sessionKey)) return normalizeProfiles(profiles);
+    const { profiles: p, ref } = _ensureProfileRef(profiles, dim, sel);
+    const card = _cloneCard(p, sessionKey);
+    card.default = _applyRef(card.default, dim, ref);
+    return normalizeProfiles({ ...p, cards: { ...(p.cards || {}), [sessionKey]: card } });
+}
+
+/** Set/clear a per-cohort dimension override. */
+export function setCohortValue(profiles, sessionKey, cellKey, dim, sel) {
+    if (!_DIM_REF[dim] || !SESSION_KEYS.includes(sessionKey) || !CELL_KEYS.includes(cellKey)) return normalizeProfiles(profiles);
+    const { profiles: p, ref } = _ensureProfileRef(profiles, dim, sel);
+    const card = _cloneCard(p, sessionKey);
+    card.overrides = { ...card.overrides, [cellKey]: _applyRef(card.overrides[cellKey] || {}, dim, ref) };
+    return normalizeProfiles({ ...p, cards: { ...(p.cards || {}), [sessionKey]: card } });
+}
+
+/** Set a per-cohort enable state. enabled ∈ {true,false,null}; null = inherit. */
+export function setCohortEnabled(profiles, sessionKey, cellKey, enabled) {
+    if (!SESSION_KEYS.includes(sessionKey) || !CELL_KEYS.includes(cellKey)) return normalizeProfiles(profiles);
+    const card = _cloneCard(profiles, sessionKey);
+    const slot = { ...(card.overrides[cellKey] || {}) };
+    if (enabled === true || enabled === false) slot.enabled = enabled; else delete slot.enabled;
+    card.overrides = { ...card.overrides, [cellKey]: slot };
+    return normalizeProfiles({ ...profiles, cards: { ...(profiles.cards || {}), [sessionKey]: card } });
+}
+
+/** Clear a cohort's entire override (entry/be/target/enabled) → back to inherit. */
+export function resetCohort(profiles, sessionKey, cellKey) {
+    if (!SESSION_KEYS.includes(sessionKey) || !CELL_KEYS.includes(cellKey)) return normalizeProfiles(profiles);
+    const card = _cloneCard(profiles, sessionKey);
+    const overrides = { ...card.overrides };
+    delete overrides[cellKey];
+    card.overrides = overrides;
+    return normalizeProfiles({ ...profiles, cards: { ...(profiles.cards || {}), [sessionKey]: card } });
+}
+
+/** Reset every session/cohort to the Global settings (clears all cards). Keeps
+ *  the Global defaults, the named-profile library and the master enable flag. */
+export function resetAllToGlobal(profiles) {
+    return normalizeProfiles({ ...profiles, cards: {} });
+}
+
 /**
  * Coerce any persisted/loaded value into a clean named-profile portfolio object.
  * Migrates BOTH legacy shapes deterministically (no data loss, no surprises):
