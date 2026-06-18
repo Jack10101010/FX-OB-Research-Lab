@@ -10,7 +10,7 @@ import React, { useState } from "react";
 import { ChevronDown, ChevronRight, Ban } from "lucide-react";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { useDataset, getActiveBundle, getTradeUniverse } from "@/data/store";
-import { buildSessionResults, cohortFailureSummary } from "@/data/sessionResults";
+import { buildSessionResults, cohortFailureSummary, describeMissedReason, cohortOutcomeDistribution } from "@/data/sessionResults";
 
 const fmtR = (v) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${Number(v).toFixed(1)}R`);
 const fmtPx = (v) => (v == null || v === "" || !Number.isFinite(Number(v)) ? "—" : Number(v).toFixed(5));
@@ -123,6 +123,62 @@ function LossesTable({ rows }) {
     );
 }
 
+function CancelledTable({ rows, showSession = false, emptyText = "No cancelled or missed opportunities for this cohort." }) {
+    if (!rows.length) return <div className="text-[11.5px] font-ui text-muted-lab italic py-2">{emptyText}</div>;
+    const reasonOf = (t) => describeMissedReason(t);
+    const sessionOf = (t) => String(t.fillSession || t.fill_session || t.session || "").trim() || "—";
+    return (
+        <div className="overflow-x-auto">
+            <table className="w-full text-[11.5px] font-ui">
+                <thead><tr className="text-[hsl(var(--accent-secondary))] uppercase text-[10px] tracking-wider text-left">
+                    <th className="py-1 pr-3">Outcome</th><th className="pr-3">Reason</th>{showSession && <th className="pr-3">Session</th>}<th className="pr-3">Setup</th><th className="pr-3">Dir</th><th className="pr-3 text-right">Planned Entry</th><th className="pr-3 text-right">Stop</th><th className="pr-3 text-right">TP</th><th className="text-right">RR</th>
+                </tr></thead>
+                <tbody>
+                    {rows.map((t, i) => (
+                        <tr key={t.id || i} className="border-t border-[hsl(var(--border-soft))] text-[hsl(var(--text-2))]">
+                            <td className="py-1 pr-3 text-[hsl(var(--text-1))]">{t.outcome || t.outcomeRaw || "—"}</td>
+                            <td className="pr-3">{reasonOf(t)}</td>
+                            {showSession && <td className="pr-3">{sessionOf(t)}</td>}
+                            <td className="pr-3">{t.structure || "—"}</td>
+                            <td className="pr-3">{t.direction || "—"}</td>
+                            <td className="pr-3 text-right font-num">{fmtPx(t.planned_entry_price ?? t.entryPrice)}</td>
+                            <td className="pr-3 text-right font-num">{fmtPx(t.stop)}</td>
+                            <td className="pr-3 text-right font-num">{fmtPx(t.tp)}</td>
+                            <td className="text-right font-num">{rrText(t)}</td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+    );
+}
+
+function OutcomeDistribution({ rows }) {
+    const { total, buckets } = cohortOutcomeDistribution(rows);
+    if (!total) return <div className="text-[11.5px] font-ui text-muted-lab italic py-1">No executed outcomes for this cohort.</div>;
+    const netTone = (b) => (b.key === "be" || b.key === "other" ? "text-[hsl(var(--text-2))]" : (b.netR > 0 ? successTone : b.netR < 0 ? dangerTone : "text-[hsl(var(--text-2))]"));
+    return (
+        <div className="overflow-x-auto">
+            <table className="w-full text-[11.5px] font-ui">
+                <thead><tr className="text-[hsl(var(--accent-secondary))] uppercase text-[10px] tracking-wider text-left">
+                    <th className="py-1 pr-3">Outcome</th><th className="pr-3 text-right">Count</th><th className="pr-3 text-right">%</th><th className="pr-3 text-right">Net R</th><th className="text-right">Avg R</th>
+                </tr></thead>
+                <tbody>
+                    {buckets.map((b) => (
+                        <tr key={b.key} className="border-t border-[hsl(var(--border-soft))]">
+                            <td className="py-1 pr-3 text-[hsl(var(--text-1))]">{b.label}</td>
+                            <td className="pr-3 text-right font-num">{b.count}</td>
+                            <td className="pr-3 text-right font-num text-[hsl(var(--text-2))]">{b.percent}%</td>
+                            <td className={`pr-3 text-right font-num ${netTone(b)}`}>{fmtR(b.netR)}</td>
+                            <td className="text-right font-num text-[hsl(var(--text-2))]">{b.avgR == null ? "—" : fmtR(b.avgR)}</td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+    );
+}
+
 function CohortDrilldown({ sessionLabel, c }) {
     const s = c.summary;
     const disabled = c.status === "disabled";
@@ -144,6 +200,12 @@ function CohortDrilldown({ sessionLabel, c }) {
                 <KV k="Avg R" v={s.avgR == null ? "—" : fmtR(s.avgR)} />
                 <KV k="Win rate" v={s.winRate == null ? "—" : `${s.winRate}%`} />
             </div>
+            {/* A2. Outcome distribution (executed trades only) */}
+            <div>
+                <div className="text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))] mb-1">Outcome distribution</div>
+                <OutcomeDistribution rows={c.executedTrades} />
+            </div>
+
             {/* B0. Failure summary for this cohort (executed losses only) */}
             <div>
                 <div className="text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))] mb-1">Failure summary</div>
@@ -180,6 +242,11 @@ function CohortDrilldown({ sessionLabel, c }) {
                 <div className="text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))] mb-1">Disabled opportunities</div>
                 <DisabledTable rows={c.disabledOpportunities} showCohort={false} emptyText="No disabled opportunities for this cohort." />
             </div>
+            {/* D. Cancelled / missed opportunities for this cohort */}
+            <div>
+                <div className="text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))] mb-1">Cancelled / missed opportunities</div>
+                <CancelledTable rows={c.cancelledOrMissedOpportunities} />
+            </div>
         </div>
     );
 }
@@ -196,7 +263,7 @@ export default function SessionResults({ trades: tradesProp, bundle: bundleProp 
     const [sessionKey, setSessionKey] = useState("london");
     const [expanded, setExpanded] = useState({}); // key: "session|cell"
 
-    const { hasScenario, sessions } = buildSessionResults(trades, scenarioConfig);
+    const { hasScenario, sessions, unassigned, unassignedCount } = buildSessionResults(trades, scenarioConfig);
     const active = sessions.find((s) => s.key === sessionKey) || sessions[0];
 
     return (
@@ -228,9 +295,10 @@ export default function SessionResults({ trades: tradesProp, bundle: bundleProp 
                     </div>
 
                     {/* A. Session summary */}
-                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-9 gap-2">
                         <Stat label="Executed" value={active.summary.executed} />
                         <Stat label="Disabled" value={active.summary.disabledOpportunities} tone={active.summary.disabledOpportunities > 0 ? dangerTone : undefined} />
+                        <Stat label="Cancelled/Missed" value={active.summary.cancelledMissed} />
                         <Stat label="W / L / BE" value={`${active.summary.wins}/${active.summary.losses}/${active.summary.be}`} />
                         <Stat label="Net R" value={fmtR(active.summary.netR)} tone={active.summary.netR >= 0 ? successTone : dangerTone} />
                         <Stat label="Avg R" value={active.summary.avgR == null ? "—" : fmtR(active.summary.avgR)} />
@@ -249,6 +317,7 @@ export default function SessionResults({ trades: tradesProp, bundle: bundleProp 
                                 const disabled = c.status === "disabled";
                                 const eCount = c.executedCount;
                                 const dCount = c.disabledCount;
+                                const mCount = c.cancelledMissedCount;
                                 const wr = c.summary ? c.summary.winRate : null;
                                 const sample = eCount > 0 && eCount < 10 ? (eCount < 5 ? "low sample" : "small sample") : null;
                                 return (
@@ -273,7 +342,7 @@ export default function SessionResults({ trades: tradesProp, bundle: bundleProp 
                                             <div className="flex items-center gap-3 sm:gap-4 shrink-0 text-right">
                                                 <div>
                                                     <div className="text-[9.5px] font-ui uppercase text-muted-lab">Trades</div>
-                                                    <div className="text-[12px] font-num text-[hsl(var(--accent-secondary))]">{eCount}T{dCount > 0 ? <span className="text-[hsl(var(--danger))]"> • {dCount} blk</span> : null}</div>
+                                                    <div className="text-[12px] font-num text-[hsl(var(--accent-secondary))]">{eCount}T{dCount > 0 ? <span className="text-[hsl(var(--danger))]"> • {dCount} blk</span> : null}{mCount > 0 ? <span className="text-[hsl(var(--text-2))]"> • {mCount} missed</span> : null}</div>
                                                 </div>
                                                 {sample && (
                                                     <span
@@ -321,6 +390,21 @@ export default function SessionResults({ trades: tradesProp, bundle: bundleProp 
                         <div className="text-[11px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))] mb-2">Disabled opportunities — {active.label}</div>
                         <DisabledTable rows={active.cohorts.flatMap((c) => c.disabledOpportunities)} />
                     </div>
+
+                    {/* E. Session-wide cancelled / missed opportunities */}
+                    <div>
+                        <div className="text-[11px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))] mb-2">Cancelled / missed — {active.label}</div>
+                        <CancelledTable rows={active.cohorts.flatMap((c) => c.cancelledOrMissedOpportunities)} emptyText="No cancelled or missed opportunities in this session." />
+                    </div>
+
+                    {/* F. Unassigned — cancelled/missed rows with no recorded fill session (run-wide) */}
+                    {unassignedCount > 0 && (
+                        <div>
+                            <div className="text-[11px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))] mb-1">Unassigned — no fill session ({unassignedCount})</div>
+                            <p className="text-[10.5px] font-ui text-muted-lab mb-2">These cancelled/missed rows never recorded a fill session, so they cannot be mapped to a session/cohort. Shown run-wide.</p>
+                            <CancelledTable rows={unassigned} showSession emptyText="" />
+                        </div>
+                    )}
                 </div>
             )}
         </NeonPanel>

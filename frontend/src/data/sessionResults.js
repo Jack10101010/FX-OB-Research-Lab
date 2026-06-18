@@ -97,19 +97,29 @@ export function buildSessionResults(trades, scenarioConfig) {
         }
     }
 
-    // Group rows by cohort id "session|cell" (read-only; never mutates rows).
+    // Group rows by cohort id "session|cell" (read-only; never mutates rows). Three
+    // mutually-exclusive buckets cover every row: executed | disabled | cancelled-
+    // or-missed (neither a real fill nor a scenario disable). Cancelled/missed rows
+    // usually have a BLANK fill_session (they never filled), so cohortOf maps them
+    // to "unknown|…" → they go to the session-agnostic `unassigned` bucket rather
+    // than being mis-assigned to a session.
+    const SESSION_SET = new Set(SESSION_KEYS);
+    const push = (map, k, t) => { if (!map.has(k)) map.set(k, []); map.get(k).push(t); };
     const exByCohort = new Map();
     const disByCohort = new Map();
+    const cmByCohort = new Map();
+    const unassigned = [];
     for (const t of list) {
-        const ck = cohortOf(t); // "session|cell" or "unknown|..."
+        const ck = cohortOf(t); // "session|cell" or "unknown|cell"
         if (isDisabledRow(t)) {
-            if (!disByCohort.has(ck)) disByCohort.set(ck, []);
-            disByCohort.get(ck).push(t);
+            push(disByCohort, ck, t);
         } else if (isExecutedRow(t)) {
-            if (!exByCohort.has(ck)) exByCohort.set(ck, []);
-            exByCohort.get(ck).push(t);
+            push(exByCohort, ck, t);
+        } else {
+            // cancelled / missed / unfilled / invalid / news-cancelled / open
+            if (SESSION_SET.has(ck.split("|")[0])) push(cmByCohort, ck, t);
+            else unassigned.push(t);
         }
-        // else: other excluded categories — intentionally not surfaced here.
     }
 
     const sessions = SESSION_KEYS.map((sKey) => {
@@ -118,6 +128,7 @@ export function buildSessionResults(trades, scenarioConfig) {
             const ck = `${sKey}|${cKey}`;
             const executed = exByCohort.get(ck) || [];
             const disabled = disByCohort.get(ck) || [];
+            const cancelledMissed = cmByCohort.get(ck) || [];
             const rule = ruleBy.get(`${sKey}|${cm.structure}|${cm.direction}`) || null;
             const status = rule ? (rule.enabled === false ? "disabled" : "enabled") : "enabled";
             const st = statsFor(executed);
@@ -134,12 +145,14 @@ export function buildSessionResults(trades, scenarioConfig) {
                 beLabel: beLabelFromRule(rule),
                 executedCount: executed.length,
                 disabledCount: disabled.length,
+                cancelledMissedCount: cancelledMissed.length,
                 netR: st.netR,
                 summary: st,                  // full per-cohort stats (executed only)
-                // Canonical drilldown row sets (executed never includes disabled).
+                // Canonical drilldown row sets — three mutually-exclusive buckets.
                 executedTrades: executed,
                 disabledOpportunities: disabled,
-                allRows: [...executed, ...disabled],
+                cancelledOrMissedOpportunities: cancelledMissed,
+                allRows: [...executed, ...disabled, ...cancelledMissed],
                 // Back-compat aliases for existing consumers.
                 executed,
                 disabled,
@@ -150,6 +163,7 @@ export function buildSessionResults(trades, scenarioConfig) {
         const allExecuted = cohorts.flatMap((c) => c.executed);
         const summaryStats = statsFor(allExecuted);
         const disabledOpportunities = cohorts.reduce((n, c) => n + c.disabledCount, 0);
+        const cancelledMissed = cohorts.reduce((n, c) => n + c.cancelledMissedCount, 0);
         const disabledCohorts = cohorts.filter((c) => c.status === "disabled").length;
         const activeCohorts = cohorts.length - disabledCohorts;
 
@@ -159,6 +173,7 @@ export function buildSessionResults(trades, scenarioConfig) {
             summary: {
                 executed: summaryStats.count,
                 disabledOpportunities,
+                cancelledMissed,
                 wins: summaryStats.wins,
                 losses: summaryStats.losses,
                 be: summaryStats.be,
@@ -172,7 +187,124 @@ export function buildSessionResults(trades, scenarioConfig) {
         };
     });
 
-    return { hasScenario, meta: (scenarioConfig && scenarioConfig.meta) || null, sessions };
+    return {
+        hasScenario,
+        meta: (scenarioConfig && scenarioConfig.meta) || null,
+        sessions,
+        // Cancelled/missed rows with no recorded fill session (could not be mapped
+        // to a session). Surfaced separately so they are never lost or mis-assigned.
+        unassigned,
+        unassignedCount: unassigned.length,
+    };
+}
+
+// Arm/delay number for a triggered-edge row. Use the CONFIGURED variant arm from
+// entry_model_key (_d6 → 6, _next → 1, _same → 0) — NOT fill_delay_candles, which
+// is the realized delay at fill (0/blank for never-filled cancelled rows, so it
+// reads 0 for every variant). fill_delay_candles is only a last-resort fallback.
+function armNumber(t) {
+    const key = String(t?.entry_model_key || "");
+    const m = key.match(/_d(\d+)\b/);
+    if (m) return Number(m[1]);
+    if (/_next\b/.test(key)) return 1;
+    if (/_same\b/.test(key)) return 0;
+    const d = Number(t?.fill_delay_candles ?? t?.fillDelayCandles);
+    if (Number.isFinite(d)) return d;
+    return null;
+}
+function numTokOrNull(v) {
+    const n = Number(v);
+    return Number.isFinite(n) ? String(n) : null;
+}
+// Short entry-model context for a row, e.g. "TrigE 25 Arm 6", "Pen 50", "Baseline".
+function entryContext(t) {
+    const model = String(t?.entry_model || t?.entry_family || "").toLowerCase();
+    const thr = numTokOrNull(t?.entry_threshold_pct ?? t?.trigger_penetration_pct ?? t?.triggerPenetrationPct);
+    if (model.includes("trigger")) {
+        const arm = armNumber(t);
+        return `TrigE${thr != null ? ` ${thr}` : ""}${arm != null ? ` Arm ${arm}` : ""}`.trim();
+    }
+    if (model.includes("penetration")) return `Pen${thr != null ? ` ${thr}` : ""}`.trim();
+    if (model === "baseline") return "Baseline";
+    return "";
+}
+// Human cause phrase for a cancelled/missed row, from explicit reason fields first,
+// then falling back to the classifyTrade category. Never invents — defaults to the
+// classified bucket name.
+function causePhrase(t) {
+    const raw = String(t?.cancel_reason || t?.cancelReason || t?.missed_reason || t?.missedReason || t?.outcomeRaw || t?.outcome || "").toLowerCase();
+    if (raw.includes("first_failed") || raw.includes("failed_tag")) return "First failed tag";
+    if (raw.includes("news_touch")) return "News touch cancel";
+    if (raw.includes("blackout")) return "News blackout";
+    if (raw.includes("session_filter")) return "Session filtered";
+    if (raw.includes("reverse")) return "Reverse touch cancel";
+    if (raw.includes("cohort_disabled")) return "Blocked by scenario";
+    if (raw.includes("invalid")) return "Invalidated before entry";
+    if (raw.includes("never_filled") || raw === "unfilled") return "Never filled";
+    const cat = classifyTrade(t);
+    if (cat === "UNFILLED") return "Never filled";
+    if (cat === "NEWS_CANCELLED") return "News cancelled";
+    if (cat === "INVALID_CANCELLED") return "Invalidated before entry";
+    if (cat === "SESSION_FILTERED") return "Session filtered";
+    if (cat === "OPEN") return "Still open at data end";
+    return "Cancelled";
+}
+/**
+ * Specific, readable reason for a cancelled/missed row, e.g.
+ *   "Invalidated before entry - TrigE 25 Arm 6"
+ *   "Never filled - TrigE Arm 2"
+ *   "Session filtered"
+ * Composes a cause phrase with the row's entry-model context when available.
+ * Pure; uses only fields already on the row.
+ */
+export function describeMissedReason(t) {
+    const cause = causePhrase(t);
+    const ctx = entryContext(t);
+    return ctx ? `${cause} - ${ctx}` : cause;
+}
+
+/**
+ * Phase 3A — pure outcome distribution over a cohort's EXECUTED trades only.
+ * Buckets are derived from classifyTrade (single source of truth); nothing is
+ * invented. Returns { total, buckets:[{key,label,count,percent,netR,avgR}] } with
+ * only non-empty buckets, in a stable order. Disabled/cancelled rows are never
+ * passed in, so they never appear here.
+ */
+export function cohortOutcomeDistribution(executedTrades) {
+    const rows = Array.isArray(executedTrades) ? executedTrades : [];
+    const total = rows.length;
+    const byCat = new Map();
+    for (const t of rows) {
+        const c = classifyTrade(t);
+        if (!byCat.has(c)) byCat.set(c, []);
+        byCat.get(c).push(t);
+    }
+    const defs = [
+        { key: "win", label: "Wins", cats: ["WIN"] },
+        { key: "loss", label: "Losses", cats: ["LOSS"] },
+        { key: "be", label: "Break Even", cats: ["BREAKEVEN"] },
+        { key: "news_flatten", label: "News Flatten", cats: ["NEWS_FLATTEN_WIN", "NEWS_FLATTEN_LOSS", "NEWS_FLATTEN_FLAT"] },
+    ];
+    const used = new Set();
+    const mkBucket = (key, label, items) => {
+        const netR = items.reduce((s, t) => s + tradeR(t), 0);
+        return {
+            key, label,
+            count: items.length,
+            percent: total ? Number(((items.length / total) * 100).toFixed(1)) : 0,
+            netR: Number(netR.toFixed(2)),
+            avgR: items.length ? Number((netR / items.length).toFixed(2)) : null,
+        };
+    };
+    const buckets = [];
+    for (const d of defs) {
+        d.cats.forEach((c) => used.add(c));
+        const items = d.cats.flatMap((c) => byCat.get(c) || []);
+        if (items.length) buckets.push(mkBucket(d.key, d.label, items));
+    }
+    const other = rows.filter((t) => !used.has(classifyTrade(t)));
+    if (other.length) buckets.push(mkBucket("other", "Other", other));
+    return { total, buckets };
 }
 
 /**
