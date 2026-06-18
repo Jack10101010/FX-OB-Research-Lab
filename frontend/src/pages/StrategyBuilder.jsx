@@ -4,6 +4,7 @@ import { LabRunHero } from "@/components/lab/LabRunHero";
 import { NeonPanel, SectionTitle } from "@/components/lab/NeonPanel";
 import SessionStrategyCards from "@/components/lab/sessionProfiles/SessionStrategyCards";
 import { Field, NeonInput, NeonSelect, Segment, NeonToggle, NeonButton } from "@/components/lab/controls";
+import { NeonDatePicker } from "@/components/lab/NeonDatePicker";
 import { HelpCircle, Play, Save, FileInput, Copy, ShieldAlert, Trash2, Check, ChevronDown, ChevronUp, FolderPlus } from "lucide-react";
 import { usePresets } from "@/data/presets";
 import { Pill } from "@/components/lab/DataTable";
@@ -1074,10 +1075,10 @@ export default function StrategyBuilder() {
                             <NeonSelect value={cfg.executionTf} onChange={set("executionTf")} options={["1m", "5m"]} />
                         </Field>
                         <Field label="From" className="sm:col-span-3">
-                            <NeonInput type="date" min={dataDateBounds?.min} max={dataDateBounds?.max} value={cfg.dateFrom} onChange={(e) => { datesUserEdited.current = true; set("dateFrom")(e.target.value); }} />
+                            <NeonDatePicker testId="bld-date-from" min={dataDateBounds?.min} max={dataDateBounds?.max} value={cfg.dateFrom} onChange={(v) => { datesUserEdited.current = true; set("dateFrom")(v); }} />
                         </Field>
                         <Field label="To" className="sm:col-span-3">
-                            <NeonInput type="date" min={dataDateBounds?.min} max={dataDateBounds?.max} value={cfg.dateTo} onChange={(e) => { datesUserEdited.current = true; set("dateTo")(e.target.value); }} />
+                            <NeonDatePicker testId="bld-date-to" min={dataDateBounds?.min} max={dataDateBounds?.max} value={cfg.dateTo} onChange={(v) => { datesUserEdited.current = true; set("dateTo")(v); }} />
                         </Field>
                         <Field label="Data Source File" className="sm:col-span-6">
                             <NeonInput value={cfg.dataFile} onChange={(e) => set("dataFile")(e.target.value)} />
