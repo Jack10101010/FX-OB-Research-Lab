@@ -242,11 +242,20 @@ export default function StrategyBuilder() {
     // the live dates deterministically. Any sidecar/manifest failure keeps the
     // current dates.
     const datesUserEdited = useRef(false);
+    // Available candle range [first, last] for the selected symbol — clamps the date
+    // pickers so users can't pick before/after the data we actually have. null until
+    // the sidecar status resolves (then the pickers are unrestricted as a fallback).
+    const [dataDateBounds, setDataDateBounds] = useState(null);
     useEffect(() => {
         let cancelled = false;
         getMarketDataStatus(cfg.symbol)
             .then((status) => {
                 if (cancelled || !status?.available || !status?.last_candle) return;
+                // Clamp the date pickers to this symbol's available candle range.
+                setDataDateBounds({
+                    min: status.first_candle ? String(status.first_candle).slice(0, 10) : undefined,
+                    max: status.last_candle ? String(status.last_candle).slice(0, 10) : undefined,
+                });
                 if (datesUserEdited.current) return; // never overwrite manual edits
                 const derived = deriveDatesFromLatestCandle(status.last_candle);
                 if (!derived) return;
@@ -1065,10 +1074,10 @@ export default function StrategyBuilder() {
                             <NeonSelect value={cfg.executionTf} onChange={set("executionTf")} options={["1m", "5m"]} />
                         </Field>
                         <Field label="From" className="sm:col-span-3">
-                            <NeonInput type="date" value={cfg.dateFrom} onChange={(e) => { datesUserEdited.current = true; set("dateFrom")(e.target.value); }} />
+                            <NeonInput type="date" min={dataDateBounds?.min} max={dataDateBounds?.max} value={cfg.dateFrom} onChange={(e) => { datesUserEdited.current = true; set("dateFrom")(e.target.value); }} />
                         </Field>
                         <Field label="To" className="sm:col-span-3">
-                            <NeonInput type="date" value={cfg.dateTo} onChange={(e) => { datesUserEdited.current = true; set("dateTo")(e.target.value); }} />
+                            <NeonInput type="date" min={dataDateBounds?.min} max={dataDateBounds?.max} value={cfg.dateTo} onChange={(e) => { datesUserEdited.current = true; set("dateTo")(e.target.value); }} />
                         </Field>
                         <Field label="Data Source File" className="sm:col-span-6">
                             <NeonInput value={cfg.dataFile} onChange={(e) => set("dataFile")(e.target.value)} />
