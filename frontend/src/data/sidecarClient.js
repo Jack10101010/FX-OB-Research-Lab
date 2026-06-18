@@ -92,4 +92,11 @@ export function getLatestSidecarOutputs(baseUrl = DEFAULT_SIDECAR_URL) {
     return requestSidecar("/outputs/latest", {}, baseUrl);
 }
 
+// Market-data manifest status (powers Strategy Builder default dates). The sidecar
+// reads data/candles/{SYMBOL}_manifest.json and always responds 200, returning
+// { available: false, reason } when no manifest exists so callers can fall back.
+export function getMarketDataStatus(symbol = "EURUSD", baseUrl = DEFAULT_SIDECAR_URL) {
+    return requestSidecar(`/datasets/${encodeURIComponent(symbol)}/status`, {}, baseUrl);
+}
+
 export { DEFAULT_SIDECAR_URL };
