@@ -341,6 +341,43 @@ export function cohortTargetSuitability(executedTrades, levels = [0.5, 1, 1.5, 2
 }
 
 /**
+ * Phase 3D — pure BE-suitability snapshot from exported MFE only. EXPLORATORY:
+ * surfaces raw reach-rate evidence to gauge whether a BE rule might help — it does
+ * NOT simulate P&L and makes no claim a BE would improve results. Reached = MFE >=
+ * level. Percentages use valid-MFE denominators (winners/losers separately).
+ *   netBenefitScore = losersReachedPct - (100 - winnersReachedPct)  // ranking aid only
+ *   signal: Strong (losers>=50 & winners>=80) · Weak (losers<25) · Mixed otherwise
+ */
+export function cohortBESuitability(executedTrades, levels = [0.5, 1, 1.5, 2]) {
+    const rows = Array.isArray(executedTrades) ? executedTrades : [];
+    const winnersV = rows.filter((t) => classifyTrade(t) === "WIN" && mfeOf(t) != null);
+    const losersV = rows.filter((t) => classifyTrade(t) === "LOSS" && mfeOf(t) != null);
+    const pct = (num, den) => (den ? Number(((num / den) * 100).toFixed(1)) : null);
+    const reachedIn = (set, lvl) => set.filter((t) => mfeOf(t) >= lvl).length;
+    const signalOf = (lp, wp) => {
+        if (lp == null || wp == null) return "—";
+        if (lp >= 50 && wp >= 80) return "Strong";
+        if (lp < 25) return "Weak";
+        return "Mixed";
+    };
+    const lv = levels.map((level) => {
+        const lc = reachedIn(losersV, level);
+        const wc = reachedIn(winnersV, level);
+        const lp = pct(lc, losersV.length);
+        const wp = pct(wc, winnersV.length);
+        const netBenefitScore = (lp == null || wp == null) ? null : Number((lp - (100 - wp)).toFixed(1));
+        return {
+            level,
+            losersReachedCount: lc, losersReachedPct: lp,
+            winnersReachedCount: wc, winnersReachedPct: wp,
+            netBenefitScore,
+            signal: signalOf(lp, wp),
+        };
+    });
+    return { totalLosers: losersV.length, totalWinners: winnersV.length, levels: lv };
+}
+
+/**
  * Phase 3A — pure outcome distribution over a cohort's EXECUTED trades only.
  * Buckets are derived from classifyTrade (single source of truth); nothing is
  * invented. Returns { total, buckets:[{key,label,count,percent,netR,avgR}] } with

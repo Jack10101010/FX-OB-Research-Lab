@@ -10,7 +10,7 @@ import React, { useState } from "react";
 import { ChevronDown, ChevronRight, Ban } from "lucide-react";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { useDataset, getActiveBundle, getTradeUniverse } from "@/data/store";
-import { buildSessionResults, cohortFailureSummary, describeMissedReason, cohortOutcomeDistribution, cohortExcursionSnapshot, cohortTargetSuitability } from "@/data/sessionResults";
+import { buildSessionResults, cohortFailureSummary, describeMissedReason, cohortOutcomeDistribution, cohortExcursionSnapshot, cohortTargetSuitability, cohortBESuitability } from "@/data/sessionResults";
 
 const fmtR = (v) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${Number(v).toFixed(1)}R`);
 const fmtPx = (v) => (v == null || v === "" || !Number.isFinite(Number(v)) ? "—" : Number(v).toFixed(5));
@@ -258,6 +258,38 @@ function TargetSuitability({ rows }) {
     );
 }
 
+function BESuitability({ rows }) {
+    const be = cohortBESuitability(rows);
+    if (be.totalLosers === 0 && be.totalWinners === 0) return <div className="text-[11.5px] font-ui text-muted-lab italic py-1">No MFE data available for BE suitability.</div>;
+    const pctTone = (p) => (p == null ? "text-[hsl(var(--text-2))]" : p >= 66 ? successTone : p >= 33 ? "text-[hsl(var(--warning))]" : dangerTone);
+    const sigTone = (s) => (s === "Strong" ? successTone : s === "Mixed" ? "text-[hsl(var(--warning))]" : s === "Weak" ? dangerTone : "text-[hsl(var(--text-2))]");
+    const cell = (pct, count, den) => (
+        <span className={`font-num ${pctTone(pct)}`}>{pct == null ? "—" : `${pct}%`} <span className="text-[hsl(var(--text-2))]">({count}/{den})</span></span>
+    );
+    return (
+        <div className="space-y-1.5">
+            <p className="text-[10.5px] font-ui text-muted-lab italic">High loser reach-rates may indicate a useful BE candidate. Confirm with backend scenario testing.</p>
+            <div className="overflow-x-auto">
+                <table className="w-full text-[11.5px] font-ui">
+                    <thead><tr className="text-[hsl(var(--accent-secondary))] uppercase text-[10px] tracking-wider text-left">
+                        <th className="py-1 pr-3">Level</th><th className="pr-3">Losers Reached</th><th className="pr-3">Winners Reached</th><th>Signal</th>
+                    </tr></thead>
+                    <tbody>
+                        {be.levels.map((l) => (
+                            <tr key={l.level} className="border-t border-[hsl(var(--border-soft))]">
+                                <td className="py-1 pr-3 text-[hsl(var(--text-1))] font-num">{l.level}R</td>
+                                <td className="pr-3">{cell(l.losersReachedPct, l.losersReachedCount, be.totalLosers)}</td>
+                                <td className="pr-3">{cell(l.winnersReachedPct, l.winnersReachedCount, be.totalWinners)}</td>
+                                <td className={`font-ui ${sigTone(l.signal)}`}>{l.signal}</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+}
+
 function CohortDrilldown({ sessionLabel, c }) {
     const s = c.summary;
     const disabled = c.status === "disabled";
@@ -295,6 +327,12 @@ function CohortDrilldown({ sessionLabel, c }) {
             <div>
                 <div className="text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))] mb-1">Target suitability</div>
                 <TargetSuitability rows={c.executedTrades} />
+            </div>
+
+            {/* A5. BE suitability (exploratory MFE reach-rate evidence) */}
+            <div>
+                <div className="text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))] mb-1">BE suitability</div>
+                <BESuitability rows={c.executedTrades} />
             </div>
 
             {/* B0. Failure summary for this cohort (executed losses only) */}
