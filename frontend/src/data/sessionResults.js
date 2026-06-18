@@ -263,6 +263,48 @@ export function describeMissedReason(t) {
     return ctx ? `${cause} - ${ctx}` : cause;
 }
 
+// Excursion field getters (R units). null when absent (old bundles).
+const mfeOf = (t) => { const n = Number(t?.mfeR ?? t?.mfe_r); return Number.isFinite(n) ? n : null; };
+const maeOf = (t) => { const n = Number(t?.maeR ?? t?.mae_r); return Number.isFinite(n) ? n : null; };
+function _avg(arr) { return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null; }
+function _median(arr) {
+    if (!arr.length) return null;
+    const s = [...arr].sort((a, b) => a - b);
+    const m = Math.floor(s.length / 2);
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+function _round2(v) { return v == null ? null : Number(v.toFixed(2)); }
+function excGroup(rows) {
+    const mfe = rows.map(mfeOf).filter((v) => v != null);
+    const mae = rows.map(maeOf).filter((v) => v != null);
+    return {
+        count: rows.length,
+        avgMFE: _round2(_avg(mfe)),
+        medianMFE: _round2(_median(mfe)),
+        avgMAE: _round2(_avg(mae)),
+        medianMAE: _round2(_median(mae)),
+    };
+}
+
+/**
+ * Phase 3B — pure excursion snapshot over a cohort's EXECUTED trades only.
+ * Exploratory (not simulation): summarizes MFE/MAE for all/winners/losers, and —
+ * for LOSS trades only — the % that reached each R level before failing (a BE/
+ * target-suitability signal). Uses only fields already on the rows; groups with
+ * no MFE/MAE data return null stats (rendered "—"). Winners = classifyTrade WIN,
+ * losers = classifyTrade LOSS.
+ */
+export function cohortExcursionSnapshot(executedTrades) {
+    const rows = Array.isArray(executedTrades) ? executedTrades : [];
+    const winners = rows.filter((t) => classifyTrade(t) === "WIN");
+    const losers = rows.filter((t) => classifyTrade(t) === "LOSS");
+    const thresholds = [0.5, 1.0, 1.5, 2.0].map((level) => {
+        const reached = losers.filter((t) => { const m = mfeOf(t); return m != null && m >= level; }).length;
+        return { level, reachedBeforeLossPct: losers.length ? Number(((reached / losers.length) * 100).toFixed(1)) : null };
+    });
+    return { all: excGroup(rows), winners: excGroup(winners), losers: excGroup(losers), thresholds };
+}
+
 /**
  * Phase 3A — pure outcome distribution over a cohort's EXECUTED trades only.
  * Buckets are derived from classifyTrade (single source of truth); nothing is

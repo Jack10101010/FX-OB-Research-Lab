@@ -10,7 +10,7 @@ import React, { useState } from "react";
 import { ChevronDown, ChevronRight, Ban } from "lucide-react";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { useDataset, getActiveBundle, getTradeUniverse } from "@/data/store";
-import { buildSessionResults, cohortFailureSummary, describeMissedReason, cohortOutcomeDistribution } from "@/data/sessionResults";
+import { buildSessionResults, cohortFailureSummary, describeMissedReason, cohortOutcomeDistribution, cohortExcursionSnapshot } from "@/data/sessionResults";
 
 const fmtR = (v) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${Number(v).toFixed(1)}R`);
 const fmtPx = (v) => (v == null || v === "" || !Number.isFinite(Number(v)) ? "—" : Number(v).toFixed(5));
@@ -179,6 +179,53 @@ function OutcomeDistribution({ rows }) {
     );
 }
 
+function ExcGroup({ title, g }) {
+    const v = (x) => (x == null ? "—" : `${x >= 0 ? "+" : ""}${Number(x).toFixed(2)}R`);
+    return (
+        <div className="clip-bevel-sm border border-[hsl(var(--border-soft))] px-2.5 py-2">
+            <div className="text-[10px] font-ui uppercase tracking-wider text-[hsl(var(--accent-secondary))] mb-1">{title} ({g.count})</div>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] font-ui">
+                <span className="text-muted-lab">Avg MFE</span><span className="font-num text-right text-[hsl(var(--text-1))]">{v(g.avgMFE)}</span>
+                <span className="text-muted-lab">Med MFE</span><span className="font-num text-right text-[hsl(var(--text-1))]">{v(g.medianMFE)}</span>
+                <span className="text-muted-lab">Avg MAE</span><span className="font-num text-right text-[hsl(var(--text-1))]">{v(g.avgMAE)}</span>
+                <span className="text-muted-lab">Med MAE</span><span className="font-num text-right text-[hsl(var(--text-1))]">{v(g.medianMAE)}</span>
+            </div>
+        </div>
+    );
+}
+
+function ExcursionSnapshot({ rows }) {
+    const snap = cohortExcursionSnapshot(rows);
+    if (snap.all.count === 0) return <div className="text-[11.5px] font-ui text-muted-lab italic py-1">No executed trades for this cohort.</div>;
+    const noData = snap.all.avgMFE == null && snap.all.avgMAE == null;
+    const pctTone = (p) => (p == null ? "text-[hsl(var(--text-2))]" : p >= 66 ? successTone : p >= 33 ? "text-[hsl(var(--warning))]" : dangerTone);
+    return (
+        <div className="space-y-2">
+            {noData && <div className="text-[10.5px] font-ui text-muted-lab italic">No excursion (MFE/MAE) data in this run.</div>}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <ExcGroup title="All Trades" g={snap.all} />
+                <ExcGroup title="Winners" g={snap.winners} />
+                <ExcGroup title="Losers" g={snap.losers} />
+            </div>
+            <div>
+                <div className="text-[10px] font-ui uppercase tracking-wider text-[hsl(var(--accent-secondary))] mb-1">Losses reaching before failure</div>
+                {snap.losers.count === 0 ? (
+                    <div className="text-[11px] font-ui text-muted-lab italic">No losses for this cohort.</div>
+                ) : (
+                    <div className="flex flex-wrap gap-x-4 gap-y-1">
+                        {snap.thresholds.map((th) => (
+                            <span key={th.level} className="inline-flex items-baseline gap-1">
+                                <span className="text-[10px] font-ui uppercase tracking-wider text-muted-lab">{th.level}R</span>
+                                <span className={`text-[11.5px] font-num ${pctTone(th.reachedBeforeLossPct)}`}>{th.reachedBeforeLossPct == null ? "—" : `${th.reachedBeforeLossPct}%`}</span>
+                            </span>
+                        ))}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
 function CohortDrilldown({ sessionLabel, c }) {
     const s = c.summary;
     const disabled = c.status === "disabled";
@@ -204,6 +251,12 @@ function CohortDrilldown({ sessionLabel, c }) {
             <div>
                 <div className="text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))] mb-1">Outcome distribution</div>
                 <OutcomeDistribution rows={c.executedTrades} />
+            </div>
+
+            {/* A3. Excursion snapshot (executed trades only) */}
+            <div>
+                <div className="text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))] mb-1">Excursion snapshot</div>
+                <ExcursionSnapshot rows={c.executedTrades} />
             </div>
 
             {/* B0. Failure summary for this cohort (executed losses only) */}
