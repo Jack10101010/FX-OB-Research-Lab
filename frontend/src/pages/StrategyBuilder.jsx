@@ -2234,6 +2234,9 @@ function reduceRunSnapshot(job, importedRunId = "") {
         news_flatten_late_count: job.news_flatten_late_count,
         session_filtered_skipped: job.session_filtered_skipped,
         structure_direction_filter_skipped: job.structure_direction_filter_skipped ?? null,
+        detected_ob_count: job.detected_ob_count ?? null,
+        simulation_ob_count: job.simulation_ob_count ?? null,
+        universe_reduction_pct: job.universe_reduction_pct ?? null,
         created_at: job.created_at,
         started_at: job.started_at,
         finished_at: job.finished_at,
@@ -2698,6 +2701,15 @@ function RunProgressCard({ job }) {
                 <RunProgressTile label="Est. finish" value={formatClockTime(job.eta_seconds)} />
                 <RunProgressTile label="Elapsed" value={formatDuration(job.elapsed_seconds ?? job.progress_elapsed_seconds)} />
             </div>
+            {(job.detected_ob_count != null || job.simulation_ob_count != null) && (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10.5px] font-ui text-[hsl(var(--text-2))]">
+                    <span><span className="text-muted-lab">Detected OBs: </span><span className="font-num tabular-nums">{job.detected_ob_count != null ? Number(job.detected_ob_count).toLocaleString() : "—"}</span></span>
+                    <span><span className="text-muted-lab">Simulation OBs: </span><span className="font-num tabular-nums">{job.simulation_ob_count != null ? Number(job.simulation_ob_count).toLocaleString() : "—"}</span></span>
+                    {job.universe_reduction_pct != null && (
+                        <span><span className="text-muted-lab">Universe Reduction: </span><span className="font-num tabular-nums">{Number(job.universe_reduction_pct).toFixed(1)}%</span></span>
+                    )}
+                </div>
+            )}
             <div className="text-[10.5px] font-ui text-muted-lab">{runStatusMessage(job)}</div>
         </div>
     );
