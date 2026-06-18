@@ -306,6 +306,41 @@ export function cohortExcursionSnapshot(executedTrades) {
 }
 
 /**
+ * Phase 3C — pure target-suitability snapshot from exported MFE only. EXPLORATORY:
+ * "how often did this cohort reach common R targets?" — NOT simulated P&L. A trade
+ * "reached" a level when MFE >= level. Percentages use VALID-MFE denominators
+ * (coverage), never `total`; winners/losers use their own valid-MFE denominators;
+ * a zero denominator yields null. Disabled/cancelled rows are never passed in.
+ */
+export function cohortTargetSuitability(executedTrades, levels = [0.5, 1, 1.5, 2, 3, 5]) {
+    const rows = Array.isArray(executedTrades) ? executedTrades : [];
+    const total = rows.length;
+    const withVal = rows.filter((t) => mfeOf(t) != null);
+    const winnersV = withVal.filter((t) => classifyTrade(t) === "WIN");
+    const losersV = withVal.filter((t) => classifyTrade(t) === "LOSS");
+    const pct = (num, den) => (den ? Number(((num / den) * 100).toFixed(1)) : null);
+    const reachedIn = (set, lvl) => set.filter((t) => mfeOf(t) >= lvl).length;
+    const lv = levels.map((level) => {
+        const reachedCount = reachedIn(withVal, level);
+        const wc = reachedIn(winnersV, level);
+        const lc = reachedIn(losersV, level);
+        return {
+            level,
+            reachedCount, reachedPct: pct(reachedCount, withVal.length),
+            winnersReachedCount: wc, winnersReachedPct: pct(wc, winnersV.length),
+            losersReachedCount: lc, losersReachedPct: pct(lc, losersV.length),
+        };
+    });
+    return {
+        total,
+        coverage: { withMFE: withVal.length, pct: pct(withVal.length, total) },
+        winnersWithMFE: winnersV.length,
+        losersWithMFE: losersV.length,
+        levels: lv,
+    };
+}
+
+/**
  * Phase 3A — pure outcome distribution over a cohort's EXECUTED trades only.
  * Buckets are derived from classifyTrade (single source of truth); nothing is
  * invented. Returns { total, buckets:[{key,label,count,percent,netR,avgR}] } with
