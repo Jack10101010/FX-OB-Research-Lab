@@ -10,7 +10,7 @@ import React, { useState } from "react";
 import { ChevronDown, ChevronRight, Ban } from "lucide-react";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { useDataset, getActiveBundle, getTradeUniverse } from "@/data/store";
-import { buildSessionResults } from "@/data/sessionResults";
+import { buildSessionResults, cohortFailureSummary } from "@/data/sessionResults";
 
 const fmtR = (v) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${Number(v).toFixed(1)}R`);
 const fmtPx = (v) => (v == null || v === "" || !Number.isFinite(Number(v)) ? "—" : Number(v).toFixed(5));
@@ -91,9 +91,42 @@ function DisabledTable({ rows, showCohort = true, emptyText = "No scenario-block
     );
 }
 
+function LossesTable({ rows }) {
+    if (!rows.length) return <div className="text-[11.5px] font-ui text-muted-lab italic py-2">No losses for this cohort.</div>;
+    const hasMfe = rows.some((t) => Number.isFinite(Number(t.mfeR ?? t.mfe_r)));
+    const hasMae = rows.some((t) => Number.isFinite(Number(t.maeR ?? t.mae_r)));
+    const reasonOf = (t) => String(t.cancel_reason || t.exit_reason || t.be_exit_reason || "").trim() || "—";
+    const rOrDash = (v) => (Number.isFinite(Number(v)) ? `${Number(v) >= 0 ? "+" : ""}${Number(v).toFixed(2)}` : "—");
+    return (
+        <div className="overflow-x-auto">
+            <table className="w-full text-[11.5px] font-ui">
+                <thead><tr className="text-[hsl(var(--accent-secondary))] uppercase text-[10px] tracking-wider text-left">
+                    <th className="py-1 pr-3">Time</th><th className="pr-3">Outcome</th><th className="pr-3 text-right">R</th><th className="pr-3 text-right">Entry</th><th className="pr-3 text-right">Stop</th><th className="pr-3 text-right">TP</th><th className="pr-3">Reason</th>{hasMfe && <th className="pr-3 text-right">MFE</th>}{hasMae && <th className="text-right">MAE</th>}
+                </tr></thead>
+                <tbody>
+                    {rows.map((t, i) => (
+                        <tr key={t.id || i} className="border-t border-[hsl(var(--border-soft))]">
+                            <td className="py-1 pr-3 text-[hsl(var(--text-2))] font-num">{String(t.fillTime || t.fill_time || t.entry || "").slice(0, 16) || "—"}</td>
+                            <td className="pr-3">{t.outcome || t.outcomeRaw || "Loss"}</td>
+                            <td className="pr-3 text-right font-num text-[hsl(var(--danger))]">{fmtR(Number(t.netR ?? t.net_r ?? t.pnl_r ?? 0))}</td>
+                            <td className="pr-3 text-right font-num text-[hsl(var(--text-2))]">{fmtPx(t.entryPrice)}</td>
+                            <td className="pr-3 text-right font-num text-[hsl(var(--text-2))]">{fmtPx(t.stop)}</td>
+                            <td className="pr-3 text-right font-num text-[hsl(var(--text-2))]">{fmtPx(t.tp)}</td>
+                            <td className="pr-3 text-[hsl(var(--text-2))]">{reasonOf(t)}</td>
+                            {hasMfe && <td className="pr-3 text-right font-num text-[hsl(var(--text-2))]">{rOrDash(t.mfeR ?? t.mfe_r)}</td>}
+                            {hasMae && <td className="text-right font-num text-[hsl(var(--text-2))]">{rOrDash(t.maeR ?? t.mae_r)}</td>}
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+    );
+}
+
 function CohortDrilldown({ sessionLabel, c }) {
     const s = c.summary;
     const disabled = c.status === "disabled";
+    const fail = cohortFailureSummary(c.executedTrades);
     return (
         <div className="mt-2 ml-2 border-l-2 border-[hsl(var(--border-mid))] pl-3 space-y-3">
             {/* A. Cohort summary */}
@@ -111,6 +144,32 @@ function CohortDrilldown({ sessionLabel, c }) {
                 <KV k="Avg R" v={s.avgR == null ? "—" : fmtR(s.avgR)} />
                 <KV k="Win rate" v={s.winRate == null ? "—" : `${s.winRate}%`} />
             </div>
+            {/* B0. Failure summary for this cohort (executed losses only) */}
+            <div>
+                <div className="text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))] mb-1">Failure summary</div>
+                {fail.totalLosses === 0 ? (
+                    <div className="text-[11.5px] font-ui text-muted-lab italic py-1">No losses for this cohort.</div>
+                ) : (
+                    <>
+                        <div className="flex flex-wrap gap-x-4 gap-y-1.5 mb-2">
+                            <KV k="Total losses" v={fail.totalLosses} tone={dangerTone} />
+                            <KV k="Loss R" v={fmtR(fail.lossR)} tone={dangerTone} />
+                            <KV k="Avg loss R" v={fail.avgLossR == null ? "—" : fmtR(fail.avgLossR)} />
+                            <KV k="Largest loss R" v={fail.largestLossR == null ? "—" : fmtR(fail.largestLossR)} tone={dangerTone} />
+                            <KV k="Loss rate" v={fail.lossRate == null ? "—" : `${fail.lossRate}%`} />
+                            {fail.beExits > 0 && <KV k="BE exits" v={fail.beExits} />}
+                        </div>
+                        {fail.topReasons.length > 0 && (
+                            <div className="text-[11px] font-ui text-muted-lab mb-2">
+                                <span className="uppercase text-[10px] tracking-wider text-[hsl(var(--accent-secondary))] mr-2">Top reasons</span>
+                                {fail.topReasons.map((r, i) => <span key={r.reason} className="text-[hsl(var(--text-2))]">{i > 0 ? " · " : ""}{r.reason} ×{r.count}</span>)}
+                            </div>
+                        )}
+                        <LossesTable rows={fail.losses} />
+                    </>
+                )}
+            </div>
+
             {/* B. Executed trades for this cohort */}
             <div>
                 <div className="text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))] mb-1">Executed trades</div>

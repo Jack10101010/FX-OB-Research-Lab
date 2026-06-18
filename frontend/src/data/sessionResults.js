@@ -174,3 +174,50 @@ export function buildSessionResults(trades, scenarioConfig) {
 
     return { hasScenario, meta: (scenarioConfig && scenarioConfig.meta) || null, sessions };
 }
+
+/**
+ * Phase 2B — pure, cohort-scoped failure summary computed ONLY from a cohort's
+ * executed trades (real fills). Disabled/COHORT_DISABLED rows are never passed in,
+ * so they can never count as losses. Uses classifyTrade (single source of truth)
+ * for loss detection; never invents failure classifications — `topReasons` is
+ * populated only from explicit reason fields present on the rows.
+ */
+export function cohortFailureSummary(executedTrades) {
+    const rows = Array.isArray(executedTrades) ? executedTrades : [];
+    const losses = rows.filter((t) => {
+        const c = classifyTrade(t);
+        return c === "LOSS" || c === "NEWS_FLATTEN_LOSS";
+    });
+    const totalLosses = losses.length;
+    let lossR = 0, largest = 0;
+    for (const t of losses) {
+        const r = tradeR(t);
+        lossR += r;
+        if (r < largest) largest = r;
+    }
+    const beExits = rows.filter((t) => String(t?.outcomeRaw || "").toUpperCase() === "BE_EXIT").length;
+
+    // Explicit reason fields only (never fabricated). Most plain stop-outs carry no
+    // reason → topReasons stays empty and the UI omits the section.
+    const reasonCounts = {};
+    for (const t of losses) {
+        const reason = String(t?.cancel_reason || t?.exit_reason || t?.be_exit_reason || "").trim();
+        if (reason) reasonCounts[reason] = (reasonCounts[reason] || 0) + 1;
+    }
+    const topReasons = Object.entries(reasonCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([reason, count]) => ({ reason, count }));
+
+    return {
+        executed: rows.length,
+        totalLosses,
+        lossR: Number(lossR.toFixed(2)),
+        avgLossR: totalLosses ? Number((lossR / totalLosses).toFixed(2)) : null,
+        largestLossR: totalLosses ? Number(largest.toFixed(2)) : null,
+        lossRate: rows.length ? Number(((totalLosses / rows.length) * 100).toFixed(1)) : null,
+        beExits,
+        topReasons,
+        losses,
+    };
+}
