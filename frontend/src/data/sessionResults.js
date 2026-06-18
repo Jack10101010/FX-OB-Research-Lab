@@ -45,7 +45,19 @@ function tpLabelFromRule(rule) {
 }
 function beLabelFromRule(rule) {
     if (rule && rule.be && rule.be.arm_r != null) return `${rule.be.arm_r}R ${rule.be.trigger || ""}`.trim();
-    return "None";
+    return "Run Default";
+}
+function entryLabelFromRule(rule) {
+    const e = rule && rule.entry;
+    if (!e || !e.model) return "Run Default";
+    if (e.model === "baseline") return "Baseline";
+    if (e.model === "triggered_edge") {
+        const arm = String(e.arm ?? e.fill_mode ?? "");
+        const c = arm === "same" ? "C0" : arm === "next" ? "C1" : /^d\d+$/.test(arm) ? `C${arm.slice(1)}` : arm;
+        return `Triggered Edge ${e.threshold}${c ? ` ${c}` : ""}`;
+    }
+    if (e.model === "penetration") return `Penetration ${e.threshold}`;
+    return "Run Default";
 }
 
 function statsFor(executed) {
@@ -110,17 +122,25 @@ export function buildSessionResults(trades, scenarioConfig) {
             const status = rule ? (rule.enabled === false ? "disabled" : "enabled") : "enabled";
             const st = statsFor(executed);
             return {
-                key: cKey,
+                key: cKey,                    // cell key (e.g. "bos_long"); unique within a session
+                cellKey: cKey,
                 label: cm.label,
                 structure: cm.structure,
                 direction: cm.direction,
                 status,                       // "enabled" | "disabled" (from config)
                 hasRule: !!rule,
+                entryLabel: entryLabelFromRule(rule),
                 tpLabel: tpLabelFromRule(rule),
                 beLabel: beLabelFromRule(rule),
                 executedCount: executed.length,
                 disabledCount: disabled.length,
                 netR: st.netR,
+                summary: st,                  // full per-cohort stats (executed only)
+                // Canonical drilldown row sets (executed never includes disabled).
+                executedTrades: executed,
+                disabledOpportunities: disabled,
+                allRows: [...executed, ...disabled],
+                // Back-compat aliases for existing consumers.
                 executed,
                 disabled,
             };
