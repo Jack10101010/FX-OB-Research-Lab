@@ -22,7 +22,7 @@ const dangerTone = "text-[hsl(var(--danger))]";
 function Stat({ label, value, tone }) {
     return (
         <div className="clip-bevel-sm border border-[hsl(var(--border-soft))] px-2.5 py-1.5">
-            <div className="text-[10px] font-ui uppercase tracking-[0.05em] text-muted-lab">{label}</div>
+            <div className="text-[10px] font-ui uppercase tracking-[0.05em] text-[hsl(var(--accent-secondary))]">{label}</div>
             <div className={`text-[14px] font-num ${tone || "text-[hsl(var(--text-1))]"}`}>{value}</div>
         </div>
     );
@@ -31,7 +31,7 @@ function Stat({ label, value, tone }) {
 function KV({ k, v, tone }) {
     return (
         <span className="inline-flex items-baseline gap-1">
-            <span className="text-[10px] font-ui uppercase tracking-wider text-muted-lab">{k}</span>
+            <span className="text-[10px] font-ui uppercase tracking-wider text-[hsl(var(--accent-secondary))]">{k}</span>
             <span className={`text-[11.5px] font-ui ${tone || "text-[hsl(var(--text-1))]"}`}>{v}</span>
         </span>
     );
@@ -42,7 +42,7 @@ function ExecutedTable({ rows, showCohort = true, emptyText = "No executed trade
     return (
         <div className="overflow-x-auto">
             <table className="w-full text-[11.5px] font-ui">
-                <thead><tr className="text-muted-lab uppercase text-[10px] tracking-wider text-left">
+                <thead><tr className="text-[hsl(var(--accent-secondary))] uppercase text-[10px] tracking-wider text-left">
                     <th className="py-1 pr-3">Time</th>{showCohort && <th className="pr-3">Cohort</th>}<th className="pr-3">Dir</th><th className="pr-3">Outcome</th><th className="pr-3 text-right">R</th><th className="pr-3 text-right">Entry</th><th className="pr-3 text-right">Stop</th><th className="pr-3 text-right">TP</th><th className="text-right">RR</th>
                 </tr></thead>
                 <tbody>
@@ -70,7 +70,7 @@ function DisabledTable({ rows, showCohort = true, emptyText = "No scenario-block
     return (
         <div className="overflow-x-auto">
             <table className="w-full text-[11.5px] font-ui">
-                <thead><tr className="text-muted-lab uppercase text-[10px] tracking-wider text-left">
+                <thead><tr className="text-[hsl(var(--accent-secondary))] uppercase text-[10px] tracking-wider text-left">
                     {showCohort && <th className="py-1 pr-3">Cohort</th>}<th className="py-1 pr-3">Dir</th><th className="pr-3 text-right">Planned Entry</th><th className="pr-3 text-right">Stop</th><th className="pr-3 text-right">TP</th><th className="pr-3 text-right">RR</th><th>Reason</th>
                 </tr></thead>
                 <tbody>
@@ -113,12 +113,12 @@ function CohortDrilldown({ sessionLabel, c }) {
             </div>
             {/* B. Executed trades for this cohort */}
             <div>
-                <div className="text-[10px] font-ui uppercase tracking-[0.06em] text-muted-lab mb-1">Executed trades</div>
+                <div className="text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))] mb-1">Executed trades</div>
                 <ExecutedTable rows={c.executedTrades} showCohort={false} emptyText="No executed trades for this cohort." />
             </div>
             {/* C. Disabled opportunities for this cohort */}
             <div>
-                <div className="text-[10px] font-ui uppercase tracking-[0.06em] text-muted-lab mb-1">Disabled opportunities</div>
+                <div className="text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))] mb-1">Disabled opportunities</div>
                 <DisabledTable rows={c.disabledOpportunities} showCohort={false} emptyText="No disabled opportunities for this cohort." />
             </div>
         </div>
@@ -134,23 +134,15 @@ export default function SessionResults({ trades: tradesProp, bundle: bundleProp 
     const trades = Array.isArray(tradesProp) ? tradesProp : (getTradeUniverse()?.trades || []);
     const scenarioConfig = bundle?.config?.session_strategy_scenario || null;
 
-    const [open, setOpen] = useState(false);
     const [sessionKey, setSessionKey] = useState("london");
     const [expanded, setExpanded] = useState({}); // key: "session|cell"
 
     const { hasScenario, sessions } = buildSessionResults(trades, scenarioConfig);
     const active = sessions.find((s) => s.key === sessionKey) || sessions[0];
 
-    const toggleBtn = "clip-bevel-sm px-3 py-1.5 text-[11px] font-ui border border-[hsl(var(--border-mid))] text-[hsl(var(--text-1))] hover:border-[hsl(var(--accent-secondary))] inline-flex items-center gap-1.5";
-
     return (
-        <NeonPanel
-            title="Session Results"
-            action={<button onClick={() => setOpen((v) => !v)} className={toggleBtn} data-testid="session-results-toggle">{open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}{open ? "Hide" : "Show"}</button>}
-        >
-            {!open ? (
-                <p className="text-[12px] font-ui text-muted-lab">Per-session, per-cohort breakdown of this run — executed trades and scenario-blocked opportunities. Click a cohort to drill in.</p>
-            ) : !trades.length ? (
+        <NeonPanel title="Session Results">
+            {!trades.length ? (
                 <p className="text-[12px] font-ui text-muted-lab">No trades in this run. Import a run to see session results.</p>
             ) : (
                 <div className="space-y-4">
@@ -190,12 +182,16 @@ export default function SessionResults({ trades: tradesProp, bundle: bundleProp 
 
                     {/* B. Cohort breakdown — expandable drilldown per cohort */}
                     <div>
-                        <div className="text-[11px] font-ui uppercase tracking-[0.06em] text-muted-lab mb-2">Cohort breakdown — click to drill in</div>
+                        <div className="text-[11px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))] mb-2">Cohort breakdown — click to drill in</div>
                         <div className="space-y-2">
                             {active.cohorts.map((c) => {
                                 const ekey = `${active.key}|${c.key}`;
                                 const isOpen = !!expanded[ekey];
                                 const disabled = c.status === "disabled";
+                                const eCount = c.executedCount;
+                                const dCount = c.disabledCount;
+                                const wr = c.summary ? c.summary.winRate : null;
+                                const sample = eCount > 0 && eCount < 10 ? (eCount < 5 ? "low sample" : "small sample") : null;
                                 return (
                                     <div key={c.key} className={`clip-bevel-sm border ${disabled ? "border-[hsl(var(--danger)/0.45)] bg-[hsl(var(--danger)/0.05)]" : "border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.15)]"}`}>
                                         <button
@@ -215,11 +211,33 @@ export default function SessionResults({ trades: tradesProp, bundle: bundleProp 
                                                     </div>
                                                 </div>
                                             </div>
-                                            <div className="flex items-center gap-4 shrink-0 text-right">
-                                                <div><div className="text-[9.5px] font-ui uppercase text-muted-lab">Status</div><div className={`text-[11px] font-ui ${disabled ? dangerTone : successTone}`}>{disabled ? "Disabled" : "Enabled"}</div></div>
-                                                <div><div className="text-[9.5px] font-ui uppercase text-muted-lab">Net</div><div className={`text-[12px] font-num ${c.netR >= 0 ? successTone : dangerTone}`}>{disabled && c.executedCount === 0 ? "—" : fmtR(c.netR)}</div></div>
-                                                <div className="hidden sm:block"><div className="text-[9.5px] font-ui uppercase text-muted-lab">TP</div><div className="text-[11px] font-ui text-[hsl(var(--text-2))]">{c.tpLabel}</div></div>
-                                                <div className="hidden sm:block"><div className="text-[9.5px] font-ui uppercase text-muted-lab">BE</div><div className="text-[11px] font-ui text-[hsl(var(--text-2))]">{c.beLabel}</div></div>
+                                            <div className="flex items-center gap-3 sm:gap-4 shrink-0 text-right">
+                                                <div>
+                                                    <div className="text-[9.5px] font-ui uppercase text-muted-lab">Trades</div>
+                                                    <div className="text-[12px] font-num text-[hsl(var(--accent-secondary))]">{eCount}T{dCount > 0 ? <span className="text-[hsl(var(--danger))]"> • {dCount} blk</span> : null}</div>
+                                                </div>
+                                                {sample && (
+                                                    <span
+                                                        className={`clip-bevel-sm px-1.5 py-0.5 text-[9px] font-ui uppercase tracking-wider border ${eCount < 5 ? "border-[hsl(var(--warning)/0.5)] text-[hsl(var(--warning))]" : "border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))]"}`}
+                                                        title="Small sample size — interpret with caution"
+                                                    >
+                                                        {sample}
+                                                    </span>
+                                                )}
+                                                <div>
+                                                    <div className="text-[9.5px] font-ui uppercase text-muted-lab">Net</div>
+                                                    <div className={`text-[13px] font-num font-semibold ${eCount === 0 ? "text-[hsl(var(--text-2))]" : (c.netR >= 0 ? successTone : dangerTone)}`}>{eCount === 0 ? "—" : fmtR(c.netR)}</div>
+                                                </div>
+                                                <div>
+                                                    <div className="text-[9.5px] font-ui uppercase text-muted-lab">Win</div>
+                                                    <div className="text-[12px] font-num text-[hsl(var(--text-1))]">{eCount > 0 && wr != null ? `${wr}%` : "—"}</div>
+                                                </div>
+                                                <div>
+                                                    <div className="text-[9.5px] font-ui uppercase text-muted-lab">Status</div>
+                                                    <div className={`text-[11px] font-ui ${disabled ? dangerTone : successTone}`}>{disabled ? "Disabled" : "Enabled"}</div>
+                                                </div>
+                                                <div className="hidden lg:block"><div className="text-[9.5px] font-ui uppercase text-muted-lab">TP</div><div className="text-[11px] font-ui text-[hsl(var(--text-2))]">{c.tpLabel}</div></div>
+                                                <div className="hidden lg:block"><div className="text-[9.5px] font-ui uppercase text-muted-lab">BE</div><div className="text-[11px] font-ui text-[hsl(var(--text-2))]">{c.beLabel}</div></div>
                                             </div>
                                         </button>
                                         {isOpen && (
@@ -235,13 +253,13 @@ export default function SessionResults({ trades: tradesProp, bundle: bundleProp 
 
                     {/* C. Session-wide executed trades */}
                     <div>
-                        <div className="text-[11px] font-ui uppercase tracking-[0.06em] text-muted-lab mb-2">Executed trades — {active.label}</div>
+                        <div className="text-[11px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))] mb-2">Executed trades — {active.label}</div>
                         <ExecutedTable rows={active.cohorts.flatMap((c) => c.executedTrades)} />
                     </div>
 
                     {/* D. Session-wide disabled opportunities */}
                     <div>
-                        <div className="text-[11px] font-ui uppercase tracking-[0.06em] text-muted-lab mb-2">Disabled opportunities — {active.label}</div>
+                        <div className="text-[11px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))] mb-2">Disabled opportunities — {active.label}</div>
                         <DisabledTable rows={active.cohorts.flatMap((c) => c.disabledOpportunities)} />
                     </div>
                 </div>
