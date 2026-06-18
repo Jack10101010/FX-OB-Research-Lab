@@ -531,6 +531,37 @@ export default function StrategyBuilder() {
         showFlash(`Loaded settings from ${getRunDisplayName(run)}`);
     };
     const onLoadFromRun = () => applyRunConfig(selectedLoadRun);
+    const [payloadCopied, setPayloadCopied] = useState(false);
+    // Build the EXACT payload sent to startSidecarRun. Single source of truth so the
+    // "Copy run payload" button and the actual submit can never drift.
+    //   1. strip underscore-prefixed frontend-only helper keys (_entry_mode, …)
+    //   2. when the Session Scenario is active (profiles.enabled === true), compile
+    //      the working copy and attach the session_strategy_scenario block (with
+    //      meta). When inactive, no key is added (byte-identical to a plain run).
+    const buildSidecarPayload = () => {
+        const payload = Object.fromEntries(
+            Object.entries(sidecarConfig).filter(([k]) => !k.startsWith("_"))
+        );
+        const profiles = getSessionProfiles();
+        if (profiles && profiles.enabled === true) {
+            const scn = compileScenarioToRunConfig(profiles, {}).session_strategy_scenario;
+            if (scn && scn.enabled === true) {
+                const loaded = getLoadedPortfolio();
+                scn.meta = {
+                    portfolio_id: loaded?.id || null,
+                    portfolio_name: loaded?.name || null,
+                    scenario_name: (runName || "").trim() || loaded?.name || null,
+                };
+                payload.session_strategy_scenario = scn;
+            }
+        }
+        return payload;
+    };
+    const copyRunPayload = () => {
+        try { navigator.clipboard?.writeText(JSON.stringify(buildSidecarPayload(), null, 2)); } catch { /* clipboard unavailable */ }
+        setPayloadCopied(true);
+        window.setTimeout(() => setPayloadCopied(false), 1400);
+    };
     const onRunLocal = async () => {
         if (sessionSelectionWarning) {
             setRunError("Select at least one session or disable session filtering.");
@@ -543,32 +574,9 @@ export default function StrategyBuilder() {
         setImportError("");
         setImportedRunId("");
         try {
-            // Strip underscore-prefixed metadata keys (_entry_mode, _selected_entry_model, …)
-            // before submission — they are frontend-only round-trip helpers and are not
-            // recognised by the backtester config schema.  sidecarConfig itself is left
-            // intact so localStorage persistence and Master Controls can still read them.
-            const sidecarPayload = Object.fromEntries(
-                Object.entries(sidecarConfig).filter(([k]) => !k.startsWith("_"))
-            );
-            // SESSION-STRATEGY-SCENARIO: when the Session Portfolio is active, compile
-            // the current working copy and attach it to the outgoing config so the
-            // backend runs the exact per-cohort rules. Gated on enabled === true →
-            // when the portfolio is disabled, the payload is byte-identical to before
-            // (no key added). Metadata lives INSIDE the scenario block (top-level
-            // unknown keys are rejected by the backend config schema).
-            const _scnProfiles = getSessionProfiles();
-            if (_scnProfiles && _scnProfiles.enabled === true) {
-                const _scn = compileScenarioToRunConfig(_scnProfiles, {}).session_strategy_scenario;
-                if (_scn && _scn.enabled === true) {
-                    const _loaded = getLoadedPortfolio();
-                    _scn.meta = {
-                        portfolio_id: _loaded?.id || null,
-                        portfolio_name: _loaded?.name || null,
-                        scenario_name: (runName || "").trim() || _loaded?.name || null,
-                    };
-                    sidecarPayload.session_strategy_scenario = _scn;
-                }
-            }
+            const sidecarPayload = buildSidecarPayload();
+            // Observability: surface whether the scenario block is actually attached.
+            console.debug("[Scenario Run Payload] session_strategy_scenario =", sidecarPayload.session_strategy_scenario || null);
             const started = await startSidecarRun(sidecarPayload, runName);
             const startedJob = started ? { display_name: (runName || "").trim(), ...started } : started;
             setRunJob(startedJob);
@@ -743,14 +751,33 @@ export default function StrategyBuilder() {
                     <div className="flex flex-col items-end gap-2">
                         <ConfigScopeRibbon cfg={cfg} />
                         {getSessionProfiles()?.enabled === true && (
-                            <span
-                                className="clip-bevel-sm px-2 py-0.5 text-[10px] font-ui uppercase tracking-wider border border-[hsl(var(--accent-primary)/0.5)] bg-[hsl(var(--accent-primary)/0.12)] text-[hsl(var(--accent-primary))]"
-                                title="The active Session Portfolio will be compiled and attached to this run."
-                                data-testid="scenario-attached-indicator"
-                            >
-                                Scenario attached{getLoadedPortfolio()?.name ? `: ${getLoadedPortfolio().name}` : ""}
-                            </span>
+                            buildSidecarPayload().session_strategy_scenario ? (
+                                <span
+                                    className="clip-bevel-sm px-2 py-0.5 text-[10px] font-ui uppercase tracking-wider border border-[hsl(var(--accent-primary)/0.5)] bg-[hsl(var(--accent-primary)/0.12)] text-[hsl(var(--accent-primary))]"
+                                    title="The active Session Scenario will be compiled and sent with this run."
+                                    data-testid="scenario-attached-indicator"
+                                >
+                                    Scenario will be sent{getLoadedPortfolio()?.name ? `: ${getLoadedPortfolio().name}` : ""}
+                                </span>
+                            ) : (
+                                <span
+                                    className="clip-bevel-sm px-2 py-0.5 text-[10px] font-ui uppercase tracking-wider border border-[hsl(var(--danger)/0.6)] bg-[hsl(var(--danger)/0.12)] text-[hsl(var(--danger))]"
+                                    title="Session Scenario is ON but did not produce a payload block — check that at least one cohort overrides the Run Default."
+                                    data-testid="scenario-not-attached-warning"
+                                >
+                                    Scenario is ON but not attached to payload
+                                </span>
+                            )
                         )}
+                        <button
+                            type="button"
+                            onClick={copyRunPayload}
+                            className="clip-bevel-sm px-2.5 py-1 text-[10.5px] font-ui uppercase tracking-wider border border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:border-[hsl(var(--accent-secondary))] hover:text-white inline-flex items-center gap-1.5"
+                            title="Copy the exact JSON payload sent to the backend run"
+                            data-testid="copy-run-payload"
+                        >
+                            {payloadCopied ? "Copied payload" : "Copy run payload"}
+                        </button>
                         <NeonButton icon={Play} tone="primary" onClick={onRunLocal} disabled={runBusy || sidecarActive} data-testid="builder-run-backtest">
                             {runBusy ? "Starting..." : sidecarActive ? "Running..." : "Run Backtest Locally"}
                         </NeonButton>
@@ -1051,7 +1078,10 @@ export default function StrategyBuilder() {
                 </BuilderFocusCard>
 
                 <BuilderFocusCard id="structure" activeId={activeBuilderCard} onActivate={setActiveBuilderCard}>
-                <NeonPanel title="Structure Settings" className="flex-1">
+                <NeonPanel title="Setup Universe Filter" className="flex-1">
+                    <p className="text-[11.5px] font-ui text-muted-lab leading-relaxed border-l-2 border-[hsl(var(--accent-secondary)/0.5)] pl-2.5 mb-3">
+                        Choose which setup types are included in the backtest before Session Scenario rules are applied. Session Scenario can customise or disable cohorts within this universe, but it cannot recover setup types filtered out here.
+                    </p>
                     <div className="grid grid-cols-2 gap-3">
                         <Field label="Swing Length">
                             <NeonInput type="number" min="2" max="30" value={cfg.swing} onChange={(e) => set("swing")(Number(e.target.value))} />
@@ -1066,7 +1096,7 @@ export default function StrategyBuilder() {
                             <NeonInput type="number" min="0.1" step="0.1" value={cfg.maxObSizePips} onChange={(e) => set("maxObSizePips")(Number(e.target.value))} />
                         </Field>
                         <div className="col-span-2">
-                            <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab mb-2">Structure Direction</div>
+                            <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab mb-2">Included Setup Types</div>
                             <div className="flex flex-wrap gap-2">
                                 {[
                                     { key: "bosLong",    label: "BOS Long",    excludedBy: cfg.direction === "Short" ? "Short" : null },
@@ -1090,6 +1120,20 @@ export default function StrategyBuilder() {
                                     </button>
                                 ))}
                             </div>
+                            {(() => {
+                                const eligible = [
+                                    ["bosLong",    cfg.direction !== "Short"],
+                                    ["bosShort",   cfg.direction !== "Long"],
+                                    ["chochLong",  cfg.direction !== "Short"],
+                                    ["chochShort", cfg.direction !== "Long"],
+                                ];
+                                const anyFiltered = eligible.some(([k, ok]) => ok && !cfg[k]);
+                                return anyFiltered ? (
+                                    <p className="text-[10.5px] font-ui text-[hsl(var(--warning))] mt-2">
+                                        Filtered setup types are removed before scenario execution.
+                                    </p>
+                                ) : null;
+                            })()}
                         </div>
                     </div>
                 </NeonPanel>

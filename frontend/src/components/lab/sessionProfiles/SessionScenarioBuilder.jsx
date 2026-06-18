@@ -12,7 +12,7 @@ import { ChevronDown, ChevronRight, Pencil, Power, AlertTriangle, RotateCcw, Che
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { useDataset, getSessionProfiles, setSessionProfiles, getActiveBundle, getTradeUniverse } from "@/data/store";
 import {
-    SESSIONS, CELLS, buildEffectivePortfolioMap,
+    SESSIONS, CELLS, ARM_OPTIONS, buildEffectivePortfolioMap,
     entryProfileLabel, beProfileLabel, targetProfileLabel,
     entryProfileId, beProfileId, targetProfileId,
     isAllGlobal, setScenarioEnabled, setGlobalDefaultValue,
@@ -25,18 +25,29 @@ const tinyBtn = "clip-bevel-sm px-2.5 py-1 text-[11px] font-ui border inline-fle
 const actionBtn = `${tinyBtn} border-[hsl(var(--border-mid))] text-[hsl(var(--text-1))] hover:border-[hsl(var(--accent-secondary))]`;
 
 // ── plain-language option presets (no profile ids / refs shown) ─────────────────
+// Full Entry Model catalog, GENERATED from the canonical ARM_OPTIONS (C0–C6) ×
+// the supported threshold set — not a hand-maintained partial list. Adding
+// variants is backward-compatible: profile ids are deterministic, so existing
+// saved scenarios keep resolving and any stored ref not listed here is preserved
+// via the "(current)" fallback option in DimSelect.
+const ENTRY_THRESHOLDS = [10, 25, 50, 75];
+const armC = (a) => a.label.split(" ")[0]; // "C0 (same)" → "C0"
 const ENTRY_OPTS = [
     { value: "", label: "Run Default", sel: null },
     { value: "baseline", label: "Baseline", sel: { model: "baseline" } },
-    { value: "te_25_next", label: "Triggered Edge 25 C1", sel: { model: "triggered_edge", threshold: 25, arm: "next" } },
-    { value: "te_25_d2", label: "Triggered Edge 25 C2", sel: { model: "triggered_edge", threshold: 25, arm: "d2" } },
-    { value: "te_50_next", label: "Triggered Edge 50 C1", sel: { model: "triggered_edge", threshold: 50, arm: "next" } },
-    { value: "te_50_d2", label: "Triggered Edge 50 C2", sel: { model: "triggered_edge", threshold: 50, arm: "d2" } },
-    { value: "pen_25", label: "Penetration 25", sel: { model: "penetration", threshold: 25 } },
-    { value: "pen_50", label: "Penetration 50", sel: { model: "penetration", threshold: 50 } },
+    ...ENTRY_THRESHOLDS.flatMap((thr) => ARM_OPTIONS.map((a) => ({
+        value: `te_${thr}_${a.key}`,
+        label: `Triggered Edge ${thr} ${armC(a)}`,
+        sel: { model: "triggered_edge", threshold: thr, arm: a.key },
+    }))),
+    ...ENTRY_THRESHOLDS.map((thr) => ({
+        value: `pen_${thr}`,
+        label: `Penetration ${thr}`,
+        sel: { model: "penetration", threshold: thr },
+    })),
 ];
 const BE_OPTS = [
-    { value: "", label: "None", sel: null },
+    { value: "", label: "Run Default", sel: null },
     { value: "wick_0.5", label: "Wick 0.5R", sel: { trigger: "wick", armR: 0.5 } },
     { value: "wick_1", label: "Wick 1R", sel: { trigger: "wick", armR: 1 } },
     { value: "close_0.5", label: "Close 0.5R", sel: { trigger: "close", armR: 0.5 } },
@@ -52,7 +63,7 @@ const TP_OPTS = [
     { value: "10", label: "10R", sel: { type: "rr", value: 10 } },
 ];
 const OPTS = { entry: ENTRY_OPTS, be: BE_OPTS, target: TP_OPTS };
-const DIM_LABEL = { entry: "Entry", be: "Break-Even", target: "Target" };
+const DIM_LABEL = { entry: "Entry Model", be: "Break-Even", target: "Target" };
 
 const idOf = (dim, sel) => (dim === "entry" ? entryProfileId(sel) : dim === "be" ? beProfileId(sel) : targetProfileId(sel));
 // Which option matches a stored ref id; "" when none; "__current__" for a non-preset ref.
@@ -113,6 +124,7 @@ function CohortCard({ profiles, sessionKey, cell, runRr }) {
     })();
     const sourceTone = sourceLabel === "Custom" ? CYAN : sourceLabel === "Mixed" ? "text-[hsl(var(--accent-secondary))]" : "text-[hsl(var(--text-2))]";
     const entryLabel = eff.entryLabel === "Base universe" ? "Run Default" : eff.entryLabel;
+    const beLabel = eff.beSource === "none" ? "Run Default" : eff.beLabel;
     const targetLabel = eff.targetSource === "none" ? (runRr != null ? `Run Default (${runRr}R)` : "Run Default") : eff.targetLabel;
 
     const pick = (dim, value) => {
@@ -123,11 +135,15 @@ function CohortCard({ profiles, sessionKey, cell, runRr }) {
     };
 
     return (
-        <div className="clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.15)] p-3">
+        <div className={`clip-bevel-sm border p-3 ${eff.disabled ? "border-[hsl(var(--danger)/0.45)] bg-[hsl(var(--danger)/0.06)]" : "border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.15)]"}`}>
             <div className="flex items-center justify-between gap-3 mb-2">
-                <span className="text-[12.5px] font-ui font-semibold text-[hsl(var(--text-1))]">{cellLabelOf(cell.cell)}</span>
+                <span className={`text-[12.5px] font-ui font-semibold ${eff.disabled ? "text-[hsl(var(--text-2))]" : "text-[hsl(var(--text-1))]"}`}>{cellLabelOf(cell.cell)}</span>
                 <div className="flex items-center gap-2">
-                    <span className={`text-[11px] font-ui ${eff.disabled ? "text-[hsl(var(--danger))]" : "text-[hsl(var(--success))]"}`}>Status: {eff.disabled ? "Off" : "On"}</span>
+                    {eff.disabled ? (
+                        <span className="clip-bevel-sm px-2 py-0.5 text-[10px] font-ui uppercase tracking-wider border border-[hsl(var(--danger)/0.5)] bg-[hsl(var(--danger)/0.12)] text-[hsl(var(--danger))]">Status: Off</span>
+                    ) : (
+                        <span className="text-[11px] font-ui text-[hsl(var(--success))]">Status: On</span>
+                    )}
                     {sourceLabel && <span className={`text-[10.5px] font-ui uppercase tracking-wider ${sourceTone}`}>{sourceLabel}</span>}
                 </div>
             </div>
@@ -142,8 +158,8 @@ function CohortCard({ profiles, sessionKey, cell, runRr }) {
                 </div>
             ) : (
                 <div className="space-y-1">
-                    <Field label="Entry" value={entryLabel} warn={eff.entryStatus === "unavailable"} />
-                    <Field label="Break-Even" value={eff.beLabel} warn={eff.beStatus === "unavailable"} />
+                    <Field label="Entry Model" value={entryLabel} warn={eff.entryStatus === "unavailable"} />
+                    <Field label="Break-Even" value={beLabel} warn={eff.beStatus === "unavailable"} />
                     <Field label="Target" value={targetLabel} warn={eff.targetStatus === "unavailable"} />
                 </div>
             )}
@@ -173,7 +189,7 @@ function GlobalCard({ profiles, runRr }) {
     const gd = profiles?.globalDefaultRef || {};
     const pm = profiles?.profiles || {};
     const entryLabel = gd.entry ? entryProfileLabel(pm.entry?.[gd.entry]) : "Run Default";
-    const beLabel = gd.be ? beProfileLabel(pm.be?.[gd.be]) : "None";
+    const beLabel = gd.be ? beProfileLabel(pm.be?.[gd.be]) : "Run Default";
     const targetLabel = gd.target ? targetProfileLabel(pm.target?.[gd.target]) : (runRr != null ? `Run Default (${runRr}R)` : "Run Default");
 
     const pick = (dim, value) => {
@@ -199,7 +215,7 @@ function GlobalCard({ profiles, runRr }) {
                 </div>
             ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <Field label="Entry" value={entryLabel} />
+                    <Field label="Entry Model" value={entryLabel} />
                     <Field label="Break-Even" value={beLabel} />
                     <Field label="Target" value={targetLabel} />
                 </div>
@@ -238,6 +254,9 @@ export default function SessionScenarioBuilder() {
                 </p>
             ) : (
                 <div className="space-y-4">
+                    <p className="text-[11.5px] font-ui text-muted-lab leading-relaxed border-l-2 border-[hsl(var(--accent-secondary)/0.5)] pl-2.5">
+                        Values set here override the Run Default only for the selected session/cohort. Leave a value as <span className="text-[hsl(var(--text-2))]">Run Default</span> to use the main Strategy Builder setting.
+                    </p>
                     {/* Master enable */}
                     <div className="flex items-center justify-between">
                         <span className="text-[12px] font-ui text-[hsl(var(--text-2))]">
