@@ -378,6 +378,92 @@ export function cohortBESuitability(executedTrades, levels = [0.5, 1, 1.5, 2]) {
 }
 
 /**
+ * Phase 3E — simple RULE-BASED management read (NOT AI, NOT prediction, NOT
+ * optimization). Composes the existing reach-rate/outcome helpers into a single
+ * "what to test next" suggestion. Conservative: a sample under 5 trades forces a
+ * "Too little data" bias regardless of other signals. Rules are evaluated in a
+ * fixed order (A→B→C→D→fallback); first match wins.
+ */
+export function cohortManagementRead(executedTrades) {
+    const rows = Array.isArray(executedTrades) ? executedTrades : [];
+    const count = rows.length;
+    const baseCaveats = ["Exploratory MFE-based guidance — confirm with a backend scenario run."];
+
+    let sample;
+    if (count === 0) sample = { count, label: "No executed trades", severity: "muted" };
+    else if (count < 5) sample = { count, label: "Too little data", severity: "muted" };
+    else if (count < 10) sample = { count, label: "Small sample", severity: "warning" };
+    else sample = { count, label: "Usable sample", severity: "normal" };
+
+    if (count === 0) {
+        return { sample, bias: { key: "none", label: "No executed trades", tone: "neutral", detail: "No executed trades in this cohort." }, nextTests: [], caveats: baseCaveats };
+    }
+    if (count < 5) {
+        return {
+            sample,
+            bias: { key: "too_little", label: "Too little data", tone: "neutral", detail: "Not enough executed trades to read management signals." },
+            nextTests: [{ label: "Collect a larger sample", reason: "Fewer than 5 executed trades", priority: "low" }],
+            caveats: [...baseCaveats, "Sample under 5 trades — signals are unreliable."],
+        };
+    }
+
+    const caveats = [...baseCaveats];
+    if (count < 10) caveats.push("Small sample (5–9 trades) — treat as directional only.");
+
+    const netR = rows.reduce((s, t) => s + tradeR(t), 0);
+    const dist = cohortOutcomeDistribution(rows);
+    const wins = (dist.buckets.find((b) => b.key === "win") || {}).count || 0;
+    const losses = (dist.buckets.find((b) => b.key === "loss") || {}).count || 0;
+    const winRate = (wins + losses) ? (wins / (wins + losses)) * 100 : null;
+    const ts = cohortTargetSuitability(rows);
+    const be = cohortBESuitability(rows);
+    const tsAt = (lvl) => { const l = ts.levels.find((x) => x.level === lvl); return l ? l.reachedPct : null; };
+    const beAt = (lvl) => be.levels.find((x) => x.level === lvl) || {};
+    const ge = (p, x) => p != null && p >= x;
+    const lt = (p, x) => p != null && p < x;
+
+    const lr05 = beAt(0.5).losersReachedPct;
+    const lr1 = beAt(1).losersReachedPct;
+    const wr1 = beAt(1).winnersReachedPct;
+    const wr2 = beAt(2).winnersReachedPct;
+    const tr05 = tsAt(0.5);
+    const tr3 = tsAt(3);
+
+    let bias, nextTests;
+    if (netR <= 0 && ge(lr05, 50) && ge(tr05, 60)) {
+        bias = { key: "fast_target", label: "Fast target candidate", tone: "warning", detail: "Losses often reached 0.5R before failing, while wider targets were less reliable." };
+        nextTests = [
+            { label: "Test 0.5R target", reason: "Many trades reached 0.5R", priority: "high" },
+            { label: "Test 1R target", reason: "Compare against a slightly wider target", priority: "medium" },
+            { label: "Test BE at 0.5R", reason: "Protect early-favorable trades", priority: "medium" },
+        ];
+    } else if (ge(lr1, 50) && ge(wr1, 80)) {
+        bias = { key: "be_candidate", label: "BE candidate", tone: "warning", detail: "Most winners cleared 1R and many losers also reached 1R first — BE may protect runners." };
+        nextTests = [
+            { label: "Test BE at 1R", reason: "Winners clear 1R; losers often touch it", priority: "high" },
+            { label: "Test BE at 0.5R", reason: "Compare an earlier BE arm", priority: "medium" },
+        ];
+    } else if (netR > 0 && ge(tr3, 40) && ge(wr2, 70)) {
+        bias = { key: "let_winners_breathe", label: "Let winners breathe", tone: "success", detail: "Winners frequently extended beyond 2R — a wider target may capture more." };
+        nextTests = [
+            { label: "Test 3R target", reason: "Many winners reached 3R", priority: "high" },
+            { label: "Test 5R target", reason: "Probe the upper tail", priority: "medium" },
+        ];
+    } else if (netR < 0 && lt(winRate, 35) && lt(tr05, 40)) {
+        bias = { key: "disable_candidate", label: "Disable candidate", tone: "danger", detail: "Low win rate with weak target reach — this cohort may not be worth trading." };
+        nextTests = [
+            { label: "Test disabling this cohort", reason: "Negative netR, low win rate, weak reach", priority: "high" },
+        ];
+    } else {
+        bias = { key: "inconclusive", label: "Needs more testing", tone: "neutral", detail: "No strong directional signal from reach-rates yet." };
+        nextTests = [
+            { label: "Test 1R and 2R targets", reason: "Establish a baseline target sweep", priority: "low" },
+        ];
+    }
+    return { sample, bias, nextTests, caveats };
+}
+
+/**
  * Phase 3A — pure outcome distribution over a cohort's EXECUTED trades only.
  * Buckets are derived from classifyTrade (single source of truth); nothing is
  * invented. Returns { total, buckets:[{key,label,count,percent,netR,avgR}] } with

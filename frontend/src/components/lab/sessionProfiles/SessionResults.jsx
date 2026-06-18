@@ -10,7 +10,7 @@ import React, { useState } from "react";
 import { ChevronDown, ChevronRight, Ban } from "lucide-react";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { useDataset, getActiveBundle, getTradeUniverse } from "@/data/store";
-import { buildSessionResults, cohortFailureSummary, describeMissedReason, cohortOutcomeDistribution, cohortExcursionSnapshot, cohortTargetSuitability, cohortBESuitability } from "@/data/sessionResults";
+import { buildSessionResults, cohortFailureSummary, describeMissedReason, cohortOutcomeDistribution, cohortExcursionSnapshot, cohortTargetSuitability, cohortBESuitability, cohortManagementRead } from "@/data/sessionResults";
 
 const fmtR = (v) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${Number(v).toFixed(1)}R`);
 const fmtPx = (v) => (v == null || v === "" || !Number.isFinite(Number(v)) ? "—" : Number(v).toFixed(5));
@@ -290,6 +290,39 @@ function BESuitability({ rows }) {
     );
 }
 
+function ManagementRead({ rows }) {
+    const mr = cohortManagementRead(rows);
+    const biasTone = (t) => (t === "success" ? successTone : t === "warning" ? "text-[hsl(var(--warning))]" : t === "danger" ? dangerTone : "text-[hsl(var(--text-2))]");
+    const biasBorder = (t) => (t === "success" ? "border-[hsl(var(--success)/0.5)] bg-[hsl(var(--success)/0.08)]" : t === "warning" ? "border-[hsl(var(--warning)/0.5)] bg-[hsl(var(--warning)/0.08)]" : t === "danger" ? "border-[hsl(var(--danger)/0.5)] bg-[hsl(var(--danger)/0.08)]" : "border-[hsl(var(--border-mid))] bg-[hsl(var(--panel-2)/0.2)]");
+    const prioTone = (p) => (p === "high" ? successTone : p === "medium" ? "text-[hsl(var(--warning))]" : "text-[hsl(var(--text-2))]");
+    return (
+        <div className="space-y-2">
+            <p className="text-[10.5px] font-ui text-muted-lab italic">Rule-based next-test guidance, not a conclusion or prediction.</p>
+            <div className="flex flex-wrap items-center gap-2">
+                <span className={`clip-bevel-sm px-2.5 py-1 text-[11.5px] font-ui font-semibold border ${biasBorder(mr.bias.tone)} ${biasTone(mr.bias.tone)}`}>{mr.bias.label}</span>
+                <span className="text-[11px] font-ui text-muted-lab">Sample: <span className="text-[hsl(var(--text-2))]">{mr.sample.label} ({mr.sample.count})</span></span>
+            </div>
+            <p className="text-[11.5px] font-ui text-[hsl(var(--text-1))]">{mr.bias.detail}</p>
+            {mr.nextTests.length > 0 && (
+                <div>
+                    <div className="text-[10px] font-ui uppercase tracking-wider text-[hsl(var(--accent-secondary))] mb-1">Next tests</div>
+                    <ul className="space-y-0.5">
+                        {mr.nextTests.map((nt, i) => (
+                            <li key={i} className="text-[11.5px] font-ui text-[hsl(var(--text-1))]">
+                                <span className={`uppercase text-[9.5px] font-ui mr-1.5 ${prioTone(nt.priority)}`}>{nt.priority}</span>
+                                {nt.label}<span className="text-muted-lab"> — {nt.reason}</span>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
+            {mr.caveats.length > 0 && (
+                <p className="text-[10px] font-ui text-muted-lab">{mr.caveats.join(" ")}</p>
+            )}
+        </div>
+    );
+}
+
 function CohortDrilldown({ sessionLabel, c }) {
     const s = c.summary;
     const disabled = c.status === "disabled";
@@ -333,6 +366,12 @@ function CohortDrilldown({ sessionLabel, c }) {
             <div>
                 <div className="text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))] mb-1">BE suitability</div>
                 <BESuitability rows={c.executedTrades} />
+            </div>
+
+            {/* A6. Management read (rule-based next-test guidance) */}
+            <div>
+                <div className="text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))] mb-1">Management read</div>
+                <ManagementRead rows={c.executedTrades} />
             </div>
 
             {/* B0. Failure summary for this cohort (executed losses only) */}
