@@ -5,10 +5,10 @@ import { NeonPanel, SectionTitle } from "@/components/lab/NeonPanel";
 import SessionStrategyCards from "@/components/lab/sessionProfiles/SessionStrategyCards";
 import { Field, NeonInput, NeonSelect, Segment, NeonToggle, NeonButton } from "@/components/lab/controls";
 import { NeonDatePicker } from "@/components/lab/NeonDatePicker";
-import { HelpCircle, Play, Save, FileInput, Copy, ShieldAlert, Trash2, Check, ChevronDown, ChevronUp, FolderPlus } from "lucide-react";
+import { HelpCircle, Play, Save, FileInput, Copy, ShieldAlert, Trash2, Check, ChevronDown, ChevronUp, FolderPlus, RefreshCw } from "lucide-react";
 import { usePresets } from "@/data/presets";
 import { Pill } from "@/components/lab/DataTable";
-import { cancelSidecarRun, getMarketDataStatus, getSidecarHealth, getSidecarRun, getSidecarRunBundle, renameSidecarRun, startSidecarRun } from "@/data/sidecarClient";
+import { cancelSidecarRun, getMarketDataStatus, refreshMarketData, getSidecarHealth, getSidecarRun, getSidecarRunBundle, renameSidecarRun, startSidecarRun } from "@/data/sidecarClient";
 import { ingestRunBundle } from "@/data/importer";
 import LazyImportStatus from "@/components/lab/LazyImportStatus";
 import {
@@ -268,6 +268,37 @@ export default function StrategyBuilder() {
             .catch(() => { /* sidecar/manifest unavailable → keep current dates */ });
         return () => { cancelled = true; };
     }, [cfg.symbol]);
+
+    // ── Market data refresh ───────────────────────────────────────────────────
+    // Runs the updater inside the sidecar (no Python in the browser), then refreshes
+    // the displayed range, the picker bounds, and — only if the user hasn't edited
+    // the dates — the default From/To from the new last candle.
+    const [mdRefreshing, setMdRefreshing] = useState(false);
+    const [mdMessage, setMdMessage] = useState(null); // { text, tone: "accent" | "danger" }
+    const refreshMarketDataNow = async () => {
+        setMdRefreshing(true);
+        setMdMessage({ text: "Updating market data…", tone: "accent" });
+        try {
+            const status = await refreshMarketData(cfg.symbol);
+            if (status?.available && status?.last_candle) {
+                setDataDateBounds({
+                    min: status.first_candle ? String(status.first_candle).slice(0, 10) : undefined,
+                    max: status.last_candle ? String(status.last_candle).slice(0, 10) : undefined,
+                });
+                if (!datesUserEdited.current) {
+                    const derived = deriveDatesFromLatestCandle(status.last_candle);
+                    if (derived) setCfg((prev) => ({ ...prev, dateFrom: derived.dateFrom, dateTo: derived.dateTo }));
+                }
+                setMdMessage({ text: `Updated · last candle ${String(status.last_candle).slice(0, 10)}`, tone: "accent" });
+            } else {
+                setMdMessage({ text: "Update returned no data", tone: "danger" });
+            }
+        } catch (err) {
+            setMdMessage({ text: `Update failed: ${formatSidecarError(err)}`, tone: "danger" });
+        } finally {
+            setMdRefreshing(false);
+        }
+    };
 
     // ── Break-even multi-select toggles ───────────────────────────────────────
     const toggleBeArm = (level) => setCfg((c) => {
@@ -1083,6 +1114,22 @@ export default function StrategyBuilder() {
                         <Field label="Data Source File" className="sm:col-span-6">
                             <NeonInput value={cfg.dataFile} onChange={(e) => set("dataFile")(e.target.value)} />
                         </Field>
+                        <div className="sm:col-span-6 flex flex-wrap items-center justify-between gap-3 clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.5)] px-3 py-2">
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
+                                <span className="font-ui text-[9.5px] uppercase tracking-[0.08em] text-[hsl(var(--text-2))]">Market Data</span>
+                                <span className="font-ui text-[hsl(var(--text-2))]">Symbol <span className="font-num text-white">{cfg.symbol}</span></span>
+                                <span className="font-ui text-[hsl(var(--text-2))]">First <span className="font-num text-[hsl(var(--text-1))]">{dataDateBounds?.min || "—"}</span></span>
+                                <span className="font-ui text-[hsl(var(--text-2))]">Last <span className="font-num text-[hsl(var(--text-1))]">{dataDateBounds?.max || "—"}</span></span>
+                                {mdMessage && (
+                                    <span className={`font-ui ${mdMessage.tone === "danger" ? "text-[hsl(var(--danger))]" : "text-[hsl(var(--accent-primary))]"}`}>
+                                        {mdMessage.text}
+                                    </span>
+                                )}
+                            </div>
+                            <NeonButton tone="ghost" icon={RefreshCw} onClick={refreshMarketDataNow} disabled={mdRefreshing}>
+                                {mdRefreshing ? "Updating market data…" : "Refresh Data"}
+                            </NeonButton>
+                        </div>
                     </div>
                 </NeonPanel>
                 </BuilderFocusCard>

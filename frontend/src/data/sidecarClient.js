@@ -99,4 +99,12 @@ export function getMarketDataStatus(symbol = "EURUSD", baseUrl = DEFAULT_SIDECAR
     return requestSidecar(`/datasets/${encodeURIComponent(symbol)}/status`, {}, baseUrl);
 }
 
+// Trigger a market-data update for `symbol` (runs update_market_data.py in the
+// sidecar) and resolve with the refreshed status payload (same shape as
+// getMarketDataStatus). Rejects with an Error on failure (backtest running, update
+// error, timeout).
+export function refreshMarketData(symbol = "EURUSD", baseUrl = DEFAULT_SIDECAR_URL) {
+    return requestSidecar(`/datasets/${encodeURIComponent(symbol)}/refresh`, { method: "POST" }, baseUrl);
+}
+
 export { DEFAULT_SIDECAR_URL };
