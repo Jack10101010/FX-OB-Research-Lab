@@ -535,6 +535,60 @@ export function cohortResearchVerdict(executedTrades) {
     return { sample, currentRead, targetRead, beRead, failureRead, nextTest, caveat };
 }
 
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// Same timestamp precedence the executed tables render (fillTime → fill_time → entry).
+function regimeTs(t) {
+    return t?.fillTime ?? t?.fill_time ?? t?.entry ?? t?.entry_time ?? t?.entryTime ?? null;
+}
+function regimeYearMonth(t) {
+    const raw = regimeTs(t);
+    if (raw == null) return null;
+    const str = String(raw);
+    const m = str.match(/(\d{4})-(\d{2})/); // ISO-ish: avoid TZ drift on the date
+    if (m) return { year: Number(m[1]), month: Number(m[2]) };
+    const d = new Date(str);
+    if (Number.isNaN(d.getTime())) return null;
+    return { year: d.getFullYear(), month: d.getMonth() + 1 };
+}
+
+/**
+ * Phase 4C — pure time-regime snapshot over a cohort's EXECUTED trades only.
+ * Groups by calendar year (ascending) and by calendar month (Jan→Dec, aggregated
+ * across years). Reuses statsFor (classifyTrade single source of truth) so win/
+ * loss/BE/netR/avgR/winRate match the rest of Session Results. Rows without a
+ * parseable timestamp are skipped. No mutation. Buckets with no trades are omitted.
+ */
+export function cohortRegimeSnapshot(executedTrades) {
+    const rows = Array.isArray(executedTrades) ? executedTrades : [];
+    const byYear = new Map();
+    const byMonth = new Map();
+    for (const t of rows) {
+        const ym = regimeYearMonth(t);
+        if (!ym) continue;
+        if (!byYear.has(ym.year)) byYear.set(ym.year, []);
+        byYear.get(ym.year).push(t);
+        if (!byMonth.has(ym.month)) byMonth.set(ym.month, []);
+        byMonth.get(ym.month).push(t);
+    }
+    const years = [...byYear.keys()].sort((a, b) => a - b).map((year) => {
+        const s = statsFor(byYear.get(year));
+        return { year, trades: s.count, wins: s.wins, losses: s.losses, be: s.be, winRate: s.winRate, netR: s.netR, avgR: s.avgR };
+    });
+    const months = [...byMonth.keys()].sort((a, b) => a - b).map((month) => {
+        const s = statsFor(byMonth.get(month));
+        return { month, label: MONTH_NAMES[month - 1], trades: s.count, wins: s.wins, losses: s.losses, be: s.be, winRate: s.winRate, netR: s.netR, avgR: s.avgR };
+    });
+    // Ties resolve to the earliest bucket (arrays are already chronologically sorted).
+    const best = (arr) => (arr.length ? arr.reduce((b, x) => (x.netR > b.netR ? x : b)) : null);
+    const worst = (arr) => (arr.length ? arr.reduce((b, x) => (x.netR < b.netR ? x : b)) : null);
+    return {
+        years, months,
+        bestYear: best(years), worstYear: worst(years),
+        bestMonth: best(months), worstMonth: worst(months),
+    };
+}
+
 /**
  * Phase 3A — pure outcome distribution over a cohort's EXECUTED trades only.
  * Buckets are derived from classifyTrade (single source of truth); nothing is

@@ -10,7 +10,7 @@ import React, { useState } from "react";
 import { ChevronDown, ChevronRight, Ban } from "lucide-react";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { useDataset, getActiveBundle, getTradeUniverse } from "@/data/store";
-import { buildSessionResults, cohortFailureSummary, describeMissedReason, cohortOutcomeDistribution, cohortExcursionSnapshot, cohortTargetSuitability, cohortBESuitability, cohortManagementRead, cohortResearchVerdict } from "@/data/sessionResults";
+import { buildSessionResults, cohortFailureSummary, describeMissedReason, cohortOutcomeDistribution, cohortExcursionSnapshot, cohortTargetSuitability, cohortBESuitability, cohortManagementRead, cohortResearchVerdict, cohortRegimeSnapshot } from "@/data/sessionResults";
 
 const fmtR = (v) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${Number(v).toFixed(1)}R`);
 const fmtPx = (v) => (v == null || v === "" || !Number.isFinite(Number(v)) ? "—" : Number(v).toFixed(5));
@@ -360,11 +360,112 @@ function ResearchVerdict({ rows }) {
     );
 }
 
+// Phase 4C — time-regime view (yearly + monthly performance + deterministic notes).
+function RegimeSnapshot({ rows }) {
+    const reg = cohortRegimeSnapshot(rows);
+    const rTone = (v) => (v == null ? "text-[hsl(var(--text-2))]" : v > 0 ? successTone : v < 0 ? dangerTone : "text-[hsl(var(--text-2))]");
+    const wrTxt = (p) => (p == null ? "—" : `${p}%`);
+
+    const Chip = ({ label, item }) => (
+        <div className="clip-bevel-sm border border-[hsl(var(--border-mid))] bg-[hsl(var(--panel-2)/0.2)] px-2.5 py-1">
+            <div className="text-[9.5px] font-ui uppercase tracking-wider text-muted-lab">{label}</div>
+            {item ? (
+                <div className="text-[11.5px] font-ui">
+                    <span className="text-[hsl(var(--text-1))] font-semibold">{item.year ?? item.label}</span>
+                    <span className={`ml-1.5 font-num ${rTone(item.netR)}`}>{fmtR(item.netR)}</span>
+                </div>
+            ) : <div className="text-[11.5px] font-ui text-muted-lab">—</div>}
+        </div>
+    );
+
+    const Table = ({ head, list, keyOf, cellHead, best, worst }) => (
+        <div className="overflow-x-auto">
+            <table className="w-full text-[11px] border-collapse">
+                <thead>
+                    <tr className="text-left text-muted-lab font-ui border-b border-[hsl(var(--border-mid))]">
+                        <th className="py-1 pr-3 font-normal">{cellHead}</th>
+                        <th className="pr-3 font-normal text-right">Trades</th>
+                        <th className="pr-3 font-normal text-right">WR%</th>
+                        <th className="pr-3 font-normal text-right">Net R</th>
+                        <th className="font-normal text-right">Avg R</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {list.length === 0 && (
+                        <tr><td colSpan={5} className="py-2 text-muted-lab font-ui">No dated executed trades.</td></tr>
+                    )}
+                    {list.map((x) => {
+                        const k = keyOf(x);
+                        const hi = best && k === keyOf(best) ? "bg-[hsl(var(--success)/0.08)]" : worst && k === keyOf(worst) ? "bg-[hsl(var(--danger)/0.08)]" : "";
+                        return (
+                            <tr key={k} className={`border-b border-[hsl(var(--border-mid)/0.4)] ${hi}`}>
+                                <td className="py-1 pr-3 text-[hsl(var(--text-1))] font-num">{head(x)}</td>
+                                <td className="pr-3 text-right text-[hsl(var(--text-2))] font-num">{x.trades}</td>
+                                <td className="pr-3 text-right text-[hsl(var(--text-2))] font-num">{wrTxt(x.winRate)}</td>
+                                <td className={`pr-3 text-right font-num ${rTone(x.netR)}`}>{fmtR(x.netR)}</td>
+                                <td className={`text-right font-num ${rTone(x.avgR)}`}>{x.avgR == null ? "—" : fmtR(x.avgR)}</td>
+                            </tr>
+                        );
+                    })}
+                </tbody>
+            </table>
+        </div>
+    );
+
+    // Deterministic regime notes (no AI, no narrative).
+    const notes = [];
+    if (reg.years.length) {
+        const pos = reg.years.filter((y) => y.netR > 0).length;
+        const neg = reg.years.filter((y) => y.netR < 0).length;
+        const n = reg.years.length;
+        notes.push(`Positive in ${pos}/${n} ${n === 1 ? "year" : "years"}.`);
+        if (neg > 0) notes.push(`Negative in ${neg}/${n} ${n === 1 ? "year" : "years"}.`);
+        if (n >= 2) {
+            const totalT = reg.years.reduce((s, y) => s + y.trades, 0);
+            const sorted = [...reg.years].sort((a, b) => b.trades - a.trades);
+            let cum = 0, k = 0;
+            for (const y of sorted) { cum += y.trades; k += 1; if (totalT && cum / totalT >= 0.7) break; }
+            if (n >= 3 && k <= 2) notes.push(`Results concentrated in ${k} ${k === 1 ? "year" : "years"}.`);
+            else if (n >= 3) notes.push("Fairly consistent across years.");
+        }
+    }
+    if (reg.bestMonth) notes.push(`Strongest month: ${reg.bestMonth.label} (${fmtR(reg.bestMonth.netR)}).`);
+    if (reg.worstMonth && (!reg.bestMonth || reg.worstMonth.month !== reg.bestMonth.month)) notes.push(`Weakest month: ${reg.worstMonth.label} (${fmtR(reg.worstMonth.netR)}).`);
+
+    return (
+        <div className="space-y-3">
+            <div>
+                <SubLabel>Yearly performance</SubLabel>
+                <div className="flex flex-wrap gap-2 mb-2">
+                    <Chip label="Best year" item={reg.bestYear} />
+                    <Chip label="Worst year" item={reg.worstYear} />
+                </div>
+                <Table cellHead="Year" list={reg.years} head={(x) => x.year} keyOf={(x) => x.year} best={reg.bestYear} worst={reg.worstYear} />
+            </div>
+            <div>
+                <SubLabel>Monthly performance</SubLabel>
+                <Table cellHead="Month" list={reg.months} head={(x) => x.label} keyOf={(x) => x.month} best={reg.bestMonth} worst={reg.worstMonth} />
+            </div>
+            <div>
+                <SubLabel>Regime notes</SubLabel>
+                {notes.length ? (
+                    <ul className="space-y-0.5">
+                        {notes.map((nt, i) => (
+                            <li key={i} className="text-[11.5px] font-ui text-[hsl(var(--text-1))]">{nt}</li>
+                        ))}
+                    </ul>
+                ) : <p className="text-[11px] font-ui text-muted-lab">No dated executed trades to summarize.</p>}
+            </div>
+        </div>
+    );
+}
+
 const DRILL_TABS = [
     { key: "overview", label: "Overview" },
     { key: "management", label: "Management" },
     { key: "failures", label: "Failures" },
     { key: "trades", label: "Trades" },
+    { key: "regimes", label: "Regimes" },
 ];
 const SubLabel = ({ children }) => (
     <div className="text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))] mb-1">{children}</div>
@@ -466,6 +567,11 @@ function CohortDrilldown({ sessionLabel, c }) {
                     <div><SubLabel>Executed trades</SubLabel><ExecutedTable rows={c.executedTrades} showCohort={false} emptyText="No executed trades for this cohort." /></div>
                     <div><SubLabel>Disabled opportunities</SubLabel><DisabledTable rows={c.disabledOpportunities} showCohort={false} emptyText="No disabled opportunities for this cohort." /></div>
                 </div>
+            )}
+
+            {/* ── Regimes: Yearly · Monthly · Regime notes ── */}
+            {tab === "regimes" && (
+                <RegimeSnapshot rows={c.executedTrades} />
             )}
         </div>
     );
