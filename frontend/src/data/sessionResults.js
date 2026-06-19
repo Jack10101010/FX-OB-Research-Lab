@@ -464,6 +464,78 @@ export function cohortManagementRead(executedTrades) {
 }
 
 /**
+ * Phase 4B — fast rule-based "research verdict" synthesizing the existing reach-
+ * rate / outcome / failure helpers into a 10-second read. NOT AI / prediction /
+ * optimization — it says what to INVESTIGATE next, not what to trade. Pure.
+ */
+export function cohortResearchVerdict(executedTrades) {
+    const rows = Array.isArray(executedTrades) ? executedTrades : [];
+    const count = rows.length;
+    const ge = (p, x) => p != null && p >= x;
+    const lt = (p, x) => p != null && p < x;
+    const caveat = "Exploratory, rule-based research signal — confirm with a backend scenario run.";
+
+    // Sample
+    let sample;
+    if (count === 0) sample = { count, label: "No data", tone: "neutral" };
+    else if (count < 5) sample = { count, label: "Too little data", tone: "danger" };
+    else if (count < 10) sample = { count, label: "Small sample", tone: "warning" };
+    else sample = { count, label: "Usable sample", tone: "success" };
+
+    const netR = rows.reduce((s, t) => s + tradeR(t), 0);
+    const dist = cohortOutcomeDistribution(rows);
+    const wins = (dist.buckets.find((b) => b.key === "win") || {}).count || 0;
+    const losses = (dist.buckets.find((b) => b.key === "loss") || {}).count || 0;
+    const winRate = (wins + losses) ? (wins / (wins + losses)) * 100 : null;
+
+    // Current read
+    let currentRead;
+    if (count === 0) currentRead = { label: "No data", tone: "neutral", detail: "No executed trades." };
+    else if (netR > 0 && ge(winRate, 35)) currentRead = { label: "Positive cohort", tone: "success", detail: "Net positive with a reasonable win rate." };
+    else if (netR > 0) currentRead = { label: "Positive but tail-dependent", tone: "warning", detail: "Net positive but win rate is low — results lean on a few large winners." };
+    else if (netR <= 0 && count >= 10) currentRead = { label: "Losing cohort", tone: "danger", detail: "Net negative across a usable sample." };
+    else currentRead = { label: "Inconclusive", tone: "neutral", detail: "Not enough signal to call yet." };
+
+    // Target read
+    const ts = cohortTargetSuitability(rows);
+    const tsAt = (lvl) => { const l = ts.levels.find((x) => x.level === lvl); return l ? l.reachedPct : null; };
+    let targetRead;
+    if (ts.coverage.withMFE === 0) targetRead = { label: "No MFE data", tone: "neutral", detail: "No excursion data to read targets." };
+    else if (ge(tsAt(3), 40)) targetRead = { label: "Runner behaviour detected", tone: "success", detail: "Many trades reached 3R before exit." };
+    else if (ge(tsAt(0.5), 65) && lt(tsAt(2), 35)) targetRead = { label: "Fast-target candidate", tone: "warning", detail: "Often reached 0.5R but rarely 2R." };
+    else targetRead = { label: "No clear target bias", tone: "neutral", detail: "No dominant target-reach pattern." };
+
+    // BE read
+    const be = cohortBESuitability(rows);
+    const beAt = (lvl) => be.levels.find((x) => x.level === lvl) || {};
+    let beRead;
+    if (be.totalLosers === 0 && be.totalWinners === 0) beRead = { label: "No MFE data", tone: "neutral", detail: "No excursion data to read BE." };
+    else if (beAt(0.5).signal === "Strong" || beAt(1).signal === "Strong") beRead = { label: "BE candidate", tone: "success", detail: "Strong BE reach signal at 0.5R/1R." };
+    else if (ge(beAt(1).winnersReachedPct, 80) && lt(beAt(1).losersReachedPct, 35)) beRead = { label: "BE likely harmful", tone: "warning", detail: "Winners clear 1R but losers rarely reach it — BE would mostly cut winners." };
+    else beRead = { label: "No clear BE bias", tone: "neutral", detail: "No dominant BE pattern." };
+
+    // Failure read
+    const fail = cohortFailureSummary(rows);
+    let failureRead;
+    if (ge(fail.lossRate, 50)) failureRead = { label: "Loss-heavy", tone: "danger", detail: "Half or more of executed trades lost." };
+    else if (fail.totalLosses > 0 && fail.avgLossR != null && fail.avgLossR <= -1) failureRead = { label: "Full-stop losses dominate", tone: "danger", detail: "Average loss is at or beyond full stop." };
+    else if (fail.totalLosses === 0 && count > 0) failureRead = { label: "No losses in sample", tone: "success", detail: "No losing trades in this sample." };
+    else failureRead = { label: "Mixed failure profile", tone: "neutral", detail: "No dominant failure pattern." };
+
+    // Next test — prefer management read's top suggestion, else a sensible fallback.
+    const mr = cohortManagementRead(rows);
+    let nextTest = mr.nextTests && mr.nextTests[0] ? mr.nextTests[0] : null;
+    if (!nextTest) {
+        if (count < 5) nextTest = { label: "Run a wider sample", reason: "Fewer than 5 executed trades", priority: "low" };
+        else if (currentRead.label === "Inconclusive") nextTest = { label: "Compare entry models", reason: "No clear directional read", priority: "medium" };
+        else if (failureRead.label === "Loss-heavy") nextTest = { label: "Inspect failure rows", reason: "High loss rate", priority: "medium" };
+        else nextTest = { label: "Compare entry models", reason: "Establish a baseline", priority: "low" };
+    }
+
+    return { sample, currentRead, targetRead, beRead, failureRead, nextTest, caveat };
+}
+
+/**
  * Phase 3A — pure outcome distribution over a cohort's EXECUTED trades only.
  * Buckets are derived from classifyTrade (single source of truth); nothing is
  * invented. Returns { total, buckets:[{key,label,count,percent,netR,avgR}] } with

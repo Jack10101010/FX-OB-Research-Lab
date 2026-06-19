@@ -10,7 +10,7 @@ import React, { useState } from "react";
 import { ChevronDown, ChevronRight, Ban } from "lucide-react";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { useDataset, getActiveBundle, getTradeUniverse } from "@/data/store";
-import { buildSessionResults, cohortFailureSummary, describeMissedReason, cohortOutcomeDistribution, cohortExcursionSnapshot, cohortTargetSuitability, cohortBESuitability, cohortManagementRead } from "@/data/sessionResults";
+import { buildSessionResults, cohortFailureSummary, describeMissedReason, cohortOutcomeDistribution, cohortExcursionSnapshot, cohortTargetSuitability, cohortBESuitability, cohortManagementRead, cohortResearchVerdict } from "@/data/sessionResults";
 
 const fmtR = (v) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${Number(v).toFixed(1)}R`);
 const fmtPx = (v) => (v == null || v === "" || !Number.isFinite(Number(v)) ? "—" : Number(v).toFixed(5));
@@ -323,98 +323,150 @@ function ManagementRead({ rows }) {
     );
 }
 
+// Phase 4B — fast rule-based "Research Verdict" at the top of the Overview tab.
+// Synthesizes existing helpers; says what to investigate next, not what to trade.
+function ResearchVerdict({ rows }) {
+    const v = cohortResearchVerdict(rows);
+    const tone = (t) => (t === "success" ? successTone : t === "warning" ? "text-[hsl(var(--warning))]" : t === "danger" ? dangerTone : "text-[hsl(var(--text-2))]");
+    const prioTone = (p) => (p === "high" ? successTone : p === "medium" ? "text-[hsl(var(--warning))]" : "text-[hsl(var(--text-2))]");
+    const cells = [
+        { k: "Sample", r: v.sample },
+        { k: "Current", r: v.currentRead },
+        { k: "Target", r: v.targetRead },
+        { k: "BE", r: v.beRead },
+        { k: "Failure", r: v.failureRead },
+    ];
+    return (
+        <div className="clip-bevel-sm border border-[hsl(var(--border-mid))] bg-[hsl(var(--panel-2)/0.2)] p-2.5 space-y-2">
+            <div className="flex items-center gap-2">
+                <span className="text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))]">Research verdict</span>
+                <span className="text-[10px] font-ui text-muted-lab italic">rule-based — what to investigate next, not a trade signal</span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-x-3 gap-y-1.5">
+                {cells.map((c) => (
+                    <div key={c.k}>
+                        <div className="text-[9.5px] font-ui uppercase tracking-wider text-muted-lab">{c.k}</div>
+                        <div className={`text-[11.5px] font-ui font-semibold ${tone(c.r.tone)}`}>{c.r.label}</div>
+                    </div>
+                ))}
+            </div>
+            <div className="border-t border-[hsl(var(--border-mid))] pt-1.5 text-[11.5px] font-ui text-[hsl(var(--text-1))]">
+                <span className="text-[9.5px] font-ui uppercase tracking-wider text-muted-lab mr-1.5">Next test</span>
+                <span className={`uppercase text-[9.5px] font-ui mr-1.5 ${prioTone(v.nextTest.priority)}`}>{v.nextTest.priority}</span>
+                {v.nextTest.label}<span className="text-muted-lab"> — {v.nextTest.reason}</span>
+            </div>
+            <p className="text-[10px] font-ui text-muted-lab">{v.caveat}</p>
+        </div>
+    );
+}
+
+const DRILL_TABS = [
+    { key: "overview", label: "Overview" },
+    { key: "management", label: "Management" },
+    { key: "failures", label: "Failures" },
+    { key: "trades", label: "Trades" },
+];
+const SubLabel = ({ children }) => (
+    <div className="text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))] mb-1">{children}</div>
+);
+
 function CohortDrilldown({ sessionLabel, c }) {
     const s = c.summary;
     const disabled = c.status === "disabled";
     const fail = cohortFailureSummary(c.executedTrades);
+    // Local to this expanded cohort. Mounted only while open, so it resets to
+    // "overview" whenever a cohort (re-)expands; switching tabs never collapses it.
+    const [tab, setTab] = useState("overview");
     return (
         <div className="mt-2 ml-2 border-l-2 border-[hsl(var(--border-mid))] pl-3 space-y-3">
-            {/* A. Cohort summary */}
-            <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-                <KV k="Session" v={sessionLabel} />
-                <KV k="Cohort" v={c.label} />
-                <KV k="Status" v={disabled ? "Disabled" : "Enabled"} tone={disabled ? dangerTone : successTone} />
-                <KV k="Entry Model" v={c.entryLabel} />
-                <KV k="BE" v={c.beLabel} />
-                <KV k="TP" v={c.tpLabel} />
-                <KV k="Executed" v={s.count} />
-                <KV k="Disabled" v={c.disabledCount} tone={c.disabledCount > 0 ? dangerTone : undefined} />
-                <KV k="W/L/BE" v={`${s.wins}/${s.losses}/${s.be}`} />
-                <KV k="Net R" v={s.count ? fmtR(s.netR) : "—"} tone={s.count ? (s.netR >= 0 ? successTone : dangerTone) : undefined} />
-                <KV k="Avg R" v={s.avgR == null ? "—" : fmtR(s.avgR)} />
-                <KV k="Win rate" v={s.winRate == null ? "—" : `${s.winRate}%`} />
-            </div>
-            {/* A2. Outcome distribution (executed trades only) */}
-            <div>
-                <div className="text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))] mb-1">Outcome distribution</div>
-                <OutcomeDistribution rows={c.executedTrades} />
+            {/* Local drilldown tabs */}
+            <div className="flex flex-wrap gap-1.5">
+                {DRILL_TABS.map((t) => {
+                    const sel = t.key === tab;
+                    return (
+                        <button
+                            key={t.key}
+                            type="button"
+                            onClick={() => setTab(t.key)}
+                            className={`clip-bevel-sm px-2.5 py-1 text-[11px] font-ui border transition-colors ${sel ? "border-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.12)] text-[hsl(var(--accent-secondary))]" : "border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:border-[hsl(var(--accent-secondary))]"}`}
+                            data-testid={`drill-tab-${t.key}`}
+                        >
+                            {t.label}
+                        </button>
+                    );
+                })}
             </div>
 
-            {/* A3. Excursion snapshot (executed trades only) */}
-            <div>
-                <div className="text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))] mb-1">Excursion snapshot</div>
-                <ExcursionSnapshot rows={c.executedTrades} />
-            </div>
+            {/* ── Overview: Cohort Summary · Management Read · Outcome Distribution ── */}
+            {tab === "overview" && (
+                <div className="space-y-3">
+                    <ResearchVerdict rows={c.executedTrades} />
+                    <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                        <KV k="Session" v={sessionLabel} />
+                        <KV k="Cohort" v={c.label} />
+                        <KV k="Status" v={disabled ? "Disabled" : "Enabled"} tone={disabled ? dangerTone : successTone} />
+                        <KV k="Entry Model" v={c.entryLabel} />
+                        <KV k="BE" v={c.beLabel} />
+                        <KV k="TP" v={c.tpLabel} />
+                        <KV k="Executed" v={s.count} />
+                        <KV k="Disabled" v={c.disabledCount} tone={c.disabledCount > 0 ? dangerTone : undefined} />
+                        <KV k="W/L/BE" v={`${s.wins}/${s.losses}/${s.be}`} />
+                        <KV k="Net R" v={s.count ? fmtR(s.netR) : "—"} tone={s.count ? (s.netR >= 0 ? successTone : dangerTone) : undefined} />
+                        <KV k="Avg R" v={s.avgR == null ? "—" : fmtR(s.avgR)} />
+                        <KV k="Win rate" v={s.winRate == null ? "—" : `${s.winRate}%`} />
+                    </div>
+                    <div><SubLabel>Management read</SubLabel><ManagementRead rows={c.executedTrades} /></div>
+                    <div><SubLabel>Outcome distribution</SubLabel><OutcomeDistribution rows={c.executedTrades} /></div>
+                </div>
+            )}
 
-            {/* A4. Target suitability (exploratory MFE reach-rate) */}
-            <div>
-                <div className="text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))] mb-1">Target suitability</div>
-                <TargetSuitability rows={c.executedTrades} />
-            </div>
+            {/* ── Management: Excursion · Target Suitability · BE Suitability ── */}
+            {tab === "management" && (
+                <div className="space-y-3">
+                    <div><SubLabel>Excursion snapshot</SubLabel><ExcursionSnapshot rows={c.executedTrades} /></div>
+                    <div><SubLabel>Target suitability</SubLabel><TargetSuitability rows={c.executedTrades} /></div>
+                    <div><SubLabel>BE suitability</SubLabel><BESuitability rows={c.executedTrades} /></div>
+                </div>
+            )}
 
-            {/* A5. BE suitability (exploratory MFE reach-rate evidence) */}
-            <div>
-                <div className="text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))] mb-1">BE suitability</div>
-                <BESuitability rows={c.executedTrades} />
-            </div>
-
-            {/* A6. Management read (rule-based next-test guidance) */}
-            <div>
-                <div className="text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))] mb-1">Management read</div>
-                <ManagementRead rows={c.executedTrades} />
-            </div>
-
-            {/* B0. Failure summary for this cohort (executed losses only) */}
-            <div>
-                <div className="text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))] mb-1">Failure summary</div>
-                {fail.totalLosses === 0 ? (
-                    <div className="text-[11.5px] font-ui text-muted-lab italic py-1">No losses for this cohort.</div>
-                ) : (
-                    <>
-                        <div className="flex flex-wrap gap-x-4 gap-y-1.5 mb-2">
-                            <KV k="Total losses" v={fail.totalLosses} tone={dangerTone} />
-                            <KV k="Loss R" v={fmtR(fail.lossR)} tone={dangerTone} />
-                            <KV k="Avg loss R" v={fail.avgLossR == null ? "—" : fmtR(fail.avgLossR)} />
-                            <KV k="Largest loss R" v={fail.largestLossR == null ? "—" : fmtR(fail.largestLossR)} tone={dangerTone} />
-                            <KV k="Loss rate" v={fail.lossRate == null ? "—" : `${fail.lossRate}%`} />
-                            {fail.beExits > 0 && <KV k="BE exits" v={fail.beExits} />}
-                        </div>
-                        {fail.topReasons.length > 0 && (
-                            <div className="text-[11px] font-ui text-muted-lab mb-2">
-                                <span className="uppercase text-[10px] tracking-wider text-[hsl(var(--accent-secondary))] mr-2">Top reasons</span>
-                                {fail.topReasons.map((r, i) => <span key={r.reason} className="text-[hsl(var(--text-2))]">{i > 0 ? " · " : ""}{r.reason} ×{r.count}</span>)}
-                            </div>
+            {/* ── Failures: Failure Summary (+ losses) · Cancelled / Missed ── */}
+            {tab === "failures" && (
+                <div className="space-y-3">
+                    <div>
+                        <SubLabel>Failure summary</SubLabel>
+                        {fail.totalLosses === 0 ? (
+                            <div className="text-[11.5px] font-ui text-muted-lab italic py-1">No losses for this cohort.</div>
+                        ) : (
+                            <>
+                                <div className="flex flex-wrap gap-x-4 gap-y-1.5 mb-2">
+                                    <KV k="Total losses" v={fail.totalLosses} tone={dangerTone} />
+                                    <KV k="Loss R" v={fmtR(fail.lossR)} tone={dangerTone} />
+                                    <KV k="Avg loss R" v={fail.avgLossR == null ? "—" : fmtR(fail.avgLossR)} />
+                                    <KV k="Largest loss R" v={fail.largestLossR == null ? "—" : fmtR(fail.largestLossR)} tone={dangerTone} />
+                                    <KV k="Loss rate" v={fail.lossRate == null ? "—" : `${fail.lossRate}%`} />
+                                    {fail.beExits > 0 && <KV k="BE exits" v={fail.beExits} />}
+                                </div>
+                                {fail.topReasons.length > 0 && (
+                                    <div className="text-[11px] font-ui text-muted-lab mb-2">
+                                        <span className="uppercase text-[10px] tracking-wider text-[hsl(var(--accent-secondary))] mr-2">Top reasons</span>
+                                        {fail.topReasons.map((r, i) => <span key={r.reason} className="text-[hsl(var(--text-2))]">{i > 0 ? " · " : ""}{r.reason} ×{r.count}</span>)}
+                                    </div>
+                                )}
+                                <LossesTable rows={fail.losses} />
+                            </>
                         )}
-                        <LossesTable rows={fail.losses} />
-                    </>
-                )}
-            </div>
+                    </div>
+                    <div><SubLabel>Cancelled / missed opportunities</SubLabel><CancelledTable rows={c.cancelledOrMissedOpportunities} /></div>
+                </div>
+            )}
 
-            {/* B. Executed trades for this cohort */}
-            <div>
-                <div className="text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))] mb-1">Executed trades</div>
-                <ExecutedTable rows={c.executedTrades} showCohort={false} emptyText="No executed trades for this cohort." />
-            </div>
-            {/* C. Disabled opportunities for this cohort */}
-            <div>
-                <div className="text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))] mb-1">Disabled opportunities</div>
-                <DisabledTable rows={c.disabledOpportunities} showCohort={false} emptyText="No disabled opportunities for this cohort." />
-            </div>
-            {/* D. Cancelled / missed opportunities for this cohort */}
-            <div>
-                <div className="text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))] mb-1">Cancelled / missed opportunities</div>
-                <CancelledTable rows={c.cancelledOrMissedOpportunities} />
-            </div>
+            {/* ── Trades: Executed · Disabled ── */}
+            {tab === "trades" && (
+                <div className="space-y-3">
+                    <div><SubLabel>Executed trades</SubLabel><ExecutedTable rows={c.executedTrades} showCohort={false} emptyText="No executed trades for this cohort." /></div>
+                    <div><SubLabel>Disabled opportunities</SubLabel><DisabledTable rows={c.disabledOpportunities} showCohort={false} emptyText="No disabled opportunities for this cohort." /></div>
+                </div>
+            )}
         </div>
     );
 }
