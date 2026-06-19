@@ -667,6 +667,22 @@ export function parseTradesCSV(text) {
             armedAfterObExit: boolOrNull(pick(r, "armed_after_ob_exit", "armedAfterObExit")),
             ob_exit_time: String(pick(r, "ob_exit_time", "obExitTime") || ""),
             obExitTime: String(pick(r, "ob_exit_time", "obExitTime") || ""),
+            // Deep-delay audit support — explicit TE validity fields (Phase: deep-delay).
+            // delay_candles_configured = the CONFIGURED arm (vs realized fill_delay_candles);
+            // ob_exit_candle_index = when the OB became spent (pairs with ob_exit_time);
+            // retraced_out_before_arm = price left the OB before the arm candle;
+            // delay_window_min/max_price = price extent over the configured delay window.
+            // All null in pre-instrumentation bundles → load unchanged.
+            delay_candles_configured: numOrNull(pick(r, "delay_candles_configured", "delayCandlesConfigured")),
+            delayCandlesConfigured: numOrNull(pick(r, "delay_candles_configured", "delayCandlesConfigured")),
+            ob_exit_candle_index: numOrNull(pick(r, "ob_exit_candle_index", "obExitCandleIndex")),
+            obExitCandleIndex: numOrNull(pick(r, "ob_exit_candle_index", "obExitCandleIndex")),
+            retraced_out_before_arm: boolOrNull(pick(r, "retraced_out_before_arm", "retracedOutBeforeArm")),
+            retracedOutBeforeArm: boolOrNull(pick(r, "retraced_out_before_arm", "retracedOutBeforeArm")),
+            delay_window_min_price: numOrNull(pick(r, "delay_window_min_price", "delayWindowMinPrice")),
+            delayWindowMinPrice: numOrNull(pick(r, "delay_window_min_price", "delayWindowMinPrice")),
+            delay_window_max_price: numOrNull(pick(r, "delay_window_max_price", "delayWindowMaxPrice")),
+            delayWindowMaxPrice: numOrNull(pick(r, "delay_window_max_price", "delayWindowMaxPrice")),
             missed_trade: boolOrNull(pick(r, "missed_trade")),
             missed_reason: String(pick(r, "missed_reason") || ""),
             missed_session: String(pick(r, "missed_session") || ""),

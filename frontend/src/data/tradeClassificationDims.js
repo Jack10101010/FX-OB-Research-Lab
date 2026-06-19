@@ -164,14 +164,26 @@ function deriveEntryModel(trade) {
         return "baseline";
     }
 
-    // Triggered-edge delay variants — check most specific suffixes first.
-    if (raw.includes("_d3"))   return "te_d3";
-    if (raw.includes("_d2"))   return "te_d2";
-    if (raw.includes("_next")) return "te_next";
-    if (raw.includes("_same")) return "te_same";
-
-    // Triggered-edge without a recognized suffix (delay=0 / same-candle default).
-    if (raw.includes("triggered_edge")) return "te_same";
+    // Triggered-edge delay bucket. Prefer the EXPLICIT configured arm
+    // (delay_candles_configured) when the backend exported it; otherwise parse the
+    // delay from the entry_model_key suffix. Both collapse into the existing coarse
+    // tag vocabulary {te_same, te_next, te_d2, te_d3} — te_d3 is the "≥3 / deep"
+    // bucket, so deep arms (C4–C50) classify as te_d3 instead of silently falling
+    // through to te_same (the old `includes("_d3")` substring check missed _d4+).
+    const isTe = raw.includes("triggered_edge");
+    const teBucket = (delay) => (delay <= 0 ? "te_same" : delay === 1 ? "te_next" : delay === 2 ? "te_d2" : "te_d3");
+    if (isTe) {
+        const configured = trade.delayCandlesConfigured ?? trade.delay_candles_configured ?? null;
+        if (configured != null && Number.isFinite(Number(configured))) {
+            return teBucket(Number(configured));
+        }
+        const dm = raw.match(/_d(\d+)(?:_|$)/);
+        if (dm) return teBucket(Number(dm[1]));
+        if (raw.includes("_next")) return "te_next";
+        if (raw.includes("_same")) return "te_same";
+        // Triggered-edge without a recognized suffix (delay=0 / same-candle default).
+        return "te_same";
+    }
 
     // Penetration — extract numeric threshold from canonical key.
     // Canonical form: entry_penetration_Np0  (e.g. entry_penetration_25p0)
