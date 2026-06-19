@@ -19,7 +19,7 @@ import {
 } from "./artifactStore";
 import { buildTradesByObId, deriveOBLifecycle } from "./obLifecycle";
 import { ingestRunBundle, enrichBeTradeRowsLazy, beTradeFileInfo, entryVariantStorageKeys } from "./importer";
-import { getRunBundleByRunId, getRunCandlesByRunId, getRunFileByRunId, getRunManifestByRunId } from "./sidecarClient";
+import { getRunBundleByRunId, getRunCandlesByRunId, getRunFileByRunId, getRunManifestByRunId, listSidecarRuns } from "./sidecarClient";
 import { fetchProjectsFromBackend, saveProjectsToBackend } from "./projectsBackend";
 import { summarizeTradeClassifications } from "./tradeClassification";
 // Phase RB-1 — Results Basis foundation. The store owns the canonical
@@ -2477,6 +2477,53 @@ export function replaceRunBundleData(runId, bundle) {
     return nextBundle;
 }
 
+// Recover a stale run record's sidecar identity. A persisted record may carry an
+// id the sidecar can't resolve (a frontend-local id, or an output folder captured
+// before the run folder was finalised), so /bundle 404s with "Run output folder
+// does not exist". We ask the sidecar for its run list, match THIS run — by display
+// name first, then by any stored identifier appearing in the run's id/folder — and
+// backfill + persist the real run_id + folder so this and all future reloads
+// resolve. Returns the resolvable sidecar run_id, or "" if there's no confident match.
+async function reconcileRunIdentityFromSidecar(runId, current) {
+    let listing;
+    try {
+        listing = await listSidecarRuns();
+    } catch {
+        return "";
+    }
+    const runs = (listing && listing.runs) || [];
+    if (!runs.length) return "";
+
+    const targetName = String(getRunDisplayName(current) || "").trim();
+    let match = targetName
+        ? runs.find((r) => String(r.display_name || r.displayName || "").trim() === targetName)
+        : null;
+
+    if (!match) {
+        const ids = runReloadIdentifiers(runId, current);
+        match = runs.find((r) => {
+            const rid = String(r.run_id || "");
+            const base = outputFolderName(r.folder || "");
+            return ids.some((id) => id && (rid === id || base === id || String(r.folder || "").includes(id)));
+        });
+    }
+    if (!match || !match.run_id) return "";
+
+    const folder = String(match.folder || "");
+    const folderName = outputFolderName(folder);
+    updateRunBundle(runId, {
+        sidecarRunId: match.run_id,
+        run_id: match.run_id,
+        sourceRunId: match.run_id,
+        outputFolder: folder || current.outputFolder || "",
+        sourceOutputFolder: folder || current.sourceOutputFolder || "",
+        folderName: folderName || current.folderName || "",
+        sourceRunFolderName: folderName || current.sourceRunFolderName || "",
+        reloadAvailable: true,
+    });
+    return match.run_id;
+}
+
 // Phase 1B — restore a LAZY (large-run) index stub from the sidecar manifest.
 // The full /bundle endpoint 413s on cube-scale runs, so lazy runs reload the
 // compact manifest instead: it rehydrates the BE scenario index + provenance +
@@ -2497,6 +2544,14 @@ export async function reloadLazyRunFromManifest(runId) {
             matched = identifier;
             break;
         } catch (error) { lastError = error; }
+    }
+    if (!manifest) {
+        // Stored identity may be stale — reconcile against the sidecar run list and retry once.
+        const reconciledId = await reconcileRunIdentityFromSidecar(runId, current);
+        if (reconciledId) {
+            try { manifest = await getRunManifestByRunId(reconciledId); matched = reconciledId; }
+            catch (error) { lastError = error; }
+        }
     }
     if (!manifest) throw lastError || new Error("Could not reload run manifest from sidecar.");
 
@@ -2582,6 +2637,18 @@ export async function reloadFullRunFromSidecar(runId) {
             break;
         } catch (error) {
             lastError = error;
+        }
+    }
+    if (!payload) {
+        // Stored identity may be stale — reconcile against the sidecar run list and retry once.
+        const reconciledId = await reconcileRunIdentityFromSidecar(runId, current);
+        if (reconciledId) {
+            try {
+                payload = await getRunBundleByRunId(reconciledId, { includeCandles: false });
+                matchedIdentifier = reconciledId;
+            } catch (error) {
+                lastError = error;
+            }
         }
     }
     if (!payload) {
