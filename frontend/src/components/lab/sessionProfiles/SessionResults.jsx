@@ -10,7 +10,7 @@ import React, { useState } from "react";
 import { ChevronDown, ChevronRight, Ban } from "lucide-react";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { useDataset, getActiveBundle, getTradeUniverse } from "@/data/store";
-import { buildSessionResults, cohortFailureSummary, describeMissedReason, cohortOutcomeDistribution, cohortExcursionSnapshot, cohortTargetSuitability, cohortBESuitability, cohortManagementRead, cohortResearchVerdict, cohortRegimeSnapshot } from "@/data/sessionResults";
+import { buildSessionResults, cohortFailureSummary, describeMissedReason, cohortOutcomeDistribution, cohortExcursionSnapshot, cohortTargetSuitability, cohortBESuitability, cohortManagementRead, cohortResearchVerdict, cohortRegimeSnapshot, cohortFailureClusters } from "@/data/sessionResults";
 
 const fmtR = (v) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${Number(v).toFixed(1)}R`);
 const fmtPx = (v) => (v == null || v === "" || !Number.isFinite(Number(v)) ? "—" : Number(v).toFixed(5));
@@ -360,6 +360,53 @@ function ResearchVerdict({ rows }) {
     );
 }
 
+// Phase 4D — rule-based failure clustering by how far the loss ran (MFE).
+function FailureClusters({ rows }) {
+    const fc = cohortFailureClusters(rows);
+    if (fc.totalLosses === 0) {
+        return <div className="text-[11.5px] font-ui text-muted-lab italic py-1">No failure clusters — no losses in this cohort.</div>;
+    }
+    const domKey = fc.dominantCluster?.key;
+    return (
+        <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[11px] font-ui text-muted-lab">Dominant: <span className="text-[hsl(var(--accent-secondary))] font-semibold">{fc.dominantCluster?.label || "—"}</span></span>
+                {fc.suggestedFocus && (
+                    <span className="clip-bevel-sm px-2.5 py-1 text-[11px] font-ui border border-[hsl(var(--border-mid))] bg-[hsl(var(--panel-2)/0.2)] text-[hsl(var(--text-1))]">
+                        <span className="uppercase text-[9.5px] tracking-wider text-muted-lab mr-1.5">Focus</span>{fc.suggestedFocus}
+                    </span>
+                )}
+            </div>
+            <div className="overflow-x-auto">
+                <table className="w-full text-[11px] border-collapse">
+                    <thead>
+                        <tr className="text-left text-muted-lab font-ui border-b border-[hsl(var(--border-mid))]">
+                            <th className="py-1 pr-3 font-normal">Cluster</th>
+                            <th className="pr-3 font-normal text-right">Count</th>
+                            <th className="pr-3 font-normal text-right">%</th>
+                            <th className="pr-3 font-normal text-right">Avg MFE</th>
+                            <th className="pr-3 font-normal text-right">Avg Loss R</th>
+                            <th className="font-normal">Read</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {fc.clusters.map((c) => (
+                            <tr key={c.key} className={`border-b border-[hsl(var(--border-mid)/0.4)] ${c.key === domKey ? "bg-[hsl(var(--accent-secondary)/0.08)]" : ""}`}>
+                                <td className="py-1 pr-3 font-ui text-[hsl(var(--accent-secondary))]">{c.label}</td>
+                                <td className="pr-3 text-right text-[hsl(var(--text-1))] font-num">{c.count}</td>
+                                <td className="pr-3 text-right text-[hsl(var(--text-2))] font-num">{c.pct}%</td>
+                                <td className="pr-3 text-right text-[hsl(var(--text-2))] font-num">{c.avgMFE == null ? "—" : fmtR(c.avgMFE)}</td>
+                                <td className={`pr-3 text-right font-num ${dangerTone}`}>{c.avgLossR == null ? "—" : fmtR(c.avgLossR)}</td>
+                                <td className="text-muted-lab font-ui">{c.read}</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+}
+
 // Phase 4C — time-regime view (yearly + monthly performance + deterministic notes).
 function RegimeSnapshot({ rows }) {
     const reg = cohortRegimeSnapshot(rows);
@@ -530,7 +577,7 @@ function CohortDrilldown({ sessionLabel, c }) {
                 </div>
             )}
 
-            {/* ── Failures: Failure Summary (+ losses) · Cancelled / Missed ── */}
+            {/* ── Failures: Failure Summary · Failure Clusters · Losses · Cancelled / Missed ── */}
             {tab === "failures" && (
                 <div className="space-y-3">
                     <div>
@@ -548,15 +595,16 @@ function CohortDrilldown({ sessionLabel, c }) {
                                     {fail.beExits > 0 && <KV k="BE exits" v={fail.beExits} />}
                                 </div>
                                 {fail.topReasons.length > 0 && (
-                                    <div className="text-[11px] font-ui text-muted-lab mb-2">
+                                    <div className="text-[11px] font-ui text-muted-lab">
                                         <span className="uppercase text-[10px] tracking-wider text-[hsl(var(--accent-secondary))] mr-2">Top reasons</span>
                                         {fail.topReasons.map((r, i) => <span key={r.reason} className="text-[hsl(var(--text-2))]">{i > 0 ? " · " : ""}{r.reason} ×{r.count}</span>)}
                                     </div>
                                 )}
-                                <LossesTable rows={fail.losses} />
                             </>
                         )}
                     </div>
+                    <div><SubLabel>Failure clusters</SubLabel><FailureClusters rows={c.executedTrades} /></div>
+                    {fail.totalLosses > 0 && <div><SubLabel>Losses</SubLabel><LossesTable rows={fail.losses} /></div>}
                     <div><SubLabel>Cancelled / missed opportunities</SubLabel><CancelledTable rows={c.cancelledOrMissedOpportunities} /></div>
                 </div>
             )}

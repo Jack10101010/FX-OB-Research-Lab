@@ -535,6 +535,59 @@ export function cohortResearchVerdict(executedTrades) {
     return { sample, currentRead, targetRead, beRead, failureRead, nextTest, caveat };
 }
 
+/**
+ * Phase 4D — rule-based failure clustering over a cohort's LOSS trades only.
+ * Buckets each loss by how far it ran in favour (MFE) before failing, so callers
+ * can tell entry-quality losses from give-back losses from deep-runner losses.
+ * classifyTrade is the single source of truth for "loss". Pure, no mutation.
+ */
+const FAILURE_CLUSTER_DEFS = [
+    { key: "immediate",  label: "Immediate failure",  read: "Never moved meaningfully in favour", test: (m) => m != null && m <= 0.1 },
+    { key: "faded_05",   label: "Faded before 0.5R",  read: "Small run-up, then failed",          test: (m) => m != null && m > 0.1 && m < 0.5 },
+    { key: "gaveback_1", label: "Gave back 0.5–1R",   read: "Reached partial profit zone before failing", test: (m) => m != null && m >= 0.5 && m < 1 },
+    { key: "gaveback_2", label: "Gave back 1–2R",     read: "Reached meaningful profit before failing",    test: (m) => m != null && m >= 1 && m < 2 },
+    { key: "deep",       label: "Deep runner failure", read: "Reached 2R+ but still failed",       test: (m) => m != null && m >= 2 },
+    { key: "unknown",    label: "Unknown MFE",        read: "No excursion data",                   test: (m) => m == null },
+];
+const CLUSTER_FOCUS = {
+    immediate: "Entry quality / timing",
+    faded_05: "Entry quality / timing",
+    gaveback_1: "Fast target or early protection",
+    gaveback_2: "BE / partial management candidate",
+    deep: "Trailing / exit management candidate",
+    unknown: "Need MFE coverage",
+};
+export function cohortFailureClusters(executedTrades) {
+    const rows = Array.isArray(executedTrades) ? executedTrades : [];
+    const losses = rows.filter((t) => classifyTrade(t) === "LOSS");
+    const totalLosses = losses.length;
+    const buckets = FAILURE_CLUSTER_DEFS.map((d) => ({ def: d, trades: [] }));
+    for (const t of losses) {
+        const m = mfeOf(t);
+        const b = buckets.find((x) => x.def.test(m));
+        if (b) b.trades.push(t);
+    }
+    const avg = (arr, f) => { const v = arr.map(f).filter((n) => Number.isFinite(n)); return v.length ? Number((v.reduce((s, n) => s + n, 0) / v.length).toFixed(2)) : null; };
+    const clusters = buckets
+        .filter((b) => b.trades.length > 0)
+        .map((b) => ({
+            key: b.def.key,
+            label: b.def.label,
+            read: b.def.read,
+            count: b.trades.length,
+            pct: totalLosses ? Number(((b.trades.length / totalLosses) * 100).toFixed(1)) : 0,
+            avgMFE: avg(b.trades, mfeOf),
+            avgLossR: avg(b.trades, tradeR),
+            trades: b.trades,
+        }));
+    // Dominant = highest count; ties resolve to the earlier (more actionable) bucket
+    // since FAILURE_CLUSTER_DEFS is already ordered immediate → deep → unknown.
+    let dominantCluster = null;
+    for (const c of clusters) { if (!dominantCluster || c.count > dominantCluster.count) dominantCluster = c; }
+    const suggestedFocus = dominantCluster ? (CLUSTER_FOCUS[dominantCluster.key] || null) : null;
+    return { totalLosses, clusters, dominantCluster, suggestedFocus };
+}
+
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 // Same timestamp precedence the executed tables render (fillTime → fill_time → entry).
