@@ -56,15 +56,19 @@ export const ENTRY_MODELS = [
     { key: "triggered_edge", label: "Triggered Edge" },
     { key: "penetration", label: "Penetration" },
 ];
-// Arm option → exported fill-mode token (TE only). Display uses C0–C6.
+// Arm option → exported fill-mode token (TE only). Display uses C0–C50.
+// C0 = "same" (arm on trigger candle), C1 = "next", C2..C50 = "d2".."d50".
+// Generated (not hand-maintained) so the deep-delay range stays consistent with
+// the backend's VALID_TRIGGERED_EDGE_CANDLE_DELAYS (0..50). buildEntryKey /
+// armToFillMode already accept arbitrary d{n}; this just exposes them in the UI.
+export const MAX_ARM_DELAY = 50;
 export const ARM_OPTIONS = [
     { key: "same", label: "C0 (same)" },
     { key: "next", label: "C1 (next)" },
-    { key: "d2", label: "C2" },
-    { key: "d3", label: "C3" },
-    { key: "d4", label: "C4" },
-    { key: "d5", label: "C5" },
-    { key: "d6", label: "C6" },
+    ...Array.from({ length: MAX_ARM_DELAY - 1 }, (_, i) => {
+        const n = i + 2;
+        return { key: `d${n}`, label: `C${n}` };
+    }),
 ];
 
 // ── Portfolio object (2A.1 — named-profile model) ──────────────────────────────
@@ -127,11 +131,19 @@ export function beProfileId(sel) {
     return `be_${sel.trigger}_${numTok(sel.armR)}`;
 }
 
-const ARM_LABEL = { same: "C0", next: "C1", d2: "C2", d3: "C3", d4: "C4", d5: "C5", d6: "C6" };
+// Derived from ARM_OPTIONS so it always covers the full C0–C50 range. "C0 (same)"
+// → "C0", "d40" → "C40". Falls back to a generic d{n}→C{n} parse for any token.
+const ARM_LABEL = ARM_OPTIONS.reduce((m, a) => { m[a.key] = a.label.split(" ")[0]; return m; }, {});
+function armDisplay(arm) {
+    if (arm == null) return "";
+    if (ARM_LABEL[arm]) return ARM_LABEL[arm];
+    const dm = String(arm).match(/^d(\d+)$/i);
+    return dm ? `C${dm[1]}` : String(arm);
+}
 export function entryProfileLabel(sel) {
     if (!sel) return "—";
     if (sel.model === "baseline") return "Baseline";
-    if (sel.model === "triggered_edge") return `TE ${sel.threshold}% · ${ARM_LABEL[sel.arm] || sel.arm}`;
+    if (sel.model === "triggered_edge") return `TE ${sel.threshold}% · ${armDisplay(sel.arm)}`;
     if (sel.model === "penetration") return `Pen ${sel.threshold}%`;
     return "—";
 }

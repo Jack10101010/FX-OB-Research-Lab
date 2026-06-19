@@ -41,6 +41,11 @@ import {
     BE_ARM_LEVEL_CHOICES,
 } from "@/data/configTranslator";
 
+// Triggered-edge entry delay arms: C0–C50 (generated). The backend accepts any
+// int delay in VALID_TRIGGERED_EDGE_CANDLE_DELAYS (0..50); these chips select
+// which delay variants this run generates. Compact "C{n}" labels, wrapping grid.
+const TE_DELAY_ARMS = Array.from({ length: 51 }, (_, d) => ({ d, label: `C${d}` }));
+
 const LAST_CONFIG_KEY = "fxob_strategy_builder_last_config";
 const LAST_RUN_KEY = "fxob_strategy_builder_last_run";
 // IMPORT-IDENTITY: identity of the run THIS Strategy Builder submitted and is awaiting
@@ -1582,7 +1587,7 @@ export default function StrategyBuilder() {
                                                         </div>
                                                         <div className="flex gap-1.5 flex-wrap items-center">
                                                             <span className="text-[10px] font-ui uppercase tracking-[0.08em] text-muted-lab">Presets</span>
-                                                            {[10, 25, 50, 75].map((p) => {
+                                                            {[0.5, 1, 2, 3, 4, 5, 10, 25, 50, 75].map((p) => {
                                                                 const active = thrSet.includes(p);
                                                                 return (
                                                                     <button key={p} type="button"
@@ -1599,7 +1604,7 @@ export default function StrategyBuilder() {
                                                             })}
                                                         </div>
                                                         <div className="flex gap-2 items-center">
-                                                            <NeonInput type="number" min="1" max="99" step="1"
+                                                            <NeonInput type="number" min="0.5" max="99" step="0.5"
                                                                 value={cfg.singleTriggeredEdgeThreshold}
                                                                 onChange={(e) => set("singleTriggeredEdgeThreshold")(Number(e.target.value))} />
                                                             <button type="button" className="px-3 py-1.5 text-[10.5px] font-ui clip-bevel-sm border border-[hsl(var(--border-soft))] hover:text-[hsl(var(--text-base))]"
@@ -1625,13 +1630,13 @@ export default function StrategyBuilder() {
                                             label={
                                                 <LabelWithTooltip
                                                     label="Entry Delay After Trigger"
-                                                    help={`Entry delay controls when the limit order is armed after the trigger threshold is reached.\n\nArm C0 = order becomes active on the trigger candle.\nArm C1 = order becomes active at the start of the next candle.\nArm C2–C6 = order becomes active at the start of the Nth candle after trigger.\n\nThis is not the same as fill timing. A trade can Arm C0 but still Fill C1, C2, or later if price reaches the limit later.`}
+                                                    help={`Entry delay controls when the limit order is armed after the trigger threshold is reached.\n\nArm C0 = order becomes active on the trigger candle.\nArm C1 = order becomes active at the start of the next candle.\nArm C2–C50 = order becomes active at the start of the Nth candle after trigger.\n\nThis is not the same as fill timing. A trade can Arm C0 but still Fill C1, C2, or later if price reaches the limit later.`}
                                                 />
                                             }
                                             className="col-span-2"
                                         >
-                                            <div className="flex gap-2">
-                                                {[{ d: 0, label: "Arm C0" }, { d: 1, label: "Arm C1" }, { d: 2, label: "Arm C2" }, { d: 3, label: "Arm C3" }, { d: 4, label: "Arm C4" }, { d: 5, label: "Arm C5" }, { d: 6, label: "Arm C6" }].map(({ d, label }) => {
+                                            <div className="flex flex-wrap gap-1.5">
+                                                {TE_DELAY_ARMS.map(({ d, label }) => {
                                                     const delays = Array.isArray(cfg.triggeredEdgeDelays) ? cfg.triggeredEdgeDelays : [0, 1];
                                                     const active = delays.includes(d);
                                                     return (
@@ -1938,13 +1943,13 @@ export default function StrategyBuilder() {
                                                 label={
                                                     <LabelWithTooltip
                                                         label="Entry Delay After Trigger"
-                                                        help={`Entry delay controls when the limit order is armed after the trigger threshold is reached.\n\nArm C0 = order becomes active on the trigger candle.\nArm C1 = order becomes active at the start of the next candle.\nArm C2–C6 = order becomes active at the start of the Nth candle after trigger.\n\nThis is not the same as fill timing. A trade can Arm C0 but still Fill C1, C2, or later if price reaches the limit later.`}
+                                                        help={`Entry delay controls when the limit order is armed after the trigger threshold is reached.\n\nArm C0 = order becomes active on the trigger candle.\nArm C1 = order becomes active at the start of the next candle.\nArm C2–C50 = order becomes active at the start of the Nth candle after trigger.\n\nThis is not the same as fill timing. A trade can Arm C0 but still Fill C1, C2, or later if price reaches the limit later.`}
                                                     />
                                                 }
                                                 className="col-span-2"
                                             >
-                                                <div className="flex gap-2">
-                                                    {[{ d: 0, label: "Arm C0" }, { d: 1, label: "Arm C1" }, { d: 2, label: "Arm C2" }, { d: 3, label: "Arm C3" }, { d: 4, label: "Arm C4" }, { d: 5, label: "Arm C5" }, { d: 6, label: "Arm C6" }].map(({ d, label }) => {
+                                                <div className="flex flex-wrap gap-1.5">
+                                                    {TE_DELAY_ARMS.map(({ d, label }) => {
                                                         const delays = Array.isArray(cfg.triggeredEdgeDelays) ? cfg.triggeredEdgeDelays : [0, 1];
                                                         const active = delays.includes(d);
                                                         return (
@@ -2820,9 +2825,9 @@ function DirectionalEntryCard({ label, enabled, entryModel, penetrationPct, trig
                             <Field label="Trigger Threshold %">
                                 <NeonInput
                                     type="number"
-                                    min="1"
+                                    min="0.5"
                                     max="99"
-                                    step="1"
+                                    step="0.5"
                                     value={triggeredEdgeThreshold}
                                     onChange={(e) => onChange("TriggeredEdgeThreshold", Number(e.target.value))}
                                 />
@@ -2831,12 +2836,12 @@ function DirectionalEntryCard({ label, enabled, entryModel, penetrationPct, trig
                                 label={
                                     <LabelWithTooltip
                                         label="Entry Delay"
-                                        help={`Entry delay controls when the limit order is armed after the trigger threshold is reached.\n\nArm C0 = order becomes active on the trigger candle.\nArm C1 = order becomes active at the start of the next candle.\nArm C2–C6 = order becomes active at the start of the Nth candle after trigger.\n\nThis is not the same as fill timing. A trade can Arm C0 but still Fill C1, C2, or later if price reaches the limit later.`}
+                                        help={`Entry delay controls when the limit order is armed after the trigger threshold is reached.\n\nArm C0 = order becomes active on the trigger candle.\nArm C1 = order becomes active at the start of the next candle.\nArm C2–C50 = order becomes active at the start of the Nth candle after trigger.\n\nThis is not the same as fill timing. A trade can Arm C0 but still Fill C1, C2, or later if price reaches the limit later.`}
                                     />
                                 }
                             >
-                                <div className="flex gap-1.5">
-                                    {[{ d: 0, label: "C0" }, { d: 1, label: "C1" }, { d: 2, label: "C2" }, { d: 3, label: "C3" }].map(({ d, label }) => {
+                                <div className="flex flex-wrap gap-1.5">
+                                    {TE_DELAY_ARMS.map(({ d, label }) => {
                                         const active = delays.includes(d);
                                         return (
                                             <button

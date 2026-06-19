@@ -30,19 +30,28 @@ const actionBtn = `${tinyBtn} border-[hsl(var(--border-mid))] text-[hsl(var(--te
 // variants is backward-compatible: profile ids are deterministic, so existing
 // saved scenarios keep resolving and any stored ref not listed here is preserved
 // via the "(current)" fallback option in DimSelect.
-const ENTRY_THRESHOLDS = [10, 25, 50, 75];
+// Trigger thresholds: 0.5%→5% deep range (research) plus the legacy 10/25/50/75.
+// 0% is intentionally NOT exposed — at exactly 0% the backend's penetration test
+// (penetration >= depth*0) can read as "touched" before price reaches the OB, so
+// 0.5% is the safe minimum that keeps simulation semantics unchanged.
+const ENTRY_THRESHOLDS = [0.5, 1, 2, 3, 4, 5, 10, 25, 50, 75];
 const armC = (a) => a.label.split(" ")[0]; // "C0 (same)" → "C0"
+const thrTok = (thr) => String(thr).replace(".", "p"); // 0.5 → "0p5" (option value only)
+// Entry options carry an optgroup label so the dropdown stays usable with the full
+// thresholds × C0–C50 catalog (~500 variants). Compact labels: "TE 3% C40".
 const ENTRY_OPTS = [
     { value: "", label: "Run Default", sel: null },
     { value: "baseline", label: "Baseline", sel: { model: "baseline" } },
     ...ENTRY_THRESHOLDS.flatMap((thr) => ARM_OPTIONS.map((a) => ({
-        value: `te_${thr}_${a.key}`,
-        label: `Triggered Edge ${thr} ${armC(a)}`,
+        value: `te_${thrTok(thr)}_${a.key}`,
+        label: `TE ${thr}% ${armC(a)}`,
+        group: `Triggered Edge ${thr}%`,
         sel: { model: "triggered_edge", threshold: thr, arm: a.key },
     }))),
     ...ENTRY_THRESHOLDS.map((thr) => ({
-        value: `pen_${thr}`,
-        label: `Penetration ${thr}`,
+        value: `pen_${thrTok(thr)}`,
+        label: `Pen ${thr}%`,
+        group: "Penetration",
         sel: { model: "penetration", threshold: thr },
     })),
 ];
@@ -80,6 +89,26 @@ function runRrOf(bundle) {
 const sourceBucket = (src) => (src === "cohort" ? "Custom" : src === "session-default" ? "Session" : "Global");
 
 // ── one editable dimension dropdown ─────────────────────────────────────────────
+// Render options, grouping any that carry a `group` into <optgroup>s (preserving
+// first-seen order). Ungrouped options render at the top level (Run Default, etc.).
+function renderOptions(opts) {
+    const out = [];
+    const groups = new Map();
+    for (const o of opts) {
+        if (!o.group) { out.push(<option key={o.value} value={o.value}>{o.label}</option>); continue; }
+        if (!groups.has(o.group)) groups.set(o.group, []);
+        groups.get(o.group).push(o);
+    }
+    for (const [label, items] of groups) {
+        out.push(
+            <optgroup key={`grp-${label}`} label={label}>
+                {items.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </optgroup>,
+        );
+    }
+    return out;
+}
+
 function DimSelect({ dim, currentRef, currentLabel, onPick }) {
     const value = valueForRef(dim, currentRef);
     return (
@@ -92,7 +121,7 @@ function DimSelect({ dim, currentRef, currentLabel, onPick }) {
                     onChange={(e) => onPick(dim, e.target.value)}
                 >
                     {value === "__current__" && <option value="__current__">{currentLabel} (current)</option>}
-                    {OPTS[dim].map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    {renderOptions(OPTS[dim])}
                 </select>
                 <ChevronDown size={14} className="pointer-events-none absolute right-1.5 text-[hsl(var(--accent-secondary))]" />
             </span>

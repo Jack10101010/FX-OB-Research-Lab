@@ -284,10 +284,16 @@ export function buildAvailableOptions(allKeys = []) {
         }
     }
 
-    const FILL_ORDER = ["both", "same", "next", "d2", "d3", "d4", "d5", "d6"];
-    const sortFillModes = (modes) => [...modes].sort(
-        (a, b) => FILL_ORDER.indexOf(a) - FILL_ORDER.indexOf(b),
-    );
+    // Depth-aware rank so the full C0–C50 range orders correctly (both < C0 < C1
+    // < C2 … < C50). "d{n}" → rank n+1; unknown tokens sort last.
+    const fillRank = (m) => {
+        if (m === "both") return 0;
+        if (m === "same") return 1;
+        if (m === "next") return 2;
+        const dm = typeof m === "string" ? m.match(/^d(\d+)$/) : null;
+        return dm ? Number(dm[1]) + 1 : Number.MAX_SAFE_INTEGER;
+    };
+    const sortFillModes = (modes) => [...modes].sort((a, b) => fillRank(a) - fillRank(b));
 
     return {
         availableFamilies: [...families],
