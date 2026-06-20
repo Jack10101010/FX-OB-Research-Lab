@@ -34,6 +34,13 @@ import { ClassificationBadge } from "@/components/lab/ClassificationBadge";
 import { getTagMeta } from "@/data/classificationRegistry";
 
 const STRATEGY_MAP_UI_KEY = "fxob_strategy_map_ui_v1";
+// LARGE-RUN candle cap: large/lazy runs ship multi-million-row candles.csv
+// (~2.4M 1-minute rows / ~147 MB). Loading every row froze the page (full-series
+// fetch + main-thread normalize/resample/sort). We request a downsampled window
+// from the sidecar (which already supports ?limit= via stride); the chart resamples
+// for display anyway, so a few thousand points is plenty. Runs with fewer rows than
+// the cap are returned in full (no-op), so small eager runs are unchanged.
+const STRATEGY_MAP_CANDLE_LIMIT = 12000;
 const DEFAULT_CHART_HEIGHT = 460;
 const MIN_CHART_HEIGHT = 420;
 const MAX_CHART_HEIGHT_VH = 0.85;
@@ -254,6 +261,15 @@ export default function StrategyMap() {
     const candleStatus = runId ? candleLoadStatus?.[runId] || null : null;
     const candlesLoading = candleStatus?.status === "loading";
     const candlesError = candleStatus?.status === "failed" ? candleStatus.error : "";
+    // Did the sidecar downsample? The strided window returns at most the cap, so a
+    // loaded count at/over the cap means the run had more rows than we fetched. Used
+    // for a subtle, non-blocking "candles downsampled for performance" note.
+    const loadedCandleCount = (candleStatus?.status === "loaded" ? candleStatus.count : 0) || sourceCandles.length || 0;
+    const candlesDownsampled = loadedCandleCount >= STRATEGY_MAP_CANDLE_LIMIT;
+    // Optional source-size hint (real, from the lazy manifest) — never fabricated.
+    const candlesSourceMb = bundle?.candlesMeta?.size
+        ? Math.round(Number(bundle.candlesMeta.size) / (1024 * 1024))
+        : null;
     const canLoadCandlesFromSidecar = Boolean(
         runId
         && !hasCandles
@@ -642,7 +658,10 @@ export default function StrategyMap() {
     useEffect(() => {
         if (!canLoadCandlesFromSidecar || candleLoadAttemptedRef.current.has(runId)) return;
         candleLoadAttemptedRef.current.add(runId);
-        loadCandlesForRun(runId).catch(() => {
+        // Request a downsampled candle window (sidecar strides server-side when the
+        // run exceeds the cap). Keeps the Strategy Map interactive on multi-million-
+        // row runs; a no-op for runs with fewer rows than the cap.
+        loadCandlesForRun(runId, { limit: STRATEGY_MAP_CANDLE_LIMIT }).catch(() => {
             // Store state carries the user-facing error; keep this effect one-shot.
         });
     }, [canLoadCandlesFromSidecar, runId]);
@@ -927,6 +946,11 @@ export default function StrategyMap() {
                                 )}
                                 <Pill tone="muted">Chart time: UTC</Pill>
                                 <Pill tone="muted">{displayCandles.length} candles</Pill>
+                                {candlesDownsampled && (
+                                    <Pill tone="muted" title={`This run's candle history is large${candlesSourceMb ? ` (~${candlesSourceMb} MB on disk)` : ""}; the chart loads a downsampled window (~${STRATEGY_MAP_CANDLE_LIMIT.toLocaleString()} candles) so it stays responsive. Analytics are unaffected.`}>
+                                        Candles downsampled for performance
+                                    </Pill>
+                                )}
                                 <Pill tone="muted">{chartTradeMarkers.length} markers</Pill>
                                 {showOB && !chartObBoxes.length && <Pill tone="warning">No OB data</Pill>}
                                 {showMarkers && !chartTradeMarkers.length && <Pill tone="warning">No trade markers</Pill>}
@@ -945,6 +969,11 @@ export default function StrategyMap() {
                     ) : (
                         <div className="mb-3 flex items-center gap-2 flex-wrap">
                             <Pill tone="muted">Chart time: UTC</Pill>
+                            {candlesDownsampled && (
+                                <Pill tone="muted" title={`This run's candle history is large${candlesSourceMb ? ` (~${candlesSourceMb} MB on disk)` : ""}; the chart loads a downsampled window (~${STRATEGY_MAP_CANDLE_LIMIT.toLocaleString()} candles) so it stays responsive. Analytics are unaffected.`}>
+                                    Candles downsampled for performance
+                                </Pill>
+                            )}
                             {candlesAreCoarse && (
                                 <Pill tone="warning">Imported candles are 15m/coarser. 1m/5m views unavailable for this run.</Pill>
                             )}
