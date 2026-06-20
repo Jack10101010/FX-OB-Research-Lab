@@ -18,7 +18,7 @@ import {
     listCandleRunIds as idbListCandleRunIds,
 } from "./artifactStore";
 import { buildTradesByObId, deriveOBLifecycle } from "./obLifecycle";
-import { ingestRunBundle, enrichBeTradeRowsLazy, beTradeFileInfo, entryVariantStorageKeys } from "./importer";
+import { ingestRunBundle, enrichBeTradeRowsLazy, beTradeFileInfo, entryVariantStorageKeys, parseOrderBlocksCSV } from "./importer";
 import { getRunBundleByRunId, getRunCandlesByRunId, getRunFileByRunId, getRunManifestByRunId, listSidecarRuns } from "./sidecarClient";
 import { fetchProjectsFromBackend, saveProjectsToBackend } from "./projectsBackend";
 import { summarizeTradeClassifications } from "./tradeClassification";
@@ -2525,11 +2525,27 @@ async function reconcileRunIdentityFromSidecar(runId, current) {
 }
 
 // Phase 1B — restore a LAZY (large-run) index stub from the sidecar manifest.
+// True when a sidecar request failed because the response was too large (HTTP 413).
+// Used to route an over-cap /bundle request to the manifest-based lazy import.
+function isBundleTooLargeError(error) {
+    if (!error) return false;
+    if (error.status === 413) return true;
+    const msg = String(error.message || error).toLowerCase();
+    return msg.includes("413")
+        || msg.includes("too large")
+        || msg.includes("entity too large")
+        || msg.includes("payload too large");
+}
+
 // The full /bundle endpoint 413s on cube-scale runs, so lazy runs reload the
 // compact manifest instead: it rehydrates the BE scenario index + provenance +
 // candle metadata so on-demand BE loads (via the sidecar /file endpoint) work
 // again after a refresh. Trade rows themselves stay lazy.
-export async function reloadLazyRunFromManifest(runId) {
+export async function reloadLazyRunFromManifest(runId, options = {}) {
+    // lazyReason marks WHY this run went lazy — "bundle_413" when the 413 fallback
+    // routed here, else a generic "lazy_manifest". Surfaced on the run record so the
+    // status chip can say "Large-run lazy import" rather than implying global lazy mode.
+    const lazyReason = options.reason || "lazy_manifest";
     const current = runId ? state.runs[runId] : null;
     if (!current) throw new Error("Run is not available in the local index.");
     const identifiers = runReloadIdentifiers(runId, current);
@@ -2554,6 +2570,27 @@ export async function reloadLazyRunFromManifest(runId) {
         }
     }
     if (!manifest) throw lastError || new Error("Could not reload run manifest from sidecar.");
+
+    // Load order_blocks ONCE for a lazy run so OB-dependent enrichment (penetration %,
+    // OB-relative fields in entry/BE rows) does not run against []. Graceful: a missing
+    // or unreadable order_blocks.csv degrades to whatever was already resident (else [])
+    // with a warning surfaced on the run record — it never throws / blocks the import.
+    let lazyOrderBlocks = Array.isArray(current.orderBlocks) ? current.orderBlocks : [];
+    const lazyWarnings = [];
+    if (!lazyOrderBlocks.length) {
+        try {
+            const obPayload = await getRunFileByRunId(matched, "order_blocks.csv");
+            const obText = obPayload?.content ?? "";
+            const parsed = obText ? parseOrderBlocksCSV(obText) : [];
+            if (Array.isArray(parsed) && parsed.length) {
+                lazyOrderBlocks = parsed;
+            } else {
+                lazyWarnings.push("order_blocks.csv was empty or unavailable; OB-dependent fields may be degraded.");
+            }
+        } catch (error) {
+            lazyWarnings.push(`Could not load order_blocks.csv: ${String(error?.message || error)}`);
+        }
+    }
 
     const beScenarioIndex = (manifest.be_matrix?.scenarios || []).map((s) => ({
         name: s.name,
@@ -2588,7 +2625,15 @@ export async function reloadLazyRunFromManifest(runId) {
     const patch = {
         lazy: true,
         reloadAvailable: true,
-        indexOnly: false,
+        // GUARD: a lazy-manifest run is index-backed (rows fetched on demand). Mark it
+        // explicitly as NOT fully loaded so RunDetail/selectors never treat it as eager
+        // and never inherit a stale hasFullData=true from a prior eager load.
+        indexOnly: true,
+        hasFullData: false,
+        largeRun: true,
+        lazyReason,
+        lazyWarnings,
+        orderBlocks: lazyOrderBlocks,
         storageMode: "lazy_manifest",
         primaryVariant,
         // Preserve any already-loaded entry rows; refresh the summary + index.
@@ -2637,6 +2682,14 @@ export async function reloadFullRunFromSidecar(runId) {
             break;
         } catch (error) {
             lastError = error;
+            // Large BE / deep-triggered-edge runs exceed the monolithic /bundle cap
+            // (MAX_BUNDLE_BYTES → 413). A 413 means the run is too big for eager bundle
+            // import — fall back to the manifest-based lazy path, which discovers ALL
+            // entry variants (incl. d20–d50) via /runs/{id}/manifest without loading rows.
+            // Not a hard failure; never raise MAX_BUNDLE_BYTES.
+            if (isBundleTooLargeError(error)) {
+                return reloadLazyRunFromManifest(runId, { reason: "bundle_413" });
+            }
         }
     }
     if (!payload) {

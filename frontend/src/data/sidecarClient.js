@@ -19,7 +19,11 @@ async function requestSidecar(path, options = {}, baseUrl = DEFAULT_SIDECAR_URL)
         const detail = typeof data?.detail === "object"
             ? (data.detail.error || JSON.stringify(data.detail))
             : (data?.detail || response.statusText || "Sidecar request failed");
-        throw new Error(detail);
+        // Surface the HTTP status so callers can route on it (e.g. 413 → lazy import).
+        const err = new Error(detail);
+        err.status = response.status;
+        err.statusText = response.statusText;
+        throw err;
     }
     return data;
 }

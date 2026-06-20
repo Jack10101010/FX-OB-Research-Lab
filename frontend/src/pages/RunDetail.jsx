@@ -6,6 +6,8 @@ import { MetricChip } from "@/components/lab/MetricChip";
 import { EquityCurveV2, MiniLine } from "@/components/lab/EquityCurve";
 import { DataTable, Pill } from "@/components/lab/DataTable";
 import SessionResults from "@/components/lab/sessionProfiles/SessionResults";
+import EntryVariantOverlap from "@/components/lab/EntryVariantOverlap";
+import LazyImportStatus from "@/components/lab/LazyImportStatus";
 import { NeonButton, NeonInput, NeonSelect, FilterToggle } from "@/components/lab/controls";
 import { compactTimeframe, formatRunDateRange, getRunDisplayName, reloadFullRunFromSidecar, updateRunBundle, useDataset } from "@/data/store";
 import { setActiveRunId, setSelectedTradeVariant, setFocusedFftEvent } from "@/data/store";
@@ -675,7 +677,11 @@ export default function RunDetail() {
         || Object.values(runData?.entryResults?.tradesByMode || {}).some((trades) => Array.isArray(trades) && trades.length)
     );
     const isIndexOnlyRun = Boolean(runData?.indexOnly || runData?.storageMode === "index_only" || (runData && !hasFullRunData));
-    const shouldAutoReloadRun = Boolean(isIndexOnlyRun && runData?.reloadAvailable && runId);
+    // A lazy-manifest run (large run loaded via the 413 fallback) IS usable — its
+    // variants/BE rows load on demand — so it must NOT show the "metadata-only / reload
+    // manually" prompt. It shows the large-run lazy status instead.
+    const isLazyRun = Boolean(runData?.lazy || runData?.storageMode === "lazy_manifest" || runData?.largeRun);
+    const shouldAutoReloadRun = Boolean(isIndexOnlyRun && !isLazyRun && runData?.reloadAvailable && runId);
     const requestFullRunReload = React.useCallback(async () => {
         if (!runId || reloadBusy) return;
         console.debug("[RunDetail] reload start", {
@@ -1456,6 +1462,7 @@ export default function RunDetail() {
         { id: "monthly", label: "Monthly" },
         { id: "baseline-splits", label: "Baseline Splits" },
         { id: "session-results", label: "Session Results" },
+        { id: "variant-overlap", label: "Variant Overlap" },
         { id: "entry-timing", label: "Entry Timing" },
         { id: "research",    label: "Research" },
     ]), []);
@@ -1580,7 +1587,27 @@ export default function RunDetail() {
                 beCoverage={summarizeBeCoverage(runData || run)}
             />
 
-            {isIndexOnlyRun && (
+            {isLazyRun && (
+                <div className="px-6 mb-4">
+                    <div className="flex items-start gap-3 border border-[hsl(var(--warning)/0.4)] bg-[hsl(var(--warning)/0.06)] clip-bevel-sm px-3 py-2">
+                        <div className="min-w-0 flex-1 text-[11.5px] leading-relaxed text-[hsl(var(--text-2))]">
+                            <span className="text-[hsl(var(--text))] font-medium">Large run — loaded lazily.</span>{" "}
+                            This run was too large for a full in-memory import, so it was imported automatically
+                            via the large-run lazy path. Baseline, triggered-edge (incl. deep delays), and BE
+                            variants load on demand as you select them. Cross-variant aggregation is disabled until
+                            full data is loaded.
+                            <div className="mt-1.5">
+                                <LazyImportStatus runLazy lazyReason={runData?.lazyReason || ""} />
+                            </div>
+                            {Array.isArray(runData?.lazyWarnings) && runData.lazyWarnings.length > 0 && (
+                                <span className="block mt-1 text-[hsl(var(--warning))]">{runData.lazyWarnings[0]}</span>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {isIndexOnlyRun && !isLazyRun && (
                 <div className="px-6 mb-4">
                     <div className="flex items-start justify-between gap-3 border border-[hsl(var(--accent-secondary)/0.35)] bg-[hsl(var(--accent-secondary)/0.06)] clip-bevel-sm px-3 py-2">
                         <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-[hsl(var(--accent-secondary))]" />
@@ -2157,6 +2184,24 @@ export default function RunDetail() {
                 {showResultsSection("baseline-splits") && <SessionSplit trades={displayTrades} />}
 
                 {showResultsSection("session-results") && <SessionResults trades={displayTrades} bundle={runData} />}
+
+                {showResultsSection("variant-overlap") && (
+                    // GUARD: cross-variant overlap aggregates trade rows ACROSS variants. A lazily-
+                    // loaded large run only holds the rows of variants opened individually, so the
+                    // comparison would be partial/misleading. Gate it here in the parent (single-
+                    // variant views + BE/triggered-edge selection are unaffected).
+                    runData?.lazy ? (
+                        <NeonPanel title="Entry Variant Overlap">
+                            <div className="text-[12px] font-ui text-muted-lab py-2">
+                                This run was loaded lazily because it is too large for full import. Cross-variant
+                                aggregation is disabled until full data is loaded. You can still open individual
+                                triggered-edge and BE variants from Run Detail.
+                            </div>
+                        </NeonPanel>
+                    ) : (
+                        <EntryVariantOverlap bundle={runData} />
+                    )
+                )}
 
                 {showResultsSection("config") && <NeonPanel className="xl:col-span-3" title="Configuration" action={<Pill tone="muted">Compact</Pill>}>
                     <div className="space-y-3">
