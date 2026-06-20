@@ -388,60 +388,10 @@ export default function RunDetail() {
         return views;
     }, [runData]);
 
-    // ── RW-10A: grouped navigation + active option ───────────────────────────
-    const resultViewGroups = React.useMemo(() => {
-        const FILL_SLOTS = [
-            { fillMode: "same", displayLabel: "Arm C0" },
-            { fillMode: "next", displayLabel: "Arm C1" },
-            { fillMode: "d2",   displayLabel: "Arm C2" },
-            { fillMode: "d3",   displayLabel: "Arm C3" },
-            { fillMode: "d4",   displayLabel: "Arm C4" },
-            { fillMode: "d5",   displayLabel: "Arm C5" },
-            { fillMode: "d6",   displayLabel: "Arm C6" },
-        ];
-        const groups = [];
-        const baselineOpt = resultViewOptions.find((o) => o.family === "baseline");
-        if (baselineOpt) {
-            groups.push({
-                groupKey: "baseline",
-                groupLabel: null,
-                slots: [{ ...FILL_SLOTS[0], displayLabel: "Baseline Reference", available: true, opt: baselineOpt }],
-            });
-        }
-        const seen = new Set();
-        resultViewOptions.filter((o) => o.family !== "baseline").forEach((opt) => {
-            const gKey = `${opt.family}::${opt.threshold}`;
-            if (seen.has(gKey)) return;
-            seen.add(gKey);
-            const familyLabel = opt.family === "triggered_edge" ? "Triggered Edge"
-                : opt.family === "penetration" ? "Penetration"
-                : String(opt.family).replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-            const threshStr = opt.threshold != null ? ` ${opt.threshold}%` : "";
-            const groupOpts = resultViewOptions.filter(
-                (o) => o.family === opt.family && o.threshold === opt.threshold,
-            );
-            const slots = FILL_SLOTS.map((slot) => {
-                const match = groupOpts.find((o) => o.fillMode === slot.fillMode);
-                return { ...slot, available: Boolean(match), opt: match || null };
-            });
-            groups.push({ groupKey: gKey, groupLabel: `${familyLabel}${threshStr}`, slots });
-        });
-        // RW-4A: directional scenarios group
-        const directionalOpts = resultViewOptions.filter((o) => o.family === "directional");
-        if (directionalOpts.length > 0) {
-            groups.push({
-                groupKey: "directional",
-                groupLabel: "Directional Scenarios",
-                slots: directionalOpts.map((opt) => ({
-                    fillMode: null,
-                    displayLabel: opt.label,
-                    available: true,
-                    opt,
-                })),
-            });
-        }
-        return groups;
-    }, [resultViewOptions]);
+    // RW-10A note: the former `resultViewGroups` memo (a hardcoded C0–C6 slot grid)
+    // was dead code — never rendered — and duplicated the legacy shallow-arm
+    // assumption. Removed during the deep-delay fix; the live arm selector is now
+    // data-driven inside ResearchRunHeader (armSlotsFromFillModes).
 
     const activeResultViewOption = React.useMemo(() => {
         const isScenario = Boolean(resultView?.family && resultView.family !== "baseline");
@@ -676,11 +626,11 @@ export default function RunDetail() {
         || Object.values(runData?.tradesByVariant || {}).some((trades) => Array.isArray(trades) && trades.length)
         || Object.values(runData?.entryResults?.tradesByMode || {}).some((trades) => Array.isArray(trades) && trades.length)
     );
-    const isIndexOnlyRun = Boolean(runData?.indexOnly || runData?.storageMode === "index_only" || (runData && !hasFullRunData));
-    // A lazy-manifest run (large run loaded via the 413 fallback) IS usable — its
-    // variants/BE rows load on demand — so it must NOT show the "metadata-only / reload
-    // manually" prompt. It shows the large-run lazy status instead.
+    // A lazy-manifest run (large run loaded via the 413 fallback) is a FIRST-CLASS
+    // loaded state — its variant/BE indexes are resident and rows load on demand. It is
+    // NOT an index-only/metadata shell, so it is excluded from isIndexOnlyRun below.
     const isLazyRun = Boolean(runData?.lazy || runData?.storageMode === "lazy_manifest" || runData?.largeRun);
+    const isIndexOnlyRun = Boolean((runData?.indexOnly || runData?.storageMode === "index_only" || (runData && !hasFullRunData)) && !isLazyRun);
     const shouldAutoReloadRun = Boolean(isIndexOnlyRun && !isLazyRun && runData?.reloadAvailable && runId);
     const requestFullRunReload = React.useCallback(async () => {
         if (!runId || reloadBusy) return;
@@ -1588,22 +1538,17 @@ export default function RunDetail() {
             />
 
             {isLazyRun && (
-                <div className="px-6 mb-4">
-                    <div className="flex items-start gap-3 border border-[hsl(var(--warning)/0.4)] bg-[hsl(var(--warning)/0.06)] clip-bevel-sm px-3 py-2">
-                        <div className="min-w-0 flex-1 text-[11.5px] leading-relaxed text-[hsl(var(--text-2))]">
-                            <span className="text-[hsl(var(--text))] font-medium">Large run — loaded lazily.</span>{" "}
-                            This run was too large for a full in-memory import, so it was imported automatically
-                            via the large-run lazy path. Baseline, triggered-edge (incl. deep delays), and BE
-                            variants load on demand as you select them. Cross-variant aggregation is disabled until
-                            full data is loaded.
-                            <div className="mt-1.5">
-                                <LazyImportStatus runLazy lazyReason={runData?.lazyReason || ""} />
-                            </div>
-                            {Array.isArray(runData?.lazyWarnings) && runData.lazyWarnings.length > 0 && (
-                                <span className="block mt-1 text-[hsl(var(--warning))]">{runData.lazyWarnings[0]}</span>
-                            )}
-                        </div>
-                    </div>
+                <div className="px-6 mb-3 flex flex-wrap items-center gap-2">
+                    <LazyImportStatus runLazy lazyReason={runData?.lazyReason || ""} />
+                    <span
+                        className="text-[10.5px] font-ui text-muted-lab"
+                        title="This run was too large for a full in-memory import, so it was imported automatically via the large-run lazy path. Baseline, triggered-edge (incl. deep delays), and BE variants load on demand as you select them. Cross-variant aggregation is disabled until full data is loaded."
+                    >
+                        Variants load on demand.
+                    </span>
+                    {Array.isArray(runData?.lazyWarnings) && runData.lazyWarnings.length > 0 && (
+                        <span className="text-[10.5px] font-ui text-[hsl(var(--warning))]">{runData.lazyWarnings[0]}</span>
+                    )}
                 </div>
             )}
 

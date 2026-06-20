@@ -41,6 +41,9 @@ import { formatDirectionalScenarioLabel } from "@/components/lab/entries/analyti
 // the exact same styling. Pure visual no-op for this header.
 import { ResearchBannerShell } from "@/components/lab/researchBanner/ResearchBannerShell";
 import { CurrentResultViewPanel } from "@/components/lab/researchBanner/CurrentResultViewPanel";
+// DEEP-DELAY: arm slots + fill-mode pick are data-driven from the run's actual
+// available variants (so d20…d50 runs show C20…C50, not dead C0–C6 placeholders).
+import { armSlotsFromFillModes, pickFillModeForSelection } from "@/data/tradeUniverse";
 
 // Local presentational helper (mirrors RunDetail's ScopeRow — uppercase metadata
 // eyebrow + inline value, within the AGENTS.md tracking ceiling).
@@ -109,15 +112,15 @@ export default function ResearchRunHeader({
                                 .map((o) => o.fillMode),
                         );
 
+                        // DEEP-DELAY: delegate to the shared, delay-aware picker so
+                        // selecting a model/threshold lands on a REAL available arm —
+                        // including d20…d50 — instead of falling back to a null suffix
+                        // (which mapped to a non-existent file → Trades = 0).
                         const pickFillMode = (family, threshold, preferFm) => {
                             const opts = resultViewOptions
                                 .filter((o) => o.family === family && o.threshold === threshold)
                                 .map((o) => o.fillMode);
-                            if (opts.includes(preferFm)) return preferFm;
-                            if (opts.includes(null))    return null;
-                            if (opts.includes("same"))  return "same";
-                            if (opts.includes("next"))  return "next";
-                            return null;
+                            return pickFillModeForSelection(opts, preferFm);
                         };
                         const pickThreshold = (family, preferThresh) => {
                             const opts = resultViewOptions
@@ -134,19 +137,13 @@ export default function ResearchRunHeader({
                             { key: "penetration",    label: "Penetration" },
                             { key: "triggered_edge", label: "Triggered Edge" },
                         ];
-                        // Arm timing (candle index after the trigger). Labels match
-                        // the Strategy Map convention (fillModeDisplayLabel): same=C0,
-                        // next=C1, d2..d6=C2..C6. All delays C0–C6 are listed; each
-                        // renders active when present and dimmed when absent.
-                        const FILL_MODE_SLOTS = [
-                            { fillMode: "same", label: "Arm C0" },
-                            { fillMode: "next", label: "Arm C1" },
-                            { fillMode: "d2",   label: "Arm C2" },
-                            { fillMode: "d3",   label: "Arm C3" },
-                            { fillMode: "d4",   label: "Arm C4" },
-                            { fillMode: "d5",   label: "Arm C5" },
-                            { fillMode: "d6",   label: "Arm C6" },
-                        ];
+                        // Arm timing (candle index after the trigger), DATA-DRIVEN from
+                        // the run's actual available arms for the selected family+threshold.
+                        // Labels follow the Strategy Map convention (same=C0, next=C1,
+                        // d{n}=C{n}), sorted by candle index. A shallow run yields C0–C6;
+                        // a deep-delay run yields its real C20…C50 — and ONLY the arms it
+                        // ran (no dead C0–C6 placeholders for arms that never existed).
+                        const FILL_MODE_SLOTS = armSlotsFromFillModes([...availFillModes]);
 
                         const showThresholdRow = selModel !== "baseline";
                         const showFillModeRow  = selModel === "triggered_edge" && selThreshold != null; // RW-11A: penetration has no fill mode
@@ -274,8 +271,11 @@ export default function ResearchRunHeader({
                                             <div className="flex flex-wrap items-center gap-2 pl-3 border-l border-[hsl(var(--border-soft)/0.3)]">
                                                 <span
                                                     className="text-[9.5px] font-ui uppercase tracking-[0.07em] text-[hsl(var(--text-2)/0.65)] shrink-0 mr-0.5 cursor-default"
-                                                    title={"Arm timing = the candle (after the trigger threshold is reached) on which the limit order becomes active.\n\nArm C0 = active on the trigger candle\nArm C1 = active on the next candle\nArm C2–C6 = active 2–6 candles after the trigger\n\nThis is arm timing, not fill timing — a trade can arm on C0 yet still fill on a later candle."}
-                                                >Arm</span>
+                                                    title={"Arm timing = the candle (after the trigger threshold is reached) on which the limit order becomes active.\n\nArm C0 = active on the trigger candle\nArm C1 = active on the next candle\nArm C{n} = active n candles after the trigger\n\nOnly the arms this run actually executed are shown.\n\nThis is arm timing, not fill timing — a trade can arm on C0 yet still fill on a later candle."}
+                                                >Arm <span className="normal-case text-[hsl(var(--text-2)/0.45)]">· available in this run</span></span>
+                                                {FILL_MODE_SLOTS.length === 0 && (
+                                                    <span className={[btnSm, btnDim].join(" ")}>No arms exported</span>
+                                                )}
                                                 {FILL_MODE_SLOTS.map(({ fillMode: fm, label }) => {
                                                     const isAvail  = availFillModes.has(fm);
                                                     const isActive = selFillMode === fm;

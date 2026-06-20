@@ -307,12 +307,72 @@ export function buildAvailableOptions(allKeys = []) {
     };
 }
 
+// Arm candle index used for sorting + labelling: same=0, next=1, d{n}=n.
+// Non-arm tokens (null / "both" / unknown) sort last. Single source of truth for
+// the "Arm C{index}" convention so deep delays (d20…d50) order/label correctly.
+export function armCandleIndex(fillMode) {
+    if (fillMode === "same") return 0;
+    if (fillMode === "next") return 1;
+    const dm = typeof fillMode === "string" ? fillMode.match(/^d(\d+)$/) : null;
+    return dm ? Number(dm[1]) : Number.MAX_SAFE_INTEGER;
+}
+
+// Human label for an arm fill mode: same→"Arm C0", next→"Arm C1", d{n}→"Arm C{n}".
+export function armLabel(fillMode) {
+    return `Arm C${armCandleIndex(fillMode)}`;
+}
+
+// True for the real arm fill modes (same / next / d{n}); excludes combined
+// (null / "both") and unknown tokens.
+function isArmFillMode(fillMode) {
+    return fillMode === "same" || fillMode === "next"
+        || (typeof fillMode === "string" && /^d\d+$/.test(fillMode));
+}
+
+// Build the ORDERED arm slots a run actually exposes for a given family+threshold,
+// straight from its available fill modes. Data-driven replacement for the legacy
+// hardcoded C0–C6 slot list: a d20…d50 run yields C20…C50, a C0–C6 run yields
+// C0…C6 — only the arms that exist, no dead placeholders.
+export function armSlotsFromFillModes(availableFillModes = []) {
+    return [...new Set(availableFillModes)]
+        .filter(isArmFillMode)
+        .sort((a, b) => armCandleIndex(a) - armCandleIndex(b))
+        .map((fillMode) => ({ fillMode, label: armLabel(fillMode) }));
+}
+
+// Choose a fill mode when selecting a family/threshold. Preference order:
+//   1. the requested mode if available
+//   2. combined/null (a bare/combined CSV exists)
+//   3. "same", then "next"
+//   4. the first available deep arm by candle index (d{n})
+//   5. null
+// Deep-aware (step 4) so a run with only d20…d50 lands on a real arm instead of a
+// non-existent combined key. Shallow C0–C6 runs are unaffected (resolved at 2–3).
+export function pickFillModeForSelection(availableFillModes = [], requested = null) {
+    const modes = Array.isArray(availableFillModes) ? availableFillModes : [...availableFillModes];
+    if (requested != null && modes.includes(requested)) return requested;
+    if (modes.includes(null)) return null;
+    if (modes.includes("both")) return null;
+    if (modes.includes("same")) return "same";
+    if (modes.includes("next")) return "next";
+    const deep = modes
+        .filter((fm) => typeof fm === "string" && /^d\d+$/.test(fm))
+        .sort((a, b) => armCandleIndex(a) - armCandleIndex(b))[0];
+    return deep ?? null;
+}
+
 export function safeFillModeWhenNoCombined(availableModesForFT) {
     if (!availableModesForFT) return null;
     const modes = Array.isArray(availableModesForFT) ? availableModesForFT : [...availableModesForFT];
     if (modes.includes("next")) return "next";
     if (modes.includes("same")) return "same";
-    return null;
+    // DEEP-DELAY: no combined/same/next exists (e.g. a d20…d50-only run) — fall back
+    // to the first real deep arm by candle index instead of null, so coerceFillMode
+    // produces a canonical key with a suffix that maps to an existing file.
+    const deep = modes
+        .filter((fm) => typeof fm === "string" && /^d\d+$/.test(fm))
+        .sort((a, b) => armCandleIndex(a) - armCandleIndex(b))[0];
+    return deep ?? null;
 }
 
 export function buildCanonicalKey(family, threshold, fillMode) {
@@ -830,6 +890,31 @@ export function derivePrimaryResultView(bundle) {
         }
     }
 
+    // ── 3b. Index/manifest-aware TE fallback (DEEP-DELAY) ───────────────────
+    // The row-based scans above need resident rows in `byMode`, which are EMPTY
+    // for a lazy/large run until a variant is selected — and the shallow suffix
+    // list never matches d20…d50 anyway. Fall back to the full key inventory
+    // (collectAllEntryKeys also reads the manifest entry-summary keys) and open
+    // on the first available Triggered Edge arm by candle index. Eager C0–C6 runs
+    // never reach here (resolved at step 2/3), so their behaviour is unchanged.
+    const inventoryKeys = collectAllEntryKeys(
+        bundle,
+        Array.isArray(bundle?.trades) ? bundle.trades : [],
+    );
+    const teArmKeys = inventoryKeys.filter(
+        (k) => familyFromKey(k) === "triggered_edge" && isArmFillModeKey(k),
+    );
+    if (teArmKeys.length > 0) {
+        const picked = [...teArmKeys]
+            .sort((a, b) => armCandleIndex(fillModeFromKey(a)) - armCandleIndex(fillModeFromKey(b)))[0];
+        return {
+            family: "triggered_edge",
+            threshold: extractThreshold(picked),
+            fillMode: fillModeFromKey(picked),
+            directionalStorageKey: null,
+        };
+    }
+
     // Penetration fallback
     const penKey = nonEmptyKeys
         .filter((k) => k.startsWith("entry_penetration"))
@@ -845,6 +930,12 @@ export function derivePrimaryResultView(bundle) {
 
     // ── 4. Final fallback ───────────────────────────────────────────────────
     return null;
+}
+
+// Helper for the index-aware TE fallback: does this key carry a real arm suffix?
+function isArmFillModeKey(key) {
+    const fm = fillModeFromKey(key);
+    return fm === "same" || fm === "next" || (typeof fm === "string" && /^d\d+$/.test(fm));
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
