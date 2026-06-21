@@ -41,6 +41,12 @@ const ARM_LEVELS = BE_ARM_LEVEL_CHOICES;
 const DEFAULT_ARM = 0.5;
 const DEFAULT_TRIGGER = "wick";
 
+// FREEZE-FIX #1 — candle-walk REPLAY is O(candles × arms) and runs synchronously on
+// the main thread. For large/lazy runs (or any run whose candle array exceeds this
+// cap) it blocks the whole app. Above this many candles we disable REPLAY and show
+// EXACT BE only. Small runs are unaffected.
+const REPLAY_CANDLE_CAP = 50000;
+
 // Base params — triggerBasis is NOT here; it comes from state so it can be toggled.
 const REPLAY_PARAMS = Object.freeze({
     stopMode:     "entry",
@@ -790,8 +796,21 @@ export function BreakevenTab({
 
     const noCandles = !Array.isArray(candles) || !candles.length;
 
+    // FREEZE-FIX #1 — block candle-walk REPLAY (and its full candle auto-load) for
+    // large/lazy runs or any run with more candles than the cap. EXACT BE needs no
+    // candles, so the tab stays fully usable; only the synchronous replay is skipped.
+    const replayBlocked = Boolean(
+        activeRun?.largeRun ||
+        activeRun?.lazy ||
+        (Array.isArray(candles) && candles.length > REPLAY_CANDLE_CAP)
+    );
+
     React.useEffect(() => {
         const token = ++loadTokenRef.current;
+
+        // Large/lazy runs: never auto-load the full candle set for replay (the load +
+        // parse alone can freeze the main thread). EXACT BE does not need candles.
+        if (replayBlocked) return;
 
         if (!noCandles) {
             setCandleLoadState("ready");
@@ -824,7 +843,7 @@ export function BreakevenTab({
                 if (token !== loadTokenRef.current) return;
                 setCandleLoadState("failed");
             });
-    }, [activeRunId, noCandles]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [activeRunId, noCandles, replayBlocked]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const [armLevelR, setArmLevelR]       = React.useState(DEFAULT_ARM);
     const [triggerBasis, setTriggerBasis] = React.useState(DEFAULT_TRIGGER);
@@ -890,8 +909,11 @@ export function BreakevenTab({
     React.useEffect(() => {
         // Re-check availability inside the effect so the dep array stays clean.
         const avail = beReplayAvailability(trades, candles);
+        // FREEZE-FIX #1 — REPLAY is only permitted when the candle-walk is available
+        // AND the run is not large/lazy. When blocked we still compute EXACT-only.
+        const canReplay = avail.available && !replayBlocked;
         // Nothing to show only when REPLAY can't run AND there is no EXACT data.
-        if (!avail.available && !hasExact) {
+        if (!canReplay && !hasExact) {
             setScenarios([]);
             return;
         }
@@ -920,8 +942,9 @@ export function BreakevenTab({
                 if (resolved.source === "EXACT") {
                     return { armLevelR: arm, summary: resolved.summary, source: "EXACT", scenarioKey: resolved.scenarioKey };
                 }
-                // REPLAY fallback — only if candle-walk is actually available.
-                if (avail.available) {
+                // REPLAY fallback — only if candle-walk is available AND not blocked
+                // (large/lazy runs skip replay entirely; EXACT arms above still resolve).
+                if (canReplay) {
                     const results = replayBeScenario(trades, candles, { ...REPLAY_PARAMS, triggerBasis, armLevelR: arm });
                     const summary = buildBeScenarioSummary(results, baseline);
                     return { armLevelR: arm, summary, source: "REPLAY", scenarioKey: null };
@@ -943,7 +966,7 @@ export function BreakevenTab({
             if (typeof cancelIdleCallback !== "undefined") cancelIdleCallback(handle);
             else clearTimeout(handle);
         };
-    }, [trades, candles, triggerBasis, hasExact, beEntryVariantKey, beResultsMap, beTradesByModeMap, beExecutionMode]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [trades, candles, triggerBasis, hasExact, beEntryVariantKey, beResultsMap, beTradesByModeMap, beExecutionMode, replayBlocked]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Must be before any early return (hooks rule).
     const tableColumns = React.useMemo(
@@ -1130,7 +1153,9 @@ export function BreakevenTab({
     // State 2 — missing:   load completed and genuinely no candles exist.
     // State 3 — unavailable: candles present but coverage/trades check failed.
     // EXACT backend results need no candles — only gate on candles for REPLAY.
-    if (noCandles && !hasExact) {
+    // FREEZE-FIX #1 — large/lazy runs never load candles for replay, so don't show the
+    // candle-required/preparing screens; fall through to the EXACT-only main view.
+    if (noCandles && !hasExact && !replayBlocked) {
         if (candleLoadState === "empty") {
             return (
                 <NeonPanel title="Break-even Replay · Candle Data Required" action={<Pill tone="muted">DATA REQUIRED</Pill>}>
@@ -1163,7 +1188,7 @@ export function BreakevenTab({
             </NeonPanel>
         );
     }
-    if (!availability.available && !hasExact) {
+    if (!availability.available && !hasExact && !replayBlocked) {
         let gateMsg;
         if (availability.reason === "low_coverage") {
             gateMsg = `Candle coverage too low (${availability.coveragePct}%). ${availability.resolvedCount} of ${availability.filledCount} trades can be resolved. Re-export with updated candles.`;
@@ -1258,6 +1283,16 @@ export function BreakevenTab({
 
     return (
         <div className="flex flex-col gap-4 pb-8">
+            {/* FREEZE-FIX #1 — large/lazy runs skip the synchronous candle-walk REPLAY
+                (it would block the main thread). EXACT BE is shown as-is. */}
+            {replayBlocked && (
+                <div className="flex items-center gap-2 px-3 py-2 clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.3)]">
+                    <span className="text-[11px] font-ui text-[hsl(var(--text-2))]">
+                        BE replay disabled for large/lazy runs. Showing EXACT BE results only.
+                    </span>
+                </div>
+            )}
+
             {/* BE entry-view selector — BE defaults to a VARIANT when variants were
                 run (baseline is a fallback). When the BE view differs from the active
                 result view, say so; the chips below switch between variants with BE. */}
