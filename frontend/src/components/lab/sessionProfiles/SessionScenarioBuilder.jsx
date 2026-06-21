@@ -140,6 +140,45 @@ function Field({ label, value, warn }) {
     );
 }
 
+// Custom RR target entry — compact row under the Target dropdown. Reuses the
+// existing target profile model: applies {type:"rr", value} via the caller's
+// write helper (setCohortValue / setGlobalDefaultValue). No separate state model.
+const TARGET_RR_MIN = 0.25;
+const TARGET_RR_MAX = 50;
+function CustomTargetInput({ onApply }) {
+    const [text, setText] = useState("");
+    const [err, setErr] = useState("");
+    const apply = () => {
+        const n = Number(String(text).trim());
+        if (!Number.isFinite(n) || n <= 0) { setErr("Enter a positive number"); return; }
+        if (n > TARGET_RR_MAX) { setErr(`Max ${TARGET_RR_MAX}R`); return; }
+        if (n < TARGET_RR_MIN) { setErr(`Min ${TARGET_RR_MIN}R`); return; }
+        setErr("");
+        setText("");
+        onApply({ type: "rr", value: n });
+    };
+    return (
+        <div className="flex items-center gap-2">
+            <span className="text-[10.5px] font-ui uppercase tracking-wider text-muted-lab w-24 shrink-0">Custom R</span>
+            <input
+                type="number"
+                inputMode="decimal"
+                step="0.05"
+                min={TARGET_RR_MIN}
+                max={TARGET_RR_MAX}
+                value={text}
+                placeholder="e.g. 2.7"
+                onChange={(e) => { setText(e.target.value); if (err) setErr(""); }}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); apply(); } }}
+                className="clip-bevel-sm bg-[hsl(var(--panel-2)/0.4)] border border-[hsl(var(--border-mid))] text-[12px] font-num text-[hsl(var(--text-1))] pl-2 pr-1 py-1 w-20"
+                data-testid="custom-target-input"
+            />
+            <button type="button" className={actionBtn} onClick={apply} data-testid="custom-target-apply"><Check size={12} />Apply</button>
+            {err && <span className="text-[10px] font-ui text-[hsl(var(--danger))]">{err}</span>}
+        </div>
+    );
+}
+
 function CohortCard({ profiles, sessionKey, cell, runRr }) {
     const eff = cell.effective;
     const [editing, setEditing] = useState(false);
@@ -184,6 +223,7 @@ function CohortCard({ profiles, sessionKey, cell, runRr }) {
                     <DimSelect dim="entry" currentRef={ov.entryRef} currentLabel={entryLabel} onPick={pick} />
                     <DimSelect dim="be" currentRef={ov.beRef} currentLabel={eff.beLabel} onPick={pick} />
                     <DimSelect dim="target" currentRef={ov.targetRef} currentLabel={targetLabel} onPick={pick} />
+                    <CustomTargetInput onApply={(sel) => setSessionProfiles(setCohortValue(profiles, sessionKey, cell.cell, "target", sel))} />
                 </div>
             ) : (
                 <div className="space-y-1">
@@ -241,6 +281,7 @@ function GlobalCard({ profiles, runRr }) {
                     <DimSelect dim="entry" currentRef={gd.entry} currentLabel={entryLabel} onPick={pick} />
                     <DimSelect dim="be" currentRef={gd.be} currentLabel={beLabel} onPick={pick} />
                     <DimSelect dim="target" currentRef={gd.target} currentLabel={targetLabel} onPick={pick} />
+                    <CustomTargetInput onApply={(sel) => setSessionProfiles(setGlobalDefaultValue(profiles, "target", sel))} />
                 </div>
             ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
