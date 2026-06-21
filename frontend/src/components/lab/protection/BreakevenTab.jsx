@@ -42,10 +42,15 @@ const DEFAULT_ARM = 0.5;
 const DEFAULT_TRIGGER = "wick";
 
 // FREEZE-FIX #1 — candle-walk REPLAY is O(candles × arms) and runs synchronously on
-// the main thread. For large/lazy runs (or any run whose candle array exceeds this
-// cap) it blocks the whole app. Above this many candles we disable REPLAY and show
-// EXACT BE only. Small runs are unaffected.
+// the main thread. For large/lazy runs (or any run whose candle file is large) it
+// blocks the whole app. Above this many candles we disable REPLAY and show EXACT BE
+// only. Small runs are unaffected.
 const REPLAY_CANDLE_CAP = 50000;
+// FREEZE-FIX #1b — the candle ARRAY length is 0 before the load, so it cannot gate the
+// load itself. We must use PRE-LOAD run metadata. candlesMeta.size is the candle-file
+// byte size from the run manifest (present before any candle load); 25 MB ≈ ~400k M1
+// rows, well past anything that should be JSON-parsed synchronously on the main thread.
+const LARGE_CANDLE_FILE_BYTES = 25 * 1024 * 1024; // 25 MB
 
 // Base params — triggerBasis is NOT here; it comes from state so it can be toggled.
 const REPLAY_PARAMS = Object.freeze({
@@ -796,14 +801,44 @@ export function BreakevenTab({
 
     const noCandles = !Array.isArray(candles) || !candles.length;
 
-    // FREEZE-FIX #1 — block candle-walk REPLAY (and its full candle auto-load) for
-    // large/lazy runs or any run with more candles than the cap. EXACT BE needs no
-    // candles, so the tab stays fully usable; only the synchronous replay is skipped.
+    // FREEZE-FIX #1 — block candle-walk REPLAY *and its full candle auto-load* for
+    // large/lazy runs. The loaded candle array is empty before the load, so it cannot
+    // gate the load — we read PRE-LOAD run metadata (candle count / file byte size from
+    // the manifest) instead. EXACT BE needs no candles, so the tab stays fully usable.
+    const estimatedCandleCount = Number(
+        activeRun?.candleCount
+        ?? activeRun?.candlesMeta?.count
+        ?? activeRun?.candlesMeta?.rowCount
+        ?? activeRun?.candlesMeta?.returnedCount
+        ?? activeRun?.summary?.candleCount
+        ?? NaN
+    );
+    const estimatedCandleBytes = Number(
+        activeRun?.candlesMeta?.size
+        ?? activeRun?.candlesMeta?.size_bytes
+        ?? activeRun?.candlesMeta?.bytes
+        ?? NaN
+    );
+    const candleLoadTooLarge =
+        (Number.isFinite(estimatedCandleCount) && estimatedCandleCount > REPLAY_CANDLE_CAP)
+        || (Number.isFinite(estimatedCandleBytes) && estimatedCandleBytes > LARGE_CANDLE_FILE_BYTES);
     const replayBlocked = Boolean(
         activeRun?.largeRun ||
         activeRun?.lazy ||
+        candleLoadTooLarge ||
         (Array.isArray(candles) && candles.length > REPLAY_CANDLE_CAP)
     );
+    // Human-readable reason for the disabled-replay banner.
+    const replayBlockReason =
+        activeRun?.largeRun ? "large run"
+        : activeRun?.lazy ? "lazy run"
+        : (Number.isFinite(estimatedCandleCount) && estimatedCandleCount > REPLAY_CANDLE_CAP)
+            ? `~${estimatedCandleCount.toLocaleString()} candles`
+        : (Number.isFinite(estimatedCandleBytes) && estimatedCandleBytes > LARGE_CANDLE_FILE_BYTES)
+            ? `candle file ~${Math.round(estimatedCandleBytes / (1024 * 1024))} MB`
+        : (Array.isArray(candles) && candles.length > REPLAY_CANDLE_CAP)
+            ? `${candles.length.toLocaleString()} candles loaded`
+        : "";
 
     React.useEffect(() => {
         const token = ++loadTokenRef.current;
@@ -1283,12 +1318,14 @@ export function BreakevenTab({
 
     return (
         <div className="flex flex-col gap-4 pb-8">
-            {/* FREEZE-FIX #1 — large/lazy runs skip the synchronous candle-walk REPLAY
-                (it would block the main thread). EXACT BE is shown as-is. */}
+            {/* FREEZE-FIX #1 — large/lazy / large-candle-file runs skip the synchronous
+                candle-walk REPLAY and its full candle load (both block the main thread).
+                EXACT BE needs no candles and is shown as-is. */}
             {replayBlocked && (
                 <div className="flex items-center gap-2 px-3 py-2 clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.3)]">
                     <span className="text-[11px] font-ui text-[hsl(var(--text-2))]">
-                        BE replay disabled for large/lazy runs. Showing EXACT BE results only.
+                        BE replay disabled for large candle datasets. Showing EXACT BE results only.
+                        {replayBlockReason ? <span className="text-[hsl(var(--text-2)/0.7)]"> ({replayBlockReason})</span> : null}
                     </span>
                 </div>
             )}
