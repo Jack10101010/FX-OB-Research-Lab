@@ -48,6 +48,59 @@ export function useLazyEntryVariant(runId, universe, runData) {
 }
 
 /**
+ * Resolve the entry-variant CSV file name for a canonical key (mirrors the
+ * tradeUniverse deriveSourceFile naming: trades_<variant>__<key>.csv, preferring
+ * an exact match in the run's exported sourceFiles list).
+ */
+function entryVariantFileForKey(runData, variant, key) {
+    if (!key) return null;
+    const er = runData?.entryResults || {};
+    const sources = er.sourceFiles || er.source_files || [];
+    const matched = sources.find((name) => {
+        const lower = String(name).toLowerCase();
+        return lower.endsWith(`__${key}.csv`) || lower.endsWith(`${key}.csv`);
+    });
+    return matched || (variant ? `trades_${variant}__${key}.csv` : `${key}.csv`);
+}
+
+/**
+ * PHASE 2 — Ensure EACH pinned entry-variant's rows are loaded for a lazy run.
+ * Loads one CSV per pinned key that isn't already resident — never the full set.
+ * `ensureVariantTrades` is idempotent + in-flight de-duped, so repeated calls are
+ * safe; the effect re-runs only when the set of not-yet-resident keys changes
+ * (keyed on a stable signature), so it can't loop. No-op for small/eager runs.
+ * @param runId       the run id
+ * @param runData     the run record (carries `lazy`, entryResults.tradesByMode/sourceFiles)
+ * @param variantKeys canonical pinned keys (already filtered to this run's discovered set)
+ * @param variant     the active trade variant (e.g. "single_position")
+ */
+export function useLazyEntryVariants(runId, runData, variantKeys, variant) {
+    const lazy = Boolean(runData?.lazy);
+    const tbm  = runData?.entryResults?.tradesByMode || {};
+    const keys = Array.isArray(variantKeys) ? variantKeys : [];
+    // Pinned keys whose rows are NOT resident yet.
+    const needKeys = keys.filter((k) => {
+        const resident = tbm[`${variant}__${k}`] || tbm[k];
+        return k && !(Array.isArray(resident) && resident.length);
+    });
+    const signature = needKeys.join("|");
+
+    useEffect(() => {
+        if (!lazy || !needKeys.length) return undefined;
+        let cancelled = false;
+        needKeys.forEach((k) => {
+            const file = entryVariantFileForKey(runData, variant, k);
+            if (!file) return;
+            ensureVariantTrades(runId, file).catch(() => { /* surfaced elsewhere */ });
+        });
+        return () => { cancelled = true; };
+        // `signature` captures the meaningful change; runData identity churns on every
+        // store notify and must not be a dep (would re-fire every render).
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [runId, variant, lazy, signature]);
+}
+
+/**
  * Ensure ONE selected BE scenario's rows are loaded for a lazy run.
  * @param runId     the run id
  * @param runData   the run record (carries `lazy` + `beScenarioIndex`)

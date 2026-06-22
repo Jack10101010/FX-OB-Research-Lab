@@ -47,7 +47,7 @@ function buildVariantOptions(runData, trades) {
     return views;
 }
 
-export function EntryVariantSelector({ runId, runData, trades, setSelectedModelKey }) {
+export function EntryVariantSelector({ runId, runData, trades, setSelectedModelKey, addVariantKey }) {
     const { resultView, setResultView, universe, lazyStatus } = useRunVariant(runId);
     const [open, setOpen] = React.useState(false);
     const [query, setQuery] = React.useState("");
@@ -78,10 +78,15 @@ export function EntryVariantSelector({ runId, runData, trades, setSelectedModelK
         // Drive the SHARED store scenario — this is what RunDetail uses, and it triggers
         // the existing single-CSV lazy load for this one variant.
         setResultView({ family: opt.family, threshold: opt.threshold, fillMode: opt.fillMode });
+        const canonicalKey = opt.family === "baseline"
+            ? null
+            : buildCanonicalKey(opt.family, opt.threshold, opt.fillMode);
         if (typeof setSelectedModelKey === "function") {
-            setSelectedModelKey(opt.family === "baseline"
-                ? null
-                : buildCanonicalKey(opt.family, opt.threshold, opt.fillMode));
+            setSelectedModelKey(canonicalKey);
+        }
+        // PHASE 2 — pin the picked variant to the comparison set (de-duped in the hook).
+        if (canonicalKey && typeof addVariantKey === "function") {
+            addVariantKey(canonicalKey);
         }
         setOpen(false);
         setQuery("");

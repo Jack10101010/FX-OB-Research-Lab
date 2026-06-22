@@ -20,14 +20,17 @@ const MODEL_COLORS = [
     "#34d399",
 ];
 
-export function EquityCurvePanel({ exactRows, tradesByMode, activeVariant }) {
+export function EquityCurvePanel({ exactRows, tradesByMode, activeVariant, baselineTrades }) {
     const curves = useMemo(
-        () => buildAllModelCurves(exactRows, tradesByMode, activeVariant),
-        [exactRows, tradesByMode, activeVariant],
+        () => buildAllModelCurves(exactRows, tradesByMode, activeVariant, baselineTrades),
+        [exactRows, tradesByMode, activeVariant, baselineTrades],
     );
     const [selectedModes, setSelectedModes] = useLocalStorageState("fxob_entries_workspace_equity_selected_models_v1", []);
     const [chartMode, setChartMode] = useLocalStorageState("fxob_entries_workspace_chart_toggles_v1", { equityMode: "equity" });
     const showDD = chartMode?.equityMode === "drawdown";
+    // PHASE 2 — dedicated Baseline curve toggle (default ON). Independent of the per-variant
+    // model toggles: turning it off hides ONLY the baseline curve; variants stay visible.
+    const [showBaseline, setShowBaseline] = useLocalStorageState("fxob_entries_workspace_equity_show_baseline_v1", true);
 
     useEffect(() => {
         if (!curves.length) return;
@@ -49,7 +52,8 @@ export function EquityCurvePanel({ exactRows, tradesByMode, activeVariant }) {
         });
     };
 
-    const visibleCurves = curves.filter(c => selected.has(c.mode));
+    const visibleCurves = curves.filter(c => (c.isBaseline ? showBaseline : selected.has(c.mode)));
+    const hasBaselineCurve = curves.some(c => c.isBaseline);
     const chartCurves = useMemo(() => {
         if (!showDD) return visibleCurves;
         return visibleCurves.map(curve => ({
@@ -79,6 +83,18 @@ export function EquityCurvePanel({ exactRows, tradesByMode, activeVariant }) {
             className="xl:col-span-3"
             action={
                 <div className="flex items-center gap-2">
+                    {hasBaselineCurve && (
+                        <button
+                            type="button"
+                            onClick={() => setShowBaseline(v => !v)}
+                            className={cn("px-2.5 py-1 text-[9.5px] font-ui uppercase tracking-wider clip-bevel-sm border transition-colors",
+                                showBaseline ? "border-[hsl(var(--accent-secondary)/0.5)] text-[hsl(var(--accent-secondary))] bg-[hsl(var(--accent-secondary)/0.08)]"
+                                             : "border-[hsl(var(--border-soft))] text-muted-lab hover:text-white")}
+                            title="Show / hide the Baseline · Edge Touch curve"
+                        >
+                            {showBaseline ? "Baseline: On" : "Baseline: Off"}
+                        </button>
+                    )}
                     <button
                         type="button"
                         onClick={() => setChartMode(prev => ({ ...prev, equityMode: showDD ? "equity" : "drawdown" }))}
@@ -92,29 +108,32 @@ export function EquityCurvePanel({ exactRows, tradesByMode, activeVariant }) {
                 </div>
             }
         >
-            {/* Model toggles */}
+            {/* Variant toggles — baseline is governed by the dedicated Baseline toggle above. */}
             <div className="flex flex-wrap gap-2 mb-4">
-                {curves.map((c, i) => (
-                    <button
-                        key={c.mode}
-                        type="button"
-                        onClick={() => toggleModel(c.mode)}
-                        className={cn(
-                            "flex items-center gap-1.5 px-2.5 py-1 clip-bevel-sm border text-[10px] font-ui uppercase tracking-wider transition-colors",
-                            selected.has(c.mode)
-                                ? "border-transparent text-white"
-                                : "border-[hsl(var(--border-soft))] text-muted-lab opacity-50",
-                        )}
-                        style={selected.has(c.mode) ? {
-                            borderColor: MODEL_COLORS[i % MODEL_COLORS.length].replace(")", "/0.5)"),
-                            background: MODEL_COLORS[i % MODEL_COLORS.length].replace(")", "/0.12)"),
-                            color: MODEL_COLORS[i % MODEL_COLORS.length],
-                        } : undefined}
-                    >
-                        <span className="w-2 h-2 rounded-full" style={{ background: MODEL_COLORS[i % MODEL_COLORS.length] }} />
-                        {c.label}
-                    </button>
-                ))}
+                {curves.filter(c => !c.isBaseline).map((c) => {
+                    const i = curves.indexOf(c);
+                    return (
+                        <button
+                            key={c.mode}
+                            type="button"
+                            onClick={() => toggleModel(c.mode)}
+                            className={cn(
+                                "flex items-center gap-1.5 px-2.5 py-1 clip-bevel-sm border text-[10px] font-ui uppercase tracking-wider transition-colors",
+                                selected.has(c.mode)
+                                    ? "border-transparent text-white"
+                                    : "border-[hsl(var(--border-soft))] text-muted-lab opacity-50",
+                            )}
+                            style={selected.has(c.mode) ? {
+                                borderColor: MODEL_COLORS[i % MODEL_COLORS.length].replace(")", "/0.5)"),
+                                background: MODEL_COLORS[i % MODEL_COLORS.length].replace(")", "/0.12)"),
+                                color: MODEL_COLORS[i % MODEL_COLORS.length],
+                            } : undefined}
+                        >
+                            <span className="w-2 h-2 rounded-full" style={{ background: MODEL_COLORS[i % MODEL_COLORS.length] }} />
+                            {c.label}
+                        </button>
+                    );
+                })}
             </div>
 
             <ResponsiveContainer width="100%" height={320}>

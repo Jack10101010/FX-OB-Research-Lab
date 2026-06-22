@@ -21,12 +21,17 @@ export function buildModelEquityCurve(trades, label, color) {
     });
 }
 
-export function buildAllModelCurves(exactRows, tradesByMode, activeVariant) {
+export function buildAllModelCurves(exactRows, tradesByMode, activeVariant, baselineTrades) {
     const curves = [];
     exactRows.forEach(row => {
         if (!row.exact) return;
         const modeKey   = String(row.mode).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
-        const modeTrades = tradesByMode?.[`${activeVariant}__${modeKey}`] || tradesByMode?.[modeKey] || [];
+        let modeTrades = tradesByMode?.[`${activeVariant}__${modeKey}`] || tradesByMode?.[modeKey] || [];
+        // Baseline trades live in the top-level base trade list, not in tradesByMode — fall
+        // back to the supplied baselineTrades so the Baseline · Edge Touch curve renders.
+        if (!modeTrades.length && row.isBaseline && Array.isArray(baselineTrades) && baselineTrades.length) {
+            modeTrades = baselineTrades;
+        }
         if (modeTrades.length) {
             curves.push({
                 mode:   row.mode,

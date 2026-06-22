@@ -6,11 +6,13 @@
 import { useSearchParams } from "react-router-dom";
 import { useState, useCallback, useEffect, useRef } from "react";
 import { sessionOf } from "../analytics/entryFormatters";
+import { canonicalEntryMode } from "../analytics/entryAnalytics";
 
-const LS_FILTERS = "fxob_entries_workspace_filters_v1";
-const LS_COLS    = "fxob_entries_workspace_exact_columns_v1";
-const LS_MODEL   = "fxob_entries_workspace_model_selection_v1";
-const LS_TAB     = "fxob_entries_workspace_tab_state_v1";
+const LS_FILTERS  = "fxob_entries_workspace_filters_v1";
+const LS_COLS     = "fxob_entries_workspace_exact_columns_v1";
+const LS_MODEL    = "fxob_entries_workspace_model_selection_v1";
+const LS_TAB      = "fxob_entries_workspace_tab_state_v1";
+const LS_VARIANTS = "fxob_entries_selected_variants_v1";
 
 const DEFAULT_FILTERS = {
     sessions:   [],    // [] = all sessions
@@ -67,6 +69,26 @@ export function useLocalStorageState(key, initialValue) {
     }, [key]);
 
     return [value, setValue];
+}
+
+// PHASE 2 — pinned entry-variant keys (canonical). Persisted as a string[]. When no
+// pinned set exists yet, seed from the single highlight key (LS_MODEL) so a Phase-1
+// selection carries over. Non-destructive: LS_MODEL is left untouched.
+function loadSelectedVariants() {
+    try {
+        const raw = localStorage.getItem(LS_VARIANTS);
+        const parsed = raw ? JSON.parse(raw) : null;
+        if (Array.isArray(parsed)) {
+            const arr = parsed.filter((k) => typeof k === "string" && k);
+            if (arr.length) return arr;
+        }
+    } catch {}
+    try {
+        const rawModel = localStorage.getItem(LS_MODEL);
+        const model = rawModel ? JSON.parse(rawModel) : null;
+        if (typeof model === "string" && model) return [model];
+    } catch {}
+    return [];
 }
 
 function loadFilters() {
@@ -132,6 +154,46 @@ export function useEntryWorkspace() {
         } catch {}
     }, []);
 
+    // PHASE 2 — pinned variant keys (the comparison set shown in the table). `selectedModelKey`
+    // stays the highlight/focus key; this array is the multi-select set.
+    const [selectedVariantKeys, setSelectedVariantKeysState] = useState(loadSelectedVariants);
+
+    const setSelectedVariantKeys = useCallback((patch) => {
+        setSelectedVariantKeysState(prev => {
+            const base = Array.isArray(prev) ? prev : [];
+            const raw  = typeof patch === "function" ? patch(base) : patch;
+            // canonical de-dupe, drop falsy — keep first occurrence (stable order)
+            const seen = new Set();
+            const next = (Array.isArray(raw) ? raw : []).filter((k) => {
+                if (!k) return false;
+                const c = canonicalEntryMode(k);
+                if (seen.has(c)) return false;
+                seen.add(c);
+                return true;
+            });
+            try { localStorage.setItem(LS_VARIANTS, JSON.stringify(next)); } catch {}
+            return next;
+        });
+    }, []);
+
+    const addVariantKey = useCallback((key) => {
+        if (!key) return;
+        setSelectedVariantKeys(prev => {
+            const c = canonicalEntryMode(key);
+            return (prev || []).some(k => canonicalEntryMode(k) === c) ? prev : [...(prev || []), key];
+        });
+    }, [setSelectedVariantKeys]);
+
+    const removeVariantKey = useCallback((key) => {
+        if (!key) return;
+        setSelectedVariantKeys(prev => {
+            const c = canonicalEntryMode(key);
+            return (prev || []).filter(k => canonicalEntryMode(k) !== c);
+        });
+    }, [setSelectedVariantKeys]);
+
+    const clearVariantKeys = useCallback(() => setSelectedVariantKeys([]), [setSelectedVariantKeys]);
+
     const toggleSession = useCallback((session) => {
         setFilters(prev => {
             const has  = prev.sessions.includes(session);
@@ -172,6 +234,7 @@ export function useEntryWorkspace() {
         filters, setFilters, toggleSession, toggleDirection, clearFilters, hasActiveFilters, applyFilters,
         colVis, setColVis,
         selectedModelKey, setSelectedModelKey,
+        selectedVariantKeys, addVariantKey, removeVariantKey, clearVariantKeys,
         TABS,
     };
 }

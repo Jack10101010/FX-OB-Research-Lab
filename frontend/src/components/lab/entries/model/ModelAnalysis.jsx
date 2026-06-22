@@ -112,8 +112,8 @@ export function ModelAnalysis({
     // Build equity curves only when tradesByMode is available
     const curvesData = useMemo(() => {
         if (!tradesByMode || !exactRows?.length) return null;
-        return buildAllModelCurves(exactRows, tradesByMode, activeVariant);
-    }, [exactRows, tradesByMode, activeVariant]);
+        return buildAllModelCurves(exactRows, tradesByMode, activeVariant, trades);
+    }, [exactRows, tradesByMode, activeVariant, trades]);
 
     // Ghost data presence check — drives Trigger Behavior tier visibility.
     const hasGhostData = useMemo(() => {
@@ -260,6 +260,7 @@ export function ModelAnalysis({
                     curvesData={curvesData}
                     tradesByMode={tradesByMode}
                     activeVariant={activeVariant}
+                    baselineTrades={trades}
                 />
                 <TradeOffPanel
                     exactRows={exactRows || []}

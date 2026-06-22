@@ -1,7 +1,9 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useEffect, useRef } from "react";
 import { useDataset } from "@/data/store";
 import { collectAllEntryKeys, buildCanonicalKey } from "@/data/tradeUniverse";
 import { useRunVariant } from "@/data/useRunVariant";
+import { useLazyEntryVariants } from "@/data/useLazyRows";
+import { cn } from "@/lib/utils";
 import { extractOffTrades } from "@/data/fftPairingResolver";
 import { computePairedFftAnalytics } from "@/data/fftPairingAnalytics";
 import { useEntryWorkspace, useModelSelectionGuard } from "./shared/useEntryWorkspace";
@@ -60,6 +62,7 @@ export function EntriesWorkspace() {
         filters, toggleSession, toggleDirection, clearFilters, hasActiveFilters, applyFilters,
         colVis, setColVis,
         selectedModelKey, setSelectedModelKey,
+        selectedVariantKeys, addVariantKey, removeVariantKey,
         TABS,
     } = useEntryWorkspace();
 
@@ -86,10 +89,10 @@ export function EntriesWorkspace() {
         [activeRun, trades],
     );
 
-    // PHASE 1 — Baseline + active-variant row model. The table is NO LONGER built from the
-    // static PLANNED_ENTRY_MODES set (buildEntryResultRows). It shows ONLY the edge-touch
-    // baseline plus the one variant currently active in the store scenario. The selector
-    // reflects THIS (resultView / universe.sourceKey), not the toggleable `selectedModelKey`.
+    // PHASE 2 — Baseline + user-pinned variants. The table is NOT built from the static
+    // PLANNED_ENTRY_MODES set; it shows the edge-touch baseline plus every PINNED variant that
+    // exists in this run. The selector reflects the active store scenario (resultView /
+    // universe.sourceKey); `selectedModelKey` is the highlight/focus key only.
     const { resultView: activeResultView, universe: activeUniverse } = useRunVariant(activeRunId);
     const scenarioKey = useMemo(() => {
         if (activeUniverse?.sourceKey && activeUniverse.sourceKey !== "baseline") return activeUniverse.sourceKey;
@@ -99,21 +102,42 @@ export function EntriesWorkspace() {
         return null;
     }, [activeUniverse, activeResultView]);
 
-    // exactRows = Baseline · Edge Touch (always) + the active DISCOVERED variant (when any),
-    // built from resident summary metrics / lazily-loaded rows (null-metric placeholder until
-    // they land — never fabricated 0R). `selectedModelKey` is highlight-only; row existence
-    // follows `scenarioKey`. No active variant (null / baseline / not discovered) → baseline
-    // only. One variant → one CSV — never the full 71.
+    // Pinned keys that actually exist in THIS run (stale keys from another run are dropped).
+    const appliedVariantKeys = useMemo(
+        () => (selectedVariantKeys || []).filter((k) => discoveredModelKeys.includes(k)),
+        [selectedVariantKeys, discoveredModelKeys],
+    );
+
+    // Auto-seed the active scenario ONCE per run when nothing applicable is pinned, so the
+    // page isn't empty and RunDetail's active variant carries over. Guarded per-run so a user
+    // who clears all chips isn't fought.
+    const seedRunRef = useRef(null);
+    useEffect(() => {
+        if (!activeRunId) return;
+        if (appliedVariantKeys.length === 0
+            && scenarioKey && discoveredModelKeys.includes(scenarioKey)
+            && seedRunRef.current !== activeRunId) {
+            seedRunRef.current = activeRunId;
+            addVariantKey(scenarioKey);
+        }
+    }, [activeRunId, appliedVariantKeys, scenarioKey, discoveredModelKeys, addVariantKey]);
+
+    // Lazy-load ONLY the pinned variants' rows (one CSV each) for lazy runs — never all 71.
+    useLazyEntryVariants(activeRunId, runWithEntryResults, appliedVariantKeys, ACTIVE_TRADE_VARIANT);
+
+    // exactRows = Baseline · Edge Touch (always) + one row per pinned variant present in this
+    // run, built from resident summary metrics / lazily-loaded rows (null-metric placeholder
+    // until they land — never fabricated 0R). `selectedModelKey` is highlight-only.
     const exactRows = useMemo(() => {
         const baseline = baselineEntryRow(filteredTrades);
         const rows = [baseline];
-        if (scenarioKey && discoveredModelKeys.includes(scenarioKey)) {
-            const extra = entryRowForSelectedKey(activeRun, scenarioKey, baseline, ACTIVE_TRADE_VARIANT);
+        appliedVariantKeys.forEach((k) => {
+            const extra = entryRowForSelectedKey(activeRun, k, baseline, ACTIVE_TRADE_VARIANT);
             if (extra) rows.push(extra);
-        }
+        });
         markHighlights(rows);
         return rows;
-    }, [filteredTrades, scenarioKey, discoveredModelKeys, activeRun, ACTIVE_TRADE_VARIANT]);
+    }, [filteredTrades, appliedVariantKeys, activeRun, ACTIVE_TRADE_VARIANT]);
 
     // Selectable model keys for THIS run (what selectedModelKey is matched against
     // across the workspace) and the subset that has a built-in FFT-OFF control.
@@ -227,16 +251,61 @@ export function EntriesWorkspace() {
                 exactRows={exactRows}
             />
 
-            {/* Entry-variant selector — pick ONE discovered variant (e.g. Triggered Edge
-                25% · Arm C40) to analyse vs the edge-touch baseline. Drives the shared
-                store scenario so only that one variant's CSV lazy-loads. */}
+            {/* Entry-variant selector — pick discovered variants (e.g. Triggered Edge 25% ·
+                Arm C40) to PIN against the edge-touch baseline. Picking adds the variant to
+                the comparison set + drives the shared store scenario so only that one
+                variant's CSV lazy-loads. */}
             {activeRunId && (
                 <EntryVariantSelector
                     runId={activeRunId}
                     runData={activeRun}
                     trades={trades}
                     setSelectedModelKey={setSelectedModelKey}
+                    addVariantKey={addVariantKey}
                 />
+            )}
+
+            {/* Pinned-variant chips — the comparison set. Each chip removes its row (and, if
+                it was the highlighted/focus row, the highlight falls back to another pinned
+                variant or baseline). Baseline is implicit and not shown as a removable chip. */}
+            {activeRunId && exactRows.some((r) => r && !r.isBaseline) && (
+                <div className="mt-2 flex flex-wrap items-center gap-2 px-6">
+                    <span className="text-[10px] font-ui uppercase tracking-[0.08em] text-[hsl(var(--text-2))]">Pinned</span>
+                    {exactRows.filter((r) => r && !r.isBaseline && r.mode).map((r) => (
+                        <span
+                            key={r.mode}
+                            className={cn(
+                                "inline-flex items-center gap-1.5 clip-bevel-sm border px-2 py-1 text-[10px] font-ui transition-colors",
+                                r.mode === selectedModelKey
+                                    ? "border-[hsl(var(--accent-primary)/0.6)] bg-[hsl(var(--accent-primary)/0.12)] text-[hsl(var(--accent-primary))]"
+                                    : "border-[hsl(var(--border-mid))] text-[hsl(var(--text-1))]",
+                            )}
+                        >
+                            <button
+                                type="button"
+                                onClick={() => setSelectedModelKey(r.mode === selectedModelKey ? null : r.mode)}
+                                className="truncate max-w-[220px] hover:text-white"
+                                title="Focus this variant"
+                            >
+                                {r.label || r.mode}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    removeVariantKey(r.mode);
+                                    if (selectedModelKey === r.mode) {
+                                        const next = exactRows.find((o) => o && !o.isBaseline && o.mode && o.mode !== r.mode);
+                                        setSelectedModelKey(next?.mode || null);
+                                    }
+                                }}
+                                className="text-[hsl(var(--text-2))] hover:text-[hsl(var(--danger))] leading-none"
+                                title="Remove variant"
+                            >
+                                ×
+                            </button>
+                        </span>
+                    ))}
+                </div>
             )}
 
             {/* RESEARCH-RESULT-VIEW-BANNER: multi-model page → truthful CONTEXT banner
