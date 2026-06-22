@@ -206,6 +206,7 @@ export function useModelSelectionGuard({
     controlBackedKeys,
     selectedModelKey,
     setSelectedModelKey,
+    discoveredModelKeys = [],
 }) {
     const lastRunRef = useRef(null);
     useEffect(() => {
@@ -213,9 +214,12 @@ export function useModelSelectionGuard({
         if (available.length === 0) return; // run not loaded yet — don't touch the selection
 
         const runChanged = lastRunRef.current !== runId;
+        // A variant chosen from the metadata selector may not have RESIDENT rows yet, so
+        // it is valid if present in the discovered universe even when not in `available`.
+        const discovered = Array.isArray(discoveredModelKeys) ? discoveredModelKeys : [];
 
         // Valid selection for this run — keep it.
-        if (selectedModelKey && available.includes(selectedModelKey)) {
+        if (selectedModelKey && (available.includes(selectedModelKey) || discovered.includes(selectedModelKey))) {
             lastRunRef.current = runId;
             return;
         }
@@ -229,5 +233,5 @@ export function useModelSelectionGuard({
             if (next && next !== selectedModelKey) setSelectedModelKey(next);
         }
         lastRunRef.current = runId;
-    }, [runId, availableModelKeys, controlBackedKeys, selectedModelKey, setSelectedModelKey]);
+    }, [runId, availableModelKeys, controlBackedKeys, selectedModelKey, setSelectedModelKey, discoveredModelKeys]);
 }

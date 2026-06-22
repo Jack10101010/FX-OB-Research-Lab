@@ -25,6 +25,7 @@ import {
     isFiniteNumber, num, round1, normalizeMode, normalizePct,
     firstNumber, parseDate, sessionOf, dayIndex, SESSIONS,
 } from "./entryFormatters";
+import { familyFromKey, extractThreshold, fillModeFromKey, armCandleIndex } from "@/data/tradeUniverse";
 
 // ── Primitive helpers ────────────────────────────────────────────────────────
 
@@ -32,7 +33,7 @@ export function rOf(trade) {
     return Number.isFinite(Number(trade?.r)) ? Number(trade.r) : 0;
 }
 
-function canonicalEntryMode(value) {
+export function canonicalEntryMode(value) {
     return normalizeMode(value).replace(/^entry_penetration_(\d+)$/, "entry_penetration_$1p0");
 }
 
@@ -321,6 +322,85 @@ export function buildEntryResultRows(run, trades, selectedVariant) {
     });
     markHighlights(rows);
     return rows;
+}
+
+// ── Selected dynamic variant row (Option A) ──────────────────────────────────
+// PLANNED_ENTRY_MODES enumerates only a static subset, so a DISCOVERED deep/dynamic
+// variant (e.g. entry_triggered_edge_25p0_d40 = "Triggered Edge 25% · Arm C40") never
+// becomes a row in buildEntryResultRows. This builds ONE row for the SELECTED key from
+// data already resident — summary metrics (flattenEntrySummary) and/or the lazily-loaded
+// rows in tradesByMode — without touching PLANNED_ENTRY_MODES or loading any other
+// variant. Returns null when nothing real exists yet (no fake 0R KPIs).
+
+// A planned-mode template to inherit family metadata (familyType / metricsProfile /
+// requiresLifecycleFunnel / supportedDimensions) so the synthetic row behaves like its
+// siblings. Cloned from the first PLANNED entry of the same family; baseline as fallback.
+function plannedTemplateForFamily(familyKey) {
+    const prefix = familyKey === "triggered_edge" ? "entry_triggered_edge_"
+        : familyKey === "penetration" ? "entry_penetration_"
+        : null;
+    if (prefix) {
+        const t = PLANNED_ENTRY_MODES.find((p) => typeof p.mode === "string" && p.mode.startsWith(prefix));
+        if (t) return t;
+    }
+    return PLANNED_ENTRY_MODES.find((p) => p.mode === "baseline") || {};
+}
+
+function summaryHasMetrics(src) {
+    if (!src || typeof src !== "object") return false;
+    return firstNumber(src, "net_r", "netR", "net", "net_r_total") != null
+        || firstNumber(src, "fills", "filled", "filled_trades", "fill_count") != null
+        || firstNumber(src, "eligible_setups", "eligible", "trades", "trade_count", "total_trades") != null
+        || firstNumber(src, "wins", "winning_trades") != null;
+}
+
+export function entryRowForSelectedKey(run, key, baseline, activeVariant = "single_position") {
+    if (!run || !key) return null;
+    const canonical = canonicalEntryMode(key);
+    if (canonical === "baseline") return null;
+
+    const entryResults = run.entryResults || {};
+
+    // Summary metrics for this exact mode (if the run exported them / they're resident).
+    const summaryRows = flattenEntrySummary(entryResults.summary || run?.summary?.entry_results || {}, activeVariant);
+    const src = summaryRows.find((r) => canonicalEntryMode(r.mode) === canonical) || null;
+
+    // Resident rows merged by the lazy loader (ensureVariantTrades) — try both key forms.
+    const tbm = entryResults.tradesByMode || {};
+    const modeTrades = tbm[`${activeVariant}__${canonical}`] || tbm[canonical]
+        || tbm[`${activeVariant}__${key}`] || tbm[key] || null;
+
+    const hasSummary = summaryHasMetrics(src);
+    const hasRows    = Array.isArray(modeTrades) && modeTrades.length > 0;
+
+    // Descriptor derived from the key (family / threshold / arm), labelled like the
+    // selector + RunDetail: "Triggered Edge 25% · Arm C40".
+    const familyKey = familyFromKey(canonical);
+    const threshold = extractThreshold(canonical);
+    const fillMode  = fillModeFromKey(canonical);
+    const template  = plannedTemplateForFamily(familyKey);
+    const familyLabel = familyKey === "triggered_edge" ? "Triggered Edge"
+        : familyKey === "penetration" ? "Penetration"
+        : (template.family || String(familyKey || "").replace(/_/g, " "));
+    const arm = armCandleIndex(fillMode);
+    const threshStr = threshold != null ? ` ${threshold}%` : "";
+    const armStr = (familyKey === "penetration" || !Number.isFinite(arm) || arm === Number.MAX_SAFE_INTEGER)
+        ? "" : ` · Arm C${arm}`;
+    const label = `${familyLabel}${threshStr}${armStr}`;
+    const planned = { ...template, mode: canonical, label, family: familyLabel, threshold };
+
+    if (hasSummary || hasRows) {
+        // Real row — entryRowFromSummary computes deltaVsBaseline vs the edge-touch baseline.
+        return entryRowFromSummary(planned, src || {}, baseline, hasRows ? modeTrades : null);
+    }
+    // Neither summary metrics nor resident rows yet → loading placeholder, NOT fake 0s.
+    return {
+        ...planned,
+        exact: true, isBaseline: false, selectedPending: true,
+        eligible: null, trades: null, fills: null, fillPct: null,
+        wins: null, losses: null, winRate: null, netR: null, expectancy: null,
+        maxDD: null, deltaVsBaseline: null,
+    };
 }
 
 // ── Highlights ────────────────────────────────────────────────────────────────

@@ -1,14 +1,17 @@
 import React, { useMemo } from "react";
 import { useDataset } from "@/data/store";
+import { collectAllEntryKeys, buildCanonicalKey } from "@/data/tradeUniverse";
+import { useRunVariant } from "@/data/useRunVariant";
 import { extractOffTrades } from "@/data/fftPairingResolver";
 import { computePairedFftAnalytics } from "@/data/fftPairingAnalytics";
 import { useEntryWorkspace, useModelSelectionGuard } from "./shared/useEntryWorkspace";
 import { WorkspaceTabBar } from "./shared/WorkspaceTabBar";
 import { GlobalFilterBar } from "./shared/GlobalFilterBar";
 import { EntryWorkspaceHeader } from "./shared/EntryWorkspaceHeader";
+import { EntryVariantSelector } from "./shared/EntryVariantSelector";
 import ResearchContextBanner from "@/components/lab/ResearchContextBanner";
 import { buildBannerRunIdentity } from "@/components/lab/researchBanner/bannerRun";
-import { buildEntryResultRows, buildExactSummary, buildEntryAnalytics } from "./analytics/entryAnalytics";
+import { buildExactSummary, buildEntryAnalytics, entryRowForSelectedKey, baselineEntryRow, markHighlights } from "./analytics/entryAnalytics";
 import { ModelAnalysis } from "./model/ModelAnalysis";
 import { ExperimentCompare } from "./compare/ExperimentCompare";
 import { EntryHypothesisLab } from "./hypothesis/EntryHypothesisLab";
@@ -75,11 +78,42 @@ export function EntriesWorkspace() {
         activeRun ? { ...activeRun, entryResults } : null
     ), [activeRun, entryResults]);
 
-    // Core entry rows — always built from full trades + active run data
-    const exactRows = useMemo(
-        () => buildEntryResultRows(runWithEntryResults, filteredTrades, ACTIVE_TRADE_VARIANT),
-        [runWithEntryResults, filteredTrades, ACTIVE_TRADE_VARIANT],
+    // VARIANT DISCOVERY (consistent with RunDetail) — RunDetail lists variants from the
+    // canonical `collectAllEntryKeys` (which unions resident rows AND entryResults.summary /
+    // entry keys), so it shows variants even when their rows aren't resident.
+    const discoveredModelKeys = useMemo(
+        () => collectAllEntryKeys(activeRun || {}, trades).filter((k) => k && k !== "baseline"),
+        [activeRun, trades],
     );
+
+    // PHASE 1 — Baseline + active-variant row model. The table is NO LONGER built from the
+    // static PLANNED_ENTRY_MODES set (buildEntryResultRows). It shows ONLY the edge-touch
+    // baseline plus the one variant currently active in the store scenario. The selector
+    // reflects THIS (resultView / universe.sourceKey), not the toggleable `selectedModelKey`.
+    const { resultView: activeResultView, universe: activeUniverse } = useRunVariant(activeRunId);
+    const scenarioKey = useMemo(() => {
+        if (activeUniverse?.sourceKey && activeUniverse.sourceKey !== "baseline") return activeUniverse.sourceKey;
+        if (activeResultView?.family && activeResultView.family !== "baseline") {
+            return buildCanonicalKey(activeResultView.family, activeResultView.threshold, activeResultView.fillMode);
+        }
+        return null;
+    }, [activeUniverse, activeResultView]);
+
+    // exactRows = Baseline · Edge Touch (always) + the active DISCOVERED variant (when any),
+    // built from resident summary metrics / lazily-loaded rows (null-metric placeholder until
+    // they land — never fabricated 0R). `selectedModelKey` is highlight-only; row existence
+    // follows `scenarioKey`. No active variant (null / baseline / not discovered) → baseline
+    // only. One variant → one CSV — never the full 71.
+    const exactRows = useMemo(() => {
+        const baseline = baselineEntryRow(filteredTrades);
+        const rows = [baseline];
+        if (scenarioKey && discoveredModelKeys.includes(scenarioKey)) {
+            const extra = entryRowForSelectedKey(activeRun, scenarioKey, baseline, ACTIVE_TRADE_VARIANT);
+            if (extra) rows.push(extra);
+        }
+        markHighlights(rows);
+        return rows;
+    }, [filteredTrades, scenarioKey, discoveredModelKeys, activeRun, ACTIVE_TRADE_VARIANT]);
 
     // Selectable model keys for THIS run (what selectedModelKey is matched against
     // across the workspace) and the subset that has a built-in FFT-OFF control.
@@ -87,6 +121,12 @@ export function EntriesWorkspace() {
         () => (exactRows || []).filter((r) => r && !r.isBaseline && r.mode).map((r) => r.mode),
         [exactRows],
     );
+    // Prefer the resident set (it carries labels via exactRows); fall back to the
+    // discovered keys when no rows are resident yet.
+    const listedModelKeys = availableModelKeys.length ? availableModelKeys : discoveredModelKeys;
+    const hasEntryVariants = listedModelKeys.length > 0;
+    // Variants exist in metadata but none of their rows are resident → don't fabricate KPIs.
+    const variantRowsNotLoaded = discoveredModelKeys.length > 0 && availableModelKeys.length === 0;
     const controlBackedKeys = useMemo(() => {
         const map = activeRun?.controlTradesByScenario || {};
         return Object.keys(map)
@@ -103,6 +143,7 @@ export function EntriesWorkspace() {
         controlBackedKeys,
         selectedModelKey,
         setSelectedModelKey,
+        discoveredModelKeys,
     });
 
     const summary = useMemo(() => buildExactSummary(exactRows), [exactRows]);
@@ -186,6 +227,18 @@ export function EntriesWorkspace() {
                 exactRows={exactRows}
             />
 
+            {/* Entry-variant selector — pick ONE discovered variant (e.g. Triggered Edge
+                25% · Arm C40) to analyse vs the edge-touch baseline. Drives the shared
+                store scenario so only that one variant's CSV lazy-loads. */}
+            {activeRunId && (
+                <EntryVariantSelector
+                    runId={activeRunId}
+                    runData={activeRun}
+                    trades={trades}
+                    setSelectedModelKey={setSelectedModelKey}
+                />
+            )}
+
             {/* RESEARCH-RESULT-VIEW-BANNER: multi-model page → truthful CONTEXT banner
                 (NOT "Current Result View" — this page compares many entry models).
                 Shows run identity + symbol/TF + date range + the comparison scope. */}
@@ -193,19 +246,25 @@ export function EntriesWorkspace() {
                 <div className="px-6 mt-2 mb-1">
                     <ResearchContextBanner
                         run={buildBannerRunIdentity(activeRun)}
-                        tone={availableModelKeys.length > 0 ? "context" : "baseline"}
+                        tone={hasEntryVariants ? "context" : "baseline"}
                         scopeTitle="Entry Model Comparison"
                         scopeSummary={
                             availableModelKeys.length > 0
                                 ? `Comparing ${availableModelKeys.length} entry model${availableModelKeys.length === 1 ? "" : "s"} vs baseline`
-                                : "Baseline only — no entry-model variants in this run"
+                                : variantRowsNotLoaded
+                                    ? `${discoveredModelKeys.length} entry-model variant${discoveredModelKeys.length === 1 ? "" : "s"} in this run — rows not loaded`
+                                    : "Baseline only — no entry-model variants in this run"
                         }
                         facts={[
-                            { label: "Models", value: availableModelKeys.length },
+                            { label: "Models", value: availableModelKeys.length || discoveredModelKeys.length },
                             { label: "Variant", value: ACTIVE_TRADE_VARIANT || "Primary" },
                         ]}
                         chipsLabel="Models"
-                        chips={(exactRows || []).map((r) => r.label || r.mode).filter(Boolean)}
+                        chips={
+                            availableModelKeys.length
+                                ? (exactRows || []).map((r) => r.label || r.mode).filter(Boolean)
+                                : discoveredModelKeys
+                        }
                     />
                 </div>
             )}
