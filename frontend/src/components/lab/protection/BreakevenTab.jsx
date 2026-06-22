@@ -1,21 +1,12 @@
-// BreakevenTab — Break-even Replay research surface for Protection Lab.
-// BE-Replay Phase 3 (trigger basis selector). Candle-walk simulation only — NOT an exact backtest.
-// Confidence tier: REPLAY (between EXACT and ESTIMATE).
-// No equity curve overlay in V1. No delay/buffer controls in V1.
-//
-// Performance note: scenario computation is deferred to after first paint via
-// useEffect + setTimeout(0) / requestIdleCallback. This prevents the 6×
-// candle-walk from blocking the initial tab render.
+// BreakevenTab — Break-even research surface for Protection Lab. EXACT-only.
+// Renders backend EXACT break-even scenarios per arm/trigger; arms with no exported
+// scenario are marked "Not Exported". No client-side candle-walk replay is performed
+// (the legacy Phase 1 REPLAY tier is disabled), so no candles are loaded.
 import React from "react";
 import { cn } from "@/lib/utils";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { MetricChip } from "@/components/lab/MetricChip";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
-import {
-    replayBeScenario,
-    buildBeScenarioSummary,
-    beReplayAvailability,
-} from "@/data/beReplay";
 import { resolveBeScenarioSource, hasAnyExactBe, entryVariantHasExact, describeBeAvailability, parseBeScenarioKey } from "@/data/beResolve";
 import { useLazyBeScenario } from "@/data/useLazyRows";
 import { buildBeAffectedTrades } from "@/data/protectionTimeline";
@@ -41,23 +32,11 @@ const ARM_LEVELS = BE_ARM_LEVEL_CHOICES;
 const DEFAULT_ARM = 0.5;
 const DEFAULT_TRIGGER = "wick";
 
-// FREEZE-FIX #1 — candle-walk REPLAY is O(candles × arms) and runs synchronously on
-// the main thread. For large/lazy runs (or any run whose candle file is large) it
-// blocks the whole app. Above this many candles we disable REPLAY and show EXACT BE
-// only. Small runs are unaffected.
-const REPLAY_CANDLE_CAP = 50000;
-// FREEZE-FIX #1b — the candle ARRAY length is 0 before the load, so it cannot gate the
-// load itself. We must use PRE-LOAD run metadata. candlesMeta.size is the candle-file
-// byte size from the run manifest (present before any candle load); 25 MB ≈ ~400k M1
-// rows, well past anything that should be JSON-parsed synchronously on the main thread.
-const LARGE_CANDLE_FILE_BYTES = 25 * 1024 * 1024; // 25 MB
-
-// Base params — triggerBasis is NOT here; it comes from state so it can be toggled.
-const REPLAY_PARAMS = Object.freeze({
-    stopMode:     "entry",
-    delayCandles: 0,
-    bufferR:      0,
-});
+// EXACT-ONLY — Protection Lab is EXACT-only by default. The client-side candle-walk
+// REPLAY (legacy Phase 1 tier) is NOT run: exported arms show backend EXACT, non-exported
+// arms show "Not Exported", and no candles are loaded. Flip BE_DEBUG to re-enable the
+// per-render console diagnostic (it logs on BE-map churn).
+const BE_DEBUG = false;
 
 const TRIGGER_OPTIONS = [
     {
@@ -154,8 +133,8 @@ function buildTableColumns(armLevelR, setArmLevelR) {
         {
             key: "source", label: "Source", sortable: false, width: "76px",
             render: (row) => (
-                <Pill tone={row.source === "EXACT" ? "success" : "secondary"}>
-                    {row.source === "EXACT" ? "EXACT" : "REPLAY"}
+                <Pill tone={row.source === "EXACT" ? "success" : "muted"}>
+                    {row.source === "EXACT" ? "EXACT" : "Not Exported"}
                 </Pill>
             ),
         },
@@ -696,7 +675,7 @@ function SelectiveBeCohortPanel({
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export function BreakevenTab({
-    trades, candles, activeRun, activeRunId,
+    trades, activeRun, activeRunId,
     beResults, beTradesByMode, executionMode,
     entryVariantKey = "baseline", resultViewLabel,
 }) {
@@ -704,7 +683,7 @@ export function BreakevenTab({
     // is nested beResults/beTradesByMode[mode][entryVariantKey][beKey]. EXACT is
     // resolved per the CURRENT result view's entry variant; a variant NEVER
     // falls back to baseline BE. Anything without exact BE for the current view
-    // uses the client-side candle-walk REPLAY on that view's own trades.
+    // is shown as "Not Exported" (EXACT-only — no client-side replay).
     const beResultsMap     = beResults     ?? activeRun?.beResults     ?? EMPTY_BE_MAP;
     const beTradesByModeMap = beTradesByMode ?? activeRun?.beTradesByMode ?? EMPTY_BE_MAP;
     const beExecutionMode  = executionMode ?? activeRun?.primaryVariant ?? null;
@@ -715,6 +694,14 @@ export function BreakevenTab({
     const beDataPresentAnywhere = React.useMemo(
         () => hasAnyExactBe(beResultsMap, beTradesByModeMap),
         [beResultsMap, beTradesByModeMap],
+    );
+    // NO-BE GUARD — did this run generate ANY BE scenario at all? Resident EXACT maps
+    // (beDataPresentAnywhere) OR the generated scenario index (covers lazy/large runs
+    // whose BE rows are deferred). When false, BE was disabled / never run, so we show
+    // the "No BE scenarios were run for this run." panel.
+    const hasAnyBeScenario = Boolean(
+        beDataPresentAnywhere
+        || (Array.isArray(activeRun?.beScenarioIndex) && activeRun.beScenarioIndex.length > 0)
     );
     // Entry variants that HAVE exact BE on this run (mode-level; independent of the
     // active result view). availableEntryVariantKeys = union of entry keys with BE.
@@ -791,97 +778,27 @@ export function BreakevenTab({
     }, [beExactCoverage]);
     // ── All hooks unconditionally before any early return ─────────────────
 
-    // Candle loading (mirrors useRetestData pattern).
-    // When candles live in IndexedDB the store delivers CANDLES=[] until
-    // loadCandlesForRun() is called. We trigger it here and show a preparing
-    // state instead of a false "candles not found" gate.
-    const { loadCandlesForRun, SCENARIO } = useDataset();
-    const [candleLoadState, setCandleLoadState] = React.useState("idle"); // idle|loading|ready|empty|failed
-    const loadTokenRef = React.useRef(0);
-
-    const noCandles = !Array.isArray(candles) || !candles.length;
-
-    // FREEZE-FIX #1 — block candle-walk REPLAY *and its full candle auto-load* for
-    // large/lazy runs. The loaded candle array is empty before the load, so it cannot
-    // gate the load — we read PRE-LOAD run metadata (candle count / file byte size from
-    // the manifest) instead. EXACT BE needs no candles, so the tab stays fully usable.
-    const estimatedCandleCount = Number(
-        activeRun?.candleCount
-        ?? activeRun?.candlesMeta?.count
-        ?? activeRun?.candlesMeta?.rowCount
-        ?? activeRun?.candlesMeta?.returnedCount
-        ?? activeRun?.summary?.candleCount
-        ?? NaN
-    );
-    const estimatedCandleBytes = Number(
-        activeRun?.candlesMeta?.size
-        ?? activeRun?.candlesMeta?.size_bytes
-        ?? activeRun?.candlesMeta?.bytes
-        ?? NaN
-    );
-    const candleLoadTooLarge =
-        (Number.isFinite(estimatedCandleCount) && estimatedCandleCount > REPLAY_CANDLE_CAP)
-        || (Number.isFinite(estimatedCandleBytes) && estimatedCandleBytes > LARGE_CANDLE_FILE_BYTES);
-    const replayBlocked = Boolean(
-        activeRun?.largeRun ||
-        activeRun?.lazy ||
-        candleLoadTooLarge ||
-        (Array.isArray(candles) && candles.length > REPLAY_CANDLE_CAP)
-    );
-    // Human-readable reason for the disabled-replay banner.
-    const replayBlockReason =
-        activeRun?.largeRun ? "large run"
-        : activeRun?.lazy ? "lazy run"
-        : (Number.isFinite(estimatedCandleCount) && estimatedCandleCount > REPLAY_CANDLE_CAP)
-            ? `~${estimatedCandleCount.toLocaleString()} candles`
-        : (Number.isFinite(estimatedCandleBytes) && estimatedCandleBytes > LARGE_CANDLE_FILE_BYTES)
-            ? `candle file ~${Math.round(estimatedCandleBytes / (1024 * 1024))} MB`
-        : (Array.isArray(candles) && candles.length > REPLAY_CANDLE_CAP)
-            ? `${candles.length.toLocaleString()} candles loaded`
-        : "";
-
-    React.useEffect(() => {
-        const token = ++loadTokenRef.current;
-
-        // Large/lazy runs: never auto-load the full candle set for replay (the load +
-        // parse alone can freeze the main thread). EXACT BE does not need candles.
-        if (replayBlocked) return;
-
-        if (!noCandles) {
-            setCandleLoadState("ready");
-            return;
-        }
-
-        const mayHave = !!(
-            activeRun?.hasCandles ||
-            activeRun?.candlesStorage ||
-            activeRun?.reloadAvailable ||
-            activeRun?.sidecarRunId || activeRun?.sidecarJobId || activeRun?.originalRunId ||
-            activeRun?.outputFolder || activeRun?.sourceOutputFolder
-        );
-
-        if (!mayHave || !activeRunId) {
-            setCandleLoadState("empty");
-            return;
-        }
-
-        setCandleLoadState("loading");
-        loadCandlesForRun(activeRunId)
-            .then(() => {
-                if (token !== loadTokenRef.current) return;
-                // Store notifies after load; CANDLES prop updates on next render.
-                // "ready" here is optimistic — gate stays as "preparing" until
-                // noCandles goes false (candles prop propagates).
-                setCandleLoadState("ready");
-            })
-            .catch(() => {
-                if (token !== loadTokenRef.current) return;
-                setCandleLoadState("failed");
-            });
-    }, [activeRunId, noCandles, replayBlocked]); // eslint-disable-line react-hooks/exhaustive-deps
+    // EXACT-ONLY — Protection Lab loads no candles for BE; backend EXACT needs none.
+    const { SCENARIO } = useDataset();
 
     const [armLevelR, setArmLevelR]       = React.useState(DEFAULT_ARM);
     const [triggerBasis, setTriggerBasis] = React.useState(DEFAULT_TRIGGER);
+
+    // EXACT-ONLY — default the selection onto an EXPORTED (arm, trigger) so the main view
+    // shows EXACT data, not a blank "Not Exported" cell (e.g. a run that only exported
+    // 0.25R should land on 0.25R). Only moves when the current selection isn't exported;
+    // once it lands on an exported cell, isArmExact is true and it stops (no loop).
+    React.useEffect(() => {
+        if (!beExactCoverage.hasAny) return;
+        const triggers = [...(beExactCoverage.triggers || [])];
+        if (!triggers.length) return;
+        const trig = triggers.includes(triggerBasis) ? triggerBasis : triggers[0];
+        if (trig !== triggerBasis) setTriggerBasis(trig);
+        if (!isArmExact(armLevelR, trig)) {
+            const arms = [...(beExactCoverage.armsByTrigger[trig] || [])].sort((a, b) => a - b);
+            if (arms.length) setArmLevelR(arms[0]);
+        }
+    }, [beExactCoverage, isArmExact, armLevelR, triggerBasis]);
 
     // LARGE-RUN-IMPORT Phase 2 — for a lazy/large run, lazily fetch the SELECTED
     // BE scenario's rows (one CSV) so EXACT replaces the REPLAY/unavailable
@@ -896,6 +813,9 @@ export function BreakevenTab({
     // selection, so a "why no EXACT?" can be answered from the browser console
     // without guesswork. Cheap, read-only, fires when the run/selection changes.
     React.useEffect(() => {
+        // EXACT-ONLY — diagnostic logging is OFF by default (it logs a large object on
+        // every BE-map change, which inflated memory during replay churn). Flip BE_DEBUG.
+        if (!BE_DEBUG) return;
         const d = describeBeAvailability(beResultsMap, beTradesByModeMap, {
             executionMode: beExecutionMode, entryVariantKey: beEntryVariantKey, triggerBasis, armLevelR,
         });
@@ -929,79 +849,40 @@ export function BreakevenTab({
         console.groupEnd();
     }, [activeRunId, armLevelR, triggerBasis, beExecutionMode, beEntryVariantKey, beResultsMap, beTradesByModeMap, viewLabel, beLazyStatus.loading, beLazyStatus.error]);
 
-    // Fast check only — no candle walking, safe to run synchronously.
-    const availability = React.useMemo(
-        () => beReplayAvailability(trades, candles),
-        [trades, candles],
-    );
-
-    // Heavy compute deferred to after first paint.
+    // EXACT-only scenario list.
     // null  = computing (loading state)
     // []    = nothing to compute (gate failed)
     // [...] = ready
     const [scenarios, setScenarios] = React.useState(null);
 
     React.useEffect(() => {
-        // Re-check availability inside the effect so the dep array stays clean.
-        const avail = beReplayAvailability(trades, candles);
-        // FREEZE-FIX #1 — REPLAY is only permitted when the candle-walk is available
-        // AND the run is not large/lazy. When blocked we still compute EXACT-only.
-        const canReplay = avail.available && !replayBlocked;
-        // Nothing to show only when REPLAY can't run AND there is no EXACT data.
-        if (!canReplay && !hasExact) {
+        // EXACT-ONLY scenario builder. Resolve each arm from backend EXACT BE; arms with
+        // no exported (or not-yet-loaded) scenario are marked NOT_EXPORTED. The legacy
+        // candle-walk REPLAY is NOT run here — no candles, no candle index, no idle-callback
+        // heavy pass. Cheap: O(arms) resolver lookups, so we compute synchronously.
+        if (!hasAnyBeScenario) {
             setScenarios([]);
             return;
         }
-
-        // Signal loading to trigger a repaint before the heavy work starts.
-        setScenarios(null);
-
-        let cancelled = false;
-        const compute = () => {
-            if (cancelled) return;
-            const baseline = computeBaseline(trades);
-            const result = ARM_LEVELS.map((arm) => {
-                // Prefer backend EXACT for this arm + trigger, matched to the
-                // CURRENT result view's entry variant. The resolver never
-                // substitutes baseline BE for a variant view; it returns REPLAY
-                // when the current view has no matching exact scenario.
-                const resolved = resolveBeScenarioSource({
-                    armLevelR: arm,
-                    triggerBasis,
-                    executionMode: beExecutionMode,
-                    entryVariantKey: beEntryVariantKey,
-                    beResults: beResultsMap,
-                    beTradesByMode: beTradesByModeMap,
-                    baseline,
-                });
-                if (resolved.source === "EXACT") {
-                    return { armLevelR: arm, summary: resolved.summary, source: "EXACT", scenarioKey: resolved.scenarioKey };
-                }
-                // REPLAY fallback — only if candle-walk is available AND not blocked
-                // (large/lazy runs skip replay entirely; EXACT arms above still resolve).
-                if (canReplay) {
-                    const results = replayBeScenario(trades, candles, { ...REPLAY_PARAMS, triggerBasis, armLevelR: arm });
-                    const summary = buildBeScenarioSummary(results, baseline);
-                    return { armLevelR: arm, summary, source: "REPLAY", scenarioKey: null };
-                }
-                // EXACT-only run with no candles: this arm wasn't exported.
-                return { armLevelR: arm, summary: null, source: "REPLAY", scenarioKey: null };
+        const baseline = computeBaseline(trades);
+        const result = ARM_LEVELS.map((arm) => {
+            const resolved = resolveBeScenarioSource({
+                armLevelR: arm,
+                triggerBasis,
+                executionMode: beExecutionMode,
+                entryVariantKey: beEntryVariantKey,
+                beResults: beResultsMap,
+                beTradesByMode: beTradesByModeMap,
+                baseline,
             });
-            if (!cancelled) setScenarios(result);
-        };
-
-        // Prefer requestIdleCallback so the browser can paint first; fall back
-        // to setTimeout(0) which at minimum defers past the current task.
-        const handle = typeof requestIdleCallback !== "undefined"
-            ? requestIdleCallback(compute, { timeout: 1500 })
-            : setTimeout(compute, 0);
-
-        return () => {
-            cancelled = true;
-            if (typeof cancelIdleCallback !== "undefined") cancelIdleCallback(handle);
-            else clearTimeout(handle);
-        };
-    }, [trades, candles, triggerBasis, hasExact, beEntryVariantKey, beResultsMap, beTradesByModeMap, beExecutionMode, replayBlocked]); // eslint-disable-line react-hooks/exhaustive-deps
+            if (resolved.source === "EXACT") {
+                return { armLevelR: arm, summary: resolved.summary, source: "EXACT", scenarioKey: resolved.scenarioKey };
+            }
+            // Not exported (or not yet loaded) — never client-side REPLAY.
+            return { armLevelR: arm, summary: null, source: "NOT_EXPORTED", scenarioKey: null };
+        });
+        setScenarios(result);
+    }, [trades, triggerBasis, hasExact, beEntryVariantKey, beResultsMap, beTradesByModeMap, beExecutionMode, hasAnyBeScenario]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Must be before any early return (hooks rule).
     const tableColumns = React.useMemo(
@@ -1181,68 +1062,29 @@ export function BreakevenTab({
         setScenario({ runId: activeRunId || null, layers: [] });
     }, [activeRunId]);
 
-    // ── Gate: three-state candle resolution ──────────────────────────────
-    //
-    // State 1 — preparing: noCandles=true but load is in-flight (or the store
-    //   prop hasn't propagated after load resolved). Never show "re-export" here.
-    // State 2 — missing:   load completed and genuinely no candles exist.
-    // State 3 — unavailable: candles present but coverage/trades check failed.
-    // EXACT backend results need no candles — only gate on candles for REPLAY.
-    // FREEZE-FIX #1 — large/lazy runs never load candles for replay, so don't show the
-    // candle-required/preparing screens; fall through to the EXACT-only main view.
-    if (noCandles && !hasExact && !replayBlocked) {
-        if (candleLoadState === "empty") {
-            return (
-                <NeonPanel title="Break-even Replay · Candle Data Required" action={<Pill tone="muted">DATA REQUIRED</Pill>}>
-                    <div className="flex flex-col gap-3 py-2">
-                        <p className="text-[13px] font-display text-[hsl(var(--text-2))] leading-relaxed">
-                            candles.csv not found in this bundle. Re-export with candles to enable Break-even Replay.
-                        </p>
-                        <p className="text-[11px] font-ui text-[hsl(var(--text-2)/0.7)]">
-                            Break-even Replay requires 15-min or finer OHLC candles aligned to trade fill and exit timestamps.
-                        </p>
-                    </div>
-                </NeonPanel>
-            );
-        }
-        if (candleLoadState === "failed") {
-            return (
-                <NeonPanel title="Break-even Replay · Load Error" action={<Pill tone="warning">LOAD ERROR</Pill>}>
-                    <div className="flex flex-col gap-3 py-2">
-                        <p className="text-[13px] font-display text-[hsl(var(--text-2))] leading-relaxed">
-                            Could not load candle data for this run. Try reloading or re-exporting with candles.
-                        </p>
-                    </div>
-                </NeonPanel>
-            );
-        }
-        // idle | loading | ready-but-prop-not-yet-propagated → show preparing
+    // ── Gate 0: NO BE — this run generated no BE scenarios (BE disabled / no BE CSVs).
+    // Short-circuit before any candle load or replay: there is nothing to show and the
+    // candle-walk REPLAY fallback must NOT run (wrong + can freeze). Independent of
+    // large/lazy. EXACT and BE-indexed (lazy) runs have hasAnyBeScenario=true and skip this.
+    if (!hasAnyBeScenario) {
         return (
-            <NeonPanel title="Break-even Replay · Preparing">
-                <ComputingRow label="Loading candle data…" />
-            </NeonPanel>
-        );
-    }
-    if (!availability.available && !hasExact && !replayBlocked) {
-        let gateMsg;
-        if (availability.reason === "low_coverage") {
-            gateMsg = `Candle coverage too low (${availability.coveragePct}%). ${availability.resolvedCount} of ${availability.filledCount} trades can be resolved. Re-export with updated candles.`;
-        } else if (availability.reason === "no_filled_trades") {
-            gateMsg = "No filled trades found with fill and exit timestamps. Break-even Replay cannot run.";
-        } else {
-            gateMsg = "Candle data found but Break-even Replay is unavailable for this run.";
-        }
-        return (
-            <NeonPanel title="Break-even Replay · Unavailable" action={<Pill tone="muted">UNAVAILABLE</Pill>}>
+            <NeonPanel title="Break-even Replay · No BE Scenarios" action={<Pill tone="muted">NO BE</Pill>}>
                 <div className="flex flex-col gap-3 py-2">
-                    <p className="text-[13px] font-display text-[hsl(var(--text-2))] leading-relaxed">{gateMsg}</p>
+                    <p className="text-[13px] font-display text-[hsl(var(--text-2))] leading-relaxed">
+                        No BE scenarios were run for this run.
+                    </p>
                     <p className="text-[11px] font-ui text-[hsl(var(--text-2)/0.7)]">
-                        Break-even Replay requires 15-min or finer OHLC candles aligned to trade fill and exit timestamps.
+                        Break-even results appear here when a run is executed with break-even enabled. This run
+                        has no exact BE data and no BE scenario index, so no replay is performed.
                     </p>
                 </div>
             </NeonPanel>
         );
     }
+
+    // EXACT-ONLY — the candle "preparing / required / unavailable" gates are removed:
+    // Protection Lab never loads candles for BE. The table below renders EXACT cells and
+    // marks the rest "Not Exported". (Run with no BE at all is handled by Gate 0 above.)
 
     // ── Derived display state ─────────────────────────────────────────────
     const computing = scenarios === null;
@@ -1251,7 +1093,7 @@ export function BreakevenTab({
         : null;
     const s = selected?.summary ?? null;
     // Source of the currently selected scenario, and whether ANY arm is EXACT.
-    const selectedSource = selected?.source ?? (hasExact ? "EXACT" : "REPLAY");
+    const selectedSource = selected?.source ?? (hasExact ? "EXACT" : "NOT_EXPORTED");
     const isExact = selectedSource === "EXACT";
     const anyExact = Array.isArray(scenarios) && scenarios.some((sc) => sc.source === "EXACT");
 
@@ -1297,7 +1139,7 @@ export function BreakevenTab({
     const tableRows = Array.isArray(scenarios)
         ? scenarios.map(({ armLevelR: arm, summary: sm, source }) => ({
             id: arm, arm,
-            source:          source ?? "REPLAY",
+            source:          source ?? "NOT_EXPORTED",
             netR:            sm?.netR ?? null,
             deltaNetR:       sm?.deltaNetR ?? null,
             profitFactor:    sm?.profitFactor ?? null,
@@ -1318,18 +1160,6 @@ export function BreakevenTab({
 
     return (
         <div className="flex flex-col gap-4 pb-8">
-            {/* FREEZE-FIX #1 — large/lazy / large-candle-file runs skip the synchronous
-                candle-walk REPLAY and its full candle load (both block the main thread).
-                EXACT BE needs no candles and is shown as-is. */}
-            {replayBlocked && (
-                <div className="flex items-center gap-2 px-3 py-2 clip-bevel-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.3)]">
-                    <span className="text-[11px] font-ui text-[hsl(var(--text-2))]">
-                        BE replay disabled for large candle datasets. Showing EXACT BE results only.
-                        {replayBlockReason ? <span className="text-[hsl(var(--text-2)/0.7)]"> ({replayBlockReason})</span> : null}
-                    </span>
-                </div>
-            )}
-
             {/* BE entry-view selector — BE defaults to a VARIANT when variants were
                 run (baseline is a fallback). When the BE view differs from the active
                 result view, say so; the chips below switch between variants with BE. */}
@@ -1410,24 +1240,22 @@ export function BreakevenTab({
                 </div>
             )}
 
-            {/* ── 1. Confidence banner — EXACT or REPLAY tier ─────────────── */}
+            {/* ── 1. Confidence banner — EXACT or NOT EXPORTED (EXACT-only mode) ─── */}
             <div className={cn(
                 "rounded-[6px] border px-4 py-3",
                 isExact
                     ? "border-[hsl(var(--success)/0.4)] bg-[hsl(var(--success)/0.06)]"
-                    : "border-[hsl(var(--accent-secondary)/0.4)] bg-[hsl(var(--accent-secondary)/0.06)]",
+                    : "border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.3)]",
             )}>
                 <div className="flex items-center gap-2 mb-2 flex-wrap">
-                    <Pill tone={isExact ? "success" : "secondary"}>{isExact ? "EXACT TIER" : "REPLAY TIER"}</Pill>
-                    {/* Which result view the BE data belongs to — never implies a
-                        variant has exact data when it does not. */}
+                    <Pill tone={isExact ? "success" : "muted"}>{isExact ? "EXACT TIER" : "NOT EXPORTED"}</Pill>
                     <Pill tone={isExact ? "success" : "muted"}>
-                        {isExact ? `BE data: ${viewLabel}` : `BE data: REPLAY fallback · ${viewLabel}`}
+                        {isExact ? `BE data: ${viewLabel}` : `BE data: not exported · ${viewLabel}`}
                     </Pill>
                     <span className="text-[12px] font-ui font-semibold text-[hsl(var(--text-1))]">
                         {isExact
                             ? "backend exact replay · 1-minute execution · spread / news / conflict handled"
-                            : "candle-resolution · spread not modelled · same-candle conservative"}
+                            : "this arm/trigger was not exported by the backtester"}
                     </span>
                 </div>
                 {isExact ? (
@@ -1438,49 +1266,23 @@ export function BreakevenTab({
                             Arm/stop detection, spread, news and conflict handling match the live engine — no
                             same-candle ambiguity.
                         </p>
-                        {!anyExact ? null : (
+                        {anyExact && (
                             <p className="text-[11px] font-ui text-[hsl(var(--text-2)/0.8)] leading-relaxed">
-                                Arm levels without an exported backend scenario fall back to candle-resolution
-                                REPLAY — the Source column marks each row.
+                                Arm levels without an exported backend scenario are marked
+                                <span className="font-semibold"> Not Exported</span> in the Source column — no
+                                client-side replay is performed.
                             </p>
                         )}
                     </div>
                 ) : (
-                <div className="flex flex-col gap-1.5">
-                    {!hasExact && (
-                        <p className="text-[11px] font-ui text-[hsl(var(--text-1))] leading-relaxed">
-                            <span className="font-semibold">Backend EXACT results were not generated for this result view.</span>{" "}
-                            Showing frontend REPLAY fallback for {viewLabel ? `“${viewLabel}”` : "this view"}, computed on its
-                            own trades.{" "}
-                            {beDataPresentAnywhere
-                                ? "Other result views in this run do have exact BE — switch view, or re-run with “All entry variants” to cover this one."
-                                : "Enable BE scenarios in Strategy Builder to generate exact results."}
-                        </p>
-                    )}
                     <p className="text-[11px] font-ui text-[hsl(var(--text-2))] leading-relaxed">
-                        <span className="font-semibold text-[hsl(var(--text-1))]">Candle-resolution replay:</span>{" "}
-                        arm/exit detection uses 15-min OHLC bars. Not tick-level.
+                        <span className="font-semibold text-[hsl(var(--text-1))]">Not exported.</span>{" "}
+                        No backend EXACT break-even scenario exists for {viewLabel ? `“${viewLabel}”` : "this view"}
+                        {" "}at this arm/trigger. {beDataPresentAnywhere
+                            ? "Other arms/views in this run have exact BE — select an exported arm above, or re-run the BE matrix to cover this one."
+                            : "Re-run with break-even enabled (or the BE matrix) to generate exact results."}{" "}
+                        Protection Lab is EXACT-only — no candle-resolution replay is run.
                     </p>
-                    {triggerBasis === "wick" ? (
-                        <p className="text-[11px] font-ui text-[hsl(var(--warning))] leading-relaxed">
-                            <span className="font-semibold">Wick trigger — same-candle ambiguity risk:</span>{" "}
-                            when the arm and the BE stop are both touched on the same bar, ordering is unknown.
-                            The conservative rule assumes BE triggered first. Ambig% in the table shows how often this applies.
-                            High ambiguity at tight arm levels (e.g. 0.25R) makes results least reliable.
-                        </p>
-                    ) : (
-                        <p className="text-[11px] font-ui text-[hsl(var(--text-2))] leading-relaxed">
-                            <span className="font-semibold text-[hsl(var(--text-1))]">Close trigger — slower arming:</span>{" "}
-                            BE arms only after a candle closes beyond the arm level, not on a wick touch.
-                            This reduces same-candle ambiguity but may miss arming on fast moves.
-                            Close trigger is not more "exact" than wick — it is a different approximation.
-                        </p>
-                    )}
-                    <p className="text-[11px] font-ui text-[hsl(var(--text-2))] leading-relaxed">
-                        <span className="font-semibold text-[hsl(var(--text-1))]">Spread and slippage not modelled.</span>{" "}
-                        BE exit R = 0R (entry price, no fill cost).
-                    </p>
-                </div>
                 )}
             </div>
 
@@ -1611,7 +1413,7 @@ export function BreakevenTab({
             {/* ── 4. Scenario comparison table — evidence for the verdict ─── */}
             <NeonPanel title="Scenario Comparison · All Arm Levels">
                 {computing ? (
-                    <ComputingRow label="Walking candles for all arm levels…" />
+                    <ComputingRow label="Resolving EXACT scenarios…" />
                 ) : (
                     <>
                         <DataTable
@@ -1619,7 +1421,7 @@ export function BreakevenTab({
                             rows={tableRows}
                             rowKey="id"
                             selectedKey={armLevelR}
-                            onRowClick={(row) => setArmLevelR(row.arm)}
+                            onRowClick={(row) => { if (!beExactCoverage.hasAny || isArmExact(row.arm, triggerBasis)) setArmLevelR(row.arm); }}
                             defaultSortKey={null}
                         />
                         <Note>
