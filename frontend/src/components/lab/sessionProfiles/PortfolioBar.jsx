@@ -12,8 +12,10 @@ import {
     useDataset, listPortfolios, getLoadedPortfolio, isWorkingCopyDirty,
     loadPortfolio, savePortfolio, savePortfolioAs, createPortfolio, revertPortfolio,
     duplicatePortfolio, renamePortfolio, setPortfolioDescription, deletePortfolio,
+    getSessionProfiles, getActiveBundle,
 } from "@/data/store";
 import { summarizePortfolio } from "@/data/portfolioLibrary";
+import { compileScenarioToRunConfig } from "@/data/scenarioCompile";
 import {
     DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
     DropdownMenuLabel, DropdownMenuSeparator,
@@ -71,6 +73,23 @@ export default function PortfolioBar() {
 
     const handleSave = () => { if (loaded) savePortfolio(); else openSaveAs(); };
 
+    // Phase 1 — compile the current working copy to a backend-ready run config and
+    // download it. No backend submission yet (that's the future "Run True Scenario"
+    // action). baseConfig = the active run's config when present, so the export is
+    // runnable later; {} otherwise.
+    const exportScenario = () => {
+        const cfg = compileScenarioToRunConfig(getSessionProfiles(), getActiveBundle()?.config || {});
+        const blob = new Blob([JSON.stringify(cfg, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `scenario-${(loaded?.name || "untitled").replace(/\s+/g, "_")}-${new Date().toISOString().slice(0, 10)}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    };
+
     return (
         <div className="flex items-center gap-2">
             {/* Selector */}
@@ -98,6 +117,7 @@ export default function PortfolioBar() {
                     {loaded && dirty && <DropdownMenuItem onSelect={() => revertPortfolio()}>Revert changes</DropdownMenuItem>}
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onSelect={() => setCompareOpen(true)}>Compare…</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={exportScenario} data-testid="portfolio-export-scenario">Export Scenario Config</DropdownMenuItem>
                     <DropdownMenuItem onSelect={() => setManagerOpen(true)}>Manage…</DropdownMenuItem>
                 </DropdownMenuContent>
             </DropdownMenu>
