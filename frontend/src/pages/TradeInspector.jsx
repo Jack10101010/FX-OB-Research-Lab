@@ -97,9 +97,11 @@ export default function TradeInspector() {
     }, [supportsExecutionTimeframes, chartTf]);
     const displayCandles = useMemo(() => resampleCandlesForDisplay(CANDLES, effectiveChartTf), [CANDLES, effectiveChartTf]);
     const candleIndex = useMemo(() => buildCandleIndex(displayCandles), [displayCandles]);
-    const fillTimeForMapping = tradeStatus.key === "news_blackout"
-        ? trade?.news_blackout_trigger_time
-        : trade?.entry;
+    // True fill/entry time takes precedence; only fall back to the news-blackout
+    // trigger time when the trade genuinely never filled (e.g. NEWS_BLACKOUT).
+    const trueFillTime = trade?.entry || trade?.fill_time || trade?.fillTime || trade?.entry_time || "";
+    const newsBlackoutTime = trade?.news_blackout_trigger_time || trade?.newsBlackoutTriggerTime || "";
+    const fillTimeForMapping = trueFillTime || newsBlackoutTime || null;
     const fillMap = useMemo(() => mapTimeToCandle(fillTimeForMapping, candleIndex), [fillTimeForMapping, candleIndex]);
     const selectedMarker = trade
         ? {
@@ -453,7 +455,10 @@ function VisualVerifier({ trade, status, selectedOB, selectedMarker, fillMap, ex
                     <VerifierRow k="Raw Trade ID" v={rawTradeId(trade)} />
                     <VerifierRow k="OB ID" v={displayObId(trade)} />
                     <VerifierRow k="Direction" v={trade.direction} />
-                    <VerifierRow k="Fill Time (UTC)" v={formatUtc(trade.news_blackout_trigger_time || trade.entry)} />
+                    <VerifierRow k="Fill Time (UTC)" v={formatUtc(trueFillTime)} />
+                    {newsBlackoutTime && (
+                        <VerifierRow k="News Blackout Time (UTC)" v={formatUtc(newsBlackoutTime)} />
+                    )}
                     <VerifierRow k="Exit Time (UTC)" v={formatUtc(trade.exit)} />
                     <VerifierRow k="Fill Candle Index (Execution TF)" v={formatIndex(trade.fill_candle_index)} />
                     <VerifierRow k="Exit Candle Index (Execution TF)" v={formatIndex(trade.exit_candle_index)} />
@@ -461,7 +466,7 @@ function VisualVerifier({ trade, status, selectedOB, selectedMarker, fillMap, ex
                     <VerifierRow k="Stop" v={formatNumber(trade.stop)} />
                     <VerifierRow k="TP" v={formatNumber(trade.tp)} />
                     <VerifierRow k="Outcome" v={formatValue(trade.outcome)} />
-                    <VerifierRow k="Session" v={formatValue(trade.session)} />
+                    <VerifierRow k="Fill Session" v={formatValue(trade.session)} />
                     <VerifierRow k="Display Timeframe" v={displayTimeframe || "1m"} />
                     <VerifierRow k="Mapped Fill Index" v={formatIndex(selectedMarker?.i ?? fillMap.i)} />
                     <VerifierRow k="Mapped Exit Index" v={formatIndex(exitMap.i)} />

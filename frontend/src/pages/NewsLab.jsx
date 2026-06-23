@@ -695,7 +695,8 @@ export default function NewsLab() {
                         maxHeight={360}
                         columns={[
                             { key: "tradeId", label: "Trade ID" },
-                            { key: "fillTime", label: "Entry / Fill Time" },
+                            { key: "fillTime", label: "Fill Time (UTC)" },
+                            { key: "blackoutTime", label: "News Blackout Time (UTC)" },
                             { key: "eventTime", label: "Event Time" },
                             { key: "minutesFromEvent", label: "Min From Event", align: "right", render: (r) => fmtMaybeCount(r.minutesFromEvent) },
                             { key: "eventName", label: "Event" },
@@ -703,7 +704,7 @@ export default function NewsLab() {
                             { key: "impact", label: "Impact" },
                             { key: "originalOutcome", label: "Original Outcome" },
                             { key: "originalR", label: "Original R", align: "right", render: (r) => fmtMaybeR(r.originalR) },
-                            { key: "session", label: "Session" },
+                            { key: "session", label: "Fill Session" },
                             { key: "structure", label: "Structure" },
                             { key: "obId", label: "OB ID" },
                         ]}
@@ -1293,6 +1294,7 @@ function buildBlockedRows(newsResults) {
         id: row.id || row.tradeId || row.trade_id || `blocked-${idx}`,
         tradeId: row.tradeId || row.trade_id || row.id || "—",
         fillTime: row.fillTime || row.fill_time || row.entryTime || row.entry_time || "—",
+        blackoutTime: row.newsBlackoutTriggerTime || row.news_blackout_trigger_time || "—",
         eventTime: row.eventTime || row.event_time || row.news_time || "—",
         minutesFromEvent: row.minutesFromEvent ?? row.minutes_from_event,
         eventName: row.eventName || row.event || row.news_event || "—",
@@ -1317,7 +1319,8 @@ function buildExactBlockedRows(trades) {
             return {
                 id: trade.id || `exact-news-${idx}`,
                 tradeId: trade.id || "—",
-                fillTime: trade.news_blackout_trigger_time || trade.entry || trade.fillTime || trade.fill_time || "—",
+                fillTime: trade.entry || trade.fill_time || trade.fillTime || "—",
+                blackoutTime: trade.news_blackout_trigger_time || "—",
                 eventTime: trade.news_blackout_event_time || "—",
                 minutesFromEvent: trade.news_blackout_minutes_from_event,
                 eventName: trade.news_blackout_event || "—",
