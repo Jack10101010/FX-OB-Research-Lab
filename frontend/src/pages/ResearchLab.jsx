@@ -13,6 +13,7 @@ import { resolveDisplayTrades } from "@/data/resolveDisplayTrades";
 import { DIMENSIONS, availableDimensions } from "@/data/cohortDimensions";
 import { buildFilterDiscovery } from "@/data/cohortFilterSimulator";
 import { buildResearchUniverse, resolveResearchCohort, cohortSummary, observedValuesFor } from "@/data/researchLab";
+import { runExperimentStack, buildExcludeExperiment, buildTargetExperiment, targetLevels } from "@/data/cohortExperiment";
 
 const successTone = "text-[hsl(var(--success))]";
 const dangerTone = "text-[hsl(var(--danger))]";
@@ -133,7 +134,7 @@ function CohortBuilder({ availDims, universe, sel, setSel }) {
 }
 
 // ── Discovery / What-If module ────────────────────────────────────────────────
-function DiscoveryModule({ cohort, onPick }) {
+function DiscoveryModule({ cohort, onPick, onAddExclusion }) {
     const discovery = useMemo(() => buildFilterDiscovery(cohort.trades, { dims: DIMENSIONS, topN: 30 }), [cohort.trades]);
     const rows = discovery.rows;
     return (
@@ -152,7 +153,7 @@ function DiscoveryModule({ cohort, onPick }) {
                             <th className="py-1 pr-3">Candidate</th><th className="pr-3">Dimension</th>
                             <th className="pr-3 text-right">Removed</th><th className="pr-3 text-right">W</th><th className="pr-3 text-right">L</th>
                             <th className="pr-3 text-right">Loss R Saved</th><th className="pr-3 text-right">Winner R Lost</th>
-                            <th className="pr-3 text-right">Δ Net R</th><th className="pr-3 text-right">PF B→A</th><th className="pr-3 text-right">WR B→A</th><th>Rec</th>
+                            <th className="pr-3 text-right">Δ Net R</th><th className="pr-3 text-right">PF B→A</th><th className="pr-3 text-right">WR B→A</th><th className="pr-3">Rec</th><th></th>
                         </tr></thead>
                         <tbody>
                             {rows.map((r) => (
@@ -167,13 +168,146 @@ function DiscoveryModule({ cohort, onPick }) {
                                     <td className={`pr-3 text-right font-num ${rTone(r.netRImpact)}`}>{fmtR1(r.netRImpact)}</td>
                                     <td className="pr-3 text-right font-num text-[hsl(var(--text-2))]">{pfShow(r.pfBefore)}→{pfShow(r.pfAfter)}</td>
                                     <td className="pr-3 text-right font-num text-[hsl(var(--text-2))]">{r.before.winRate}→{r.after.winRate}%</td>
-                                    <td className={`font-ui ${recTone(r.recommendation?.tone)}`}>{r.recommendation?.label ?? "—"}</td>
+                                    <td className={`pr-3 font-ui ${recTone(r.recommendation?.tone)}`}>{r.recommendation?.label ?? "—"}</td>
+                                    <td>{onAddExclusion && (
+                                        <button type="button" onClick={(e) => { e.stopPropagation(); onAddExclusion(r); }} className="clip-bevel-sm px-1.5 py-0.5 text-[9.5px] font-ui border border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:text-[hsl(var(--danger))]" title="Add this candidate as an exclusion experiment">+ Excl</button>
+                                    )}</td>
                                 </tr>
                             ))}
                         </tbody>
                     </table>
                 </div>
             )}
+        </div>
+    );
+}
+
+// ── Cohort Experiments module (Phase 2A — EXACT: exclusions + TP retarget) ────
+function MetricsRow({ label, m, delta, strong }) {
+    return (
+        <tr className={`border-t border-[hsl(var(--border-soft))] ${strong ? "bg-[hsl(var(--success)/0.06)]" : ""}`}>
+            <td className={`py-1 pr-3 font-ui ${strong ? "text-[hsl(var(--text-1))] font-semibold" : "text-[hsl(var(--text-2))]"}`}>{label}</td>
+            <td className="pr-3 text-right font-num text-[hsl(var(--text-1))]">{m.trades}</td>
+            <td className="pr-3 text-right font-num"><span className={successTone}>{m.winners}</span><span className="text-[hsl(var(--text-3))]">/</span><span className={dangerTone}>{m.losers}</span></td>
+            <td className={`pr-3 text-right font-num ${rTone(m.netR)}`}>{fmtR1(m.netR)}</td>
+            <td className="pr-3 text-right font-num text-[hsl(var(--text-2))]">{pfShow(m.pf)}</td>
+            <td className="pr-3 text-right font-num text-[hsl(var(--text-2))]">{m.winRate}%</td>
+            <td className="pr-3 text-right font-num text-[hsl(var(--text-2))]">{fmtR2(m.expectancy)}</td>
+            <td className={`text-right font-num ${delta == null ? "text-[hsl(var(--text-3))]" : rTone(delta)}`}>{delta == null ? "—" : fmtR1(delta)}</td>
+        </tr>
+    );
+}
+
+function ExperimentsModule({ cohort, availDims, universe, exclusions, setExclusions, tpTarget, setTpTarget }) {
+    const [b, setB] = useState({ dim1: "", val1: "", dim2Enabled: false, dim2: "", val2: "" });
+    const vals1 = useMemo(() => (b.dim1 ? observedValuesFor(universe, b.dim1) : []), [universe, b.dim1]);
+    const vals2 = useMemo(() => (b.dim2 ? observedValuesFor(universe, b.dim2) : []), [universe, b.dim2]);
+
+    const experiments = useMemo(() => {
+        const xs = exclusions.map((x) => buildExcludeExperiment(x.dims));
+        if (tpTarget) xs.push(buildTargetExperiment(Number(tpTarget)));
+        return xs;
+    }, [exclusions, tpTarget]);
+    const stack = useMemo(() => runExperimentStack(cohort.trades, experiments), [cohort.trades, experiments]);
+
+    const tpStep = stack.steps.find((s) => s.type === "tp");
+    const tpUnavailable = !!tpTarget && tpStep && tpStep.result && tpStep.result.available === false;
+    const afterTrades = stack.combined.tradesAfter;
+    const lowSample = afterTrades > 0 && afterTrades < 15;
+
+    const canAdd = b.dim1 && b.val1 && (!b.dim2Enabled || (b.dim2 && b.val2));
+    const addExclusion = () => {
+        const dims = [{ dim: b.dim1, value: b.val1 }];
+        if (b.dim2Enabled && b.dim2 && b.val2) dims.push({ dim: b.dim2, value: b.val2 });
+        setExclusions((xs) => [...xs, { dims }]);
+        setB({ dim1: "", val1: "", dim2Enabled: false, dim2: "", val2: "" });
+    };
+    const Select = ({ value, onChange, children, testid }) => (
+        <select value={value} onChange={(e) => onChange(e.target.value)} data-testid={testid}
+            className="w-full clip-bevel-sm border border-[hsl(var(--border-mid))] bg-[hsl(var(--panel-2)/0.4)] px-2 py-1 text-[11.5px] font-ui text-[hsl(var(--text-1))] outline-none">{children}</select>
+    );
+    const dimOpt = (d) => <option key={d.key} value={d.key}>{d.label}</option>;
+
+    return (
+        <div className="space-y-3">
+            <div className="flex items-baseline gap-2">
+                <span className="text-[12px] font-ui font-semibold text-[hsl(var(--text-1))]">Cohort Experiments</span>
+                <span className="text-[9.5px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--success))]">EXACT · in-sample</span>
+            </div>
+            <p className="text-[10.5px] font-ui text-muted-lab italic">Exclusions and TP retargets are reconstructed exactly from this run. They are still in-sample research candidates and must be validated OOS.</p>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                {/* Exclusion builder */}
+                <div className="space-y-1.5">
+                    <SubLabel>Exclusion</SubLabel>
+                    <Select value={b.dim1} onChange={(v) => setB((s) => ({ ...s, dim1: v, val1: "" }))} testid="rl-excl-dim1">
+                        <option value="">— dimension —</option>{availDims.map(dimOpt)}
+                    </Select>
+                    {b.dim1 && <Select value={b.val1} onChange={(v) => setB((s) => ({ ...s, val1: v }))} testid="rl-excl-val1"><option value="">— value —</option>{vals1.map((v) => <option key={v} value={v}>{v}</option>)}</Select>}
+                    <label className="flex items-center gap-2 text-[10.5px] font-ui text-[hsl(var(--text-2))] cursor-pointer">
+                        <input type="checkbox" checked={b.dim2Enabled} onChange={(e) => setB((s) => ({ ...s, dim2Enabled: e.target.checked }))} /> pair (second dimension)
+                    </label>
+                    {b.dim2Enabled && (
+                        <>
+                            <Select value={b.dim2} onChange={(v) => setB((s) => ({ ...s, dim2: v, val2: "" }))} testid="rl-excl-dim2"><option value="">— dimension —</option>{availDims.filter((d) => d.key !== b.dim1).map(dimOpt)}</Select>
+                            {b.dim2 && <Select value={b.val2} onChange={(v) => setB((s) => ({ ...s, val2: v }))} testid="rl-excl-val2"><option value="">— value —</option>{vals2.map((v) => <option key={v} value={v}>{v}</option>)}</Select>}
+                        </>
+                    )}
+                    <button type="button" disabled={!canAdd} onClick={addExclusion} data-testid="rl-add-exclusion"
+                        className={`clip-bevel-sm px-2.5 py-1 text-[10.5px] font-ui border ${canAdd ? "border-[hsl(var(--danger)/0.5)] text-[hsl(var(--danger))]" : "border-[hsl(var(--border-mid))] text-[hsl(var(--text-3))] opacity-60 cursor-not-allowed"}`}>+ Add exclusion</button>
+                </div>
+
+                {/* TP target */}
+                <div className="space-y-1.5">
+                    <SubLabel>TP retarget</SubLabel>
+                    <Select value={tpTarget} onChange={setTpTarget} testid="rl-tp-target">
+                        <option value="">— no TP override —</option>
+                        {targetLevels.map((t) => <option key={t} value={t}>{t}R</option>)}
+                    </Select>
+                    {tpUnavailable && <div className="text-[10px] font-ui text-[hsl(var(--warning))]">TP retarget unavailable — no MFE data for this cohort.</div>}
+                </div>
+            </div>
+
+            {/* Active stack */}
+            {(exclusions.length > 0 || tpTarget) && (
+                <div>
+                    <SubLabel>Active experiment stack</SubLabel>
+                    <div className="flex flex-wrap gap-1.5">
+                        {exclusions.map((x, i) => (
+                            <span key={i} className="clip-bevel-sm px-2 py-0.5 text-[10px] font-ui border border-[hsl(var(--danger)/0.4)] text-[hsl(var(--text-2))]">
+                                {i + 1}. {buildExcludeExperiment(x.dims).label}
+                                <button type="button" onClick={() => setExclusions((xs) => xs.filter((_, j) => j !== i))} className="ml-1.5 text-[hsl(var(--danger))]" title="Remove">✕</button>
+                            </span>
+                        ))}
+                        {tpTarget && (
+                            <span className="clip-bevel-sm px-2 py-0.5 text-[10px] font-ui border border-[hsl(var(--accent-secondary)/0.4)] text-[hsl(var(--text-2))]">
+                                {exclusions.length + 1}. TP {tpTarget}R
+                                <button type="button" onClick={() => setTpTarget("")} className="ml-1.5 text-[hsl(var(--accent-secondary))]" title="Remove">✕</button>
+                            </span>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* Results */}
+            <div>
+                <SubLabel>Result · combined grade {stack.combined.grade}</SubLabel>
+                {lowSample && <div className="text-[10px] font-ui text-[hsl(var(--warning))] mb-1">Low sample after experiments ({afterTrades} trades) — treat any improvement as a hypothesis only.</div>}
+                <div className="overflow-x-auto">
+                    <table className="w-full text-[11.5px] font-ui whitespace-nowrap">
+                        <thead><tr className="text-[hsl(var(--accent-secondary))] uppercase text-[10px] tracking-wider text-left">
+                            <th className="py-1 pr-3">Stage</th><th className="pr-3 text-right">Trades</th><th className="pr-3 text-right">W/L</th><th className="pr-3 text-right">Net R</th><th className="pr-3 text-right">PF</th><th className="pr-3 text-right">WR</th><th className="pr-3 text-right">Exp</th><th className="text-right">Δ Net R</th>
+                        </tr></thead>
+                        <tbody>
+                            <MetricsRow label="Baseline (cohort)" m={stack.baseline} delta={null} />
+                            {stack.steps.map((s, i) => (
+                                <MetricsRow key={i} label={`After: ${s.label}`} m={s.after} delta={s.deltaNetR} />
+                            ))}
+                            {(exclusions.length > 0 || tpTarget) && <MetricsRow label="Combined (exact)" m={stack.combined.after} delta={stack.combined.deltaNetR} strong />}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </div>
     );
 }
@@ -186,6 +320,8 @@ export default function ResearchLab() {
     const universe = useMemo(() => buildResearchUniverse(resolved?.trades || []), [resolved]);
 
     const [sel, setSel] = useState({ dim1: "", val1: "", dim2Enabled: false, dim2: "", val2: "" });
+    const [exclusions, setExclusions] = useState([]);
+    const [tpTarget, setTpTarget] = useState("");
 
     const availDims = useMemo(() => availableDimensions(universe), [universe]);
     const selection = useMemo(() => {
@@ -247,8 +383,20 @@ export default function ResearchLab() {
                                 </div>
                             </NeonPanel>
 
+                            <NeonPanel title="Experiments">
+                                <ExperimentsModule
+                                    cohort={cohort} availDims={availDims} universe={universe}
+                                    exclusions={exclusions} setExclusions={setExclusions}
+                                    tpTarget={tpTarget} setTpTarget={setTpTarget}
+                                />
+                            </NeonPanel>
+
                             <NeonPanel title="Discovery">
-                                <DiscoveryModule cohort={cohort} onPick={pickRow} />
+                                <DiscoveryModule cohort={cohort} onPick={pickRow} onAddExclusion={(r) => {
+                                    const dims = [{ dim: r.dimA, value: String(r.keyA) }];
+                                    if (r.isPair) dims.push({ dim: r.dimB, value: String(r.keyB) });
+                                    setExclusions((xs) => [...xs, { dims }]);
+                                }} />
                             </NeonPanel>
                         </div>
                     </div>
