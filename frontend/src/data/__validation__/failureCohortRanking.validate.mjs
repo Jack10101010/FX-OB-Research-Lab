@@ -44,6 +44,9 @@ const entryRegistryShim = { sampleConfidence: () => ({ label: "N/A", tone: "mute
 const resolveShared = (utils, registry, dimensions, aggregation, excursion, analytics, filterSim, tc) => (spec) => {
     if (spec.includes("entryFormatters")) return entryFormattersShim;
     if (spec.includes("entryRegistry")) return entryRegistryShim;
+    // Phase 0 extraction (must precede the filterSimulator check — its name is a substring).
+    if (spec.includes("cohortFilterSimulator")) return cohortSim;
+    if (spec.includes("cohortDimensions")) return cohortDims;
     if (spec.includes("failuresUtils")) return utils;
     if (spec.includes("failuresRegistry")) return registry;
     if (spec.includes("failuresDimensions")) return dimensions;
@@ -57,7 +60,10 @@ const resolveShared = (utils, registry, dimensions, aggregation, excursion, anal
 
 const utils = loadCjs(`${BASE}/failuresUtils.js`, () => entryFormattersShim);
 const registry = loadCjs(`${BASE}/failuresRegistry.js`, () => entryRegistryShim);
-const dimensions = loadCjs(`${BASE}/failuresDimensions.js`, (s) => (s.includes("failuresUtils") ? utils : s.includes("failuresRegistry") ? registry : {}));
+// Phase 0 extraction: dimension registry + truth layer moved to data/cohort*.js.
+const cohortDims = loadCjs("src/data/cohortDimensions.js", (s) => (s.includes("failuresUtils") ? utils : s.includes("failuresRegistry") ? registry : {}));
+const cohortSim = loadCjs("src/data/cohortFilterSimulator.js", (s) => (s.includes("cohortDimensions") ? cohortDims : {}));
+const dimensions = loadCjs(`${BASE}/failuresDimensions.js`, (s) => (s.includes("cohortDimensions") ? cohortDims : s.includes("failuresUtils") ? utils : s.includes("failuresRegistry") ? registry : {}));
 const aggregation = loadCjs(`${BASE}/failuresAggregation.js`, (s) => (s.includes("failuresDimensions") ? dimensions : s.includes("failuresUtils") ? utils : {}));
 const tc = loadCjs("src/data/tradeClassification.js", () => ({}));
 const excursion = loadCjs(`${BASE}/excursionAnalytics.js`, resolveShared(utils, registry, dimensions, aggregation, {}, {}, {}, tc));

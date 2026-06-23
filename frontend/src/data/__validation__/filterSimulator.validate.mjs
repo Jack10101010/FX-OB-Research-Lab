@@ -48,12 +48,25 @@ const entryRegistryShim = { sampleConfidence: () => ({ label: "N/A", tone: "mute
 
 const utils = loadCjs(`${BASE}/failuresUtils.js`, () => entryFormattersShim);
 const registry = loadCjs(`${BASE}/failuresRegistry.js`, () => entryRegistryShim);
+// Phase 0 extraction: registry + truth-layer moved to data/cohort*.js; the
+// failures-path modules now re-export them. Load the neutral modules first.
+const cohortDims = loadCjs("src/data/cohortDimensions.js", (spec) => {
+    if (spec.includes("failuresUtils")) return utils;
+    if (spec.includes("failuresRegistry")) return registry;
+    return {};
+});
+const cohortSim = loadCjs("src/data/cohortFilterSimulator.js", (spec) => {
+    if (spec.includes("cohortDimensions")) return cohortDims;
+    return {};
+});
 const dimensions = loadCjs(`${BASE}/failuresDimensions.js`, (spec) => {
+    if (spec.includes("cohortDimensions")) return cohortDims;
     if (spec.includes("failuresUtils")) return utils;
     if (spec.includes("failuresRegistry")) return registry;
     return {};
 });
 const sim = loadCjs(`${BASE}/filterSimulator.js`, (spec) => {
+    if (spec.includes("cohortFilterSimulator")) return cohortSim;
     if (spec.includes("failuresUtils")) return utils;
     if (spec.includes("failuresDimensions")) return dimensions;
     return {};

@@ -34,7 +34,14 @@ const entryRegistryShim = { sampleConfidence: () => ({ label: "N/A", tone: "mute
 
 const utils = loadCjs(`${BASE}/failuresUtils.js`, () => entryFormattersShim);
 const registry = loadCjs(`${BASE}/failuresRegistry.js`, () => entryRegistryShim);
+// Phase 0 extraction: dimension registry moved to data/cohortDimensions.js.
+const cohortDims = loadCjs("src/data/cohortDimensions.js", (spec) => {
+    if (spec.includes("failuresUtils")) return utils;
+    if (spec.includes("failuresRegistry")) return registry;
+    return {};
+});
 const dimensions = loadCjs(`${BASE}/failuresDimensions.js`, (spec) => {
+    if (spec.includes("cohortDimensions")) return cohortDims;
     if (spec.includes("failuresUtils")) return utils;
     if (spec.includes("failuresRegistry")) return registry;
     return {};

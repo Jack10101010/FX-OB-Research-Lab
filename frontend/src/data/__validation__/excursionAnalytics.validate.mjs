@@ -37,7 +37,14 @@ const utils = loadCjs(`${BASE}/failuresUtils.js`, () => entryFormattersShim);
 // failuresRegistry (for archetypeLabel) re-exports sampleConfidence from entryRegistry — stub it.
 const registry = loadCjs(`${BASE}/failuresRegistry.js`, () => ({ sampleConfidence: () => ({ label: "N/A", tone: "muted" }) }));
 // V4: excursionAnalytics now delegates to the shared dimension registry + engine.
+// Phase 0 extraction: the registry now lives in data/cohortDimensions.js.
+const cohortDims = loadCjs("src/data/cohortDimensions.js", (spec) => {
+    if (spec.includes("failuresUtils")) return utils;
+    if (spec.includes("failuresRegistry")) return registry;
+    return {};
+});
 const dimensions = loadCjs(`${BASE}/failuresDimensions.js`, (spec) => {
+    if (spec.includes("cohortDimensions")) return cohortDims;
     if (spec.includes("failuresUtils")) return utils;
     if (spec.includes("failuresRegistry")) return registry;
     return {};
