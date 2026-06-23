@@ -1,0 +1,12 @@
+{
+  "schema": "md.tick.v1",
+  "symbol": "EURUSD",
+  "domain": "FX",
+  "ts": "2025-05-18T21:00:03.412Z",
+  "bid": 1.11748,
+  "ask": 1.11751,
+  "mid": 1.117495,
+  "spread": 0.00003,
+  "source": "live",
+  "synthetic": false
+}

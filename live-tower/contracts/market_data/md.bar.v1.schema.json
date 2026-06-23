@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://live-tower/contracts/market_data/md.bar.v1.schema.json",
+  "title": "md.bar.v1",
+  "description": "Canonical OHLCV bar. Strict superset of the FX-OB-Research-Lab candles.csv columns. UTC only. Higher timeframes are always derived from the lowest stored resolution by the single canonical aggregator; bars are stamped at their OPEN time.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "symbol",
+    "domain",
+    "timeframe",
+    "ts",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "is_closed",
+    "source"
+  ],
+  "properties": {
+    "schema": {
+      "const": "md.bar.v1",
+      "description": "Contract identifier and version. Additive changes do not bump the major version; shape-breaking changes do (md.bar.v2) and run side-by-side during migration."
+    },
+    "symbol": {
+      "type": "string",
+      "pattern": "^[A-Z0-9_]{3,16}$",
+      "description": "Canonical symbol (e.g. EURUSD). Venue spellings are mapped to canonical at the feed edge and never cross this contract boundary."
+    },
+    "domain": {
+      "type": "string",
+      "enum": ["FX", "FUTURES"],
+      "description": "Asset-class discriminator. Only FX is used now; the field exists from day one so Futures is additive."
+    },
+    "timeframe": {
+      "type": "string",
+      "enum": ["1m", "M5", "M15", "M30", "H1", "H4", "D1", "W1"],
+      "description": "Bar interval. M15 = detection, 1m = execution in the existing Lab."
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Bar OPEN time in UTC, ISO-8601 (e.g. 2025-05-18T21:00:00Z). The bar is considered closed when the next interval begins."
+    },
+    "open": { "type": "number", "description": "Open price at full source precision." },
+    "high": { "type": "number", "description": "High price. Must be >= max(open, close, low)." },
+    "low": { "type": "number", "description": "Low price. Must be <= min(open, close, high)." },
+    "close": { "type": "number", "description": "Close price at full source precision." },
+    "volume": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Bar volume (tick or real volume per source). >= 0."
+    },
+    "is_closed": {
+      "type": "boolean",
+      "description": "True only for finalized bars. Strategy/ghost/replay consume closed bars only; emitting a forming bar as closed is a look-ahead bug."
+    },
+    "source": {
+      "type": "string",
+      "enum": ["mock", "file", "backfill", "replay", "live"],
+      "description": "Provenance of this bar. 'replay' and 'live' must produce byte-identical OHLCV for the same (symbol,timeframe,ts)."
+    },
+    "session": {
+      "type": "string",
+      "enum": ["Asia", "London", "London Lull", "New York", "Outside"],
+      "description": "DERIVED on emit (pure function of ts, UTC-hour boundaries matching ghost_tracker.py). Included for consumer convenience; never stored as system of record."
+    }
+  }
+}

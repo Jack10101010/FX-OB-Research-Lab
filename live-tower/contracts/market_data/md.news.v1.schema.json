@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://live-tower/contracts/market_data/md.news.v1.schema.json",
+  "title": "md.news.v1",
+  "description": "Economic-calendar / news event, market-data view. Normalized from the existing master_economic_calendar_*.csv shape. UTC only. Carries the blackout window so consumers derive session/news restrictions consistently. This contract describes the DATA only; it expresses no execution policy.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "currency", "impact", "ts", "event", "source"],
+  "properties": {
+    "schema": { "const": "md.news.v1" },
+    "currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$",
+      "description": "ISO-4217 currency the event affects (e.g. USD). For FUTURES later, this maps to the instrument's reference currency/region."
+    },
+    "impact": {
+      "type": "string",
+      "enum": ["high", "medium", "low", "holiday"],
+      "description": "Event impact classification from the calendar source."
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Scheduled event time in UTC."
+    },
+    "event": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Event name (e.g. 'CPI m/m', 'Non-Farm Payrolls')."
+    },
+    "blackout_before_s": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Seconds before ts that constitute the pre-event blackout window."
+    },
+    "blackout_after_s": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Seconds after ts that constitute the post-event blackout window."
+    },
+    "source": {
+      "type": "string",
+      "enum": ["calendar", "live", "manual"],
+      "description": "'calendar' = historical CSV import; 'live' = live calendar feed; 'manual' = hand-entered."
+    }
+  }
+}

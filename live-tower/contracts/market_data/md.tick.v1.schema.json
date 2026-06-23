@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://live-tower/contracts/market_data/md.tick.v1.schema.json",
+  "title": "md.tick.v1",
+  "description": "Canonical bid/ask quote tick. Optional high-resolution substrate used for intrabar fill realism and spread/slippage capture. v1 may be bar-only; this contract reserves the tick layer so adding it later is additive. mid and spread are DERIVED.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "symbol", "domain", "ts", "bid", "ask", "source"],
+  "properties": {
+    "schema": { "const": "md.tick.v1" },
+    "symbol": {
+      "type": "string",
+      "pattern": "^[A-Z0-9_]{3,16}$",
+      "description": "Canonical symbol. Venue spellings never cross this boundary."
+    },
+    "domain": {
+      "type": "string",
+      "enum": ["FX", "FUTURES"]
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Quote time in UTC, millisecond precision (e.g. 2025-05-18T21:00:03.412Z)."
+    },
+    "bid": { "type": "number", "description": "Best bid at full source precision." },
+    "ask": { "type": "number", "description": "Best ask at full source precision. Must be >= bid for real ticks." },
+    "mid": {
+      "type": "number",
+      "description": "DERIVED = (bid + ask) / 2. Included for convenience; recomputable."
+    },
+    "spread": {
+      "type": "number",
+      "minimum": 0,
+      "description": "DERIVED = ask - bid. >= 0 for real ticks."
+    },
+    "source": {
+      "type": "string",
+      "enum": ["mock", "replay", "live"]
+    },
+    "synthetic": {
+      "type": "boolean",
+      "default": false,
+      "description": "True when ticks are generated (e.g. replay intrabar path from a bar-only store). Consumers must never mistake synthetic ticks for captured ticks."
+    }
+  }
+}

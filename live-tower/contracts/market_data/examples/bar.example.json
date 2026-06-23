@@ -1,0 +1,15 @@
+{
+  "schema": "md.bar.v1",
+  "symbol": "EURUSD",
+  "domain": "FX",
+  "timeframe": "M15",
+  "ts": "2025-05-18T21:00:00Z",
+  "open": 1.11749,
+  "high": 1.11776,
+  "low": 1.11713,
+  "close": 1.11758,
+  "volume": 129.285,
+  "is_closed": true,
+  "source": "file",
+  "session": "Outside"
+}
