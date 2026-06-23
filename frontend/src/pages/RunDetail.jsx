@@ -6,6 +6,7 @@ import { MetricChip } from "@/components/lab/MetricChip";
 import { EquityCurveV2, MiniLine } from "@/components/lab/EquityCurve";
 import { DataTable, Pill } from "@/components/lab/DataTable";
 import SessionResults from "@/components/lab/sessionProfiles/SessionResults";
+import TimingRegimeLab from "@/components/lab/timing/TimingRegimeLab";
 import EntryVariantOverlap from "@/components/lab/EntryVariantOverlap";
 import LazyImportStatus from "@/components/lab/LazyImportStatus";
 import { NeonButton, NeonInput, NeonSelect, FilterToggle } from "@/components/lab/controls";
@@ -1414,6 +1415,7 @@ export default function RunDetail() {
         { id: "session-results", label: "Session Results" },
         { id: "variant-overlap", label: "Variant Overlap" },
         { id: "entry-timing", label: "Entry Timing" },
+        { id: "timing-regime", label: "Timing & Regime" },
         { id: "research",    label: "Research" },
     ]), []);
     const currentResultsTab = resultsTabs.some((tab) => tab.id === activeResultsTab)
@@ -3065,6 +3067,7 @@ export default function RunDetail() {
                         <TimeOfDayHeatmap trades={displayTrades} />
                     </>
                 )}
+                {showResultsSection("timing-regime") && <TimingRegimeLab trades={displayTrades} />}
                 {showResultsSection("research") && (
                     <ResearchStrip
                         project={linkedProject}
