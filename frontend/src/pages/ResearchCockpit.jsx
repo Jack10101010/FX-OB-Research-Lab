@@ -11,7 +11,7 @@ import ResearchResultViewBanner from "@/components/lab/ResearchResultViewBanner"
 import { buildBannerRunIdentity } from "@/components/lab/researchBanner/bannerRun";
 import { useDataset, getRunDisplayName } from "@/data/store";
 import { useRunVariant } from "@/data/useRunVariant";
-import { resolveDisplayTrades } from "@/data/resolveDisplayTrades";
+import { resolveRunDisplayUniverse } from "@/data/resolveDisplayTrades";
 import { isPerformanceTrade, isWinTrade, isLossTrade } from "@/data/tradeClassification";
 import { buildFillStateBreakdown, buildSessionBreakdown } from "@/data/fillStateBreakdown";
 import { buildResearchSignals } from "@/data/researchSignals";
@@ -59,7 +59,10 @@ export default function ResearchCockpit() {
     const { universe } = useRunVariant(runId);
     // Variant-aware: read the ACTIVE trade variant (e.g. "TrigE +2"), consistent with
     // RunDetail / Strategy Map — not the bundle's base trades array.
-    const resolved = useMemo(() => resolveDisplayTrades(runData, ACTIVE_TRADE_VARIANT), [runData, ACTIVE_TRADE_VARIANT]);
+    // Bridge: resolve via the shared run-display universe (falls back to
+    // entryResults.tradesByMode for lazy entry-variant runs). Hydration is already
+    // triggered above by useRunVariant → useLazyEntryVariant. See RUN-DATA-PATH-AUDIT-1.md.
+    const resolved = useMemo(() => resolveRunDisplayUniverse(runData, ACTIVE_TRADE_VARIANT), [runData, ACTIVE_TRADE_VARIANT]);
     const trades = resolved.trades;
 
     // ── reuse existing pure analytics over the active run's trades ──────────────

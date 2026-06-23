@@ -8,8 +8,8 @@
 
 import React, { useMemo, useState } from "react";
 import { NeonPanel } from "@/components/lab/NeonPanel";
-import { useDataset, getRunDisplayName } from "@/data/store";
-import { resolveDisplayTrades } from "@/data/resolveDisplayTrades";
+import { Link } from "react-router-dom";
+import { useRunDisplayUniverse } from "@/data/useRunDisplayUniverse";
 import { DIMENSIONS, availableDimensions } from "@/data/cohortDimensions";
 import { buildFilterDiscovery } from "@/data/cohortFilterSimulator";
 import { buildResearchUniverse, resolveResearchCohort, cohortSummary, observedValuesFor } from "@/data/researchLab";
@@ -313,11 +313,8 @@ function ExperimentsModule({ cohort, availDims, universe, exclusions, setExclusi
 }
 
 export default function ResearchLab() {
-    const { ACTIVE_RUN, ACTIVE_TRADE_VARIANT, getRunData } = useDataset();
-    const runId = ACTIVE_RUN?.id || null;
-    const runData = useMemo(() => (runId && getRunData ? getRunData(runId) : null), [runId, getRunData]);
-    const resolved = useMemo(() => resolveDisplayTrades(runData, ACTIVE_TRADE_VARIANT), [runData, ACTIVE_TRADE_VARIANT]);
-    const universe = useMemo(() => buildResearchUniverse(resolved?.trades || []), [resolved]);
+    const { runId, runData, runName, trades: resolvedTrades, needsHydration, loading: hydrating, error: hydrationError } = useRunDisplayUniverse();
+    const universe = useMemo(() => buildResearchUniverse(resolvedTrades || []), [resolvedTrades]);
 
     const [sel, setSel] = useState({ dim1: "", val1: "", dim2Enabled: false, dim2: "", val2: "" });
     const [exclusions, setExclusions] = useState([]);
@@ -332,7 +329,6 @@ export default function ResearchLab() {
     }, [sel]);
     const cohort = useMemo(() => resolveResearchCohort(universe, selection), [universe, selection]);
     const summary = useMemo(() => cohortSummary(cohort), [cohort]);
-    const runName = runId ? getRunDisplayName(runData, runId) : "—";
     const span = useMemo(() => dateSpan(universe), [universe]);
 
     // Discovery candidate → cohort selection.
@@ -351,9 +347,31 @@ export default function ResearchLab() {
                 <p className="text-[11.5px] font-ui text-muted-lab">Universal cohort research workspace. In-sample only — validate candidates out-of-sample before adopting.</p>
             </div>
 
-            {!runData || universe.length === 0 ? (
+            {!runData ? (
                 <NeonPanel title="Research Lab">
                     <div className="py-10 text-center font-ui text-[12px] text-muted-lab">Import or select a run to use Research Lab.</div>
+                </NeonPanel>
+            ) : hydrating ? (
+                <NeonPanel title="Research Lab">
+                    <div className="py-10 text-center font-ui text-[12px] text-muted-lab">Loading run trades…</div>
+                </NeonPanel>
+            ) : universe.length === 0 ? (
+                <NeonPanel title="Research Lab">
+                    <div className="py-10 text-center font-ui text-[12px] text-muted-lab space-y-2">
+                        {hydrationError ? (
+                            <>
+                                <div>Could not load this run's trades ({String(hydrationError)}).</div>
+                                <div><Link to="/runs/active" className="text-[hsl(var(--accent-secondary))] underline">Open Run Workspace</Link> to hydrate it from the sidecar.</div>
+                            </>
+                        ) : needsHydration ? (
+                            <>
+                                <div>This run's trades aren't loaded yet.</div>
+                                <div><Link to="/runs/active" className="text-[hsl(var(--accent-secondary))] underline">Open Run Workspace</Link> to hydrate it, then return.</div>
+                            </>
+                        ) : (
+                            <div>No performance trades in this run.</div>
+                        )}
+                    </div>
                 </NeonPanel>
             ) : (
                 <>

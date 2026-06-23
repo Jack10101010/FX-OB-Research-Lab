@@ -2324,6 +2324,67 @@ export async function ensureBaselineTrades(runId, fileName) {
     try { return await task; } finally { LAZY_BE_INFLIGHT.delete(inflightKey); }
 }
 
+/**
+ * SHARED RUN-UNIVERSE BRIDGE — ensure a run's visible trade universe has resident
+ * rows, hydrating from the sidecar when needed. Lets Research Lab / Cockpit load a
+ * lazy/guarded run on demand (the same way Run Detail does via useLazyEntryVariant),
+ * without duplicating RunDetail-only logic. Idempotent + de-duped (the underlying
+ * ensure* helpers guard in-flight). Resolves the active universe's source file via
+ * getTradeUniverse, then loads the entry-variant OR baseline file — whichever yields
+ * rows (the helpers no-op for the wrong file type, so trying both is safe).
+ * @returns {Promise<{ hydrated:boolean, reason:string, file?:string, error?:string }>}
+ */
+function _hasResidentRows(b) {
+    return (Array.isArray(b?.trades) && b.trades.length > 0)
+        || Object.values(b?.tradesByVariant || {}).some((v) => Array.isArray(v) && v.length > 0)
+        || Object.values(b?.entryResults?.tradesByMode || {}).some((v) => Array.isArray(v) && v.length > 0);
+}
+
+// Bound the sidecar fetch so an unresponsive sidecar degrades to the error/CTA
+// instead of hanging the UI forever. The underlying load keeps running in the
+// background — if it later resolves and merges rows, the next render picks them up.
+const HYDRATE_TIMEOUT_MS = 20000;
+function _withTimeout(promise, ms = HYDRATE_TIMEOUT_MS) {
+    return Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error("hydration timed out (sidecar unreachable)")), ms)),
+    ]);
+}
+
+export async function ensureRunTradeUniverse(runId) {
+    if (!runId) return { hydrated: false, reason: "no_run" };
+    const bundle = state.runs[runId];
+    if (!bundle) return { hydrated: false, reason: "no_bundle" };
+    if (_hasResidentRows(bundle)) return { hydrated: true, reason: "resident" };
+
+    // 1) Lazy run — light, targeted load of the active universe's source file
+    //    (entry-variant → tradesByMode, or baseline → tradesByVariant/trades).
+    if (bundle.lazy) {
+        const file = getTradeUniverse(runId)?.sourceFile || null;
+        if (file) {
+            try {
+                let rows = await _withTimeout(ensureVariantTrades(runId, file));   // null for non-entry files
+                if (!(Array.isArray(rows) && rows.length)) rows = await _withTimeout(ensureBaselineTrades(runId, file));
+                if (Array.isArray(rows) && rows.length) return { hydrated: true, reason: "loaded", file };
+            } catch (e) { /* fall through to the full reload below */ }
+        }
+    }
+
+    // 2) General fallback — full reload from the sidecar. Covers index-only
+    //    non-lazy runs (bundle reload) and lazy runs (manifest reload). Writes
+    //    rows back into state.runs (same path Run Detail uses).
+    if (bundle.lazy || bundle.reloadAvailable) {
+        try {
+            await _withTimeout(reloadFullRunFromSidecar(runId));
+            const ok = _hasResidentRows(state.runs[runId]);
+            return { hydrated: ok, reason: ok ? "reloaded" : "no_rows" };
+        } catch (e) {
+            return { hydrated: false, reason: "error", error: String(e?.message || e) };
+        }
+    }
+    return { hydrated: false, reason: "not_loadable" };
+}
+
 /** Find the BE scenario filename in a lazy run's index for a UI selection. */
 export function findBeFileForRun(run, { executionMode, entryVariantKey, triggerBasis, armLevelR } = {}) {
     const idx = run?.beScenarioIndex;
