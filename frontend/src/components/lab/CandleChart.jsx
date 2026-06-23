@@ -1498,7 +1498,7 @@ export function CandleChart({
                             showObDetails={showObDetails}
                             selected={selected}
                             beAffected={beAffected}
-                            suppressSelectionStyle={beVerificationActive}
+                            suppressSelectionStyle={true}
                             onClick={selectable ? () => handleObClick(o) : undefined}
                             onDebugClick={beAffected && selectable ? () => handleObClick(o) : undefined}
                         />
@@ -1511,12 +1511,13 @@ export function CandleChart({
                 {triggeredEdgeLevelShapes.map((shape) => (
                     <TriggeredEdgeLevelLine key={shape.id} shape={shape} />
                 ))}
-                {/* Triggered-edge: lifecycle event dot markers */}
+                {/* Triggered-edge: lifecycle event dot markers — visual only. Lifecycle
+                    Detail now opens from the OB/trade selection, so these are no longer a
+                    click target (kept as event-position markers). */}
                 {triggeredEdgeLifecycleMarkers.map((m) => (
                     <TriggeredEdgeLifecycleMarker
                         key={m.id}
                         marker={m}
-                        onClick={onSelectOverlay ? () => { onSelectOverlay(m.overlay); } : undefined}
                     />
                 ))}
                 {/* Triggered-edge: OB badge chips */}

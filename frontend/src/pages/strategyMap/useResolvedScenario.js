@@ -394,9 +394,20 @@ function buildTriggeredEdgeOverlays(trades = [], obs = []) {
             tappedCandleIndex:       numericOrNull(trade.tapped_candle_index ?? trade.tappedCandleIndex),
             triggerCandleIndex:      numericOrNull(trade.trigger_candle_index ?? trade.triggerCandleIndex),
             armCandleIndex:          numericOrNull(trade.arm_candle_index ?? trade.armCandleIndex),
+            fillCandleIndex:         numericOrNull(trade.fill_candle_index ?? trade.fillCandleIndex),
+            exitCandleIndex:         numericOrNull(trade.exit_candle_index ?? trade.exitCandleIndex),
             exitedObBeforeArm:       trade.exited_ob_before_arm ?? trade.exitedObBeforeArm ?? null,
             obOccupiedAtArm:         trade.ob_occupied_at_arm ?? trade.obOccupiedAtArm ?? null,
             armedAfterObExit:        trade.armed_after_ob_exit ?? trade.armedAfterObExit ?? null,
+            // Real arm/fill-delay (so diagnostics show "Arm C50 · Filled +51", not the
+            // legacy same/next "Fill C1"). `delay_candles_configured` = the configured arm;
+            // `fill_delay_candles` = the realized candles from trigger to fill.
+            delayCandlesConfigured:  numericOrNull(trade.delay_candles_configured ?? trade.delayCandlesConfigured),
+            fillDelayCandles:        numericOrNull(trade.fill_delay_candles ?? trade.fillDelayCandles),
+            retracedOutBeforeArm:    trade.retraced_out_before_arm ?? trade.retracedOutBeforeArm ?? null,
+            armedAtTime:             firstAvailable(trade.arm_time, trade.armTime, trade.armed_at, trade.armedAt) || armedAt || null,
+            fillTime:                firstAvailable(trade.fill_time, trade.fillTime, trade.entry_time, trade.entry) || null,
+            exitTime:                firstAvailable(trade.exit_time, trade.exitTime, trade.exit) || null,
             obExitTime:              firstAvailable(trade.ob_exit_time, trade.obExitTime) || null,
             ghostCandidate:          trade.ghost_candidate ?? trade.ghostCandidate ?? null,
             fftMoveAwayPipsAtCancel: numericOrNull(trade.fft_move_away_pips_at_cancel ?? trade.fftMoveAwayPipsAtCancel),

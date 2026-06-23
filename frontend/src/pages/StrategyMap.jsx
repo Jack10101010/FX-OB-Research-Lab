@@ -15,7 +15,7 @@ import { BeVerificationPanel } from "@/components/lab/protection/BeVerificationP
 import { BeAffectedTradesCard } from "@/components/lab/protection/BeAffectedTradesCard";
 import { resolveBeScenarioSource, entryVariantHasExact } from "@/data/beResolve";
 import { buildBreakEvenTimeline, pairBaselineTrade, buildBeAffectedTrades } from "@/data/protectionTimeline";
-import { compactTimeframe, formatRunDateRange, getRunDisplayName, loadCandlesForRun, reloadFullRunFromSidecar, rehydrateRunCandles, useDataset } from "@/data/store";
+import { compactTimeframe, formatRunDateRange, getRunDisplayName, loadCandlesForRun, loadInspectorWindowCandles, loadM15WindowCandles, reloadFullRunFromSidecar, rehydrateRunCandles, useDataset } from "@/data/store";
 import { setActiveRunId, setScenario, setSelectedTradeVariant } from "@/data/store";
 import { FolderKanban, Search, AlertTriangle } from "lucide-react";
 import {
@@ -41,6 +41,9 @@ const STRATEGY_MAP_UI_KEY = "fxob_strategy_map_ui_v1";
 // for display anyway, so a few thousand points is plenty. Runs with fewer rows than
 // the cap are returned in full (no-op), so small eager runs are unchanged.
 const STRATEGY_MAP_CANDLE_LIMIT = 12000;
+// Intrabar inspector window: hard-capped so a distant OB-detection / exit timestamp
+// can never request a multi-day 1m window. 24h ⇒ ≤ 1440 1m rows; ±padding.
+const INSPECTOR_MAX_WINDOW_SEC = 24 * 3600;
 const DEFAULT_CHART_HEIGHT = 460;
 const MIN_CHART_HEIGHT = 420;
 const MAX_CHART_HEIGHT_VH = 0.85;
@@ -229,6 +232,14 @@ export default function StrategyMap() {
         r.id && r.id !== runId && (r.hasCandles || r.candleCount || r.trades || r.ob_count || r.obCount)
     ))?.id || null;
     const bundle = runId ? getRunData(runId) : null;
+    // ── Display mode: "overview" (aggregated 6h, full run) | "m15_window" (bounded
+    // 15m window for detection-timeframe trust-checking). State hoisted here so the
+    // candle-source resolution below can read the M15 window; the range + fetch are
+    // computed lower (they depend on the selected trade).
+    const [displayMode, setDisplayMode] = useState("overview");
+    const [m15Preset, setM15Preset] = useState("1Y"); // "6M" | "9M" | "1Y" | "trade"
+    const [m15Offset, setM15Offset] = useState(0);     // whole-window shifts (Prev/Next)
+    const [m15Window, setM15Window] = useState({ candles: [], loading: false, error: "", key: "" });
     // RESEARCH-RESULT-VIEW-BANNER: read-only context banner reads the SAME store
     // scenario (SCENARIO) that useResolvedScenario drives the chart from, so the
     // banner cannot disagree with the map for entry-model / baseline views.
@@ -255,17 +266,33 @@ export default function StrategyMap() {
             || activeRunMeta?.outputFolder
         )
     );
-    const sourceCandles = CANDLES?.length ? CANDLES : (bundle?.candles || []);
-    const hasCandles = bundle ? (bundle.hasCandles !== false && !!bundle.candles?.length) : (CANDLES?.length > 0);
-    const candlesInIndexedDb = !!bundle?.hasCandles && bundle?.candlesStorage === "indexeddb" && !bundle?.candles?.length;
+    // Strategy Map renders DISPLAY candles (aggregated OHLC) when present — a separate
+    // cache slot from full-resolution `candles` (used by OB Retest / Breakeven), so the
+    // two never cross-contaminate. Falls back to full candles for small/eager runs.
+    const displayCandles_ = bundle?.displayCandles;
+    const overviewCandles = (Array.isArray(displayCandles_) && displayCandles_.length)
+        ? displayCandles_
+        : (CANDLES?.length ? CANDLES : (bundle?.candles || []));
+    // In M15 window mode the chart renders the bounded 15m window (separate cache);
+    // otherwise the aggregated overview candles. Never the full multi-million-row candles.csv.
+    const inM15Mode = displayMode === "m15_window" && m15Window.candles.length > 0;
+    const sourceCandles = inM15Mode ? m15Window.candles : overviewCandles;
+    const hasCandles = bundle
+        ? ((bundle.hasCandles !== false && !!bundle.candles?.length) || !!displayCandles_?.length || m15Window.candles.length > 0)
+        : (CANDLES?.length > 0);
+    const candlesInIndexedDb = !!bundle?.hasCandles && bundle?.candlesStorage === "indexeddb" && !bundle?.candles?.length && !displayCandles_?.length;
     const candleStatus = runId ? candleLoadStatus?.[runId] || null : null;
     const candlesLoading = candleStatus?.status === "loading";
     const candlesError = candleStatus?.status === "failed" ? candleStatus.error : "";
-    // Did the sidecar downsample? The strided window returns at most the cap, so a
-    // loaded count at/over the cap means the run had more rows than we fetched. Used
-    // for a subtle, non-blocking "candles downsampled for performance" note.
-    const loadedCandleCount = (candleStatus?.status === "loaded" ? candleStatus.count : 0) || sourceCandles.length || 0;
-    const candlesDownsampled = loadedCandleCount >= STRATEGY_MAP_CANDLE_LIMIT;
+    // Subtle, non-blocking "candles aggregated" note — driven by the backend's
+    // aggregation metadata (authoritative), with a count fallback. Suppressed in M15
+    // mode (the 15m window is the requested timeframe, not a downsample).
+    const displayMeta = bundle?.displayCandlesMeta || null;
+    const candlesDownsampled = !inM15Mode && (Boolean(displayMeta?.aggregated) || sourceCandles.length >= STRATEGY_MAP_CANDLE_LIMIT);
+    const candlesSourceCount = displayMeta?.sourceCount || null;
+    // Timeframe label the UI shows. In M15 window mode the candles ARE 15m; otherwise
+    // the overview's auto-chosen bucket (e.g. "6h"). Never implies a wrong timeframe.
+    const aggBucketLabel = inM15Mode ? "15m" : (displayMeta?.aggregated ? (displayMeta.bucketLabel || "") : "");
     // Optional source-size hint (real, from the lazy manifest) — never fabricated.
     const candlesSourceMb = bundle?.candlesMeta?.size
         ? Math.round(Number(bundle.candlesMeta.size) / (1024 * 1024))
@@ -307,7 +334,11 @@ export default function StrategyMap() {
     );
     const medianCandleGapSec = useMemo(() => getMedianCandleGapSec(sourceCandles), [sourceCandles]);
     const candlesAreCoarse = medianCandleGapSec >= 900;
-    const displayTfOptions = useMemo(() => (candlesAreCoarse ? ["15m"] : ["1m", "5m", "15m"]), [candlesAreCoarse]);
+    // When candles are server-aggregated, the timeframe control reflects the REAL
+    // bucket (e.g. "6h") rather than a misleading "15m"; lower TFs stay unavailable.
+    const displayTfOptions = useMemo(() => (
+        aggBucketLabel ? [aggBucketLabel] : (candlesAreCoarse ? ["15m"] : ["1m", "5m", "15m"])
+    ), [aggBucketLabel, candlesAreCoarse]);
     const displayCandles = useMemo(() => {
         if (candlesAreCoarse || displayTf === "1m") return normalizeDisplayCandles(sourceCandles);
         return resampleCandlesForDisplay(sourceCandles, displayTf === "15m" ? 15 : 5);
@@ -658,10 +689,16 @@ export default function StrategyMap() {
     useEffect(() => {
         if (!canLoadCandlesFromSidecar || candleLoadAttemptedRef.current.has(runId)) return;
         candleLoadAttemptedRef.current.add(runId);
-        // Request a downsampled candle window (sidecar strides server-side when the
-        // run exceeds the cap). Keeps the Strategy Map interactive on multi-million-
-        // row runs; a no-op for runs with fewer rows than the cap.
-        loadCandlesForRun(runId, { limit: STRATEGY_MAP_CANDLE_LIMIT }).catch(() => {
+        // Request DISPLAY candles: correct OHLC bucket aggregation server-side (open/
+        // high/low/close/volume per bucket), not row-striding — so the chart shows
+        // continuous bars, not sparse specks. Cached separately (purpose:"display")
+        // so it never poisons full-resolution candles. No-op for runs with fewer rows
+        // than the cap (returned in full).
+        loadCandlesForRun(runId, {
+            maxPoints: STRATEGY_MAP_CANDLE_LIMIT,
+            aggregate: "ohlc",
+            purpose: "display",
+        }).catch(() => {
             // Store state carries the user-facing error; keep this effect one-shot.
         });
     }, [canLoadCandlesFromSidecar, runId]);
@@ -732,6 +769,99 @@ export default function StrategyMap() {
             || rrLookupKey(o.tradeId) === key
         )) || null;
     }, [selectedTradeId, triggeredEdgeOverlays]);
+
+    // ── Intrabar inspector: full-resolution 1m window fetch ───────────────────
+    // The overview chart uses aggregated display candles, which can't drive the M1
+    // magnifier. On trade select, fetch a SMALL full-resolution window (trigger → arm
+    // → fill → exit ± padding) from the sidecar range endpoint, cached per-window in
+    // the store (never displayCandles / full candles.csv). Falls back to the page's
+    // sourceCandles when no window is resolvable. The window is derived as STABLE
+    // PRIMITIVES (minute-rounded epoch seconds), so a store notify() / new bundle
+    // identity for the SAME trade yields the same numbers and the fetch effect does
+    // NOT re-fire. Hard-capped to INSPECTOR_MAX_WINDOW_SEC. User-controlled past/future
+    // padding (minutes).
+    const [inspPastMin, setInspPastMin] = useState(120);   // 2h
+    const [inspFutureMin, setInspFutureMin] = useState(120); // 2h
+    const { inspectorStart, inspectorEnd } = useMemo(() => {
+        if (!selectedTrade) return { inspectorStart: null, inspectorEnd: null };
+        const ov = selectedTriggeredEdge || {};
+        const norm = (v) => normalizeTimestampSeconds(v);
+        const trig = norm(ov.triggerTime) ?? norm(selectedTrade.trigger_time);
+        const firstEvents = [trig, norm(ov.tappedTime), norm(ov.fillTime), norm(selectedTrade.entry)].filter((t) => t != null);
+        const lastEvents = [norm(ov.exitTime), norm(selectedTrade.exit), norm(ov.fillTime), norm(selectedTrade.entry), trig].filter((t) => t != null);
+        if (!firstEvents.length && !lastEvents.length) return { inspectorStart: null, inspectorEnd: null };
+        const anchorLo = firstEvents.length ? Math.min(...firstEvents) : Math.min(...lastEvents);
+        const anchorHi = lastEvents.length ? Math.max(...lastEvents) : anchorLo;
+        let lo = anchorLo - inspPastMin * 60;
+        let hi = anchorHi + inspFutureMin * 60;
+        if (hi - lo > INSPECTOR_MAX_WINDOW_SEC) hi = lo + INSPECTOR_MAX_WINDOW_SEC; // clamp to cap
+        return { inspectorStart: Math.floor(lo / 60) * 60, inspectorEnd: Math.ceil(hi / 60) * 60 };
+    }, [selectedTrade, selectedTriggeredEdge, inspPastMin, inspFutureMin]);
+    const inspectorWindowKey = inspectorStart != null ? `${inspectorStart}_${inspectorEnd}` : "";
+
+    const [inspectorWindow, setInspectorWindow] = useState({ candles: [], loading: false, error: "", key: "" });
+    useEffect(() => {
+        if (!runId || inspectorStart == null) { setInspectorWindow({ candles: [], loading: false, error: "", key: "" }); return undefined; }
+        let cancelled = false;
+        setInspectorWindow((s) => ({ ...s, loading: true, error: "", key: inspectorWindowKey }));
+        loadInspectorWindowCandles(runId, { start: inspectorStart, end: inspectorEnd })
+            .then((candles) => { if (!cancelled) setInspectorWindow({ candles: candles || [], loading: false, error: "", key: inspectorWindowKey }); })
+            .catch((e) => { if (!cancelled) setInspectorWindow({ candles: [], loading: false, error: String(e?.message || e), key: inspectorWindowKey }); });
+        return () => { cancelled = true; };
+        // Primitive deps only → drag/resize/bundle-identity changes never refetch.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [runId, inspectorStart, inspectorEnd]);
+
+    const inspectorSourceCandles = inspectorWindow.candles.length ? inspectorWindow.candles : sourceCandles;
+    const inspectorMedianGapSec = useMemo(
+        () => (inspectorWindow.candles.length ? getMedianCandleGapSec(inspectorWindow.candles) : medianCandleGapSec),
+        [inspectorWindow.candles, medianCandleGapSec],
+    );
+    const inspectorSourceIsFine = inspectorWindow.candles.length ? (inspectorMedianGapSec <= 300) : !candlesAreCoarse;
+    const inspectorWindowMinutes = (inspectorStart != null && inspectorEnd != null) ? Math.round((inspectorEnd - inspectorStart) / 60) : 0;
+
+    // ── M15 window mode: bounded detection-timeframe view ─────────────────────
+    // Anchor the window at the run's end (latest overview-candle time, else config
+    // end_date). Presets pick a span; m15Offset shifts by whole windows (Prev/Next);
+    // "trade" centres on the selected trade. Range is minute-rounded primitive epoch
+    // seconds so the fetch effect is stable against drag / bundle-identity churn.
+    const runEndSec = useMemo(() => {
+        const dc = bundle?.displayCandles;
+        if (Array.isArray(dc) && dc.length) return normalizeTimestampSeconds(dc[dc.length - 1].time);
+        return normalizeTimestampSeconds(bundle?.config?.end_date) || null;
+    }, [bundle]);
+    const M15_PRESET_DAYS = { "3M": 91, "6M": 182, "9M": 273, "1Y": 365 };
+    const { m15Start, m15End } = useMemo(() => {
+        if (displayMode !== "m15_window") return { m15Start: null, m15End: null };
+        if (m15Preset === "trade" && selectedTrade) {
+            const t = normalizeTimestampSeconds(selectedTriggeredEdge?.fillTime || selectedTrade.entry || selectedTrade.trigger_time);
+            if (t != null) {
+                const half = 21 * 86400; // ±3 weeks around the trade (~4k 15m bars)
+                return { m15Start: Math.floor((t - half) / 900) * 900, m15End: Math.ceil((t + half) / 900) * 900 };
+            }
+        }
+        if (!runEndSec) return { m15Start: null, m15End: null };
+        const span = (M15_PRESET_DAYS[m15Preset] || 365) * 86400;
+        const end = runEndSec - m15Offset * span;
+        const start = end - span;
+        return { m15Start: Math.floor(start / 900) * 900, m15End: Math.ceil(end / 900) * 900 };
+    }, [displayMode, m15Preset, m15Offset, runEndSec, selectedTrade, selectedTriggeredEdge]);
+
+    useEffect(() => {
+        if (!runId || displayMode !== "m15_window" || m15Start == null) {
+            if (m15Window.candles.length || m15Window.loading) setM15Window({ candles: [], loading: false, error: "", key: "" });
+            return undefined;
+        }
+        const key = `${m15Start}_${m15End}`;
+        let cancelled = false;
+        setM15Window((s) => ({ ...s, loading: true, error: "", key }));
+        loadM15WindowCandles(runId, { start: m15Start, end: m15End })
+            .then((candles) => { if (!cancelled) setM15Window({ candles: candles || [], loading: false, error: "", key }); })
+            .catch((e) => { if (!cancelled) setM15Window({ candles: [], loading: false, error: String(e?.message || e), key }); });
+        return () => { cancelled = true; };
+        // Primitive deps only → drag / bundle-identity churn never refetches.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [runId, displayMode, m15Start, m15End]);
 
     // ── BE visual verification (P1) ───────────────────────────────────────────
     // Resolve exact BE for the CURRENT result view only (never baseline-for-variant).
@@ -856,7 +986,48 @@ export default function StrategyMap() {
                     title="Full Chart View"
                     action={
                         <div className="flex items-center gap-2 flex-wrap justify-end min-w-0">
-                            <NeonSelect value={displayTf} onChange={setDisplayTf} options={displayTfOptions} />
+                            {/* Overview (aggregated 6h) vs M15 Strategy Window (bounded detection-tf). */}
+                            <Segment
+                                value={displayMode}
+                                onChange={setDisplayMode}
+                                options={[
+                                    { value: "overview", label: "Overview" },
+                                    { value: "m15_window", label: "M15 Window" },
+                                ]}
+                            />
+                            {displayMode === "m15_window" && (
+                                <div className="flex items-center gap-1.5 flex-wrap" title="M15 is loaded in bounded windows for large runs — not the full multi-year history at once.">
+                                    {["6M", "9M", "1Y", "trade"].map((p) => (
+                                        <button
+                                            key={p}
+                                            type="button"
+                                            onClick={() => { setM15Preset(p); setM15Offset(0); }}
+                                            className={[
+                                                "px-2 py-[2px] text-[11px] font-ui clip-bevel-sm border",
+                                                m15Preset === p
+                                                    ? "bg-[hsl(var(--accent-primary)/0.15)] border-[hsl(var(--accent-primary)/0.55)] text-[hsl(var(--accent-primary))]"
+                                                    : "bg-transparent border-[hsl(var(--border-soft))] text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-base))]",
+                                            ].join(" ")}
+                                        >
+                                            {p === "trade" ? "Around trade" : p}
+                                        </button>
+                                    ))}
+                                    {m15Preset !== "trade" && (
+                                        <>
+                                            <button type="button" onClick={() => setM15Offset((o) => o + 1)} title="Older window" className="px-1.5 py-[2px] text-[11px] font-ui clip-bevel-sm border border-[hsl(var(--border-soft))] text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-base))]">◀ Prev</button>
+                                            <button type="button" disabled={m15Offset === 0} onClick={() => setM15Offset((o) => Math.max(0, o - 1))} title="Newer window" className={["px-1.5 py-[2px] text-[11px] font-ui clip-bevel-sm border", m15Offset === 0 ? "border-[hsl(var(--border-soft)/0.3)] text-[hsl(var(--text-muted)/0.35)] cursor-default" : "border-[hsl(var(--border-soft))] text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-base))]"].join(" ")}>Next ▶</button>
+                                        </>
+                                    )}
+                                    {m15Window.loading && <Pill tone="muted">Loading M15…</Pill>}
+                                    {m15Window.error && <Pill tone="warning">M15 load failed</Pill>}
+                                    {!m15Window.loading && !m15Window.error && m15Window.candles.length > 0 && (
+                                        <Pill tone="muted">{m15Window.candles.length.toLocaleString()} × 15m</Pill>
+                                    )}
+                                </div>
+                            )}
+                            {displayMode === "overview" && (
+                                <NeonSelect value={displayTf} onChange={setDisplayTf} options={displayTfOptions} />
+                            )}
                             <NeonSelect value={runId || ""} onChange={(v) => setActiveRunId(v)} options={importedRuns.slice(0, 20).map((r) => ({ value: r.id, label: getRunDisplayName(r) }))} />
                             {!showTradeList && (
                                 <NeonButton tone="ghost" onClick={() => setShowTradeList(true)}>
@@ -947,14 +1118,14 @@ export default function StrategyMap() {
                                 <Pill tone="muted">Chart time: UTC</Pill>
                                 <Pill tone="muted">{displayCandles.length} candles</Pill>
                                 {candlesDownsampled && (
-                                    <Pill tone="muted" title={`This run's candle history is large${candlesSourceMb ? ` (~${candlesSourceMb} MB on disk)` : ""}; the chart loads a downsampled window (~${STRATEGY_MAP_CANDLE_LIMIT.toLocaleString()} candles) so it stays responsive. Analytics are unaffected.`}>
-                                        Candles downsampled for performance
+                                    <Pill tone="muted" title={`This run's candle history is large${candlesSourceMb ? ` (~${candlesSourceMb} MB on disk)` : ""}; the chart shows ${sourceCandles.length.toLocaleString()} OHLC candles${candlesSourceCount ? ` aggregated from ${candlesSourceCount.toLocaleString()} 1m candles` : ""} to ${aggBucketLabel || "a coarser timeframe"} (UTC-aligned) so it stays responsive. High/low ranges are preserved; analytics use full-resolution data.`}>
+                                        {aggBucketLabel ? `Aggregated to ${aggBucketLabel} candles for performance` : "Candles aggregated for performance"}
                                     </Pill>
                                 )}
                                 <Pill tone="muted">{chartTradeMarkers.length} markers</Pill>
                                 {showOB && !chartObBoxes.length && <Pill tone="warning">No OB data</Pill>}
                                 {showMarkers && !chartTradeMarkers.length && <Pill tone="warning">No trade markers</Pill>}
-                                {candlesAreCoarse && (
+                                {candlesAreCoarse && !aggBucketLabel && (
                                     <Pill tone="warning">Imported candles are 15m/coarser. 1m/5m views unavailable for this run.</Pill>
                                 )}
                             </div>
@@ -970,11 +1141,11 @@ export default function StrategyMap() {
                         <div className="mb-3 flex items-center gap-2 flex-wrap">
                             <Pill tone="muted">Chart time: UTC</Pill>
                             {candlesDownsampled && (
-                                <Pill tone="muted" title={`This run's candle history is large${candlesSourceMb ? ` (~${candlesSourceMb} MB on disk)` : ""}; the chart loads a downsampled window (~${STRATEGY_MAP_CANDLE_LIMIT.toLocaleString()} candles) so it stays responsive. Analytics are unaffected.`}>
-                                    Candles downsampled for performance
+                                <Pill tone="muted" title={`This run's candle history is large${candlesSourceMb ? ` (~${candlesSourceMb} MB on disk)` : ""}; the chart shows ${sourceCandles.length.toLocaleString()} OHLC candles${candlesSourceCount ? ` aggregated from ${candlesSourceCount.toLocaleString()} 1m candles` : ""} to ${aggBucketLabel || "a coarser timeframe"} (UTC-aligned) so it stays responsive. High/low ranges are preserved; analytics use full-resolution data.`}>
+                                    {aggBucketLabel ? `Aggregated to ${aggBucketLabel} candles for performance` : "Candles aggregated for performance"}
                                 </Pill>
                             )}
-                            {candlesAreCoarse && (
+                            {candlesAreCoarse && !aggBucketLabel && (
                                 <Pill tone="warning">Imported candles are 15m/coarser. 1m/5m views unavailable for this run.</Pill>
                             )}
                         </div>
@@ -1083,9 +1254,19 @@ export default function StrategyMap() {
                                 key={`be-insp-${selectedTrade?.displayObId || selectedTrade?.obId || selectedTrade?.id || "none"}`}
                                 selectedTrade={selectedTrade}
                                 triggeredEdgeOverlay={selectedTriggeredEdge}
-                                sourceCandles={sourceCandles}
-                                sourceIsFine={!candlesAreCoarse}
-                                medianCandleGapSec={medianCandleGapSec}
+                                sourceCandles={inspectorSourceCandles}
+                                sourceIsFine={inspectorSourceIsFine}
+                                medianCandleGapSec={inspectorMedianGapSec}
+                                windowLoading={inspectorWindow.loading}
+                                windowError={inspectorWindow.error}
+                                windowRows={inspectorWindow.candles.length}
+                                windowMinutes={inspectorWindowMinutes}
+                                windowStartSec={inspectorStart}
+                                windowEndSec={inspectorEnd}
+                                pastPadMin={inspPastMin}
+                                futurePadMin={inspFutureMin}
+                                onPastPad={setInspPastMin}
+                                onFuturePad={setInspFutureMin}
                                 beVerification={beVerification}
                                 pipSize={Number(runConfig?.pip_size) || 0.0001}
                                 onClose={() => setSelectedTradeId(null)}
@@ -1096,10 +1277,11 @@ export default function StrategyMap() {
                             stacked on the RIGHT (50%). Outside BE debug the panels
                             render full-width exactly as before. */}
                         {(() => {
-                            // The original debug (lifecycle) panel: explicit overlay
-                            // selection, or — while BE-debugging — auto-derived from
-                            // the selected trade so it stays visible.
-                            const lifecycleOverlay = selectedOverlay || (showBeVerification ? selectedTriggeredEdge : null);
+                            // Lifecycle Detail opens from the OB/trade selection: an explicit
+                            // overlay click, else the selected trade's triggered-edge overlay.
+                            // So clicking an OB opens BOTH the Intrabar Inspector (trade) and
+                            // this panel (overlay).
+                            const lifecycleOverlay = selectedOverlay || selectedTriggeredEdge;
                             const panels = (
                                 <>
                                     {showBeVerification && beTimeline && (
@@ -1116,7 +1298,7 @@ export default function StrategyMap() {
                                         <LifecycleDetailPanel
                                             overlay={lifecycleOverlay}
                                             trades={activeTrades}
-                                            onClose={() => setSelectedOverlay(null)}
+                                            onClose={() => { setSelectedOverlay(null); setSelectedTradeId(null); }}
                                             showFftDebug={showFftDebug}
                                             runConfig={runConfig}
                                         />
@@ -2136,6 +2318,30 @@ function LifecycleDetailPanel({ overlay: ov, onClose, trades = [], showFftDebug 
         inval:        { label: "Invalidated Pre-Entry", tooltip: null,                                                                 tone: "rgba(139,92,246,0.82)" },
     };
     const badgeInfo = BADGE_STATUS[ov.badgeState] || null;
+    // ── Real arm / fill-delay labels (deep-delay aware) ──────────────────────
+    // The legacy badge collapsed every delayed fill to "Fill C1" (badgeState next).
+    // Use the real fields so a C40 trade reads "Arm C40 · Filled +41", never "Fill C1".
+    // `delayCandlesConfigured` = configured arm; `fillDelayCandles` = realized candles
+    // from trigger to fill.
+    const armN = ov.delayCandlesConfigured;
+    const fillN = ov.fillDelayCandles;
+    const armText = armN != null ? `Arm C${armN}`
+        : ov.badgeState === "same" ? "Arm C0"
+        : ov.badgeState === "next" ? "Arm C1"
+        : null;
+    const fillText = fillN != null ? `Filled +${fillN}` : null;
+    // For FILLED states only, replace the legacy "Fill C0/C1" badge with the real arm.
+    const armBadge = (ov.badgeState === "same" || ov.badgeState === "next") && armText
+        ? {
+            label: `${armText}${fillText ? ` · ${fillText}` : ""}`,
+            tone: badgeInfo?.tone || "rgba(6,182,212,0.85)",
+            tooltip: `Configured arm ${armText}${fillN != null ? `; order filled ${fillN} candle(s) after the trigger` : ""}. (Legacy "Fill C0/C1" only distinguished trigger-candle vs not.)`,
+        }
+        : badgeInfo;
+    // Suspicious delay flags (backend-recorded): price left the OB during the delay
+    // window and/or the order armed after that exit and filled on a revisit.
+    const flagLeftObBeforeArm = ov.retracedOutBeforeArm === true || ov.exitedObBeforeArm === true;
+    const flagArmedAfterExit = ov.armedAfterObExit === true;
 
     // Time helpers
     const fmtShort = (raw) => {
@@ -2174,11 +2380,21 @@ function LifecycleDetailPanel({ overlay: ov, onClose, trades = [], showFftDebug 
             narrative = `The ${dir} OB setup was invalidated before any trigger.${cancelLabel ? ` Reason: ${cancelLabel}.` : ""} The setup was removed to protect the trade from a compromised zone.`;
             break;
         case "same":
-            narrative = `Price tapped the ${dir} OB${fmtAt(ov.tappedTime)}, crossed ${trigPctText}, and filled on the trigger candle (Fill C0)${fmtAt(fillTime)}. The trade ${rText}.`;
+            narrative = `Price tapped the ${dir} OB${fmtAt(ov.tappedTime)}, crossed ${trigPctText}, and filled on the trigger candle (${armText || "Arm C0"})${fmtAt(fillTime)}. The trade ${rText}.`;
             break;
-        case "next":
-            narrative = `Price tapped the ${dir} OB${fmtAt(ov.tappedTime)}, crossed ${trigPctText}${fmtAt(ov.triggerTime)}, then filled on the first candle after trigger (Fill C1)${fmtAt(fillTime)}. The trade ${rText}.`;
+        case "next": {
+            const armPhrase = armN != null && armN > 1
+                ? `armed ${armN} candles after the trigger (${armText})`
+                : "filled on the first candle after trigger (Arm C1)";
+            const fillPhrase = fillN != null ? `, filling ${fillN} candle(s) after the trigger` : "";
+            const exitPhrase = flagArmedAfterExit
+                ? " Note: price had already left the OB before the order armed — it filled on a revisit."
+                : flagLeftObBeforeArm
+                    ? " Note: price left the OB during the delay window before arming."
+                    : "";
+            narrative = `Price tapped the ${dir} OB${fmtAt(ov.tappedTime)}, crossed ${trigPctText}${fmtAt(ov.triggerTime)}, then ${armPhrase}${fillPhrase}${fmtAt(fillTime)}. The trade ${rText}.${exitPhrase}`;
             break;
+        }
         default:
             narrative = ov.cancelledBeforeEntry
                 ? `The ${dir} OB setup was cancelled before any fill.${cancelLabel ? ` (${cancelLabel})` : ""}`
@@ -2218,6 +2434,39 @@ function LifecycleDetailPanel({ overlay: ov, onClose, trades = [], showFftDebug 
     const ghostOutcome = String(ov.ghost_outcome || "").toUpperCase();
     const ghostR = ov.ghost_r;
 
+    // ── Compact Details grid (fields already present on overlay / trade row) ──
+    const pipSize = Number(runConfig?.pip_size) || 0.0001;
+    const num = (v) => (v != null && v !== "" && isFinite(Number(v)) ? Number(v) : null);
+    const fmtPx = (v) => { const n = num(v); return n == null ? "—" : n.toFixed(5); };
+    const fmtInt = (v) => { const n = num(v); return n == null ? "—" : String(n); };
+    const fmtSess = (s) => { const v = String(s || "").trim(); return v ? v.toUpperCase() : "—"; };
+    const fmtBool = (b) => (b === true ? "Yes" : b === false ? "No" : "—");
+    const obTopN = num(ov.obTop);
+    const obBotN = num(ov.obBot);
+    const obPips = (obTopN != null && obBotN != null && pipSize) ? (Math.abs(obTopN - obBotN) / pipSize).toFixed(1) : "—";
+    const rrVal = num(trade?.rr) ?? num(trade?.rr_multiple) ?? num(runConfig?.rr_multiple);
+    const detailRows = [
+        ["Direction", dirLabel],
+        ["OB top", fmtPx(ov.obTop)],
+        ["OB bottom", fmtPx(ov.obBot)],
+        ["OB size (pips)", obPips],
+        ["Entry price", fmtPx(ov.entryPrice)],
+        ["Stop price", fmtPx(trade?.stop)],
+        ["Target price", fmtPx(trade?.tp)],
+        ["RR / target R", rrVal != null ? `${rrVal}R` : "—"],
+        ["Delay configured", armN != null ? `C${armN}` : "—"],
+        ["Actual fill delay", fillN != null ? `+${fillN}` : "—"],
+        ["Arm candle idx", fmtInt(ov.armCandleIndex)],
+        ["Fill candle idx", fmtInt(ov.fillCandleIndex)],
+        ["Exit candle idx", fmtInt(ov.exitCandleIndex)],
+        ["OB origin session", fmtSess(trade?.obOriginSession)],
+        ["OB detection session", fmtSess(trade?.obDetectionSession)],
+        ["Fill session", fmtSess(trade?.fillSession || trade?.session)],
+        ["Retraced out before arm", fmtBool(ov.retracedOutBeforeArm)],
+        ["Exited OB before arm", fmtBool(ov.exitedObBeforeArm)],
+        ["Armed after OB exit", fmtBool(ov.armedAfterObExit)],
+    ];
+
     return (
         <div
             className="mt-2 rounded-sm border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-1)/0.96)] px-3 py-2.5 shadow-md"
@@ -2229,13 +2478,31 @@ function LifecycleDetailPanel({ overlay: ov, onClose, trades = [], showFftDebug 
                     <span className="font-ui text-[10px] uppercase tracking-wider font-semibold text-[hsl(var(--text-1))]">
                         Lifecycle Detail
                     </span>
-                    {badgeInfo && (
+                    {armBadge && (
                         <span
                             className="px-1.5 py-px rounded-sm font-ui text-[9px] uppercase tracking-wider"
-                            style={{ background: badgeInfo.tone, color: "rgba(255,255,255,0.96)" }}
-                            title={badgeInfo.tooltip || undefined}
+                            style={{ background: armBadge.tone, color: "rgba(255,255,255,0.96)" }}
+                            title={armBadge.tooltip || undefined}
                         >
-                            {badgeInfo.label}
+                            {armBadge.label}
+                        </span>
+                    )}
+                    {flagLeftObBeforeArm && (
+                        <span
+                            className="px-1.5 py-px rounded-sm font-ui text-[9px] uppercase tracking-wider"
+                            style={{ background: "rgba(217,119,6,0.9)", color: "rgba(255,255,255,0.96)" }}
+                            title="Price left the order block before the delayed order became eligible (during the delay window). Fields: retraced_out_before_arm / exited_ob_before_arm."
+                        >
+                            Left OB before arm
+                        </span>
+                    )}
+                    {flagArmedAfterExit && (
+                        <span
+                            className="px-1.5 py-px rounded-sm font-ui text-[9px] uppercase tracking-wider"
+                            style={{ background: "rgba(220,38,38,0.92)", color: "rgba(255,255,255,0.96)" }}
+                            title="The delayed order armed after price had already exited the OB, then filled on a revisit. Critical for diagnosing deep-delay C20–C50 entries. Field: armed_after_ob_exit."
+                        >
+                            Armed after OB exit
                         </span>
                     )}
                 </div>
@@ -2267,6 +2534,18 @@ function LifecycleDetailPanel({ overlay: ov, onClose, trades = [], showFftDebug 
             <p className="font-ui text-[10.5px] text-[hsl(var(--text-1))] leading-snug mb-2">
                 {narrative}
             </p>
+            {/* Compact Details grid — OB / trade / session fields (— for missing) */}
+            <div className="border-t border-[hsl(var(--border-soft))] pt-1.5 mb-2">
+                <div className="font-ui text-[10px] uppercase tracking-wider text-[hsl(var(--text-2))] font-semibold mb-1">Details</div>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+                    {detailRows.map(([label, value]) => (
+                        <div key={label} className="flex items-center justify-between gap-2 font-ui text-[10px]">
+                            <span className="text-[hsl(var(--text-3))] truncate">{label}</span>
+                            <span className="text-[hsl(var(--text-1))] tabular-nums font-medium">{value}</span>
+                        </div>
+                    ))}
+                </div>
+            </div>
             {/* Event timeline */}
             {timelineEvents.length > 0 && (
                 <div className="border-t border-[hsl(var(--border-soft))] pt-1.5">

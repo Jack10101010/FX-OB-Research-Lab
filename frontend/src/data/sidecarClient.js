@@ -88,6 +88,11 @@ export function getRunCandlesByRunId(runId, options = {}, baseUrl = DEFAULT_SIDE
     if (options.start) params.set("start", options.start);
     if (options.end) params.set("end", options.end);
     if (options.limit) params.set("limit", String(options.limit));
+    // Opt-in display aggregation (Strategy Map): correct OHLC bucket downsample.
+    if (options.maxPoints) params.set("max_points", String(options.maxPoints));
+    if (options.aggregate) params.set("aggregate", String(options.aggregate));
+    // Forced timeframe for the windowed M15 Strategy Map view (no auto-upshift).
+    if (options.bucket) params.set("bucket", String(options.bucket));
     const suffix = params.toString() ? `?${params.toString()}` : "";
     return requestSidecar(`/runs/${encodeURIComponent(runId)}/candles${suffix}`, {}, baseUrl);
 }

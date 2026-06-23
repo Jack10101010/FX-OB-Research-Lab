@@ -2823,6 +2823,49 @@ export async function autoReloadIndexedRunsFromSidecar() {
 export async function loadCandlesForRun(runId, options = {}) {
     const current = runId ? state.runs[runId] : null;
     if (!current) throw new Error("Run is not available in the local index.");
+
+    // DISPLAY path (Strategy Map): aggregated OHLC candles are cached SEPARATELY in
+    // `displayCandles` so they can never satisfy or overwrite the full-resolution
+    // `candles` that OB Retest / Breakeven verification depend on. A full request
+    // (no purpose/aggregate) never reads or writes this slot, so there is no
+    // cross-contamination either way.
+    const isDisplay = options.purpose === "display" || Boolean(options.aggregate);
+    if (isDisplay) {
+        if (Array.isArray(current.displayCandles) && current.displayCandles.length) return current.displayCandles;
+        const dispIds = runReloadIdentifiers(runId, current);
+        if (!dispIds.length) throw new Error("This run has no sidecar run id or output folder reference.");
+        setCandleLoadStatus(runId, "loading", "", current.candleCount || 0);
+        let dispPayload = null;
+        let dispError = null;
+        for (const identifier of dispIds) {
+            try { dispPayload = await getRunCandlesByRunId(identifier, options); break; }
+            catch (error) { dispError = error; }
+        }
+        if (!dispPayload) {
+            const message = dispError?.message || "Could not load candle data from sidecar. Make sure sidecar is running and candles.csv exists.";
+            setCandleLoadStatus(runId, "failed", message, 0);
+            throw new Error(message);
+        }
+        const displayCandles = Array.isArray(dispPayload.candles) ? dispPayload.candles : [];
+        const cur = state.runs[runId] || current;
+        state = {
+            ...state,
+            runs: { ...state.runs, [runId]: {
+                ...cur,
+                displayCandles,
+                displayCandlesMeta: {
+                    aggregated: Boolean(dispPayload.aggregated),
+                    sourceCount: dispPayload.source_count ?? null,
+                    returnedCount: dispPayload.returned_count ?? displayCandles.length,
+                    bucketSeconds: dispPayload.bucket_seconds ?? null,
+                    bucketLabel: dispPayload.bucket_label || "",
+                },
+            } },
+        };
+        setCandleLoadStatus(runId, "loaded", "", displayCandles.length);
+        return displayCandles;
+    }
+
     if (Array.isArray(current.candles) && current.candles.length) return current.candles;
 
     const identifiers = runReloadIdentifiers(runId, current);
@@ -2867,6 +2910,101 @@ export async function loadCandlesForRun(runId, options = {}) {
     };
     setCandleLoadStatus(runId, "loaded", "", candles.length);
     return candles;
+}
+
+// Intrabar inspector: fetch a SMALL full-resolution (1m) candle window around a
+// selected event via the sidecar range endpoint (no aggregation). Cached per
+// window in run.intrabarCandlesByWindow[`${start}_${end}`] — NEVER touches
+// run.candles (full-resolution consumers) or run.displayCandles (aggregated
+// overview). Idempotent + de-duped; never loads the whole candles.csv.
+const INSPECTOR_WINDOW_INFLIGHT = new Map();
+export async function loadInspectorWindowCandles(runId, { start, end } = {}) {
+    const current = runId ? state.runs[runId] : null;
+    if (!current) throw new Error("Run is not available in the local index.");
+    if (!start || !end) throw new Error("Inspector window requires start and end times.");
+    const key = `${start}_${end}`;
+    const cached = current.intrabarCandlesByWindow?.[key];
+    if (Array.isArray(cached) && cached.length) return cached;
+    const inflightKey = `${runId}::${key}`;
+    if (INSPECTOR_WINDOW_INFLIGHT.has(inflightKey)) return INSPECTOR_WINDOW_INFLIGHT.get(inflightKey);
+    const identifiers = runReloadIdentifiers(runId, current);
+    if (!identifiers.length) throw new Error("This run has no sidecar run id or output folder reference.");
+    const task = (async () => {
+        let payload = null;
+        let lastError = null;
+        for (const identifier of identifiers) {
+            // No aggregate / max_points → the sidecar returns FULL-resolution rows
+            // in [start, end] only.
+            try { payload = await getRunCandlesByRunId(identifier, { start, end }); break; }
+            catch (error) { lastError = error; }
+        }
+        if (!payload) throw lastError || new Error("Could not load inspector candle window from sidecar.");
+        const windowCandles = Array.isArray(payload.candles) ? payload.candles : [];
+        const cur = state.runs[runId];
+        if (cur) {
+            // Store the window for cache reuse WITHOUT notify(): the caller (the
+            // inspector effect) receives the candles via this promise and sets its
+            // own component state. Calling notify() here would re-render StrategyMap
+            // with a new bundle identity — harmless now that the fetch effect keys
+            // off primitive start/end, but an unnecessary full-tree re-render. The
+            // cache mutation is intentionally non-reactive (read only by this fn).
+            state = {
+                ...state,
+                runs: { ...state.runs, [runId]: {
+                    ...cur,
+                    intrabarCandlesByWindow: { ...(cur.intrabarCandlesByWindow || {}), [key]: windowCandles },
+                } },
+            };
+        }
+        return windowCandles;
+    })();
+    INSPECTOR_WINDOW_INFLIGHT.set(inflightKey, task);
+    try { return await task; } finally { INSPECTOR_WINDOW_INFLIGHT.delete(inflightKey); }
+}
+
+// Strategy Map "M15 window" mode: fetch a BOUNDED, server-aggregated 15m OHLC window
+// (aggregate=ohlc & bucket=15m) over [start,end]. Cached per window in
+// run.m15Windows[`m15_${start}_${end}`] — a slot distinct from run.candles (full-res),
+// run.displayCandles (6h overview), and run.intrabarCandlesByWindow (1m inspector).
+// Forced bucket (no max_points) so the bounded range stays at 15m with no auto-upshift;
+// the caller bounds the range (≤ ~1Y). Never loads the whole candles.csv.
+const M15_WINDOW_INFLIGHT = new Map();
+export async function loadM15WindowCandles(runId, { start, end } = {}) {
+    const current = runId ? state.runs[runId] : null;
+    if (!current) throw new Error("Run is not available in the local index.");
+    if (!start || !end) throw new Error("M15 window requires start and end times.");
+    const key = `m15_${start}_${end}`;
+    const cached = current.m15Windows?.[key];
+    if (Array.isArray(cached) && cached.length) return cached;
+    const inflightKey = `${runId}::${key}`;
+    if (M15_WINDOW_INFLIGHT.has(inflightKey)) return M15_WINDOW_INFLIGHT.get(inflightKey);
+    const identifiers = runReloadIdentifiers(runId, current);
+    if (!identifiers.length) throw new Error("This run has no sidecar run id or output folder reference.");
+    const task = (async () => {
+        let payload = null;
+        let lastError = null;
+        for (const identifier of identifiers) {
+            try { payload = await getRunCandlesByRunId(identifier, { start, end, aggregate: "ohlc", bucket: "15m" }); break; }
+            catch (error) { lastError = error; }
+        }
+        if (!payload) throw lastError || new Error("Could not load M15 window from sidecar.");
+        const windowCandles = Array.isArray(payload.candles) ? payload.candles : [];
+        const cur = state.runs[runId];
+        if (cur) {
+            // Non-reactive cache mutation (read only by this fn); the caller receives
+            // candles via this promise and sets its own component state.
+            state = {
+                ...state,
+                runs: { ...state.runs, [runId]: {
+                    ...cur,
+                    m15Windows: { ...(cur.m15Windows || {}), [key]: windowCandles },
+                } },
+            };
+        }
+        return windowCandles;
+    })();
+    M15_WINDOW_INFLIGHT.set(inflightKey, task);
+    try { return await task; } finally { M15_WINDOW_INFLIGHT.delete(inflightKey); }
 }
 
 function setAutoReloadRunStatus(runId, status, error = "") {

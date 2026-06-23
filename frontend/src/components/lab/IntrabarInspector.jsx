@@ -22,14 +22,17 @@ const INSPECTOR_POS_KEY = "fxob_strategy_map_inspector_pos_v1";
 const INSPECTOR_VIEW_KEY = "fxob_strategy_map_inspector_view_v1";
 const DEFAULT_LEAD_MIN = 65;   // +50 lead candles (1m) vs the original 15
 const DEFAULT_TRAIL_MIN = 80;  // +50 trail candles (1m) vs the original 30
+const AXIS_CLEAR_PX = 22;      // reserve for lightweight-charts' time axis so labels never cover the date/time
+const LABEL_ROW_PX = 12;       // vertical spacing between stacked marker labels
 const INSPECTOR_WIDTH = 360;   // default width; resizable via the corner handle
 const INSPECTOR_HEIGHT = 260;  // default height; resizable via the corner handle
 const MIN_INSPECTOR_WIDTH = 280;
 const MIN_INSPECTOR_HEIGHT = 200;
 const HEADER_HEIGHT = 22;
 const STATUS_HEIGHT = 16;
-const FOOTER_HEIGHT = 28;
-const CHART_HEIGHT = INSPECTOR_HEIGHT - HEADER_HEIGHT - STATUS_HEIGHT - FOOTER_HEIGHT; // 194px
+const COUNTSTRIP_HEIGHT = 18;  // lifecycle candle-count strip (Trig→Arm / Arm→Fill / …)
+const FOOTER_HEIGHT = 30;      // past/future padding controls
+const CHART_HEIGHT = INSPECTOR_HEIGHT - HEADER_HEIGHT - STATUS_HEIGHT - COUNTSTRIP_HEIGHT - FOOTER_HEIGHT;
 
 const UTC_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const MONO_FONT = "JetBrains Mono, Menlo, monospace";
@@ -199,6 +202,19 @@ export function IntrabarInspector({
     onClose,
     beVerification = null,   // optional BE geometry from StrategyMap: { beArmPrice, beStopPrice, beArmTime, beExitTime, armLevelR }
     pipSize = 0.0001,        // for stage-line wick clipping
+    windowLoading = false,   // fetching the full-resolution 1m window from the sidecar
+    windowError = "",        // sidecar window fetch failed
+    windowRows = 0,          // # of 1m candles in the fetched window
+    windowMinutes = 0,       // window duration in minutes
+    // Past/future padding (minutes) driving the FETCH window in StrategyMap. When
+    // provided, the inspector renders the whole fetched range and shows preset
+    // buttons; the legacy lead/trail inputs are the fallback when absent.
+    windowStartSec = null,
+    windowEndSec = null,
+    pastPadMin = null,
+    futurePadMin = null,
+    onPastPad = null,
+    onFuturePad = null,
 }) {
     const wrapperRef = useRef(null);
     const dragRef = useRef(null);
@@ -223,7 +239,7 @@ export function IntrabarInspector({
         if (!obViewKey) return;
         saveView(obViewKey, { lead: leadMinutes, trail: trailMinutes, width: size.width, height: size.height, showBeLines });
     }, [obViewKey, leadMinutes, trailMinutes, size, showBeLines]);
-    const chartHeight = Math.max(120, size.height - HEADER_HEIGHT - STATUS_HEIGHT - FOOTER_HEIGHT);
+    const chartHeight = Math.max(120, size.height - HEADER_HEIGHT - STATUS_HEIGHT - COUNTSTRIP_HEIGHT - FOOTER_HEIGHT);
     const beAvailable = !!(beVerification && (beVerification.beArmPrice != null || beVerification.beStopPrice != null));
 
     // Compute initial right-aligned position if none was persisted.
@@ -361,8 +377,12 @@ export function IntrabarInspector({
         return null;
     }, [triggeredEdgeOverlay, selectedTrade]);
 
-    const windowStart = centerTime != null ? centerTime - leadMinutes * 60 : null;
-    const windowEnd = centerTime != null ? centerTime + trailMinutes * 60 : null;
+    // Prefer the StrategyMap-driven fetched window (padding controls) so the chart
+    // shows the whole fetched range; fall back to the legacy centre±lead/trail slice.
+    const windowStart = windowStartSec != null ? windowStartSec
+        : (centerTime != null ? centerTime - leadMinutes * 60 : null);
+    const windowEnd = windowEndSec != null ? windowEndSec
+        : (centerTime != null ? centerTime + trailMinutes * 60 : null);
 
     const slicedCandles = useMemo(() => {
         if (windowStart == null || windowEnd == null) return [];
@@ -380,17 +400,85 @@ export function IntrabarInspector({
         tpPrice: numericOrNull(selectedTrade?.tp),
     }), [triggeredEdgeOverlay, selectedTrade]);
 
-    const events = useMemo(() => ({
-        obDetectionTime: normalizeChartTimestamp(triggeredEdgeOverlay?.detectionTime ?? selectedTrade?.obDetectionTime ?? selectedTrade?.detected),
-        tappedTime: normalizeChartTimestamp(triggeredEdgeOverlay?.tappedTime ?? selectedTrade?.tapped_time),
-        triggerTime: normalizeChartTimestamp(triggeredEdgeOverlay?.triggerTime ?? selectedTrade?.trigger_time),
-        armedAt: normalizeChartTimestamp(triggeredEdgeOverlay?.armedAt ?? selectedTrade?.armed_at),
-        fillTime: normalizeChartTimestamp(selectedTrade?.entry),
-        edgeRevisitTime: normalizeChartTimestamp(triggeredEdgeOverlay?.edgeRevisitTime ?? selectedTrade?.edge_revisit_time),
-        retraceCancelTime: normalizeChartTimestamp(triggeredEdgeOverlay?.retraceCancelTime ?? selectedTrade?.retrace_cancel_time),
-        exitTime: normalizeChartTimestamp(selectedTrade?.exit),
-        invalidationTime: normalizeChartTimestamp(selectedTrade?.invalidationTime ?? selectedTrade?.invalidation_time),
-    }), [triggeredEdgeOverlay, selectedTrade]);
+    // ── Lifecycle indices + candle-count diagnostics (from row fields) ────────
+    // The configured arm-eligibility candle is trigger + delay (NOT armed_at, which
+    // is the trigger candle's time). All counts come from real row indices; missing
+    // values render as "—" rather than being guessed.
+    const lifecycle = useMemo(() => {
+        const num = (v) => (v == null || v === "" || !isFinite(Number(v)) ? null : Number(v));
+        const trigIdx = num(triggeredEdgeOverlay?.triggerCandleIndex ?? selectedTrade?.trigger_candle_index);
+        const delay = num(triggeredEdgeOverlay?.delayCandlesConfigured ?? selectedTrade?.delay_candles_configured);
+        const armIdx = num(triggeredEdgeOverlay?.armCandleIndex ?? selectedTrade?.arm_candle_index)
+            ?? (trigIdx != null && delay != null ? trigIdx + delay : null);
+        const fillIdx = num(triggeredEdgeOverlay?.fillCandleIndex ?? selectedTrade?.fill_candle_index);
+        const exitIdx = num(triggeredEdgeOverlay?.exitCandleIndex ?? selectedTrade?.exit_candle_index);
+        const fillDelay = num(triggeredEdgeOverlay?.fillDelayCandles ?? selectedTrade?.fill_delay_candles);
+        const trigToArm = delay != null ? delay : (trigIdx != null && armIdx != null ? armIdx - trigIdx : null);
+        const trigToFill = fillDelay != null ? fillDelay : (trigIdx != null && fillIdx != null ? fillIdx - trigIdx : null);
+        const armToFill = (trigToFill != null && trigToArm != null) ? trigToFill - trigToArm
+            : (armIdx != null && fillIdx != null ? fillIdx - armIdx : null);
+        const fillToExit = (fillIdx != null && exitIdx != null) ? exitIdx - fillIdx : null;
+        return { trigIdx, armIdx, fillIdx, exitIdx, delay, fillDelay, trigToArm, trigToFill, armToFill, fillToExit };
+    }, [triggeredEdgeOverlay, selectedTrade]);
+
+    // Arm-eligible time: prefer a real arm_time/arm_eligible_time column; else map
+    // the configured delay onto M1 candles (trigger + delay minutes). Never armed_at.
+    const armEligibleSec = useMemo(() => {
+        const explicit = normalizeChartTimestamp(
+            triggeredEdgeOverlay?.armEligibleTime ?? selectedTrade?.arm_eligible_time ?? selectedTrade?.arm_time,
+        );
+        if (explicit != null) return explicit;
+        const trig = normalizeChartTimestamp(triggeredEdgeOverlay?.triggerTime ?? selectedTrade?.trigger_time);
+        if (trig != null && lifecycle.trigToArm != null) return trig + lifecycle.trigToArm * 60;
+        return null;
+    }, [triggeredEdgeOverlay, selectedTrade, lifecycle.trigToArm]);
+
+    const events = useMemo(() => {
+        const fill = normalizeChartTimestamp(selectedTrade?.entry);
+        const revisit = normalizeChartTimestamp(triggeredEdgeOverlay?.edgeRevisitTime ?? selectedTrade?.edge_revisit_time);
+        // For delayed entries the engine's edge_revisit_time IS the fill candle, so a
+        // separate "REVISIT" marker on top of ENTRY/FILL is confusing. Only show it
+        // when it is a genuinely different candle (> 1 minute from the fill).
+        const revisitDistinct = (revisit != null && (fill == null || Math.abs(revisit - fill) > 60)) ? revisit : null;
+        return {
+            obDetectionTime: normalizeChartTimestamp(triggeredEdgeOverlay?.detectionTime ?? selectedTrade?.obDetectionTime ?? selectedTrade?.detected),
+            tappedTime: normalizeChartTimestamp(triggeredEdgeOverlay?.tappedTime ?? selectedTrade?.tapped_time),
+            triggerTime: normalizeChartTimestamp(triggeredEdgeOverlay?.triggerTime ?? selectedTrade?.trigger_time),
+            armEligibleTime: armEligibleSec,
+            fillTime: fill,
+            edgeRevisitTime: revisitDistinct,
+            retraceCancelTime: normalizeChartTimestamp(triggeredEdgeOverlay?.retraceCancelTime ?? selectedTrade?.retrace_cancel_time),
+            exitTime: normalizeChartTimestamp(selectedTrade?.exit),
+            invalidationTime: normalizeChartTimestamp(selectedTrade?.invalidationTime ?? selectedTrade?.invalidation_time),
+        };
+    }, [triggeredEdgeOverlay, selectedTrade, armEligibleSec]);
+
+    // Per-event dynamic labels/tooltips (override the static eventColors map) so the
+    // arm marker reads "ARM C50" and tooltips carry candle indices + counts.
+    const fmtIdx = (v) => (v == null ? "—" : String(v));
+    const eventLabels = useMemo(() => {
+        const d = lifecycle.delay;
+        return {
+            armEligibleTime: {
+                label: d != null ? `ARM ACTIVE C${d}` : "ARM ACTIVE",
+                title: `Arm active — the delayed limit order becomes active/fill-eligible here`
+                    + `${d != null ? `, ${d} candle(s) after the trigger (delay complete)` : ""}.`
+                    + ` Trigger idx ${fmtIdx(lifecycle.trigIdx)} → arm idx ${fmtIdx(lifecycle.armIdx)}.`
+                    + ` The limit order becomes active here; a fill is only valid if price trades back to the entry on/after this candle.`,
+            },
+            triggerTime: { label: "TRIGGER", title: `Trigger — penetration threshold crossed, delay starts (candle idx ${fmtIdx(lifecycle.trigIdx)}).` },
+            fillTime: {
+                label: "ENTRY / FILL",
+                title: `Entry / fill — order filled at the OB edge`
+                    + `${lifecycle.armToFill != null ? `, ${lifecycle.armToFill} candle(s) after arm` : ""}`
+                    + `${lifecycle.trigToFill != null ? ` (${lifecycle.trigToFill} after trigger)` : ""}`
+                    + ` (candle idx ${fmtIdx(lifecycle.fillIdx)}).`,
+            },
+            exitTime: { label: "EXIT", title: `Exit — TP/SL/close${lifecycle.fillToExit != null ? `, ${lifecycle.fillToExit} candle(s) after fill` : ""} (candle idx ${fmtIdx(lifecycle.exitIdx)}).` },
+            tappedTime: { label: "TAP", title: "TAP — price first tapped the OB edge." },
+            edgeRevisitTime: { label: "REVISIT", title: "Edge revisit — price returned to the OB edge (a separate candle from the fill)." },
+        };
+    }, [lifecycle]);
 
     // Header bits
     // When BE lines are toggled on (and BE geometry is available), add the BE
@@ -420,7 +508,12 @@ export function IntrabarInspector({
     const directionLabel = direction.toUpperCase();
     const badgeState = triggeredEdgeOverlay?.badgeState;
     const BADGE_LABEL_MAP = { same: "FILL C0", next: "FILL C1", used_ob: "RETRACE", first_failed: "FAILED TAG", never_trig: "NEVER TRIG", inval: "PROTECTED" };
-    const badgeLabel = badgeState ? (BADGE_LABEL_MAP[badgeState] || String(badgeState).toUpperCase()) : "";
+    // Delay-aware: show the real configured arm ("ARM C50") for filled trades rather
+    // than the legacy same/next "FILL C1".
+    const armConfigured = numericOrNull(triggeredEdgeOverlay?.delayCandlesConfigured);
+    const badgeLabel = (armConfigured != null && (badgeState === "same" || badgeState === "next"))
+        ? `ARM C${armConfigured}`
+        : badgeState ? (BADGE_LABEL_MAP[badgeState] || String(badgeState).toUpperCase()) : "";
 
     // Status sub-line bits
     const cancelReason = triggeredEdgeOverlay?.cancelReason || selectedTrade?.cancel_reason || "";
@@ -434,13 +527,17 @@ export function IntrabarInspector({
         return <div ref={wrapperRef} style={{ position: "absolute", visibility: "hidden" }} />;
     }
 
-    const isUnavailable = !sourceIsFine;
+    // A full-resolution window fetch is in flight or failed → show that state
+    // instead of the generic "1m unavailable" message (which only applies when we
+    // genuinely have no fine candles to fetch).
+    const isFetchState = Boolean(windowLoading || windowError);
+    const isUnavailable = !isFetchState && !sourceIsFine;
     const containerStyle = {
         position: "absolute",
         top: position.top,
         left: position.left,
         width: size.width,
-        height: isUnavailable ? (HEADER_HEIGHT + 56) : size.height,
+        height: (isUnavailable || isFetchState) ? (HEADER_HEIGHT + 56) : size.height,
         zIndex: 30,
         background: "rgba(248, 250, 252, 0.98)",
         border: "1px solid rgba(15, 23, 42, 0.22)",
@@ -463,14 +560,23 @@ export function IntrabarInspector({
                 onClose={onClose}
                 onDragStart={startDrag}
             />
-            {!isUnavailable && (
+            {!isUnavailable && !isFetchState && (
                 <StatusLine
                     outcomeLabel={outcomeLabel}
                     resultR={resultR}
                     cancelReason={cancelReason}
                 />
             )}
-            {isUnavailable ? (
+            {!isUnavailable && !isFetchState && (
+                <LifecycleCountStrip lifecycle={lifecycle} windowRows={windowRows} windowMinutes={windowMinutes} />
+            )}
+            {isFetchState ? (
+                <div style={{ padding: "12px 14px", fontSize: 11, lineHeight: 1.5, color: windowError ? "rgba(190,18,60,0.95)" : "rgba(71,85,105,0.95)" }}>
+                    {windowLoading
+                        ? "Loading full-resolution 1m candles for this trade…"
+                        : `Could not load the 1m candle window.${windowError ? ` (${windowError})` : ""} Re-select the trade to retry.`}
+                </div>
+            ) : isUnavailable ? (
                 <UnavailableMessage medianCandleGapSec={medianCandleGapSec} />
             ) : (
                 <>
@@ -478,6 +584,7 @@ export function IntrabarInspector({
                         candles={slicedCandles}
                         levels={displayLevels}
                         events={displayEvents}
+                        eventLabels={eventLabels}
                         direction={direction}
                         windowStart={windowStart}
                         windowEnd={windowEnd}
@@ -485,6 +592,10 @@ export function IntrabarInspector({
                         pipSize={pipSize}
                     />
                     <Footer
+                        pastPadMin={pastPadMin}
+                        futurePadMin={futurePadMin}
+                        onPastPad={onPastPad}
+                        onFuturePad={onFuturePad}
                         leadMinutes={leadMinutes}
                         trailMinutes={trailMinutes}
                         onLead={setLeadMinutes}
@@ -614,7 +725,65 @@ function UnavailableMessage({ medianCandleGapSec }) {
     );
 }
 
-function Footer({ leadMinutes, trailMinutes, onLead, onTrail, beAvailable = false, showBeLines = false, onToggleBeLines }) {
+// Compact candle-count diagnostics: Trigger → Arm → Fill → Exit. Pure read of the
+// row indices; missing values render "—" (never guessed).
+function LifecycleCountStrip({ lifecycle, windowRows = 0, windowMinutes = 0 }) {
+    const fmt = (v) => (v == null ? "—" : `${v}`);
+    const items = [
+        ["Trig→Arm", lifecycle.trigToArm, "rgba(217,119,6,0.95)"],
+        ["Arm→Fill", lifecycle.armToFill, "rgba(34,197,94,0.95)"],
+        ["Fill→Exit", lifecycle.fillToExit, "rgba(139,92,246,0.95)"],
+        ["Trig→Fill", lifecycle.trigToFill, "rgba(71,85,105,0.95)"],
+    ];
+    return (
+        <div style={{ height: COUNTSTRIP_HEIGHT, padding: "0 12px", display: "flex", alignItems: "center", gap: 8, overflow: "hidden", fontSize: 9.5, fontFamily: MONO_FONT, color: "rgba(71,85,105,0.95)" }}>
+            {items.map(([label, val, color]) => (
+                <span key={label} title={`${label}: candle count from the lifecycle row indices`}>
+                    <span style={{ color }}>{label}</span> <b style={{ color: "rgba(15,23,42,0.92)" }}>{fmt(val)}</b>
+                    {val != null ? " c" : ""}
+                </span>
+            ))}
+            {windowRows > 0 && (
+                <span style={{ marginLeft: "auto", color: "rgba(100,116,139,0.9)" }}>
+                    {windowRows.toLocaleString()} × 1m · {windowMinutes >= 60 ? `${(windowMinutes / 60).toFixed(1)}h` : `${windowMinutes}m`}
+                </span>
+            )}
+        </div>
+    );
+}
+
+const PAD_PRESETS = [60, 120, 240, 480]; // 1h / 2h / 4h / 8h
+
+function PadButtons({ value, onChange, label }) {
+    return (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+            <span>{label}</span>
+            {PAD_PRESETS.map((m) => {
+                const active = Number(value) === m;
+                return (
+                    <button
+                        key={m}
+                        type="button"
+                        onClick={() => onChange(m)}
+                        title={`${label} padding: ${m / 60}h of context`}
+                        style={{
+                            height: 16, padding: "0 5px", fontSize: 9, fontFamily: MONO_FONT, cursor: "pointer",
+                            borderRadius: 2,
+                            border: `1px solid ${active ? "rgba(217,119,6,0.9)" : "rgba(148,163,184,0.55)"}`,
+                            background: active ? "rgba(217,119,6,0.15)" : "rgba(255,255,255,0.92)",
+                            color: active ? "rgba(120,53,15,0.95)" : "rgba(71,85,105,0.9)",
+                        }}
+                    >
+                        {m / 60}h
+                    </button>
+                );
+            })}
+        </span>
+    );
+}
+
+function Footer({ pastPadMin = null, futurePadMin = null, onPastPad = null, onFuturePad = null, leadMinutes, trailMinutes, onLead, onTrail, beAvailable = false, showBeLines = false, onToggleBeLines }) {
+    const usePadding = onPastPad && onFuturePad;
     const wrap = {
         height: FOOTER_HEIGHT,
         display: "flex",
@@ -642,50 +811,42 @@ function Footer({ leadMinutes, trailMinutes, onLead, onTrail, beAvailable = fals
         if (!isFinite(n)) return 1;
         return Math.max(1, Math.min(600, n));
     };
+    const beBtn = beAvailable ? (
+        <button
+            type="button"
+            onClick={onToggleBeLines}
+            title="Toggle break-even arm / stop lines + arm/exit markers"
+            style={{
+                height: 18, padding: "0 7px", fontSize: 10, fontFamily: UI_FONT, fontWeight: 600, cursor: "pointer",
+                borderRadius: 3,
+                border: `1px solid ${showBeLines ? "rgba(56,189,248,0.9)" : "rgba(148,163,184,0.6)"}`,
+                background: showBeLines ? "rgba(56,189,248,0.18)" : "rgba(255,255,255,0.9)",
+                color: showBeLines ? "rgba(8,47,73,0.95)" : "rgba(71,85,105,0.9)",
+            }}
+        >
+            BE lines
+        </button>
+    ) : null;
+    if (usePadding) {
+        // Past/future padding presets — adjust ONLY the inspector fetch window.
+        return (
+            <div style={{ ...wrap, gap: 8, flexWrap: "wrap" }}>
+                <PadButtons label="Past" value={pastPadMin} onChange={onPastPad} />
+                {beBtn}
+                <span style={{ flex: 1 }} />
+                <PadButtons label="Future" value={futurePadMin} onChange={onFuturePad} />
+            </div>
+        );
+    }
     return (
         <div style={wrap}>
             <span>Lead</span>
-            <input
-                type="number"
-                min={1}
-                max={600}
-                value={leadMinutes}
-                onChange={(e) => onLead(clamp(e.target.value))}
-                style={inputStyle}
-            />
+            <input type="number" min={1} max={600} value={leadMinutes} onChange={(e) => onLead(clamp(e.target.value))} style={inputStyle} />
             <span>min</span>
-            {beAvailable && (
-                <button
-                    type="button"
-                    onClick={onToggleBeLines}
-                    title="Toggle break-even arm / stop lines + arm/exit markers"
-                    style={{
-                        marginLeft: 8,
-                        height: 18,
-                        padding: "0 7px",
-                        fontSize: 10,
-                        fontFamily: UI_FONT,
-                        fontWeight: 600,
-                        cursor: "pointer",
-                        borderRadius: 3,
-                        border: `1px solid ${showBeLines ? "rgba(56,189,248,0.9)" : "rgba(148,163,184,0.6)"}`,
-                        background: showBeLines ? "rgba(56,189,248,0.18)" : "rgba(255,255,255,0.9)",
-                        color: showBeLines ? "rgba(8,47,73,0.95)" : "rgba(71,85,105,0.9)",
-                    }}
-                >
-                    BE lines
-                </button>
-            )}
+            {beBtn}
             <span style={{ flex: 1 }} />
             <span>Trail</span>
-            <input
-                type="number"
-                min={1}
-                max={600}
-                value={trailMinutes}
-                onChange={(e) => onTrail(clamp(e.target.value))}
-                style={inputStyle}
-            />
+            <input type="number" min={1} max={600} value={trailMinutes} onChange={(e) => onTrail(clamp(e.target.value))} style={inputStyle} />
             <span>min</span>
         </div>
     );
@@ -695,7 +856,7 @@ function Footer({ leadMinutes, trailMinutes, onLead, onTrail, beAvailable = fals
 // MiniChart — second lightweight-charts instance
 // ─────────────────────────────────────────────────────────────────────────────
 
-function MiniChart({ candles, levels, events, direction, windowStart, windowEnd, chartHeight = CHART_HEIGHT, pipSize = 0.0001 }) {
+function MiniChartImpl({ candles, levels, events, eventLabels = {}, direction, windowStart, windowEnd, chartHeight = CHART_HEIGHT, pipSize = 0.0001 }) {
     const containerRef = useRef(null);
     const chartRef = useRef(null);
     const seriesRef = useRef(null);
@@ -813,21 +974,26 @@ function MiniChart({ candles, levels, events, direction, windowStart, windowEnd,
         setOverlayKey((k) => k + 1);
     }, [candles]);
 
-    const overlays = computeOverlays({
+    // Overlays are derived from chart geometry; recompute ONLY when the data, the
+    // window, the chart height, or the time-scale (overlayKey) changes — never on a
+    // parent re-render caused by dragging/repositioning the inspector. Previously
+    // this ran in the render body, so every drag mousemove recomputed all overlays
+    // and froze the main thread.
+    const overlays = useMemo(() => computeOverlays({
         chart: chartRef.current,
         series: seriesRef.current,
         container: containerRef.current,
         levels,
         events,
+        eventLabels,
         direction,
         windowStart,
         windowEnd,
         candles,
         pipSize,
-        // overlayKey participates as a dep so React re-runs render after time-scale moves.
-        // eslint-disable-next-line no-unused-vars
-        _key: overlayKey,
-    });
+    // overlayKey forces recompute after the chart's time-scale moves / data reloads.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }), [levels, events, eventLabels, direction, windowStart, windowEnd, candles, pipSize, chartHeight, overlayKey]);
 
     return (
         <div style={{ position: "relative", width: "100%", height: chartHeight, overflow: "hidden" }}>
@@ -888,21 +1054,31 @@ function MiniChart({ candles, levels, events, direction, windowStart, windowEnd,
                             top: m.top ?? 0,
                             height: m.height ?? "100%",
                             left: m.x,
-                            width: 1,
-                            borderLeft: `1px solid ${m.color}`,
+                            width: m.emphasis ? 2 : 1,
+                            // ARM ACTIVE is emphasised (thicker, dashed) so it is unmistakable
+                            // and never confused with the trigger or fill lines.
+                            borderLeft: `${m.emphasis ? 2 : 1}px ${m.emphasis ? "dashed" : "solid"} ${m.color}`,
                         }}
                     >
                         <span
                             style={{
                                 position: "absolute",
-                                ...(m.labelAtTop === false ? { bottom: 1 } : { top: 1 }),
+                                // Stack overlapping labels onto separate rows; bottom labels sit
+                                // ABOVE the time axis (AXIS_CLEAR) so the date/time stays readable.
+                                ...(m.labelAtTop === false
+                                    ? { bottom: AXIS_CLEAR_PX + (m.labelRow || 0) * LABEL_ROW_PX }
+                                    : { top: (m.labelRow || 0) * LABEL_ROW_PX }),
                                 left: 2,
-                                fontSize: 7.5,
+                                fontSize: m.emphasis ? 8.5 : 7.5,
+                                fontWeight: m.emphasis ? 700 : 400,
                                 fontFamily: MONO_FONT,
-                                color: m.color,
-                                background: "rgba(248,250,252,0.86)",
+                                color: m.emphasis ? "rgba(255,255,255,0.98)" : m.color,
+                                background: m.emphasis ? m.color : "rgba(248,250,252,0.92)",
                                 padding: "0 2px",
+                                borderRadius: 2,
+                                border: m.emphasis ? "none" : `1px solid ${m.color}`,
                                 whiteSpace: "nowrap",
+                                zIndex: m.emphasis ? 7 : 6,
                             }}
                             title={m.title}
                         >
@@ -930,7 +1106,13 @@ function MiniChart({ candles, levels, events, direction, windowStart, windowEnd,
     );
 }
 
-function computeOverlays({ chart, series, container, levels, events, direction, windowStart, windowEnd, candles = [], pipSize = 0.0001 }) {
+// Memoized: dragging/repositioning the inspector changes only the parent's
+// position state, which does NOT change any MiniChart prop — so React.memo skips
+// the re-render entirely (no per-frame chart rebuild). Resize changes `chartHeight`
+// (a real prop), so the chart still updates when dimensions actually change.
+const MiniChart = React.memo(MiniChartImpl);
+
+function computeOverlays({ chart, series, container, levels, events, eventLabels = {}, direction, windowStart, windowEnd, candles = [], pipSize = 0.0001 }) {
     if (!chart || !series || !container) {
         return { obBand: null, lines: [], markers: [] };
     }
@@ -993,7 +1175,7 @@ function computeOverlays({ chart, series, container, levels, events, direction, 
         obDetectionTime:   ["rgba(107, 114, 128, 0.85)", "DET",     "OB detected"],
         tappedTime:        ["rgba(99, 102, 241, 0.9)",   "TAP",     "Price tapped the OB edge"],
         triggerTime:       ["rgba(245, 158, 11, 0.95)",  "TRIG",    "Trigger crossed (penetration threshold)"],
-        armedAt:           ["rgba(234, 179, 8, 0.95)",   "ARM",     "Entry order armed"],
+        armEligibleTime:   ["rgba(217, 70, 239, 1)",     "ARM ACTIVE", "Arm active — delayed order becomes active here"],
         fillTime:          ["rgba(34, 197, 94, 0.95)",   "FILL",    "Trade filled (entry)"],
         edgeRevisitTime:   ["rgba(6, 182, 212, 0.9)",    "REVISIT", "Edge revisit — price returned to the OB edge after triggering"],
         retraceCancelTime: ["rgba(220, 38, 38, 0.9)",    "RETRACE", "Retrace cancel — setup cancelled after pulling back"],
@@ -1010,7 +1192,10 @@ function computeOverlays({ chart, series, container, levels, events, direction, 
         if (windowEnd != null && t > windowEnd) return;
         const x = chart.timeScale().timeToCoordinate(t);
         if (x == null) return;
-        const [color, label, title] = eventColors[key] || ["rgba(71, 85, 105, 0.9)", key, key];
+        const [color, baseLabel, baseTitle] = eventColors[key] || ["rgba(71, 85, 105, 0.9)", key, key];
+        const ov = eventLabels[key] || {};
+        const label = ov.label ?? baseLabel;
+        const title = ov.title ?? baseTitle;
         // Stage line geometry: for BEARISH OBs the line drops from the chart top
         // to a pip ABOVE the event candle's high; for BULLISH OBs it rises from
         // the bottom to a pip BELOW the event candle's low. Falls back to full
@@ -1028,7 +1213,21 @@ function computeOverlays({ chart, series, container, levels, events, direction, 
                 if (yBound != null) { const b = clamp(yBound, 0, maxH); top = b; height = Math.max(2, maxH - b); labelAtTop = false; }
             }
         }
-        markers.push({ id: `${key}-${t}`, x: clamp(x, 0, maxW), color, label, title, top, height, labelAtTop });
+        markers.push({ id: `${key}-${t}`, x: clamp(x, 0, maxW), color, label, title, top, height, labelAtTop, emphasis: key === "armEligibleTime" });
+    });
+
+    // Label de-collision: stack overlapping labels onto separate vertical rows so a
+    // cluster (e.g. ARM ACTIVE + ENTRY/FILL + EXIT on the same candle) reads clearly
+    // instead of mashing together. Greedy by x; each label claims the lowest row whose
+    // last occupant ends before this label starts (estimated by char width).
+    const CHAR_PX = 5.4;
+    const rowsEnd = []; // rightmost occupied x per row
+    [...markers].sort((a, b) => a.x - b.x).forEach((m) => {
+        const w = (String(m.label).length * CHAR_PX) + 8;
+        let row = rowsEnd.findIndex((end) => m.x >= end + 2);
+        if (row === -1) { row = rowsEnd.length; rowsEnd.push(0); }
+        rowsEnd[row] = m.x + w;
+        m.labelRow = row;
     });
 
     return { obBand, lines, markers };
