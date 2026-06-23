@@ -11,11 +11,29 @@ import { ChevronDown, ChevronRight, Ban } from "lucide-react";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { useDataset, getActiveBundle, getTradeUniverse } from "@/data/store";
 import { buildSessionResults, cohortFailureSummary, describeMissedReason, cohortOutcomeDistribution, cohortExcursionSnapshot, cohortTargetSuitability, cohortTargetEconomics, cohortBESuitability, cohortRiskReduction, cohortManagementRead, cohortResearchVerdict, cohortRegimeSnapshot, cohortFailureClusters, cohortHeaderCounts } from "@/data/sessionResults";
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
 
 // Shared formatters for the Management decision-support surface.
 const fmtR2 = (v) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${Number(v).toFixed(2)}R`);
 const pfText = (pf, hasWins) => (pf == null ? (hasWins ? "∞" : "—") : pf);
 const confToneOf = (cf, success, danger) => (cf === "High" ? success : cf === "Medium" ? "text-[hsl(var(--warning))]" : "text-[hsl(var(--text-2))]");
+
+// Plain-English column tooltip. Reuses the shared dark TooltipContent surface
+// (same primitive TermTip uses) — wraps a header label with a dotted-underline
+// "help" affordance and shows a short, jargon-free explanation on hover/focus.
+function ColTip({ label, tip, side = "top" }) {
+    return (
+        <Tooltip>
+            <TooltipTrigger asChild>
+                <span tabIndex={0} className="underline decoration-dotted decoration-[hsl(var(--text-3)/0.6)] underline-offset-2 cursor-help outline-none focus-visible:decoration-[hsl(var(--accent-primary))]">{label}</span>
+            </TooltipTrigger>
+            <TooltipContent side={side} className="max-w-[250px] normal-case tracking-normal">
+                <div className="font-ui font-semibold text-[12px] text-[hsl(var(--text))] mb-0.5">{label}</div>
+                <div className="font-ui text-[11.5px] leading-[1.45] text-[hsl(var(--text-2))]">{tip}</div>
+            </TooltipContent>
+        </Tooltip>
+    );
+}
 
 const fmtR = (v) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${Number(v).toFixed(1)}R`);
 const fmtPx = (v) => (v == null || v === "" || !Number.isFinite(Number(v)) ? "—" : Number(v).toFixed(5));
@@ -190,10 +208,10 @@ function ExcGroup({ title, g }) {
         <div className="clip-bevel-sm border border-[hsl(var(--border-soft))] px-2.5 py-2">
             <div className="text-[10px] font-ui uppercase tracking-wider text-[hsl(var(--accent-secondary))] mb-1">{title} ({g.count})</div>
             <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] font-ui">
-                <span className="text-muted-lab">Avg MFE</span><span className="font-num text-right text-[hsl(var(--text-1))]">{v(g.avgMFE)}</span>
-                <span className="text-muted-lab">Med MFE</span><span className="font-num text-right text-[hsl(var(--text-1))]">{v(g.medianMFE)}</span>
-                <span className="text-muted-lab">Avg MAE</span><span className="font-num text-right text-[hsl(var(--text-1))]">{v(g.avgMAE)}</span>
-                <span className="text-muted-lab">Med MAE</span><span className="font-num text-right text-[hsl(var(--text-1))]">{v(g.medianMAE)}</span>
+                <span className="text-muted-lab"><ColTip label="Avg MFE" tip="Maximum Favourable Excursion — the average best-case profit (in R) each trade reached before it exited. How far price ran in your favour." /></span><span className="font-num text-right text-[hsl(var(--text-1))]">{v(g.avgMFE)}</span>
+                <span className="text-muted-lab"><ColTip label="Med MFE" tip="The middle value of best-case profit reached (in R): half of trades did better, half worse. Less skewed by a few big outliers than the average." /></span><span className="font-num text-right text-[hsl(var(--text-1))]">{v(g.medianMFE)}</span>
+                <span className="text-muted-lab"><ColTip label="Avg MAE" tip="Maximum Adverse Excursion — the average worst-case drawdown (in R) each trade saw. How far price moved against you before the result." /></span><span className="font-num text-right text-[hsl(var(--text-1))]">{v(g.avgMAE)}</span>
+                <span className="text-muted-lab"><ColTip label="Med MAE" tip="The middle value of worst-case drawdown (in R): half of trades dipped more, half less. Less skewed by outliers than the average." /></span><span className="font-num text-right text-[hsl(var(--text-1))]">{v(g.medianMAE)}</span>
             </div>
         </div>
     );
@@ -289,7 +307,7 @@ function TargetSuitability({ rows, tpLabel }) {
             <div className="overflow-x-auto">
                 <table className="w-full text-[11.5px] font-ui whitespace-nowrap">
                     <thead><tr className="text-[hsl(var(--accent-secondary))] uppercase text-[10px] tracking-wider text-left">
-                        <th className="py-1 pr-3">Target</th><th className="pr-3">Reach %</th><th className="pr-3">Winners</th><th className="pr-3">Losers</th><th className="pr-3 text-right">Est W</th><th className="pr-3 text-right">Est L</th><th className="pr-3 text-right">Est WR</th><th className="pr-3 text-right">Est PF</th><th className="pr-3 text-right">Est Net R</th><th className="pr-3">Strength</th><th className="pr-3 text-right">Δ Current</th><th className="pr-3 text-right">n</th><th>Confidence</th>
+                        <th className="py-1 pr-3"><ColTip label="Target" tip="The take-profit level being tested, in R (risk multiples). 1R = a profit equal to the amount you risked on the trade." /></th><th className="pr-3"><ColTip label="Reach %" tip="Share of all trades whose price reached this target at some point before exiting, based on the exported best-case (MFE) paths." /></th><th className="pr-3"><ColTip label="Winners" tip="Of the trades that actually won, the share that reached this target level." /></th><th className="pr-3"><ColTip label="Losers" tip="Of the trades that actually lost, the share that still touched this target before failing." /></th><th className="pr-3 text-right"><ColTip label="Est W" tip="Estimated wins if this target had been used — every decided trade whose peak (MFE) reached the target." /></th><th className="pr-3 text-right"><ColTip label="Est L" tip="Estimated losses if this target had been used — decided trades whose peak fell short of the target." /></th><th className="pr-3 text-right"><ColTip label="Est WR" tip="Estimated win rate at this target = Est W ÷ (Est W + Est L)." /></th><th className="pr-3 text-right"><ColTip label="Est PF" tip="Estimated profit factor at this target = total winning R ÷ total losing R. Above 1 is profitable; higher is better. ∞ means no losing R." /></th><th className="pr-3 text-right"><ColTip label="Est Net R" tip="Estimated total result in R if every trade had used this target instead of its actual one. Exact for this fill set — confirm in a backend run." /></th><th className="pr-3"><ColTip label="Strength" tip="A bar showing this target's Est Net R relative to the other rows — longer = stronger. Helps spot a broad plateau vs a single sharp peak." /></th><th className="pr-3 text-right"><ColTip label="Δ Current" tip="How much better or worse this target's Est Net R is versus the cohort's current target. '—' means the current target can't be read." /></th><th className="pr-3 text-right"><ColTip label="n" tip="Number of decided trades (wins + losses with excursion data) behind these estimates. Larger n = more trustworthy." /></th><th><ColTip label="Confidence" tip="How much to trust this row — High / Medium / Low — from sample size and how many trades reached the target. Small cohorts mostly read Low." /></th>
                     </tr></thead>
                     <tbody>
                         {ts.levels.map((l) => {
@@ -354,7 +372,7 @@ function BESuitability({ rows }) {
             <div className="overflow-x-auto">
                 <table className="w-full text-[11.5px] font-ui whitespace-nowrap">
                     <thead><tr className="text-[hsl(var(--accent-secondary))] uppercase text-[10px] tracking-wider text-left">
-                        <th className="py-1 pr-3">Level</th><th className="pr-3">Losers Reached</th><th className="pr-3">Winners Reached</th><th className="pr-3 text-right">Net Benefit</th><th className="pr-3 text-right">Saved R<span className="text-[8px] align-super"> bound</span></th><th className="pr-3 text-right">Lost R<span className="text-[8px] align-super"> bound</span></th><th className="pr-3 text-right">Net Impact<span className="text-[8px] align-super"> bound</span></th><th>Signal</th>
+                        <th className="py-1 pr-3"><ColTip label="Level" tip="The profit level (in R) at which break-even would arm — i.e. move your stop to entry once price reaches this much profit." /></th><th className="pr-3"><ColTip label="Losers Reached" tip="Of losing trades, how many first reached this level — so a break-even stop could have saved them from a full loss." /></th><th className="pr-3"><ColTip label="Winners Reached" tip="Of winning trades, how many reached this level — these are the winners a break-even stop might protect, or cut short." /></th><th className="pr-3 text-right"><ColTip label="Net Benefit" tip="A simple reach-rate score (loser reach % minus winner give-back %). A ranking aid only — not a profit/loss figure." /></th><th className="pr-3 text-right"><ColTip label="Saved R (bound)" tip="Upper-bound R you might save by moving losers to break-even — a best case, not a simulated result." /></th><th className="pr-3 text-right"><ColTip label="Lost R (bound)" tip="Worst-case R you might give up if winners get stopped at break-even before they run. A pessimistic bound." /></th><th className="pr-3 text-right"><ColTip label="Net Impact (bound)" tip="Saved minus Lost — a rough range, not real P&L. It depends on the order price moved, so confirm with a backend run." /></th><th><ColTip label="Signal" tip="Quick read — Strong / Mixed / Weak — of whether break-even at this level looks worth testing." /></th>
                     </tr></thead>
                     <tbody>
                         {be.levels.map((l) => (
@@ -391,7 +409,7 @@ function RiskReduction({ rows }) {
             <div className="overflow-x-auto">
                 <table className="w-full text-[11.5px] font-ui whitespace-nowrap">
                     <thead><tr className="text-[hsl(var(--accent-secondary))] uppercase text-[10px] tracking-wider text-left">
-                        <th className="py-1 pr-3">Trigger</th><th className="pr-3">New Stop</th><th className="pr-3 text-right">Losers Reached</th><th className="pr-3 text-right">Winners Threatened</th><th className="pr-3 text-right">Saved R<span className="text-[8px] align-super"> bound</span></th><th className="pr-3 text-right">Lost R<span className="text-[8px] align-super"> bound</span></th><th className="pr-3 text-right">Net Impact<span className="text-[8px] align-super"> bound</span></th><th>Signal</th>
+                        <th className="py-1 pr-3"><ColTip label="Trigger" tip="Once a trade reaches this much profit (in R), the stop is tightened to the New Stop level." /></th><th className="pr-3"><ColTip label="New Stop" tip="Where the stop moves to after the trigger is hit (e.g. −0.5R means your risk is cut roughly in half)." /></th><th className="pr-3 text-right"><ColTip label="Losers Reached" tip="Of losing trades, how many reached the trigger — so the tightened stop could have reduced their loss." /></th><th className="pr-3 text-right"><ColTip label="Winners Threatened" tip="Winners that reached the trigger but later dipped below the New Stop — they could have been stopped out early." /></th><th className="pr-3 text-right"><ColTip label="Saved R (bound)" tip="Upper-bound R saved on losers by tightening their stop. A best case, not a simulated result." /></th><th className="pr-3 text-right"><ColTip label="Lost R (bound)" tip="Worst-case R given up if threatened winners were stopped early instead of being left to run." /></th><th className="pr-3 text-right"><ColTip label="Net Impact (bound)" tip="Saved minus Lost — a rough range, not real P&L. Depends on the order price moved; validate with a backend run." /></th><th><ColTip label="Signal" tip="Quick read — Strong / Mixed / Weak — of whether this stop-tightening rule looks worth testing." /></th>
                     </tr></thead>
                     <tbody>
                         {rr.levels.map((l) => (
@@ -764,6 +782,7 @@ function CohortDrilldown({ sessionLabel, c }) {
 
             {/* ── Management: Callouts · Excursion · Target · BE · Risk Reduction · Entry Threshold ── */}
             {tab === "management" && (
+                <TooltipProvider delayDuration={150}>
                 <div className="space-y-3">
                     <ManagementCallouts rows={c.executedTrades} tpLabel={c.tpLabel} />
                     <div><SubLabel>Excursion snapshot</SubLabel><ExcursionSnapshot rows={c.executedTrades} /></div>
@@ -772,6 +791,7 @@ function CohortDrilldown({ sessionLabel, c }) {
                     <div><SubLabel>Risk reduction suitability</SubLabel><RiskReduction rows={c.executedTrades} /></div>
                     <div><SubLabel>Entry threshold research</SubLabel><EntryThresholdResearch /></div>
                 </div>
+                </TooltipProvider>
             )}
 
             {/* ── Failures: Failure Summary · Failure Clusters · Losses · Cancelled / Missed ── */}
