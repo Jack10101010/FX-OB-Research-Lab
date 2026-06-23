@@ -64,6 +64,11 @@ import { TermTip, TooltipProvider } from "@/components/lab/TermTip";
 import { ConfidenceChip } from "@/components/lab/ConfidenceChip";
 import { buildModelFamilyComparison } from "@/data/modelFamily";
 import { computeExplainableWinner } from "@/data/compareWinner";
+// Run Results → Config: per-session scenario breakdown reuses the SAME pure
+// builder that powers the Session Results tab (read-only; no edits to that
+// module). Returns the fixed 6-session grid with per-cohort entry/RR/BE labels
+// + enabled state derived from runData.config.session_strategy_scenario.
+import { buildSessionResults } from "@/data/sessionResults";
 
 // RB-8a/8b: account config lives in the global store (state.accountSettings),
 // read/written via useResultsLens (lens.accountSettings / lens.setAccountSettings)
@@ -586,6 +591,28 @@ export default function RunDetail() {
     // require no renaming. isScenarioView is kept for the active banner and scope chip.
     const isScenarioView = Boolean(resultView?.family && resultView.family !== "baseline");
     const displayTrades = tradesForRun;
+
+    // ── Config tab: per-session scenario config (additive, read-only) ──────────
+    // When the run was produced from a Session Scenario, runData.config carries a
+    // `session_strategy_scenario` block whose cohorts hold per-session RR / entry /
+    // BE / enabled state. The Config tab's top-level RR is the GLOBAL/default RR
+    // and can differ from what each session actually used — so we surface the
+    // per-session breakdown beneath it. Absent block (older/global runs) → null,
+    // and the Config tab renders exactly as before. No per-session RR is inferred
+    // when the block is missing.
+    const sessionScenarioConfig = runData?.config?.session_strategy_scenario || null;
+    const hasSessionScenario = !!(
+        sessionScenarioConfig
+        && Array.isArray(sessionScenarioConfig.cohorts)
+        && sessionScenarioConfig.cohorts.length
+    );
+    const scenarioSessions = React.useMemo(() => {
+        if (!hasSessionScenario) return [];
+        // buildSessionResults returns the fixed 6-session grid; each cohort carries
+        // entryLabel / tpLabel (RR) / beLabel / status ("enabled"|"disabled").
+        const { sessions } = buildSessionResults(displayTrades, sessionScenarioConfig);
+        return Array.isArray(sessions) ? sessions : [];
+    }, [hasSessionScenario, sessionScenarioConfig, displayTrades]);
 
     // ── RW-3A: dev-only baseline parity audit ─────────────────────────────────
     // Compares universe.trades (resolved via resolveBaselineUniverse) against
@@ -1423,6 +1450,197 @@ export default function RunDetail() {
         : resultsTabs[0].id;
     const showResultsSection = (tabId) => resultsLayoutMode === "stacked" || currentResultsTab === tabId;
 
+    // ── Config tab groups (hoisted) ───────────────────────────────────────────
+    // Same markup as before, lifted into variables so the lower config row can
+    // place the Per-Session Scenario card on the left (half width) with the three
+    // global groups stacked on the right. Behavior is unchanged when there is no
+    // scenario (the per-session card is null → original balanced two-column layout).
+    const configSessionFiltersGroup = (() => {
+        const cfg = runData?.config || {};
+        const sfEnabled = cfg.session_filter_enabled === true || String(cfg.session_filter_enabled) === "true";
+        const allowedSessions = Array.isArray(cfg.allowed_sessions) ? cfg.allowed_sessions : [];
+        const originSession = cfg.ob_origin_session ?? cfg.origin_session ?? null;
+        const detectionSession = cfg.ob_detection_session ?? cfg.detection_session ?? null;
+        const allPermissive = !sfEnabled
+            && (!originSession    || ["any","Any",""].includes(String(originSession).trim()))
+            && (!detectionSession || ["any","Any",""].includes(String(detectionSession).trim()));
+        if (allPermissive) {
+            return (
+                <ConfigGroup title="Session Filters" paddingClassName="px-3 pt-3 pb-14">
+                    <div className="font-ui text-[10px] text-muted-lab">Session filter: Off · All sessions eligible</div>
+                </ConfigGroup>
+            );
+        }
+        return (
+            <ConfigGroup title="Session Filters" paddingClassName="px-3 pt-3 pb-14">
+                <div className="grid grid-cols-2 gap-x-3 gap-y-1 font-ui text-[11px]">
+                    <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Session Filter</div>
+                    <div className="text-right">
+                        <span className={`px-1.5 py-0.5 text-[9px] font-ui uppercase tracking-wider border ${sfEnabled ? "border-[hsl(var(--success)/0.4)] text-[hsl(var(--success))] bg-[hsl(var(--success)/0.08)]" : "border-[hsl(var(--border-soft))] text-muted-lab"}`}>
+                            {sfEnabled ? "✓ Enabled" : "Off"}
+                        </span>
+                    </div>
+                    {sfEnabled && allowedSessions.length > 0 && (
+                        <>
+                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Allowed</div>
+                            <div className="text-right flex flex-wrap gap-1 justify-end">
+                                {allowedSessions.map((s) => (
+                                    <span key={s} className="px-1 py-0.5 text-[8.5px] font-ui uppercase border border-[hsl(var(--success)/0.3)] text-[hsl(var(--success))] bg-[hsl(var(--success)/0.06)]">{s}</span>
+                                ))}
+                            </div>
+                        </>
+                    )}
+                    {originSession && !["any","Any",""].includes(String(originSession).trim()) && (
+                        <>
+                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">OB Origin</div>
+                            <div className="text-right text-white">{originSession}</div>
+                        </>
+                    )}
+                    {detectionSession && !["any","Any",""].includes(String(detectionSession).trim()) && (
+                        <>
+                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">OB Detection</div>
+                            <div className="text-right text-white">{detectionSession}</div>
+                        </>
+                    )}
+                </div>
+            </ConfigGroup>
+        );
+    })();
+
+    const configAdvancedGroup = (
+        <ConfigGroup title="Advanced / Misc">
+            <div className="grid grid-cols-2 gap-x-3 gap-y-1 font-ui text-[11px]">
+                <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Swing</div>
+                <div className="text-right text-muted-lab text-[10.5px]">{runData?.config?.swing_length ?? "—"}</div>
+                <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">OB Filter</div>
+                <div className="text-right text-muted-lab text-[10.5px]">{runData?.config?.ob_filter ?? "—"}</div>
+                <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Conflict</div>
+                <div className="text-right text-muted-lab text-[10.5px]">{runData?.config?.position_conflict ?? runData?.config?.conflict ?? "—"}</div>
+                {(runData?.config?.position_conflict === "block_opposite" || runData?.config?.conflict === "block_opposite") && (
+                    <>
+                        <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Cancel Action</div>
+                        <div className="text-right text-muted-lab text-[10.5px]">{runData?.config?.cancel_action ?? "—"}</div>
+                    </>
+                )}
+            </div>
+        </ConfigGroup>
+    );
+
+    const configNewsCostsGroup = (() => {
+        const cfg = runData?.config || {};
+        const newsOn   = !!(run?.news_blackout_enabled ?? cfg.news_blackout_enabled);
+        const spread   = cfg.spread_pips ?? cfg.spread ?? null;
+        const slippage = cfg.slippage_pips ?? cfg.slippage ?? null;
+        const commission = cfg.commission_r_per_trade ?? cfg.commission ?? null;
+        const hasAnyCost = [spread, slippage, commission].some((v) => v != null && Number(v) !== 0);
+        if (!newsOn) {
+            return (
+                <ConfigGroup title="News & Costs">
+                    <div className="font-ui text-[10px] text-muted-lab">
+                        {"News protection: Off"}
+                        {hasAnyCost
+                            ? ` · Spread ${spread ?? "—"} · Slip ${slippage ?? "—"} · Comm ${commission != null ? `${commission}R` : "—"}`
+                            : " · No cost model applied"}
+                    </div>
+                </ConfigGroup>
+            );
+        }
+        const mBefore  = cfg.news_blackout_minutes_before;
+        const mAfter   = cfg.news_blackout_minutes_after;
+        const impacts  = Array.isArray(cfg.news_blackout_impacts)    ? cfg.news_blackout_impacts    : [];
+        const currs    = Array.isArray(cfg.news_blackout_currencies) ? cfg.news_blackout_currencies : [];
+        const cancelT  = cfg.news_cancel_if_touched_during_blackout;
+        const flatAct  = cfg.news_flatten_active_trades;
+        const flatLead = cfg.news_flatten_minutes_before_blackout;
+        return (
+            <ConfigGroup title="News & Costs">
+                <div className="grid grid-cols-2 gap-x-3 gap-y-1 font-ui text-[11px]">
+                    <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">News Blackout</div>
+                    <div className="text-right">
+                        <span className="px-1.5 py-0.5 text-[9px] font-ui uppercase tracking-wider border border-[hsl(var(--success)/0.4)] text-[hsl(var(--success))] bg-[hsl(var(--success)/0.08)]">✓ On</span>
+                    </div>
+                    {(mBefore != null || mAfter != null) && (
+                        <>
+                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Window</div>
+                            <div className="text-right text-white">
+                                {[mBefore != null && `−${mBefore}m`, mAfter != null && `+${mAfter}m`].filter(Boolean).join(" / ")}
+                            </div>
+                        </>
+                    )}
+                    {impacts.length > 0 && (
+                        <>
+                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Impacts</div>
+                            <div className="text-right flex flex-wrap gap-1 justify-end">
+                                {impacts.map((imp) => (
+                                    <span key={imp} className="px-1 py-0.5 text-[8.5px] font-ui uppercase border border-[hsl(var(--warning)/0.3)] text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.06)]">{imp}</span>
+                                ))}
+                            </div>
+                        </>
+                    )}
+                    {currs.length > 0 && (
+                        <>
+                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Currencies</div>
+                            <div className="text-right text-muted-lab text-[10.5px]">{currs.join(", ")}</div>
+                        </>
+                    )}
+                    {cancelT != null && (
+                        <>
+                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Cancel Touched</div>
+                            <div className="text-right">
+                                <span className={`px-1.5 py-0.5 text-[9px] font-ui uppercase tracking-wider border ${cancelT ? "border-[hsl(var(--success)/0.4)] text-[hsl(var(--success))] bg-[hsl(var(--success)/0.08)]" : "border-[hsl(var(--border-soft))] text-muted-lab"}`}>
+                                    {cancelT ? "✓ On" : "Off"}
+                                </span>
+                            </div>
+                        </>
+                    )}
+                    {flatAct != null && (
+                        <>
+                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Flatten Active</div>
+                            <div className="text-right">
+                                <span className={`px-1.5 py-0.5 text-[9px] font-ui uppercase tracking-wider border ${flatAct ? "border-[hsl(var(--success)/0.4)] text-[hsl(var(--success))] bg-[hsl(var(--success)/0.08)]" : "border-[hsl(var(--border-soft))] text-muted-lab"}`}>
+                                    {flatAct ? "✓ On" : "Off"}
+                                </span>
+                            </div>
+                        </>
+                    )}
+                    {flatLead != null && flatAct && (
+                        <>
+                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Flatten Lead</div>
+                            <div className="text-right text-white">{flatLead} min before</div>
+                        </>
+                    )}
+                </div>
+                <div className="mt-3 pt-2.5 border-t border-[hsl(var(--border-soft)/0.4)]">
+                    {hasAnyCost ? (
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 font-ui text-[11px]">
+                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Spread</div>
+                            <div className="text-right text-muted-lab text-[10.5px]">{spread != null ? `${spread} pip` : "—"}</div>
+                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Slippage</div>
+                            <div className="text-right text-muted-lab text-[10.5px]">{slippage != null ? `${slippage} pip` : "—"}</div>
+                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Commission</div>
+                            <div className="text-right text-muted-lab text-[10.5px]">{commission != null ? `${commission}R` : "—"}</div>
+                        </div>
+                    ) : (
+                        <div className="font-ui text-[10px] text-muted-lab">No cost model applied</div>
+                    )}
+                </div>
+            </ConfigGroup>
+        );
+    })();
+
+    const configPerSessionCard = hasSessionScenario ? (
+        <ConfigGroup title="Per-Session Scenario" paddingClassName="px-3 pt-3 pb-3">
+            <div className="font-ui text-[10px] text-muted-lab mb-2.5 leading-tight">
+                Per-session settings from this run's scenario. Buffers, depth, verify ticks and costs remain global (shown above / right).
+            </div>
+            <SessionScenarioBreakdown sessions={scenarioSessions} />
+        </ConfigGroup>
+    ) : sessionScenarioConfig ? (
+        <ConfigGroup title="Per-Session Scenario" paddingClassName="px-3 pt-3 pb-3">
+            <div className="font-ui text-[10px] text-muted-lab">No session scenario config stored for this run.</div>
+        </ConfigGroup>
+    ) : null;
+
     return (
         <div className="pb-12">
             <LabRunHero
@@ -2193,8 +2411,11 @@ export default function RunDetail() {
                     {/* ── Group B — Execution / Risk ───────────────────────── */}
                     <ConfigGroup title="Execution & Risk" paddingClassName="px-3 pt-3 pb-[36px]">
                         <div className="grid grid-cols-2 gap-x-3 gap-y-1 font-ui text-[11px]">
-                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">RR</div>
-                            <div className="text-right text-[hsl(var(--accent-primary))] font-semibold">{Number.isFinite(runRr) ? `${runRr.toFixed(1)}×` : "—"}</div>
+                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">{hasSessionScenario ? "RR · Global" : "RR"}</div>
+                            <div className="text-right text-[hsl(var(--accent-primary))] font-num font-semibold">{Number.isFinite(runRr) ? `${runRr.toFixed(1)}×` : "—"}</div>
+                            {hasSessionScenario && (
+                                <div className="col-span-2 text-muted-lab font-ui text-[9.5px] leading-tight -mt-0.5 mb-0.5">Global / default RR — individual sessions may use their own RR (see Per-Session Scenario below).</div>
+                            )}
                             <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Entry Depth</div>
                             <div className="text-right text-white">{formatPercentValue(entryDepthPct)}</div>
                             <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Entry Buffer</div>
@@ -2209,183 +2430,29 @@ export default function RunDetail() {
                     </ConfigGroup>
                     </div>
 
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-stretch">
-                    <div className="flex h-full flex-col justify-between gap-3">
-
-                    {/* ── Group C — Filters (collapse when all permissive) ──── */}
-                    {(() => {
-                        const cfg = runData?.config || {};
-                        const sfEnabled = cfg.session_filter_enabled === true || String(cfg.session_filter_enabled) === "true";
-                        const allowedSessions = Array.isArray(cfg.allowed_sessions) ? cfg.allowed_sessions : [];
-                        const originSession = cfg.ob_origin_session ?? cfg.origin_session ?? null;
-                        const detectionSession = cfg.ob_detection_session ?? cfg.detection_session ?? null;
-                        const allPermissive = !sfEnabled
-                            && (!originSession    || ["any","Any",""].includes(String(originSession).trim()))
-                            && (!detectionSession || ["any","Any",""].includes(String(detectionSession).trim()));
-                        if (allPermissive) {
-                            return (
-                                <ConfigGroup title="Session Filters" paddingClassName="px-3 pt-3 pb-14">
-                                    <div className="font-ui text-[10px] text-muted-lab">Session filter: Off · All sessions eligible</div>
-                                </ConfigGroup>
-                            );
-                        }
-                        return (
-                            <ConfigGroup title="Session Filters" paddingClassName="px-3 pt-3 pb-14">
-                                <div className="grid grid-cols-2 gap-x-3 gap-y-1 font-ui text-[11px]">
-                                    <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Session Filter</div>
-                                    <div className="text-right">
-                                        <span className={`px-1.5 py-0.5 text-[9px] font-ui uppercase tracking-wider border ${sfEnabled ? "border-[hsl(var(--accent-primary)/0.4)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.08)]" : "border-[hsl(var(--border-soft))] text-muted-lab"}`}>
-                                            {sfEnabled ? "✓ Enabled" : "Off"}
-                                        </span>
-                                    </div>
-                                    {sfEnabled && allowedSessions.length > 0 && (
-                                        <>
-                                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Allowed</div>
-                                            <div className="text-right flex flex-wrap gap-1 justify-end">
-                                                {allowedSessions.map((s) => (
-                                                    <span key={s} className="px-1 py-0.5 text-[8.5px] font-ui uppercase border border-[hsl(var(--accent-primary)/0.3)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.06)]">{s}</span>
-                                                ))}
-                                            </div>
-                                        </>
-                                    )}
-                                    {originSession && !["any","Any",""].includes(String(originSession).trim()) && (
-                                        <>
-                                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">OB Origin</div>
-                                            <div className="text-right text-white">{originSession}</div>
-                                        </>
-                                    )}
-                                    {detectionSession && !["any","Any",""].includes(String(detectionSession).trim()) && (
-                                        <>
-                                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">OB Detection</div>
-                                            <div className="text-right text-white">{detectionSession}</div>
-                                        </>
-                                    )}
-                                </div>
-                            </ConfigGroup>
-                        );
-                    })()}
-
-                    <ConfigGroup title="Advanced / Misc">
-                        <div className="grid grid-cols-2 gap-x-3 gap-y-1 font-ui text-[11px]">
-                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Swing</div>
-                            <div className="text-right text-muted-lab text-[10.5px]">{runData?.config?.swing_length ?? "—"}</div>
-                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">OB Filter</div>
-                            <div className="text-right text-muted-lab text-[10.5px]">{runData?.config?.ob_filter ?? "—"}</div>
-                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Conflict</div>
-                            <div className="text-right text-muted-lab text-[10.5px]">{runData?.config?.position_conflict ?? runData?.config?.conflict ?? "—"}</div>
-                            {(runData?.config?.position_conflict === "block_opposite" || runData?.config?.conflict === "block_opposite") && (
-                                <>
-                                    <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Cancel Action</div>
-                                    <div className="text-right text-muted-lab text-[10.5px]">{runData?.config?.cancel_action ?? "—"}</div>
-                                </>
-                            )}
+                    {/* ── Lower config row ──────────────────────────────────────
+                        With a scenario: Per-Session Scenario on the LEFT (half
+                        width) + Session Filters / Advanced / News & Costs stacked
+                        on the RIGHT. Without a scenario: the original balanced
+                        two-column layout (global groups), unchanged. */}
+                    {configPerSessionCard ? (
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
+                            <div>{configPerSessionCard}</div>
+                            <div className="flex flex-col gap-3">
+                                {configSessionFiltersGroup}
+                                {configAdvancedGroup}
+                                {configNewsCostsGroup}
+                            </div>
                         </div>
-                    </ConfigGroup>
-                    </div>
-
-                    {/* ── Group D — News / Costs (collapse when news off) ───── */}
-                    {(() => {
-                        const cfg = runData?.config || {};
-                        const newsOn   = !!(run?.news_blackout_enabled ?? cfg.news_blackout_enabled);
-                        const spread   = cfg.spread_pips ?? cfg.spread ?? null;
-                        const slippage = cfg.slippage_pips ?? cfg.slippage ?? null;
-                        const commission = cfg.commission_r_per_trade ?? cfg.commission ?? null;
-                        const hasAnyCost = [spread, slippage, commission].some((v) => v != null && Number(v) !== 0);
-                        if (!newsOn) {
-                            return (
-                                <ConfigGroup title="News & Costs">
-                                    <div className="font-ui text-[10px] text-muted-lab">
-                                        {"News protection: Off"}
-                                        {hasAnyCost
-                                            ? ` · Spread ${spread ?? "—"} · Slip ${slippage ?? "—"} · Comm ${commission != null ? `${commission}R` : "—"}`
-                                            : " · No cost model applied"}
-                                    </div>
-                                </ConfigGroup>
-                            );
-                        }
-                        const mBefore  = cfg.news_blackout_minutes_before;
-                        const mAfter   = cfg.news_blackout_minutes_after;
-                        const impacts  = Array.isArray(cfg.news_blackout_impacts)    ? cfg.news_blackout_impacts    : [];
-                        const currs    = Array.isArray(cfg.news_blackout_currencies) ? cfg.news_blackout_currencies : [];
-                        const cancelT  = cfg.news_cancel_if_touched_during_blackout;
-                        const flatAct  = cfg.news_flatten_active_trades;
-                        const flatLead = cfg.news_flatten_minutes_before_blackout;
-                        return (
-                            <ConfigGroup title="News & Costs">
-                                <div className="grid grid-cols-2 gap-x-3 gap-y-1 font-ui text-[11px]">
-                                    <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">News Blackout</div>
-                                    <div className="text-right">
-                                        <span className="px-1.5 py-0.5 text-[9px] font-ui uppercase tracking-wider border border-[hsl(var(--accent-primary)/0.4)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.08)]">✓ On</span>
-                                    </div>
-                                    {(mBefore != null || mAfter != null) && (
-                                        <>
-                                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Window</div>
-                                            <div className="text-right text-white">
-                                                {[mBefore != null && `−${mBefore}m`, mAfter != null && `+${mAfter}m`].filter(Boolean).join(" / ")}
-                                            </div>
-                                        </>
-                                    )}
-                                    {impacts.length > 0 && (
-                                        <>
-                                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Impacts</div>
-                                            <div className="text-right flex flex-wrap gap-1 justify-end">
-                                                {impacts.map((imp) => (
-                                                    <span key={imp} className="px-1 py-0.5 text-[8.5px] font-ui uppercase border border-[hsl(var(--warning)/0.3)] text-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.06)]">{imp}</span>
-                                                ))}
-                                            </div>
-                                        </>
-                                    )}
-                                    {currs.length > 0 && (
-                                        <>
-                                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Currencies</div>
-                                            <div className="text-right text-muted-lab text-[10.5px]">{currs.join(", ")}</div>
-                                        </>
-                                    )}
-                                    {cancelT != null && (
-                                        <>
-                                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Cancel Touched</div>
-                                            <div className="text-right">
-                                                <span className={`px-1.5 py-0.5 text-[9px] font-ui uppercase tracking-wider border ${cancelT ? "border-[hsl(var(--accent-primary)/0.4)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.08)]" : "border-[hsl(var(--border-soft))] text-muted-lab"}`}>
-                                                    {cancelT ? "✓ On" : "Off"}
-                                                </span>
-                                            </div>
-                                        </>
-                                    )}
-                                    {flatAct != null && (
-                                        <>
-                                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Flatten Active</div>
-                                            <div className="text-right">
-                                                <span className={`px-1.5 py-0.5 text-[9px] font-ui uppercase tracking-wider border ${flatAct ? "border-[hsl(var(--accent-primary)/0.4)] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.08)]" : "border-[hsl(var(--border-soft))] text-muted-lab"}`}>
-                                                    {flatAct ? "✓ On" : "Off"}
-                                                </span>
-                                            </div>
-                                        </>
-                                    )}
-                                    {flatLead != null && flatAct && (
-                                        <>
-                                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Flatten Lead</div>
-                                            <div className="text-right text-white">{flatLead} min before</div>
-                                        </>
-                                    )}
-                                </div>
-                                <div className="mt-3 pt-2.5 border-t border-[hsl(var(--border-soft)/0.4)]">
-                                    {hasAnyCost ? (
-                                        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 font-ui text-[11px]">
-                                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Spread</div>
-                                            <div className="text-right text-muted-lab text-[10.5px]">{spread != null ? `${spread} pip` : "—"}</div>
-                                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Slippage</div>
-                                            <div className="text-right text-muted-lab text-[10.5px]">{slippage != null ? `${slippage} pip` : "—"}</div>
-                                            <div className="text-muted-lab uppercase tracking-wider text-[9.5px]">Commission</div>
-                                            <div className="text-right text-muted-lab text-[10.5px]">{commission != null ? `${commission}R` : "—"}</div>
-                                        </div>
-                                    ) : (
-                                        <div className="font-ui text-[10px] text-muted-lab">No cost model applied</div>
-                                    )}
-                                </div>
-                            </ConfigGroup>
-                        );
-                    })()}
-                    </div>
+                    ) : (
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-stretch">
+                            <div className="flex h-full flex-col justify-between gap-3">
+                                {configSessionFiltersGroup}
+                                {configAdvancedGroup}
+                            </div>
+                            {configNewsCostsGroup}
+                        </div>
+                    )}
                     </div>
                 </NeonPanel>}
 
@@ -3646,10 +3713,108 @@ function BRow({ label, count, value, tone = "muted", note }) {
 function ConfigGroup({ title, children, paddingClassName = "p-3" }) {
     return (
         <div className={`clip-bevel-sm border border-[hsl(var(--border-soft)/0.65)] bg-[hsl(var(--panel-2)/0.28)] ${paddingClassName}`}>
-            <div className="mb-2 text-[10px] font-ui uppercase tracking-widest text-[hsl(var(--text-2))]">
+            <div className="mb-2 text-[10px] font-ui uppercase tracking-widest text-[hsl(var(--accent-secondary))]">
                 {title}
             </div>
             {children}
+        </div>
+    );
+}
+
+// ── Per-Session Scenario breakdown (Config tab) ───────────────────────────────
+// Read-only render of buildSessionResults().sessions. Collapses a session's four
+// cohorts into the minimal set of distinct {status, entry, RR, BE} rows so a
+// uniform session shows ONE line and only diverging cohorts are spelled out.
+
+/** Collapse a session's cohorts into distinct rule rows (dedupe identical cells). */
+function summarizeScenarioSessionRows(session) {
+    const cohorts = Array.isArray(session?.cohorts) ? session.cohorts : [];
+    const groups = new Map();
+    for (const c of cohorts) {
+        const sig = `${c.status}|${c.entryLabel}|${c.tpLabel}|${c.beLabel}`;
+        if (!groups.has(sig)) {
+            groups.set(sig, {
+                status: c.status,
+                entryLabel: c.entryLabel,
+                tpLabel: c.tpLabel,
+                beLabel: c.beLabel,
+                cohorts: [],
+            });
+        }
+        groups.get(sig).cohorts.push(c.label);
+    }
+    const total = cohorts.length;
+    return [...groups.values()].map((g) => ({ ...g, allCohorts: g.cohorts.length === total }));
+}
+
+function ScenarioStatusChip({ status }) {
+    const disabled = status === "disabled";
+    return (
+        <span className={`px-1.5 py-0.5 text-[9px] font-ui uppercase tracking-wider border ${disabled
+            ? "border-[hsl(var(--danger)/0.4)] text-[hsl(var(--danger))] bg-[hsl(var(--danger)/0.08)]"
+            : "border-[hsl(var(--success)/0.4)] text-[hsl(var(--success))] bg-[hsl(var(--success)/0.08)]"}`}>
+            {disabled ? "Disabled" : "Enabled"}
+        </span>
+    );
+}
+
+/** RR (font-num) · Entry · BE for one collapsed rule row; muted when inherited. */
+function ScenarioRuleValues({ row }) {
+    if (row.status === "disabled") {
+        return <span className="text-[10px] font-ui text-muted-lab">No trades — cohort disabled</span>;
+    }
+    const isDefault = row.entryLabel === "Run Default" && row.tpLabel === "Run Default" && row.beLabel === "Run Default";
+    if (isDefault) {
+        return <span className="text-[10px] font-ui text-muted-lab">Uses global default</span>;
+    }
+    const dim = "text-[hsl(var(--border-mid))]";
+    return (
+        <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5 justify-end text-[10px] font-ui text-[hsl(var(--text-2))]">
+            <span>RR <span className="font-num text-[hsl(var(--accent-primary))]">{row.tpLabel === "Run Default" ? "default" : row.tpLabel}</span></span>
+            <span className={dim}>·</span>
+            <span>Entry <span className="text-white">{row.entryLabel === "Run Default" ? "default" : row.entryLabel}</span></span>
+            <span className={dim}>·</span>
+            <span>BE <span className="text-white">{row.beLabel === "Run Default" ? "default" : row.beLabel}</span></span>
+        </span>
+    );
+}
+
+function SessionScenarioBreakdown({ sessions }) {
+    const list = Array.isArray(sessions) ? sessions : [];
+    return (
+        <div className="space-y-2">
+            {list.map((s) => {
+                const rows = summarizeScenarioSessionRows(s);
+                const single = rows.length === 1 ? rows[0] : null;
+                return (
+                    <div key={s.key} className="border-t border-[hsl(var(--border-soft)/0.3)] pt-2 first:border-t-0 first:pt-0">
+                        <div className="flex items-start justify-between gap-3">
+                            <span className="text-[11px] font-ui text-[hsl(var(--accent-primary))] shrink-0">{s.label}</span>
+                            {single && (
+                                <div className="flex items-center gap-2 flex-wrap justify-end">
+                                    <ScenarioRuleValues row={single} />
+                                    <ScenarioStatusChip status={single.status} />
+                                </div>
+                            )}
+                        </div>
+                        {!single && (
+                            <div className="mt-1 space-y-1 pl-2">
+                                {rows.map((r, i) => (
+                                    <div key={i} className="flex items-start justify-between gap-3">
+                                        <span className="text-[9.5px] font-ui text-muted-lab shrink-0 max-w-[42%] leading-tight">
+                                            {r.allCohorts ? "All cohorts" : r.cohorts.join(", ")}
+                                        </span>
+                                        <div className="flex items-center gap-2 flex-wrap justify-end">
+                                            <ScenarioRuleValues row={r} />
+                                            <ScenarioStatusChip status={r.status} />
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                );
+            })}
         </div>
     );
 }

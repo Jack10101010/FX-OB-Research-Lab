@@ -44,6 +44,7 @@ const {
     applySessionProfiles, normalizeProfiles, isProfilesActive, countOverrides,
     resolveCohortConfig, resolveControlSummary, cohortOf,
     entryProfileId, beProfileId, BASELINE_ENTRY_ID, SESSION_KEYS,
+    ARM_OPTIONS, buildEntryKey, entryProfileLabel, MAX_ARM_DELAY,
 } = sp;
 const { resolveTradeUniverse } = tu;
 const { beScenarioKey } = be;
@@ -185,6 +186,33 @@ ok(!/beReplay|replay\(/i.test(srcText), "no replay invoked");
 ok(!/EURUSD|GBPUSD/.test(srcText), "no pair/symbol literals in resolver");
 const uiText = fs.readFileSync(path.resolve("src/components/lab/sessionProfiles/SessionStrategyCards.jsx"), "utf8");
 ok(!/EURUSD|GBPUSD/.test(uiText), "no pair/symbol literals in cards UI");
+
+// ── 15. entry-model range expansion: thresholds 0.5–5 + arms C0–C50 ──────────
+console.log("\n[15] entry-model range (thresholds + C0–C50)");
+// arm catalog spans C0–C50 (51 options); deep arms present
+ok(ARM_OPTIONS.length === 51 && MAX_ARM_DELAY === 50, "ARM_OPTIONS spans C0–C50 (51 options)");
+ok(ARM_OPTIONS[0].key === "same" && ARM_OPTIONS[1].key === "next", "C0=same, C1=next");
+ok(ARM_OPTIONS[ARM_OPTIONS.length - 1].key === "d50", "deepest arm = d50 (C50)");
+ok(["d20", "d30", "d40", "d50"].every((k) => ARM_OPTIONS.some((a) => a.key === k)), "deep arms d20/d30/d40/d50 present");
+// buildEntryKey carries deep arms + fractional/low thresholds (matches backend keys)
+ok(buildEntryKey({ model: "triggered_edge", threshold: 3, arm: "d40" }) === "entry_triggered_edge_3p0_d40", "TE 3% C40 → entry_triggered_edge_3p0_d40");
+ok(buildEntryKey({ model: "triggered_edge", threshold: 1, arm: "d50" }) === "entry_triggered_edge_1p0_d50", "TE 1% C50 → entry_triggered_edge_1p0_d50");
+ok(buildEntryKey({ model: "triggered_edge", threshold: 0.5, arm: "d20" }) === "entry_triggered_edge_0p5_d20", "TE 0.5% C20 → entry_triggered_edge_0p5_d20");
+ok(buildEntryKey({ model: "triggered_edge", threshold: 5, arm: "same" }) === "entry_triggered_edge_5p0_same", "TE 5% C0 → ..._same");
+ok(buildEntryKey({ model: "triggered_edge", threshold: 5, arm: "next" }) === "entry_triggered_edge_5p0_next", "TE 5% C1 → ..._next");
+// labels read configured arm token (not realized fill delay) for deep arms
+ok(entryProfileLabel({ model: "triggered_edge", threshold: 3, arm: "d40" }) === "TE 3% · C40", "label TE 3% C40");
+ok(entryProfileLabel({ model: "triggered_edge", threshold: 0.5, arm: "d50" }) === "TE 0.5% · C50", "label TE 0.5% C50");
+// thresholds 1/2/3/4/5 each build a distinct key
+ok([1, 2, 3, 4, 5].map((t) => buildEntryKey({ model: "triggered_edge", threshold: t, arm: "d2" })).join(",")
+    === "entry_triggered_edge_1p0_d2,entry_triggered_edge_2p0_d2,entry_triggered_edge_3p0_d2,entry_triggered_edge_4p0_d2,entry_triggered_edge_5p0_d2",
+    "thresholds 1–5 build distinct keys");
+// deterministic ids handle fractional thresholds + deep arms
+ok(entryProfileId({ model: "triggered_edge", threshold: 0.5, arm: "d50" }) === "entry_te_0p5_d50", "id TE 0.5% C50 → entry_te_0p5_d50");
+// existing C0–C6 unchanged (regression)
+ok(buildEntryKey({ model: "triggered_edge", threshold: 25, arm: "d2" }) === TE_KEY, "C2 key unchanged (entry_triggered_edge_25p0_d2)");
+ok(buildEntryKey({ model: "triggered_edge", threshold: 25, arm: "d6" }) === "entry_triggered_edge_25p0_d6", "C6 key unchanged");
+ok(entryProfileLabel({ model: "triggered_edge", threshold: 25, arm: "d2" }) === "TE 25% · C2", "C2 label unchanged");
 
 console.log(`\n${failures === 0 ? "ALL PASS" : `${failures} FAILURE(S)`}`);
 process.exit(failures === 0 ? 0 : 1);

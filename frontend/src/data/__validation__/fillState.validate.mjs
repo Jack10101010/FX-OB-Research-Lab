@@ -104,6 +104,23 @@ ok(em("entry_penetration_50p0") === "ep_50", "entry_penetration_50p0 → ep_50 (
 // A genuinely unrecognized key must still be unknown_model (fix is not over-broad).
 ok(em("some_unrecognized_key") === "unknown_model", "unrecognized key still → unknown_model");
 
+console.log("deriveEntryModel — deep arms (C4–C50) + explicit configured arm");
+// Deep arms must bucket into te_d3 (the ≥3 / deep bucket), NOT silently fall to
+// te_same as the old substring check did (_d40 does not contain "_d3").
+ok(em("entry_triggered_edge_3p0_d40") === "te_d3", "C40 key → te_d3 (was te_same bug)");
+ok(em("entry_triggered_edge_1p0_d50") === "te_d3", "C50 key → te_d3");
+ok(em("entry_triggered_edge_0p5_d20") === "te_d3", "C20 key → te_d3");
+ok(em("single_position__entry_triggered_edge_3p0_d40") === "te_d3", "prefixed C40 key → te_d3");
+ok(em("entry_triggered_edge_3p0_d4") === "te_d3", "C4 key → te_d3 (boundary; old check missed _d4)");
+// Explicit delay_candles_configured is preferred over the key suffix when present.
+const emCfg = (key, cfg) => buildTradeClassification({ entry_model_key: key, delay_candles_configured: cfg }).entry_model;
+ok(emCfg("entry_triggered_edge_25p0", 40) === "te_d3", "configured=40 (no suffix) → te_d3");
+ok(emCfg("entry_triggered_edge_25p0", 2) === "te_d2", "configured=2 → te_d2");
+ok(emCfg("entry_triggered_edge_25p0", 1) === "te_next", "configured=1 → te_next");
+ok(emCfg("entry_triggered_edge_25p0", 0) === "te_same", "configured=0 → te_same");
+ok(buildTradeClassification({ entry_model_key: "entry_triggered_edge_25p0_same", delayCandlesConfigured: 40 }).entry_model === "te_d3",
+   "explicit configured arm overrides suffix (camelCase delayCandlesConfigured)");
+
 console.log("classificationRegistry — alias resolution");
 ok(getTagMeta("ob_not_occupied").label === "Vacant — No AAE", 'getTagMeta("ob_not_occupied") → "Vacant — No AAE"');
 ok(getTagMeta("clean").label === "Occupied At Arm", 'getTagMeta("clean") → "Occupied At Arm"');
