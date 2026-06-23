@@ -37,7 +37,7 @@ anything.
 | `GLOSSARY.md` | Human-readable project glossary (companion to `researchGlossary.js`). | Claude |
 
 Detailed design/audit docs live as `*-PLAN.md` / `*-AUDIT.md` files at the repo
-root (e.g. `CLASSIFICATION-TAB-V2-PLAN.md`). `docs/ai/` summarizes and points to them.
+root (e.g. `_research/plans/CLASSIFICATION-TAB-V2-PLAN.md`). `docs/ai/` summarizes and points to them.
 
 ---
 

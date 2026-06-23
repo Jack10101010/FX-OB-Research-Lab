@@ -111,6 +111,11 @@ frontend/.sp*.cjs
 /frontend/src/_*.mjs
 /frontend/src/data/__validation__/_*.mjs
 
+# Research archive — scratch/triage buckets stay out of git; the curated
+# buckets (_research/{audits,plans,investigations,handoffs}) are committed.
+/_research/exports/
+/_research/_unsorted/
+
 # macOS metadata
 ._*
 

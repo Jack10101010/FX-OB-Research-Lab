@@ -279,27 +279,27 @@ Live `git status --short` at `4616506`. All Master Controls source files are com
 
 Classified by likely workstream:
 
-- **Master Controls:** `MASTER-CONTROLS-ARCHITECTURE.docx`, `PHASE-2B-CONFIG-TRANSLATION-AUDIT.md`
-- **Session Lab:** `SESSION-LAB-1-ARCHITECTURE.md`
-- **Entry / FFT:** `FFT-OVERLAY-SYNC-PLAN.md`, `DIRECTIONAL-ENTRY-1-audit.md`,
-  `DIRECTIONAL-ENTRY-3-audit.md`, `TE-DELAY-1-audit.md`, `TE-DELAY-VALIDITY-1.md`,
-  `TE-DELAY-VALIDITY-2.md`, `TE-DELAY-VALIDITY-CLOSEOUT-1.md`,
-  `TE-DELAY-VALIDITY-FIELDS-integration.md`, `TE-EXPORT-AUDIT-1.md`,
-  `TE-FFT-VALIDATION-READINESS-AUDIT-1.md`, `PRETRIGGER-CANCEL-1.md`,
-  `PRETRIGGER-CANCEL-2-LAB-IA.md`, `PRETRIGGER-CANCEL-3-RESEARCH-LAYER.md`,
-  `AUTO-PAIR-CONTROL-RUNS-1.md`, `AUTO-PAIR-CONTROL-RUNS-2-BACKEND-AUDIT.md`
-- **Trade Classification:** `TRADE-CLASSIFICATION-SYSTEM-1.md`,
-  `TRADE-CLASSIFICATION-PHASE-1-PLAN.md`, `TRADE-CLASSIFICATION-PHASE-1-CODEBASE-AUDIT.md`,
-  `CLASSIFICATION-TAB-AAE-V2-PLAN.md`, `AAE-DEEP-ANALYSIS-1.md`, `AAE-DEEP-ANALYSIS-2.md`
-- **Ghost tracking:** `ghost_tracker.py`, `ghost_tracker_test.py`, `GHOST-0-audit.md`,
-  `GHOST-SYNC-0-audit.md`, `LUX-GHOST-PHASE-1-integration.md`
+- **Master Controls:** `_research/plans/MASTER-CONTROLS-ARCHITECTURE.docx`, `_research/audits/PHASE-2B-CONFIG-TRANSLATION-AUDIT.md`
+- **Session Lab:** `_research/plans/SESSION-LAB-1-ARCHITECTURE.md`
+- **Entry / FFT:** `_research/plans/FFT-OVERLAY-SYNC-PLAN.md`, `_research/audits/DIRECTIONAL-ENTRY-1-audit.md`,
+  `_research/audits/DIRECTIONAL-ENTRY-3-audit.md`, `_research/audits/TE-DELAY-1-audit.md`, `_research/_unsorted/TE-DELAY-VALIDITY-1.md`,
+  `_research/_unsorted/TE-DELAY-VALIDITY-2.md`, `_research/_unsorted/TE-DELAY-VALIDITY-CLOSEOUT-1.md`,
+  `_research/plans/TE-DELAY-VALIDITY-FIELDS-integration.md`, `_research/audits/TE-EXPORT-AUDIT-1.md`,
+  `_research/audits/TE-FFT-VALIDATION-READINESS-AUDIT-1.md`, `_research/_unsorted/PRETRIGGER-CANCEL-1.md`,
+  `_research/plans/PRETRIGGER-CANCEL-2-LAB-IA.md`, `_research/audits/PRETRIGGER-CANCEL-3-RESEARCH-LAYER.md`,
+  `_research/_unsorted/AUTO-PAIR-CONTROL-RUNS-1.md`, `_research/audits/AUTO-PAIR-CONTROL-RUNS-2-BACKEND-AUDIT.md`
+- **Trade Classification:** `_research/_unsorted/TRADE-CLASSIFICATION-SYSTEM-1.md`,
+  `_research/plans/TRADE-CLASSIFICATION-PHASE-1-PLAN.md`, `_research/audits/TRADE-CLASSIFICATION-PHASE-1-CODEBASE-AUDIT.md`,
+  `_research/plans/CLASSIFICATION-TAB-AAE-V2-PLAN.md`, `_research/audits/AAE-DEEP-ANALYSIS-1.md`, `_research/audits/AAE-DEEP-ANALYSIS-2.md`
+- **Ghost tracking:** `ghost_tracker.py`, `ghost_tracker_test.py`, `_research/audits/GHOST-0-audit.md`,
+  `_research/audits/GHOST-SYNC-0-audit.md`, `_research/plans/LUX-GHOST-PHASE-1-integration.md`
 - **OB Retest / Retest Lab** (new workstream — see WORKSTREAMS.md): `frontend/src/data/obRetest.js`,
   `frontend/src/data/__validation__/obRetest.logictest.cjs`,
-  `frontend/src/components/lab/retest/` (untracked dir), `OB-RETEST-ANALYSIS-1.md`,
-  `OB-RETEST-ANALYSIS-2-PHASE-1-PLAN.md`
-- **Docs / analysis (general):** `IA-Audit-OrderBlockLab.md`, `IA-Audit-Run-Detail-Page.md`,
-  `OBLab-Workflow-Tab-Proposal.md`, `FULL-PIPELINE-INTEGRITY-AUDIT-1.md`,
-  `STRUCTURE-DIRECTION-FILTERS-1.md`, `PRIORITY-RESET-1-prompts.md`
+  `frontend/src/components/lab/retest/` (untracked dir), `_research/audits/OB-RETEST-ANALYSIS-1.md`,
+  `_research/plans/OB-RETEST-ANALYSIS-2-PHASE-1-PLAN.md`
+- **Docs / analysis (general):** `_research/audits/IA-Audit-OrderBlockLab.md`, `_research/audits/IA-Audit-Run-Detail-Page.md`,
+  `_research/plans/OBLab-Workflow-Tab-Proposal.md`, `_research/audits/FULL-PIPELINE-INTEGRITY-AUDIT-1.md`,
+  `_research/_unsorted/STRUCTURE-DIRECTION-FILTERS-1.md`, `_research/_unsorted/PRIORITY-RESET-1-prompts.md`
 - **Unknown / build artifacts (verify before touching):** `package.json`,
   `package-lock.json` (these are at **repo root**, not `frontend/` — likely accidental;
   the real frontend manifest is `frontend/package.json`. Do not commit the root ones

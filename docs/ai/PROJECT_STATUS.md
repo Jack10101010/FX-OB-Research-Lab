@@ -167,6 +167,6 @@ glossary and derivation.
 
 - Multiple agents edit `codex-dev` in parallel — never `git add .`; stage only your files.
 - Sandbox git can create but not unlink `.git/index.lock` (mount EPERM) → commit on host.
-- Detailed plans live at repo root: `CLASSIFICATION-TAB-V2-PLAN.md`,
-  `FILL-STATE-TAXONOMY-2-IMPLEMENTATION-PLAN.md`, `CLASSIFICATION-TAB-AAE-V2-PLAN.md`,
+- Detailed plans live at repo root: `_research/plans/CLASSIFICATION-TAB-V2-PLAN.md`,
+  `_research/plans/FILL-STATE-TAXONOMY-2-IMPLEMENTATION-PLAN.md`, `_research/plans/CLASSIFICATION-TAB-AAE-V2-PLAN.md`,
   `AAE-DEEP-ANALYSIS-1/2.md`, plus this Phase-2 audit.

@@ -19,8 +19,8 @@
 - **Owns:** `components/lab/failures/**`, `components/lab/roadmap/SectionRoadmap.jsx`,
   `data/roadmapStore.js`, `data/__validation__/failuresAggregation.validate.mjs`,
   `excursionAnalytics.validate.mjs`, `failuresFieldDetection.validate.mjs`,
-  `pages/FailuresLab.jsx`. Design refs: `FAILURES-LAB-V4-ARCHITECTURE-AUDIT-1.md`,
-  `FAILURES-LAB-V2-*`, `FAILURES-LAB-UX-AUDIT-1.md`.
+  `pages/FailuresLab.jsx`. Design refs: `_research/plans/FAILURES-LAB-V4-ARCHITECTURE-AUDIT-1.md`,
+  `FAILURES-LAB-V2-*`, `_research/audits/FAILURES-LAB-UX-AUDIT-1.md`.
 - **Shared/caution:** `data/researchGlossary.js` (shared with Classification), `data/importer.js`
   (excursion field mapping — shared with Entry/FFT).
 - **Next:** hand scoped commits to host → pause → pivot decision (Master Controls vs Protection).
@@ -120,7 +120,7 @@
   `topic` tag per card plus two pure view fns (`buildActionQueue`, `groupByTopic`) + `COCKPIT_TOPICS`.
   Still no new metric, no new threshold (mirrors `TRIAGE_LOW_SAMPLE_N` / `EXPLORER_LIFT_HIGHLIGHT`),
   no persistence, no backend, no deep-link plumbing. Design refs:
-  `RUN-INSIGHTS-COCKPIT-DESIGN-AUDIT-1.md`, `RESEARCH-COCKPIT-V2-INSIGHT-CATEGORIES-AUDIT-1.md`.
+  `_research/plans/RUN-INSIGHTS-COCKPIT-DESIGN-AUDIT-1.md`, `_research/audits/RESEARCH-COCKPIT-V2-INSIGHT-CATEGORIES-AUDIT-1.md`.
 - **V2.0A categories (this slice):** Sessions/Timing (`buildSessionBreakdown` + `buildContextSinkholes`),
   Direction & Structure (`buildLoserRunUp` cohort groups), Loss Clusters (`buildFailureDrivers` +
   `buildPairDrivers`). Phase-1 cards (BE verdict, distance-at-arm, fill-state signals) kept working,

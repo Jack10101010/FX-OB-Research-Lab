@@ -11,7 +11,7 @@ sync, a read-only **Research Cockpit** (`/cockpit`) was built above the labs and
 - **Phase 1** (`b500e36`) — static ranked insight cards from existing analytics.
 - **V2.0A** (`fe71537`) — category command-centre: Action Queue + topic sections (Sessions/Timing ·
   Direction · Structure · Loss Clusters) + an "Other signals" catch-all. See `D-015`,
-  `RUN-INSIGHTS-COCKPIT-DESIGN-AUDIT-1.md`, `RESEARCH-COCKPIT-V2-INSIGHT-CATEGORIES-AUDIT-1.md`.
+  `_research/plans/RUN-INSIGHTS-COCKPIT-DESIGN-AUDIT-1.md`, `_research/audits/RESEARCH-COCKPIT-V2-INSIGHT-CATEGORIES-AUDIT-1.md`.
 - **OB Lab Insights synthesis layer** (`abc5be5`) also landed in this window (separate stream).
 
 **Git reality:** `codex-dev` is **15 commits ahead of `origin/codex-dev`** (NOT pushed) — the earlier

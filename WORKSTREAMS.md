@@ -213,8 +213,8 @@
   - `frontend/src/data/__validation__/obRetest.logictest.cjs` (untracked)
   - `frontend/src/components/lab/retest/` (untracked dir: RetestLabTab.jsx, useRetestData.js)
   - `frontend/src/pages/OrderBlockLab.jsx` (modified — OB Retest Phase 1 tab wiring, owned by this chat)
-  - `OB-RETEST-ANALYSIS-1.md`
-  - `OB-RETEST-ANALYSIS-2-PHASE-1-PLAN.md`
+  - `_research/audits/OB-RETEST-ANALYSIS-1.md`
+  - `_research/plans/OB-RETEST-ANALYSIS-2-PHASE-1-PLAN.md`
 - **Open risks:**
   - `OrderBlockLab.jsx` is a shared page surface — keep OB Retest edits to tab wiring only;
     coordinate before any deeper change so other tabs are untouched.
@@ -235,7 +235,7 @@
 - **Do not touch:** any `frontend/` source unless a separate workstream is created.
 - **Latest relevant commits:** none on `codex-dev` yet (currently untracked files only).
 - **Currently dirty (untracked):** `ghost_tracker.py`, `ghost_tracker_test.py`,
-  `GHOST-0-audit.md`, `GHOST-SYNC-0-audit.md`, `LUX-GHOST-PHASE-1-integration.md`
+  `_research/audits/GHOST-0-audit.md`, `_research/audits/GHOST-SYNC-0-audit.md`, `_research/plans/LUX-GHOST-PHASE-1-integration.md`
 - **Open risks:** root-level `package.json` / `package-lock.json` are untracked and look
   misplaced (real manifest is `frontend/package.json`) — not part of this workstream;
   verify before anyone commits them.
