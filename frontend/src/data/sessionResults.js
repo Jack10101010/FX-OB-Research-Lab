@@ -61,21 +61,28 @@ function entryLabelFromRule(rule) {
 }
 
 function statsFor(executed) {
-    let wins = 0, losses = 0, be = 0, netR = 0;
+    let wins = 0, losses = 0, be = 0, netR = 0, sumPos = 0, sumNeg = 0;
     for (const t of executed) {
         const cat = classifyTrade(t);
         if (cat === "WIN" || cat === "NEWS_FLATTEN_WIN") wins += 1;
         else if (cat === "LOSS" || cat === "NEWS_FLATTEN_LOSS") losses += 1;
         else be += 1; // BREAKEVEN / NEWS_FLATTEN_FLAT
-        netR += tradeR(t);
+        const r = tradeR(t);
+        netR += r;
+        if (r > 0) sumPos += r;
+        else if (r < 0) sumNeg += r;
     }
     const count = executed.length;
     const decided = wins + losses;
+    // Profit factor: gross profit / gross loss. null when there is no loss R to
+    // divide by (UI renders ∞ when wins exist, else —). EXACT from executed R.
+    const pf = sumNeg !== 0 ? Number((sumPos / Math.abs(sumNeg)).toFixed(2)) : null;
     return {
         count, wins, losses, be,
         netR: Number(netR.toFixed(2)),
         avgR: count ? Number((netR / count).toFixed(2)) : null,
         winRate: decided ? Number(((wins / decided) * 100).toFixed(1)) : null,
+        pf,
     };
 }
 
@@ -266,6 +273,10 @@ export function describeMissedReason(t) {
 // Excursion field getters (R units). null when absent (old bundles).
 const mfeOf = (t) => { const n = Number(t?.mfeR ?? t?.mfe_r); return Number.isFinite(n) ? n : null; };
 const maeOf = (t) => { const n = Number(t?.maeR ?? t?.mae_r); return Number.isFinite(n) ? n : null; };
+// Adverse excursion measured to the ORIGINAL exit (can dip below −1R for winners
+// after the realised exit). Used by BE / risk-reduction BOUND estimates. Null in
+// old bundles → bounded fields degrade to "unavailable".
+const maeToExitOf = (t) => { const n = Number(t?.maeRToOriginalExit ?? t?.mae_r_to_original_exit); return Number.isFinite(n) ? n : null; };
 function _avg(arr) { return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null; }
 function _median(arr) {
     if (!arr.length) return null;
@@ -312,7 +323,16 @@ export function cohortExcursionSnapshot(executedTrades) {
  * (coverage), never `total`; winners/losers use their own valid-MFE denominators;
  * a zero denominator yields null. Disabled/cancelled rows are never passed in.
  */
-export function cohortTargetSuitability(executedTrades, levels = [0.5, 1, 1.5, 2, 3, 5]) {
+// Target-suitability R levels shown in the Session Results → Management → Target
+// Suitability table. Expanded (UI polish) to a fine-grained ladder. Consumers that
+// look up specific levels (cohortManagementRead / cohortResearchVerdict via tsAt)
+// still resolve 0.5/1/2/3 by exact match, so adding levels is non-breaking.
+export const TARGET_SUITABILITY_LEVELS = [
+    0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.25, 1.5, 1.75, 2.0,
+    2.25, 2.5, 2.75, 3.0, 3.25, 3.5, 5.0,
+];
+
+export function cohortTargetSuitability(executedTrades, levels = TARGET_SUITABILITY_LEVELS) {
     const rows = Array.isArray(executedTrades) ? executedTrades : [];
     const total = rows.length;
     const withVal = rows.filter((t) => mfeOf(t) != null);
@@ -341,6 +361,255 @@ export function cohortTargetSuitability(executedTrades, levels = [0.5, 1, 1.5, 2
 }
 
 /**
+ * Parse a cohort's current-target label ("1.5R", "10R", "Run Default") into a
+ * numeric R target, or null when it can't be parsed (e.g. "Run Default" / blank).
+ * Used to anchor Δ-vs-current in the target-economics table.
+ */
+export function parseTargetLabel(label) {
+    const m = /^\s*([0-9]*\.?[0-9]+)\s*R\s*$/i.exec(String(label ?? ""));
+    if (!m) return null;
+    const v = Number(m[1]);
+    return Number.isFinite(v) && v > 0 ? v : null;
+}
+
+// Per-trade cost in R for EXACT net-R reconstruction. Prefer the exported
+// total_cost_r; else derive from gross−net (net = gross − cost ⇒ cost = gross −
+// net); else 0 (older bundles with neither — documented fallback, no cost model).
+function costOf(t) {
+    const c = Number(t?.totalCostR ?? t?.total_cost_r);
+    if (Number.isFinite(c)) return c;
+    const g = Number(t?.grossR ?? t?.gross_r);
+    const n = Number(t?.netR ?? t?.net_r);
+    if (Number.isFinite(g) && Number.isFinite(n)) return g - n;
+    return 0;
+}
+
+/**
+ * Normalize a list of values to 0–100 bar widths (min→0, max→100) for an inline
+ * strength cue. Handles negatives (min-max scaling) and the all-equal case
+ * (range 0 → every value renders full). Non-finite entries map to 0.
+ */
+export function normalizeBars(values) {
+    const nums = (Array.isArray(values) ? values : []).map((v) => (Number.isFinite(v) ? v : null));
+    const valid = nums.filter((v) => v != null);
+    if (!valid.length) return nums.map(() => 0);
+    const min = Math.min(...valid), max = Math.max(...valid), range = max - min;
+    return nums.map((v) => (v == null ? 0 : range <= 0 ? 100 : Number((((v - min) / range) * 100).toFixed(1))));
+}
+
+/**
+ * Phase 5 — EXACT target re-targeting economics from stop-anchored MFE.
+ *
+ * Changing the take-profit target does NOT change the fill set, entry, or stop —
+ * only where profit is taken — so the outcome at any target T is exact for the
+ * existing trades: a trade wins iff `mfe_r >= T`, and
+ *     netR(T) = Σ_decided[(T if mfe_r>=T else −1) − cost] + Σ_heldNF[actual netR].
+ * Reconstruction runs over DECIDED rows (WIN/LOSS) that carry a valid MFE.
+ * News-flatten rows can't be retargeted (flattened by news, not target/stop), so
+ * they are held at their ACTUAL net R as a constant and never counted as Est W/L.
+ * EXACT for this fill set — confirm with a backend scenario run before adopting.
+ *
+ * Returns everything `cohortTargetSuitability` returns (reach-rate columns kept,
+ * additive) plus per-level `estW` / `estL` / `estNetR` / `deltaCurrent` /
+ * `confidence`, a `bestLevel`, and a gated `insight` summary.
+ */
+export function cohortTargetEconomics(executedTrades, currentTargetLabel = null, levels = TARGET_SUITABILITY_LEVELS) {
+    const rows = Array.isArray(executedTrades) ? executedTrades : [];
+    const base = cohortTargetSuitability(rows, levels);
+
+    // Retargetable set: WIN/LOSS with valid MFE. (winnersWithMFE + losersWithMFE)
+    const decidedRows = rows.filter((t) => {
+        const cat = classifyTrade(t);
+        return (cat === "WIN" || cat === "LOSS") && mfeOf(t) != null;
+    });
+    const decided = decidedRows.length;
+
+    // News-flatten rows: held at actual (cannot retarget). Included in BOTH Est
+    // Net R and Est PF for consistency (same components feed both).
+    const heldRows = rows.filter((t) => {
+        const cat = classifyTrade(t);
+        return cat === "NEWS_FLATTEN_WIN" || cat === "NEWS_FLATTEN_LOSS" || cat === "NEWS_FLATTEN_FLAT";
+    });
+    const heldNetR = heldRows.reduce((s, t) => s + tradeR(t), 0);
+
+    // Exact reconstruction at target T. Each decided trade contributes
+    // (T if mfe≥T else −1) − cost; held news-flatten rows contribute actual net R.
+    const econAt = (T) => {
+        if (T == null) return { netR: null, pf: null };
+        let sum = 0, gp = 0, gl = 0;
+        const add = (r) => { sum += r; if (r > 0) gp += r; else if (r < 0) gl += -r; };
+        for (const t of decidedRows) add((mfeOf(t) >= T ? T : -1) - costOf(t));
+        for (const t of heldRows) add(tradeR(t));
+        return { netR: Number(sum.toFixed(2)), pf: gl > 0 ? Number((gp / gl).toFixed(2)) : null };
+    };
+    const netRAt = (T) => econAt(T).netR;
+
+    const currentTarget = parseTargetLabel(currentTargetLabel);
+    const currentEcon = econAt(currentTarget);
+    const currentNetR = currentEcon.netR;
+    const pctOrNull = (num, den) => (den ? Number(((num / den) * 100).toFixed(1)) : null);
+
+    // Deterministic confidence: base on decision-relevant counts, force Low when a
+    // level's own reach count is < 5 (a % off ≤4 trades is noise).
+    const confidenceOf = (reachCount) => {
+        if (reachCount < 5) return "Low";
+        if (decided >= 40 || (base.winnersWithMFE >= 20 && base.losersWithMFE >= 10)) return "High";
+        if (decided >= 15) return "Medium";
+        return "Low";
+    };
+    // Sample-tier confidence ignoring per-level reach (for a current target that is
+    // not one of the ladder levels).
+    const decidedConfidence = (decided >= 40 || (base.winnersWithMFE >= 20 && base.losersWithMFE >= 10))
+        ? "High" : decided >= 15 ? "Medium" : "Low";
+
+    const lv = base.levels.map((l) => {
+        const T = l.level;
+        const estW = decidedRows.filter((t) => mfeOf(t) >= T).length;
+        const estL = decided - estW;
+        const e = econAt(T);
+        const deltaCurrent = (currentNetR != null && e.netR != null)
+            ? Number((e.netR - currentNetR).toFixed(2)) : null;
+        return {
+            ...l, estW, estL,
+            estNetR: e.netR,
+            estPF: e.pf,                       // null ⇒ no loss R (UI shows ∞ if estW>0)
+            estWR: pctOrNull(estW, estW + estL),
+            deltaCurrent, n: decided,
+            confidence: confidenceOf(l.reachedCount),
+        };
+    });
+
+    // Normalized Est Net R bar widths (0–100) for the inline strength cue.
+    const bars = normalizeBars(lv.map((l) => l.estNetR));
+    lv.forEach((l, i) => { l.netRBar = bars[i]; });
+
+    // ── Candidate selection (all deterministic) ──────────────────────────────
+    // PF rank: a target with no losing R (pf null but Est W>0) is treated as the
+    // strongest PF; an empty/degenerate row sinks to the bottom.
+    const pfRank = (l) => (l.estPF == null ? (l.estW > 0 ? Infinity : -1) : l.estPF);
+    const mh = lv.filter((l) => l.confidence !== "Low" && l.estNetR != null);
+
+    // Best Overall = highest Est Net R among Medium/High rows. null if all Low.
+    let best = null;
+    for (const l of mh) if (best == null || l.estNetR > best.estNetR) best = l;
+    const bestIsCurrent = best != null && currentTarget != null && best.level === currentTarget;
+
+    // Candidate pool for Conservative/Balanced = Med/High with Δ ≥ 0 (or Δ unknown).
+    const pool = mh.filter((l) => l.deltaCurrent == null || l.deltaCurrent >= 0);
+    // Conservative = strongest Est PF among the non-negative pool (tie → higher net R).
+    let conservative = null;
+    for (const l of pool) {
+        if (conservative == null || pfRank(l) > pfRank(conservative)
+            || (pfRank(l) === pfRank(conservative) && l.estNetR > conservative.estNetR)) conservative = l;
+    }
+    // Balanced = best combined rank of Est Net R and Est PF among the pool.
+    let balanced = null;
+    if (pool.length) {
+        const byNet = [...pool].sort((a, b) => b.estNetR - a.estNetR);
+        const byPf = [...pool].sort((a, b) => pfRank(b) - pfRank(a));
+        const rankOf = (l) => byNet.indexOf(l) + byPf.indexOf(l);
+        for (const l of pool) {
+            if (balanced == null || rankOf(l) < rankOf(balanced)
+                || (rankOf(l) === rankOf(balanced) && l.estNetR > balanced.estNetR)) balanced = l;
+        }
+    }
+    // Aggressive = highest Est Net R regardless of confidence (curiosity only).
+    let aggressive = null;
+    for (const l of lv) if (l.estNetR != null && (aggressive == null || l.estNetR > aggressive.estNetR)) aggressive = l;
+    const aggressiveIsLowConf = aggressive != null && aggressive.confidence === "Low";
+
+    // ── Recommendation card payload ──────────────────────────────────────────
+    let recommendation;
+    if (decided < 8) {
+        recommendation = { kind: "too_small", n: decided };
+    } else if (!best) {
+        recommendation = { kind: "none", n: decided };
+    } else if (currentTarget != null && (bestIsCurrent || (best.deltaCurrent != null && best.deltaCurrent <= 0))) {
+        const curEstW = decidedRows.filter((t) => mfeOf(t) >= currentTarget).length;
+        recommendation = {
+            kind: "current_best", level: currentTarget,
+            estNetR: currentNetR, estPF: currentEcon.pf, estWR: pctOrNull(curEstW, decided),
+            confidence: (lv.find((l) => l.level === currentTarget) || {}).confidence || decidedConfidence,
+            n: decided,
+        };
+    } else {
+        recommendation = {
+            kind: "recommend", level: best.level, deltaCurrent: best.deltaCurrent,
+            estNetR: best.estNetR, estPF: best.estPF, estWR: best.estWR,
+            confidence: best.confidence, n: decided,
+        };
+    }
+
+    // Gated insight summary (kept for back-compat; the card uses `recommendation`).
+    let insight;
+    if (decided < 8) {
+        insight = { tone: "muted", text: `Sample too small (${decided}) for target guidance.` };
+    } else if (!best) {
+        insight = { tone: "neutral", text: "No target candidate clears the confidence bar." };
+    } else if (currentTarget == null) {
+        insight = { tone: "success", text: `Best estimated target: ${best.level}R (${best.confidence} confidence). Current target unknown — Δ unavailable. Backend validation recommended.` };
+    } else if (bestIsCurrent) {
+        insight = { tone: "neutral", text: "Current target appears strongest in this cohort. No higher-confidence improvement candidate found." };
+    } else if (best.deltaCurrent != null && best.deltaCurrent > 0) {
+        insight = { tone: "success", text: `Best target candidate: ${best.level}R (+${best.deltaCurrent}R vs current, ${best.confidence} confidence). Backend validation recommended.` };
+    } else {
+        insight = { tone: "neutral", text: "Current target appears strongest — no higher-R candidate clears the confidence bar." };
+    }
+
+    return {
+        ...base,
+        decided,
+        currentTargetLabel: currentTargetLabel ?? null,
+        currentTarget,
+        currentNetR,
+        currentPF: currentEcon.pf,
+        heldNetR: Number(heldNetR.toFixed(2)),
+        levels: lv,
+        bestLevel: best ? best.level : null,
+        bestIsCurrent,
+        conservativeLevel: conservative ? conservative.level : null,
+        balancedLevel: balanced ? balanced.level : null,
+        aggressiveLevel: aggressive ? aggressive.level : null,
+        aggressiveIsLowConf,
+        recommendation,
+        insight,
+    };
+}
+
+/**
+ * Compact cohort header counts for the Cohort Breakdown card/header.
+ * Uses the app's canonical `classifyTrade` so W/L/NF match existing conventions:
+ *   • won       = executed rows classified WIN
+ *   • lost      = executed rows classified LOSS
+ *   • newsFlat  = executed rows classified NEWS_FLATTEN_* (counted SEPARATELY from W/L)
+ *   • invalidated = cancelled/missed rows classified INVALID_CANCELLED (e.g. INVALID /
+ *                   invalidated_before_fill). Reads the cohort's existing row buckets.
+ * Disabled opportunities live in their own bucket and are NEVER counted here.
+ * BREAKEVEN executed rows are intentionally not folded into W/L (parity with statsFor's
+ * separate `be`); they show in `trades` but not in W/L/NF/INV. No row is double-counted.
+ */
+export function cohortHeaderCounts(cohort) {
+    const executed = Array.isArray(cohort?.executedTrades)
+        ? cohort.executedTrades
+        : (Array.isArray(cohort?.executed) ? cohort.executed : []);
+    const cancelled = Array.isArray(cohort?.cancelledOrMissedOpportunities)
+        ? cohort.cancelledOrMissedOpportunities
+        : [];
+    let won = 0, lost = 0, newsFlat = 0;
+    for (const t of executed) {
+        const cat = classifyTrade(t);
+        if (cat === "WIN") won += 1;
+        else if (cat === "LOSS") lost += 1;
+        else if (cat === "NEWS_FLATTEN_WIN" || cat === "NEWS_FLATTEN_LOSS" || cat === "NEWS_FLATTEN_FLAT") newsFlat += 1;
+    }
+    let invalidated = 0;
+    for (const t of cancelled) {
+        if (classifyTrade(t) === "INVALID_CANCELLED") invalidated += 1;
+    }
+    return { trades: executed.length, won, lost, newsFlat, invalidated };
+}
+
+/**
  * Phase 3D — pure BE-suitability snapshot from exported MFE only. EXPLORATORY:
  * surfaces raw reach-rate evidence to gauge whether a BE rule might help — it does
  * NOT simulate P&L and makes no claim a BE would improve results. Reached = MFE >=
@@ -360,21 +629,84 @@ export function cohortBESuitability(executedTrades, levels = [0.5, 1, 1.5, 2]) {
         if (lp < 25) return "Weak";
         return "Mixed";
     };
+    // BOUND inputs: BE outcome is path-order dependent (was the milestone hit
+    // before the dip?), so these are worst/best-case bounds, never point P&L.
+    // Requires mae_r_to_original_exit on winners; absent → bounds unavailable.
+    const boundsAvailable = winnersV.some((t) => maeToExitOf(t) != null);
     const lv = levels.map((level) => {
         const lc = reachedIn(losersV, level);
         const wc = reachedIn(winnersV, level);
         const lp = pct(lc, losersV.length);
         const wp = pct(wc, winnersV.length);
         const netBenefitScore = (lp == null || wp == null) ? null : Number((lp - (100 - wp)).toFixed(1));
+        // Saved bound (upper): each loser that reached `level` could exit at BE (0R)
+        // instead of −1R → up to +1R saved. EXACT count, BOUND R.
+        const savedRBound = Number((lc * 1).toFixed(2));
+        // Lost bound (worst-case): winners that armed BE (mfe≥level) but whose adverse
+        // path returned to BE (mae_to_exit ≤ 0) — they'd be cut to ~0R, giving up
+        // their realised net R.
+        let lostRBound = null, threatenedWinners = null, netImpactBound = null;
+        if (boundsAvailable) {
+            const threatened = winnersV.filter((t) => mfeOf(t) >= level && maeToExitOf(t) != null && maeToExitOf(t) <= 0);
+            threatenedWinners = threatened.length;
+            lostRBound = Number(threatened.reduce((s, t) => s + Math.max(0, tradeR(t)), 0).toFixed(2));
+            netImpactBound = Number((savedRBound - lostRBound).toFixed(2));
+        }
         return {
             level,
             losersReachedCount: lc, losersReachedPct: lp,
             winnersReachedCount: wc, winnersReachedPct: wp,
             netBenefitScore,
             signal: signalOf(lp, wp),
+            savedRBound, threatenedWinners, lostRBound, netImpactBound,
         };
     });
-    return { totalLosers: losersV.length, totalWinners: winnersV.length, levels: lv };
+    return { totalLosers: losersV.length, totalWinners: winnersV.length, boundsAvailable, levels: lv };
+}
+
+/**
+ * Phase 3 — Risk-Reduction Suitability (NEW, separate from BE). Explores rules
+ * like "after 0.25R → tighten stop to −0.75R". Same honesty as BE: every R figure
+ * is a path-order-dependent BOUND, never simulated P&L.
+ *   • Losers Reached    = LOSS rows with mfe_r ≥ trigger (EXACT count)
+ *   • Winners Threatened = WIN rows with mfe_r ≥ trigger AND mae_to_exit ≤ newStop
+ *   • Saved R Bound (upper)  = losersReached × (newStop − (−1))   [+0.25/0.5/0.75/1 per loser]
+ *   • Lost R Bound (worst)   = Σ max(0, realised netR − newStop) over threatened winners
+ *   • Net Impact Bound       = Saved − Lost
+ * Threatened/Lost/Net require mae_r_to_original_exit; absent → bounds unavailable.
+ */
+export const RISK_REDUCTION_RULES = [
+    { trigger: 0.25, newStop: -0.75 },
+    { trigger: 0.5, newStop: -0.5 },
+    { trigger: 0.75, newStop: -0.25 },
+    { trigger: 1.0, newStop: 0 },
+];
+export function cohortRiskReduction(executedTrades, rules = RISK_REDUCTION_RULES) {
+    const rows = Array.isArray(executedTrades) ? executedTrades : [];
+    const winnersV = rows.filter((t) => classifyTrade(t) === "WIN" && mfeOf(t) != null);
+    const losersV = rows.filter((t) => classifyTrade(t) === "LOSS" && mfeOf(t) != null);
+    const boundsAvailable = winnersV.some((t) => maeToExitOf(t) != null);
+    const signalOf = (net, threatened, totalW) => {
+        if (net == null) return "—";
+        const ratio = totalW ? threatened / totalW : 0;
+        if (net > 0.5 && ratio <= 0.34) return "Strong";
+        if (net < -0.001 || ratio > 0.5) return "Weak";
+        return "Mixed";
+    };
+    const lv = rules.map(({ trigger, newStop }) => {
+        const losersReached = losersV.filter((t) => mfeOf(t) >= trigger).length;
+        const savedRBound = Number((losersReached * (newStop - -1)).toFixed(2));
+        let threatenedWinners = null, lostRBound = null, netImpactBound = null, signal = "—";
+        if (boundsAvailable) {
+            const threatened = winnersV.filter((t) => mfeOf(t) >= trigger && maeToExitOf(t) != null && maeToExitOf(t) <= newStop);
+            threatenedWinners = threatened.length;
+            lostRBound = Number(threatened.reduce((s, t) => s + Math.max(0, tradeR(t) - newStop), 0).toFixed(2));
+            netImpactBound = Number((savedRBound - lostRBound).toFixed(2));
+            signal = signalOf(netImpactBound, threatenedWinners, winnersV.length);
+        }
+        return { trigger, newStop, losersReached, threatenedWinners, savedRBound, lostRBound, netImpactBound, signal };
+    });
+    return { totalLosers: losersV.length, totalWinners: winnersV.length, boundsAvailable, levels: lv };
 }
 
 /**

@@ -10,7 +10,12 @@ import React, { useState } from "react";
 import { ChevronDown, ChevronRight, Ban } from "lucide-react";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { useDataset, getActiveBundle, getTradeUniverse } from "@/data/store";
-import { buildSessionResults, cohortFailureSummary, describeMissedReason, cohortOutcomeDistribution, cohortExcursionSnapshot, cohortTargetSuitability, cohortBESuitability, cohortManagementRead, cohortResearchVerdict, cohortRegimeSnapshot, cohortFailureClusters } from "@/data/sessionResults";
+import { buildSessionResults, cohortFailureSummary, describeMissedReason, cohortOutcomeDistribution, cohortExcursionSnapshot, cohortTargetSuitability, cohortTargetEconomics, cohortBESuitability, cohortRiskReduction, cohortManagementRead, cohortResearchVerdict, cohortRegimeSnapshot, cohortFailureClusters, cohortHeaderCounts } from "@/data/sessionResults";
+
+// Shared formatters for the Management decision-support surface.
+const fmtR2 = (v) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${Number(v).toFixed(2)}R`);
+const pfText = (pf, hasWins) => (pf == null ? (hasWins ? "∞" : "—") : pf);
+const confToneOf = (cf, success, danger) => (cf === "High" ? success : cf === "Medium" ? "text-[hsl(var(--warning))]" : "text-[hsl(var(--text-2))]");
 
 const fmtR = (v) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${Number(v).toFixed(1)}R`);
 const fmtPx = (v) => (v == null || v === "" || !Number.isFinite(Number(v)) ? "—" : Number(v).toFixed(5));
@@ -226,53 +231,130 @@ function ExcursionSnapshot({ rows }) {
     );
 }
 
-function TargetSuitability({ rows }) {
-    const ts = cohortTargetSuitability(rows);
+// Recommendation card (Part 2) — structured read of the EXACT target economics.
+function TargetRecommendationCard({ ts }) {
+    const r = ts.recommendation;
+    const wrap = (border, tone, title, body) => (
+        <div className={`clip-bevel-sm border ${border} px-3 py-2`}>
+            <div className={`text-[12px] font-ui font-semibold ${tone}`}>{title}</div>
+            {body}
+        </div>
+    );
+    const metrics = (m) => (
+        <div className="text-[11px] font-num text-[hsl(var(--text-2))] mt-0.5">
+            Est Net R <span className={m.estNetR >= 0 ? successTone : dangerTone}>{fmtR2(m.estNetR)}</span> · PF {pfText(m.estPF, m.estNetR != null)} · WR {m.estWR == null ? "—" : `${m.estWR}%`} · n {m.n}
+        </div>
+    );
+    if (r.kind === "too_small") return wrap("border-[hsl(var(--border-mid))] bg-[hsl(var(--panel-2)/0.2)]", "text-muted-lab", "Sample Too Small", <div className="text-[11px] font-ui text-muted-lab mt-0.5">n = {r.n}. Target guidance suppressed.</div>);
+    if (r.kind === "none") return wrap("border-[hsl(var(--border-mid))] bg-[hsl(var(--panel-2)/0.2)]", "text-[hsl(var(--text-2))]", "No Reliable Improvement Found", <div className="text-[11px] font-ui text-muted-lab mt-0.5">No Medium/High-confidence target beats the current one. n = {r.n}.</div>);
+    if (r.kind === "current_best") return wrap("border-[hsl(var(--border-mid))] bg-[hsl(var(--panel-2)/0.2)]", "text-[hsl(var(--text-1))]", "Current Target Remains Best", (
+        <>
+            <div className="text-[11px] font-ui text-muted-lab mt-0.5">Current target ({r.level}R) has the strongest Medium/High confidence estimate. Confidence: {r.confidence}.</div>
+            {metrics(r)}
+        </>
+    ));
+    // recommend
+    return wrap("border-[hsl(var(--success)/0.5)] bg-[hsl(var(--success)/0.08)]", successTone, `Recommended Target: ${r.level}R`, (
+        <>
+            <div className={`text-[11.5px] font-num mt-0.5 ${r.deltaCurrent == null ? "text-[hsl(var(--text-2))]" : r.deltaCurrent >= 0 ? successTone : dangerTone}`}>{r.deltaCurrent == null ? "Δ vs current unavailable" : `${fmtR2(r.deltaCurrent)} vs Current`}</div>
+            {metrics(r)}
+            <div className="text-[10.5px] font-ui text-muted-lab mt-0.5">Confidence: {r.confidence}. Backend validation recommended.</div>
+        </>
+    ));
+}
+
+function TargetSuitability({ rows, tpLabel }) {
+    const ts = cohortTargetEconomics(rows, tpLabel);
     if (ts.coverage.withMFE === 0) return <div className="text-[11.5px] font-ui text-muted-lab italic py-1">No MFE data available for target suitability.</div>;
     const tone = (p) => (p == null ? "text-[hsl(var(--text-2))]" : p >= 66 ? successTone : p >= 33 ? "text-[hsl(var(--warning))]" : dangerTone);
     const cell = (pct, count, den) => (
         <span className={`font-num ${tone(pct)}`}>{pct == null ? "—" : `${pct}%`} <span className="text-[hsl(var(--text-2))]">({count}/{den})</span></span>
     );
+    const rTone = (v) => (v == null ? "text-[hsl(var(--text-2))]" : v >= 0 ? successTone : dangerTone);
+    const confTone = (cf) => confToneOf(cf, successTone, dangerTone);
+    // Candidate tag chips per row (★ Best · ◆ Conservative · ● Balanced · ▲ Aggressive · ● Current)
+    const tagsFor = (lvl) => {
+        const out = [];
+        if (ts.bestLevel != null && lvl === ts.bestLevel) out.push({ t: "★ Best", c: "text-[hsl(var(--success))]" });
+        if (ts.conservativeLevel != null && lvl === ts.conservativeLevel) out.push({ t: "◆ Conservative", c: "text-[hsl(var(--accent-secondary))]" });
+        if (ts.balancedLevel != null && lvl === ts.balancedLevel) out.push({ t: "● Balanced", c: "text-[hsl(var(--text-1))]" });
+        if (ts.aggressiveLevel != null && lvl === ts.aggressiveLevel) out.push({ t: ts.aggressiveIsLowConf ? "▲ Aggressive (low-conf)" : "▲ Aggressive", c: "text-[hsl(var(--warning))]" });
+        if (ts.currentTarget != null && lvl === ts.currentTarget) out.push({ t: "● Current", c: "text-[hsl(var(--accent-secondary))]" });
+        return out;
+    };
     return (
         <div className="space-y-1.5">
-            <p className="text-[10.5px] font-ui text-muted-lab italic">Exploratory MFE reach-rate only. Use backend scenario runs to confirm actual P&amp;L.</p>
+            <TargetRecommendationCard ts={ts} />
+            <p className="text-[10.5px] font-ui text-muted-lab italic">Exact for this fill set using exported MFE paths — changing the target does not change entry, stop, or fills. Confirm with backend scenario runs before adopting.</p>
             <div className="overflow-x-auto">
-                <table className="w-full text-[11.5px] font-ui">
+                <table className="w-full text-[11.5px] font-ui whitespace-nowrap">
                     <thead><tr className="text-[hsl(var(--accent-secondary))] uppercase text-[10px] tracking-wider text-left">
-                        <th className="py-1 pr-3">Target</th><th className="pr-3">All Reached</th><th className="pr-3">Winners</th><th>Losers</th>
+                        <th className="py-1 pr-3">Target</th><th className="pr-3">Reach %</th><th className="pr-3">Winners</th><th className="pr-3">Losers</th><th className="pr-3 text-right">Est W</th><th className="pr-3 text-right">Est L</th><th className="pr-3 text-right">Est WR</th><th className="pr-3 text-right">Est PF</th><th className="pr-3 text-right">Est Net R</th><th className="pr-3">Strength</th><th className="pr-3 text-right">Δ Current</th><th className="pr-3 text-right">n</th><th>Confidence</th>
                     </tr></thead>
                     <tbody>
-                        {ts.levels.map((l) => (
-                            <tr key={l.level} className="border-t border-[hsl(var(--border-soft))]">
-                                <td className="py-1 pr-3 text-[hsl(var(--text-1))] font-num">{l.level}R</td>
-                                <td className="pr-3">{cell(l.reachedPct, l.reachedCount, ts.coverage.withMFE)}</td>
-                                <td className="pr-3">{cell(l.winnersReachedPct, l.winnersReachedCount, ts.winnersWithMFE)}</td>
-                                <td>{cell(l.losersReachedPct, l.losersReachedCount, ts.losersWithMFE)}</td>
-                            </tr>
-                        ))}
+                        {ts.levels.map((l) => {
+                            const isBest = ts.bestLevel != null && l.level === ts.bestLevel;
+                            const rowCls = isBest ? "border-l-2 border-[hsl(var(--success))] bg-[hsl(var(--success)/0.07)]" : "border-l-2 border-transparent";
+                            const barTone = l.estNetR == null ? "bg-[hsl(var(--border-mid))]" : l.estNetR >= 0 ? "bg-[hsl(var(--success)/0.55)]" : "bg-[hsl(var(--danger)/0.5)]";
+                            return (
+                                <tr key={l.level} className={`border-t border-[hsl(var(--border-soft))] ${rowCls}`}>
+                                    <td className="py-1 pr-3 text-[hsl(var(--text-1))] font-num align-top">
+                                        <div>{l.level}R</div>
+                                        {tagsFor(l.level).map((g, i) => <span key={i} className={`block text-[9px] font-ui ${g.c}`}>{g.t}</span>)}
+                                    </td>
+                                    <td className="pr-3">{cell(l.reachedPct, l.reachedCount, ts.coverage.withMFE)}</td>
+                                    <td className="pr-3">{cell(l.winnersReachedPct, l.winnersReachedCount, ts.winnersWithMFE)}</td>
+                                    <td className="pr-3">{cell(l.losersReachedPct, l.losersReachedCount, ts.losersWithMFE)}</td>
+                                    <td className="pr-3 text-right font-num text-[hsl(var(--text-1))]">{l.estW}</td>
+                                    <td className="pr-3 text-right font-num text-[hsl(var(--text-2))]">{l.estL}</td>
+                                    <td className="pr-3 text-right font-num text-[hsl(var(--text-2))]">{l.estWR == null ? "—" : `${l.estWR}%`}</td>
+                                    <td className="pr-3 text-right font-num text-[hsl(var(--text-2))]">{pfText(l.estPF, l.estW > 0)}</td>
+                                    <td className={`pr-3 text-right font-num ${rTone(l.estNetR)}`}>{fmtR2(l.estNetR)}</td>
+                                    <td className="pr-3"><div className="h-1.5 w-12 bg-[hsl(var(--panel-2)/0.5)] clip-bevel-sm overflow-hidden" title={`relative Est Net R ${l.netRBar}%`}><div className={`h-full ${barTone}`} style={{ width: `${l.netRBar}%` }} /></div></td>
+                                    <td className={`pr-3 text-right font-num ${rTone(l.deltaCurrent)}`}>{l.deltaCurrent == null ? "—" : fmtR2(l.deltaCurrent)}</td>
+                                    <td className="pr-3 text-right font-num text-[hsl(var(--text-2))]">{l.n}</td>
+                                    <td className={`font-ui ${confTone(l.confidence)}`}>{l.confidence}</td>
+                                </tr>
+                            );
+                        })}
                     </tbody>
                 </table>
             </div>
-            <div className="text-[10.5px] font-ui text-muted-lab">Coverage: {ts.coverage.withMFE}/{ts.total} trades with MFE</div>
+            <div className="flex flex-wrap items-center gap-2">
+                <button
+                    type="button"
+                    disabled
+                    title="Scenario staging not wired yet — use a backend scenario sweep to validate."
+                    className="clip-bevel-sm px-2.5 py-1 text-[10.5px] font-ui border border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] opacity-60 cursor-not-allowed"
+                >
+                    Stage Backend Test{ts.recommendation.kind === "recommend" ? ` (${ts.recommendation.level}R)` : ""}
+                </button>
+                <span className="text-[10px] font-ui text-muted-lab">Scenario staging not wired yet.</span>
+            </div>
+            <div className="text-[10.5px] font-ui text-muted-lab">
+                Coverage: {ts.coverage.withMFE}/{ts.total} with MFE · {ts.decided} decided{ts.heldNetR !== 0 ? ` · held news-flatten ${fmtR2(ts.heldNetR)}` : ""} · current target {ts.currentTargetLabel || "—"}{ts.currentNetR != null ? ` (Est Net ${fmtR2(ts.currentNetR)})` : ""}
+            </div>
         </div>
     );
 }
+
+const sigToneOf = (s) => (s === "Strong" ? successTone : s === "Mixed" ? "text-[hsl(var(--warning))]" : s === "Weak" ? dangerTone : "text-[hsl(var(--text-2))]");
 
 function BESuitability({ rows }) {
     const be = cohortBESuitability(rows);
     if (be.totalLosers === 0 && be.totalWinners === 0) return <div className="text-[11.5px] font-ui text-muted-lab italic py-1">No MFE data available for BE suitability.</div>;
     const pctTone = (p) => (p == null ? "text-[hsl(var(--text-2))]" : p >= 66 ? successTone : p >= 33 ? "text-[hsl(var(--warning))]" : dangerTone);
-    const sigTone = (s) => (s === "Strong" ? successTone : s === "Mixed" ? "text-[hsl(var(--warning))]" : s === "Weak" ? dangerTone : "text-[hsl(var(--text-2))]");
     const cell = (pct, count, den) => (
         <span className={`font-num ${pctTone(pct)}`}>{pct == null ? "—" : `${pct}%`} <span className="text-[hsl(var(--text-2))]">({count}/{den})</span></span>
     );
+    const rTone = (v) => (v == null ? "text-[hsl(var(--text-2))]" : v >= 0 ? successTone : dangerTone);
     return (
         <div className="space-y-1.5">
-            <p className="text-[10.5px] font-ui text-muted-lab italic">High loser reach-rates may indicate a useful BE candidate. Confirm with backend scenario testing.</p>
+            <p className="text-[10.5px] font-ui text-muted-lab italic">Exploratory reach-rate / bound analysis only. BE outcome depends on path order and must be validated with backend simulation.</p>
             <div className="overflow-x-auto">
-                <table className="w-full text-[11.5px] font-ui">
+                <table className="w-full text-[11.5px] font-ui whitespace-nowrap">
                     <thead><tr className="text-[hsl(var(--accent-secondary))] uppercase text-[10px] tracking-wider text-left">
-                        <th className="py-1 pr-3">Level</th><th className="pr-3">Losers Reached</th><th className="pr-3">Winners Reached</th><th>Signal</th>
+                        <th className="py-1 pr-3">Level</th><th className="pr-3">Losers Reached</th><th className="pr-3">Winners Reached</th><th className="pr-3 text-right">Net Benefit</th><th className="pr-3 text-right">Saved R<span className="text-[8px] align-super"> bound</span></th><th className="pr-3 text-right">Lost R<span className="text-[8px] align-super"> bound</span></th><th className="pr-3 text-right">Net Impact<span className="text-[8px] align-super"> bound</span></th><th>Signal</th>
                     </tr></thead>
                     <tbody>
                         {be.levels.map((l) => (
@@ -280,12 +362,120 @@ function BESuitability({ rows }) {
                                 <td className="py-1 pr-3 text-[hsl(var(--text-1))] font-num">{l.level}R</td>
                                 <td className="pr-3">{cell(l.losersReachedPct, l.losersReachedCount, be.totalLosers)}</td>
                                 <td className="pr-3">{cell(l.winnersReachedPct, l.winnersReachedCount, be.totalWinners)}</td>
-                                <td className={`font-ui ${sigTone(l.signal)}`}>{l.signal}</td>
+                                <td className={`pr-3 text-right font-num ${rTone(l.netBenefitScore)}`}>{l.netBenefitScore == null ? "—" : l.netBenefitScore}</td>
+                                <td className="pr-3 text-right font-num text-[hsl(var(--success))]">{l.savedRBound == null ? "—" : `+${l.savedRBound}R`}</td>
+                                <td className="pr-3 text-right font-num text-[hsl(var(--danger))]">{l.lostRBound == null ? "—" : `−${l.lostRBound}R`}</td>
+                                <td className={`pr-3 text-right font-num ${rTone(l.netImpactBound)}`}>{l.netImpactBound == null ? "—" : fmtR2(l.netImpactBound)}</td>
+                                <td className={`font-ui ${sigToneOf(l.signal)}`}>{l.signal}</td>
                             </tr>
                         ))}
                     </tbody>
                 </table>
             </div>
+            <div className="text-[10.5px] font-ui text-muted-lab">
+                {be.totalLosers} losers · {be.totalWinners} winners with MFE.{" "}
+                {be.boundsAvailable ? "Saved/Lost/Net Impact are path-order BOUNDS, not simulated P&L." : "Saved is a count-based bound; Lost/Net Impact need mae-to-exit data (unavailable in this run)."}
+            </div>
+        </div>
+    );
+}
+
+// Part 7 — Risk-Reduction Suitability (BOUND-only; separate from BE).
+function RiskReduction({ rows }) {
+    const rr = cohortRiskReduction(rows);
+    if (rr.totalLosers === 0 && rr.totalWinners === 0) return <div className="text-[11.5px] font-ui text-muted-lab italic py-1">No MFE data available for risk-reduction analysis.</div>;
+    const rTone = (v) => (v == null ? "text-[hsl(var(--text-2))]" : v >= 0 ? successTone : dangerTone);
+    return (
+        <div className="space-y-1.5">
+            <p className="text-[10.5px] font-ui text-muted-lab italic">Exploratory bound analysis only — "after Trigger R, move stop to New Stop". Saved/Lost/Net Impact are path-order BOUNDS, not simulated P&L. Validate with a backend run.</p>
+            <div className="overflow-x-auto">
+                <table className="w-full text-[11.5px] font-ui whitespace-nowrap">
+                    <thead><tr className="text-[hsl(var(--accent-secondary))] uppercase text-[10px] tracking-wider text-left">
+                        <th className="py-1 pr-3">Trigger</th><th className="pr-3">New Stop</th><th className="pr-3 text-right">Losers Reached</th><th className="pr-3 text-right">Winners Threatened</th><th className="pr-3 text-right">Saved R<span className="text-[8px] align-super"> bound</span></th><th className="pr-3 text-right">Lost R<span className="text-[8px] align-super"> bound</span></th><th className="pr-3 text-right">Net Impact<span className="text-[8px] align-super"> bound</span></th><th>Signal</th>
+                    </tr></thead>
+                    <tbody>
+                        {rr.levels.map((l) => (
+                            <tr key={l.trigger} className="border-t border-[hsl(var(--border-soft))]">
+                                <td className="py-1 pr-3 text-[hsl(var(--text-1))] font-num">{l.trigger}R</td>
+                                <td className="pr-3 font-num text-[hsl(var(--text-2))]">{l.newStop > 0 ? "+" : ""}{l.newStop}R</td>
+                                <td className="pr-3 text-right font-num text-[hsl(var(--text-1))]">{l.losersReached}</td>
+                                <td className="pr-3 text-right font-num text-[hsl(var(--text-2))]">{l.threatenedWinners == null ? "—" : l.threatenedWinners}</td>
+                                <td className="pr-3 text-right font-num text-[hsl(var(--success))]">+{l.savedRBound}R</td>
+                                <td className="pr-3 text-right font-num text-[hsl(var(--danger))]">{l.lostRBound == null ? "—" : `−${l.lostRBound}R`}</td>
+                                <td className={`pr-3 text-right font-num ${rTone(l.netImpactBound)}`}>{l.netImpactBound == null ? "—" : fmtR2(l.netImpactBound)}</td>
+                                <td className={`font-ui ${sigToneOf(l.signal)}`}>{l.signal}</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+            {!rr.boundsAvailable && <div className="text-[10.5px] font-ui text-muted-lab">Winners Threatened / Lost / Net Impact need mae-to-exit data (unavailable in this run); Saved R is a count-based upper bound.</div>}
+        </div>
+    );
+}
+
+// Part 8 — Entry Threshold Research (placeholder; honest — cannot be reconstructed
+// from one cohort's MFE because a different entry changes the fill set/stop/R).
+const ENTRY_THRESHOLD_PLACEHOLDER = [0, 10, 25, 40, 50, 60, 75, 90];
+function EntryThresholdResearch() {
+    const [open, setOpen] = useState(false);
+    return (
+        <div className="clip-bevel-sm border border-[hsl(var(--border-soft))]">
+            <button type="button" onClick={() => setOpen((v) => !v)} className="w-full text-left px-3 py-2 flex items-center gap-2" data-testid="entry-threshold-toggle">
+                <span className="text-muted-lab">{open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>
+                <span className="text-[12px] font-ui font-semibold text-[hsl(var(--text-1))]">Entry Threshold Research</span>
+            </button>
+            {open && (
+                <div className="px-3 pb-3 space-y-2">
+                    <p className="text-[11px] font-ui text-muted-lab">Entry-threshold results require real entry-variant runs. They cannot be reconstructed safely from a single cohort.</p>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-[11.5px] font-ui">
+                            <thead><tr className="text-[hsl(var(--accent-secondary))] uppercase text-[10px] tracking-wider text-left">
+                                <th className="py-1 pr-3">Entry %</th><th className="pr-3">Trades</th><th className="pr-3">WR</th><th className="pr-3">PF</th><th className="pr-3">Net R</th><th>Status</th>
+                            </tr></thead>
+                            <tbody>
+                                {ENTRY_THRESHOLD_PLACEHOLDER.map((p) => (
+                                    <tr key={p} className="border-t border-[hsl(var(--border-soft))]">
+                                        <td className="py-1 pr-3 font-num text-[hsl(var(--text-1))]">{p}%</td>
+                                        <td className="pr-3 text-[hsl(var(--text-2))]">—</td>
+                                        <td className="pr-3 text-[hsl(var(--text-2))]">—</td>
+                                        <td className="pr-3 text-[hsl(var(--text-2))]">—</td>
+                                        <td className="pr-3 text-[hsl(var(--text-2))]">—</td>
+                                        <td className="font-ui text-[hsl(var(--warning))]">Run required</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                    <button type="button" disabled title="Use a backend entry-threshold sweep to populate this table." className="clip-bevel-sm px-2.5 py-1 text-[10.5px] font-ui border border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] opacity-60 cursor-not-allowed">
+                        Run Entry Threshold Sweep — use backend sweep
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+}
+
+// Part 10 — lightweight, factual Management callouts from existing helper outputs.
+function ManagementCallouts({ rows, tpLabel }) {
+    const ts = cohortTargetEconomics(rows, tpLabel);
+    const be = cohortBESuitability(rows);
+    const rr = cohortRiskReduction(rows);
+    const out = [];
+    const rec = ts.recommendation;
+    if (rec.kind === "too_small") out.push({ tone: "muted", text: `Sample too small (n ${rec.n})` });
+    else if (rec.kind === "recommend") out.push({ tone: "success", text: `Target candidate worth testing: ${rec.level}R` });
+    else if (rec.kind === "current_best") out.push({ tone: "neutral", text: "Current target appears strongest" });
+    else out.push({ tone: "neutral", text: "No reliable target improvement detected" });
+    if (be.levels.some((l) => l.signal === "Strong")) out.push({ tone: "success", text: "BE candidate worth testing" });
+    if (rr.boundsAvailable && rr.levels.some((l) => l.signal === "Strong")) out.push({ tone: "success", text: "Risk-reduction candidate worth testing" });
+    if (out.length === 0) out.push({ tone: "neutral", text: "No reliable management improvement detected" });
+    const tone = (t) => (t === "success" ? `border-[hsl(var(--success)/0.5)] ${successTone}` : t === "muted" ? "border-[hsl(var(--border-mid))] text-muted-lab" : "border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))]");
+    return (
+        <div className="flex flex-wrap gap-1.5" data-testid="management-callouts">
+            {out.map((c, i) => (
+                <span key={i} className={`clip-bevel-sm px-2 py-0.5 text-[10.5px] font-ui border ${tone(c.tone)}`}>{c.text}</span>
+            ))}
         </div>
     );
 }
@@ -520,6 +710,7 @@ const SubLabel = ({ children }) => (
 
 function CohortDrilldown({ sessionLabel, c }) {
     const s = c.summary;
+    const hc = cohortHeaderCounts(c);
     const disabled = c.status === "disabled";
     const fail = cohortFailureSummary(c.executedTrades);
     // Local to this expanded cohort. Mounted only while open, so it resets to
@@ -559,8 +750,11 @@ function CohortDrilldown({ sessionLabel, c }) {
                         <KV k="Executed" v={s.count} />
                         <KV k="Disabled" v={c.disabledCount} tone={c.disabledCount > 0 ? dangerTone : undefined} />
                         <KV k="W/L/BE" v={`${s.wins}/${s.losses}/${s.be}`} />
+                        <KV k="NF" v={hc.newsFlat} />
+                        <KV k="INV" v={hc.invalidated} tone={hc.invalidated > 0 ? dangerTone : undefined} />
                         <KV k="Net R" v={s.count ? fmtR(s.netR) : "—"} tone={s.count ? (s.netR >= 0 ? successTone : dangerTone) : undefined} />
                         <KV k="Avg R" v={s.avgR == null ? "—" : fmtR(s.avgR)} />
+                        <KV k="PF" v={s.pf == null ? (s.wins > 0 && s.losses === 0 ? "∞" : "—") : s.pf} />
                         <KV k="Win rate" v={s.winRate == null ? "—" : `${s.winRate}%`} />
                     </div>
                     <div><SubLabel>Management read</SubLabel><ManagementRead rows={c.executedTrades} /></div>
@@ -568,12 +762,15 @@ function CohortDrilldown({ sessionLabel, c }) {
                 </div>
             )}
 
-            {/* ── Management: Excursion · Target Suitability · BE Suitability ── */}
+            {/* ── Management: Callouts · Excursion · Target · BE · Risk Reduction · Entry Threshold ── */}
             {tab === "management" && (
                 <div className="space-y-3">
+                    <ManagementCallouts rows={c.executedTrades} tpLabel={c.tpLabel} />
                     <div><SubLabel>Excursion snapshot</SubLabel><ExcursionSnapshot rows={c.executedTrades} /></div>
-                    <div><SubLabel>Target suitability</SubLabel><TargetSuitability rows={c.executedTrades} /></div>
+                    <div><SubLabel>Target suitability</SubLabel><TargetSuitability rows={c.executedTrades} tpLabel={c.tpLabel} /></div>
                     <div><SubLabel>BE suitability</SubLabel><BESuitability rows={c.executedTrades} /></div>
+                    <div><SubLabel>Risk reduction suitability</SubLabel><RiskReduction rows={c.executedTrades} /></div>
+                    <div><SubLabel>Entry threshold research</SubLabel><EntryThresholdResearch /></div>
                 </div>
             )}
 
@@ -706,10 +903,26 @@ export default function SessionResults({ trades: tradesProp, bundle: bundleProp 
                                                 <span className="text-muted-lab">{isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>
                                                 <div className="min-w-0">
                                                     <div className={`text-[12.5px] font-ui font-semibold ${disabled ? "text-[hsl(var(--text-2))]" : "text-[hsl(var(--text-1))]"}`}>{c.label}</div>
-                                                    <div className="text-[11px] font-ui text-muted-lab">
+                                                    <div data-testid={`cohort-counts-${c.key}`}>
                                                         {disabled
-                                                            ? (c.disabledCount > 0 ? <span className="text-[hsl(var(--danger))]">Blocked by scenario · {c.disabledCount} opportunit{c.disabledCount === 1 ? "y" : "ies"}</span> : <span className="text-[hsl(var(--danger))]">Disabled</span>)
-                                                            : (c.executedCount === 0 ? "No trades occurred" : `${c.executedCount} trade${c.executedCount === 1 ? "" : "s"}`)}
+                                                            ? (<div className="text-[11px] font-ui text-muted-lab">{c.disabledCount > 0 ? <span className="text-[hsl(var(--danger))]">Blocked by scenario · {c.disabledCount} opportunit{c.disabledCount === 1 ? "y" : "ies"}</span> : <span className="text-[hsl(var(--danger))]">Disabled</span>}</div>)
+                                                            : (c.executedCount === 0
+                                                                ? <div className="text-[11px] font-ui text-muted-lab">No trades occurred</div>
+                                                                : (() => {
+                                                                    const hc = cohortHeaderCounts(c);
+                                                                    const s = c.summary || {};
+                                                                    const pfText = s.pf == null ? (s.wins > 0 && s.losses === 0 ? "∞" : "—") : s.pf;
+                                                                    return (
+                                                                        <>
+                                                                            <div className="text-[11px] font-ui text-muted-lab">
+                                                                                <span className="font-num text-[hsl(var(--text-1))]">{hc.trades}T</span> · {hc.won}W · {hc.lost}L · {hc.newsFlat}NF · <span className={hc.invalidated > 0 ? "text-[hsl(var(--danger))]" : ""}>{hc.invalidated}INV</span>
+                                                                            </div>
+                                                                            <div className="text-[10.5px] font-ui text-muted-lab" data-testid={`cohort-stats-${c.key}`}>
+                                                                                Net <span className={`font-num ${s.netR >= 0 ? successTone : dangerTone}`}>{fmtR(s.netR)}</span> · PF <span className="font-num text-[hsl(var(--text-2))]">{pfText}</span> · Exp <span className="font-num text-[hsl(var(--text-2))]">{s.avgR == null ? "—" : fmtR(s.avgR)}</span> · WR <span className="font-num text-[hsl(var(--text-2))]">{s.winRate == null ? "—" : `${s.winRate}%`}</span>
+                                                                            </div>
+                                                                        </>
+                                                                    );
+                                                                })())}
                                                     </div>
                                                 </div>
                                             </div>
