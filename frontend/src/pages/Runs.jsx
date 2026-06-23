@@ -5,7 +5,7 @@ import { NeonPanel } from "@/components/lab/NeonPanel";
 import { DataTable, ColoredR, Pill } from "@/components/lab/DataTable";
 import { Field, NeonSelect, NeonInput } from "@/components/lab/controls";
 import { useDataset, updateRunBundle, deleteRunBundle, clearAllRuns, getRunsBackupPayload, importRunsBackup, getRunDisplayName, compactTimeframe, formatRunDateRange, reloadFullRunFromSidecar, autoReloadIndexedRunsFromSidecar } from "@/data/store";
-import { Check, Download, Edit3, RefreshCw, ShieldAlert, Trash2, Upload, X } from "lucide-react";
+import { Check, Copy, Download, Edit3, RefreshCw, ShieldAlert, Trash2, Upload, X } from "lucide-react";
 import { summarizeBeCoverage } from "@/components/lab/researchBanner/bannerRun";
 
 const RUN_SORT_OPTIONS = [
@@ -523,8 +523,27 @@ function formatPercentCell(value, digits = 1) {
     return formatted === "—" ? "—" : `${formatted}%`;
 }
 
+// Best Python-ready run path for sanity checks: prefer the backend run folder
+// (outputs/runs/<folder>), fall back to the app/source run id.
+function runFolderPath(run) {
+    const raw = String(run?.sourceOutputFolder || run?.outputFolder || "").trim().replace(/\\/g, "/").replace(/\/+$/, "");
+    if (!raw) return run?._bundleId || run?.id || "";       // no folder metadata → bare id fallback
+    if (/outputs\/runs\//i.test(raw)) return raw;            // already a relative path under outputs/runs
+    const folder = raw.split("/").filter(Boolean).pop();
+    return folder ? `outputs/runs/${folder}` : (run?._bundleId || run?.id || "");
+}
+
 function RunNameCell({ run, editingId, editName, setEditName, startRename, deleteRun, reloadFullRun, reloadBusyId, saveRename, cancelRename }) {
     const label = getRunDisplayName(run);
+    const [copied, setCopied] = useState(false);
+    const copyRunPath = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const path = runFolderPath(run);
+        try { navigator.clipboard?.writeText(path); } catch { /* clipboard unavailable */ }
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1200);
+    };
     const storeId = run._bundleId || run.id;
     const identityTitle = [
         `App ID: ${storeId}`,
@@ -599,6 +618,15 @@ function RunNameCell({ run, editingId, editName, setEditName, startRename, delet
                             <span className="text-[10px] font-medium">Reload</span>
                         </button>
                     )}
+                    <button
+                        type="button"
+                        onClick={copyRunPath}
+                        className="grid place-items-center w-6 h-6 opacity-0 group-hover/name:opacity-100 group-focus-within/name:opacity-100 clip-bevel-sm border border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:border-[hsl(var(--accent-secondary))] hover:text-white transition-opacity"
+                        aria-label="Copy run path"
+                        title={copied ? "Copied run path" : "Copy run path"}
+                    >
+                        {copied ? <Check className="w-3.5 h-3.5 text-[hsl(var(--success))]" /> : <Copy className="w-3.5 h-3.5" />}
+                    </button>
                     <button
                         type="button"
                         onClick={(event) => startRename(event, run)}
