@@ -584,7 +584,16 @@ export default function RunDetail() {
         ? directionalTrades
         : (Array.isArray(universe?.trades) ? universe.trades : []);
     const hasSelectedUniverseTrades = selectedUniverseTrades.length > 0;
-    const tradesForRun = hasSelectedUniverseTrades ? selectedUniverseTrades : legacyTradesForRun;
+    // SINGLE SOURCE OF TRUTH (TRADE-UNIVERSE-DIVERGENCE-AUDIT-1.md, Phase 2): all
+    // analytics read ONLY the canonical resolved universe (or the directional
+    // bypass). The previous silent fallback to `legacyTradesForRun` substituted
+    // baseline/primary rows whenever the selected universe was empty, so a hydration
+    // gap rendered as populated baseline KPIs/equity (the recurring "looks healthy
+    // but it's the wrong universe" bug). Empty now surfaces an explicit Loading /
+    // Empty Universe / Hydration-Failed state (see `universeStatus` below) instead of
+    // quietly showing a different trade set. `legacyTradesForRun` is retained only as
+    // the BASELINE REFERENCE count for the header, never as an analytics source.
+    const tradesForRun = selectedUniverseTrades;
 
     // displayTrades is now a direct alias for tradesForRun. It is kept so that
     // existing analytics memos (MONTHLY, R_DIST_V2, filteredLedgerRows, etc.)
@@ -660,6 +669,21 @@ export default function RunDetail() {
     const isLazyRun = Boolean(runData?.lazy || runData?.storageMode === "lazy_manifest" || runData?.largeRun);
     const isIndexOnlyRun = Boolean((runData?.indexOnly || runData?.storageMode === "index_only" || (runData && !hasFullRunData)) && !isLazyRun);
     const shouldAutoReloadRun = Boolean(isIndexOnlyRun && !isLazyRun && runData?.reloadAvailable && runId);
+
+    // EXPLICIT universe status (TRADE-UNIVERSE-DIVERGENCE-AUDIT-1.md, Phase 2) — drives
+    // the loading / empty / hydration-failed messaging that replaces the old silent
+    // baseline substitution. A run that can still hydrate (lazy, or index-only with a
+    // sidecar reload id) is reported as "loading" while its rows are absent, so a
+    // pending hydration is never mislabelled "empty". A genuinely empty resolved
+    // universe (eager run, selected variant has no rows) is reported as "empty".
+    const runCanHydrate = Boolean(isLazyRun || (isIndexOnlyRun && runData?.reloadAvailable));
+    const universeStatus = (lazyStatus?.loading || reloadBusy)
+        ? "loading"
+        : lazyStatus?.error
+            ? "error"
+            : (!isDirectionalView && selectedUniverseTrades.length === 0)
+                ? (runCanHydrate ? "loading" : "empty")
+                : "ok";
     const requestFullRunReload = React.useCallback(async () => {
         if (!runId || reloadBusy) return;
         console.debug("[RunDetail] reload start", {
@@ -1737,6 +1761,33 @@ export default function RunDetail() {
                 </div>
             )}
 
+            {/* TRADE-UNIVERSE-DIVERGENCE-AUDIT-1 Phase 2 — explicit EMPTY-UNIVERSE notice.
+                Replaces the old silent baseline fallback: when the canonical universe
+                resolves to zero rows (and the run can't be hydrated further), say so
+                plainly rather than rendering substituted baseline KPIs/equity. Loading
+                and hydration-failure are surfaced by the lazy-status banner above and the
+                index-only reload panel below. */}
+            {universeStatus === "empty" && (
+                <div
+                    data-testid="empty-universe-status"
+                    className="mx-6 mt-2 flex items-start gap-2 px-3 py-2 clip-bevel-sm border border-[hsl(var(--warning)/0.5)] bg-[hsl(var(--warning)/0.08)]"
+                >
+                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-[hsl(var(--warning))]" />
+                    <span className="text-[11px] font-ui leading-relaxed text-[hsl(var(--text-2))]">
+                        {isScenarioView ? (
+                            <>
+                                No trades in this Result View
+                                {universe?.label ? <> (<span className="text-[hsl(var(--warning))]">{universe.label}</span>)</> : null}.
+                                {" "}The selected entry variant produced no rows for this run — KPIs and equity are
+                                empty by design, not substituted with baseline.
+                            </>
+                        ) : (
+                            <>No trades in this run's baseline universe.</>
+                        )}
+                    </span>
+                </div>
+            )}
+
             {/* RW-13 → RUN-VARIANT-HEADER Phase 2: Result View header, extracted into a
                 reusable controlled component. The store scenario is the single source of
                 truth (via useRunVariant); onResultViewChange persists + propagates the lens. */}
@@ -1751,7 +1802,10 @@ export default function RunDetail() {
                 directionalStorageKey={directionalStorageKey}
                 hasSelectedUniverseTrades={hasSelectedUniverseTrades}
                 selectedTradeCount={selectedUniverseTrades.length}
-                legacyTradeCount={Array.isArray(legacyTradesForRun) ? legacyTradesForRun.length : 0}
+                /* Baseline REFERENCE count for the header's "Baseline: N" line, taken
+                   from the canonical universe (universe.baselineStats) so the banner is
+                   universe-derived end-to-end — not from the legacy trade array. */
+                legacyTradeCount={universe?.baselineStats?.total ?? (Array.isArray(legacyTradesForRun) ? legacyTradesForRun.length : 0)}
                 scopeChip={scopeChip}
                 baselineParityAudit={baselineParityAudit}
                 beCoverage={summarizeBeCoverage(runData || run)}

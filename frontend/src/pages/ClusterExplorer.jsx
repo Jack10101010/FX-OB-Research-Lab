@@ -11,7 +11,6 @@ import { buildBannerRunIdentity } from "@/components/lab/researchBanner/bannerRu
 import { useDataset, getRunDisplayName, addProjectFinding } from "@/data/store";
 import { useRunVariant } from "@/data/useRunVariant";
 import { buildResearchFindingPayload } from "@/data/projectWorkflow";
-import { resolveDisplayTrades } from "@/data/resolveDisplayTrades";
 import { isPerformanceTrade, isWinTrade, isLossTrade } from "@/data/tradeClassification";
 import { computeConfidence } from "@/data/researchSignals";
 import { FAILURE_DIMENSIONS } from "@/components/lab/failures/shared/failuresDimensions";
@@ -76,19 +75,21 @@ function splitHalfStability(cohortTrades, tgt, baseRate, minHalf = SPLIT_MIN_PER
 }
 
 export default function ClusterExplorer() {
-    const { ACTIVE_RUN, ACTIVE_PROJECT, ACTIVE_TRADE_VARIANT, getRunData } = useDataset();
+    const { ACTIVE_RUN, ACTIVE_PROJECT, getRunData } = useDataset();
     const [target, setTarget] = useState("losses");
     const [expanded, setExpanded] = useState(null);
     const [saved, setSaved] = useState({});
 
     const runId = ACTIVE_RUN?.id || null;
     const runData = useMemo(() => (runId && getRunData ? getRunData(runId) : null), [runId, getRunData]);
-    // Read-only current trade-view context (Result View banner — same as Protection/News).
+    // CANONICAL universe — the SAME object Run Workspace analyses (useRunVariant →
+    // useTradeUniverse → resolveTradeUniverse, scenario-aware + run-scoped). Cluster
+    // Explorer previously resolved its own trades via resolveDisplayTrades, which
+    // could disagree with Run Detail AND with this page's own banner (TRADE-UNIVERSE-
+    // DIVERGENCE-AUDIT-1.md, Phase 1). `trades` is now bound to `universe.trades`, so
+    // the banner and the analysed set are guaranteed identical.
     const { universe } = useRunVariant(runId);
-    // Variant-aware: analyse the ACTIVE trade variant (e.g. "TrigE +2"), consistent
-    // with RunDetail / Strategy Map — not the bundle's base trades array.
-    const resolved = useMemo(() => resolveDisplayTrades(runData, ACTIVE_TRADE_VARIANT), [runData, ACTIVE_TRADE_VARIANT]);
-    const trades = resolved.trades;
+    const trades = useMemo(() => (Array.isArray(universe?.trades) ? universe.trades : []), [universe]);
     const decidedCount = useMemo(() => trades.filter((t) => isPerformanceTrade(t)).length, [trades]);
     const projectId = runData?.projectId || ACTIVE_PROJECT?.id || null;
 
@@ -257,7 +258,7 @@ export default function ClusterExplorer() {
                     </div>
                     {hasRun && (
                         <div className="mt-3 flex flex-wrap items-center gap-2 text-[10.5px] text-muted-lab" data-testid="cluster-variant-summary">
-                            <Pill tone="info">Variant: {resolved.selectedVariantLabel || "Baseline"} · {decidedCount} decided</Pill>
+                            <Pill tone="info">Variant: {universe?.label || "Baseline"} · {decidedCount} decided</Pill>
                             {result.available && <Pill tone="muted">baseline {pctR(result.baseline.rate)} · n={result.baseline.n}</Pill>}
                             {result.available && <Pill tone="muted">FDR q≤{result.fdr.q} · {result.fdr.discoveries} discoveries</Pill>}
                             {result.available && <Pill tone="muted">dims: {result.dimensionsUsed.map((d) => d.label).join(", ") || "—"}</Pill>}

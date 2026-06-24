@@ -312,8 +312,36 @@ function ExperimentsModule({ cohort, availDims, universe, exclusions, setExclusi
     );
 }
 
+// ── Research Context banner — which run universe is being analysed ────────────
+const VARIANT_SOURCES = new Set(["entry_mode_active", "entry_mode_primary", "entry_mode_fallback"]);
+function universeSourceLabel(source, lazy) {
+    if (source === "base_trades" || source === "active_variant" || source === "primary_variant") return "Baseline Universe";
+    if (VARIANT_SOURCES.has(source)) return lazy ? "Lazy-Hydrated Universe" : "Hydrated Variant Universe";
+    return "—";
+}
+function ResearchContextBanner({ runName, source, universeLabel, lazy, count }) {
+    const variant = VARIANT_SOURCES.has(source) ? (universeLabel || "Variant") : "Baseline";
+    const Field = ({ label, value, tone }) => (
+        <div className="min-w-0">
+            <div className="text-[9px] font-ui uppercase tracking-[0.08em] text-[hsl(var(--text-3))]">{label}</div>
+            <div className={`text-[12px] font-ui truncate ${tone || "text-[hsl(var(--text-1))]"}`} title={typeof value === "string" ? value : undefined}>{value}</div>
+        </div>
+    );
+    return (
+        <div className="clip-bevel-sm border border-[hsl(var(--accent-secondary)/0.35)] bg-[hsl(var(--panel-2)/0.3)] px-3 py-2">
+            <div className="text-[9px] font-ui uppercase tracking-[0.08em] text-[hsl(var(--accent-secondary))] mb-1.5">Research Context</div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-1.5">
+                <Field label="Run" value={runName} />
+                <Field label="Variant" value={variant} />
+                <Field label="Universe" value={`${count} trade${count === 1 ? "" : "s"}`} tone="font-num text-[hsl(var(--text-1))]" />
+                <Field label="Source" value={universeSourceLabel(source, lazy)} tone="font-ui text-[hsl(var(--accent-secondary))]" />
+            </div>
+        </div>
+    );
+}
+
 export default function ResearchLab() {
-    const { runId, runData, runName, trades: resolvedTrades, needsHydration, loading: hydrating, error: hydrationError } = useRunDisplayUniverse();
+    const { runId, runData, runName, trades: resolvedTrades, source, universeLabel, needsHydration, loading: hydrating, error: hydrationError } = useRunDisplayUniverse();
     const universe = useMemo(() => buildResearchUniverse(resolvedTrades || []), [resolvedTrades]);
 
     const [sel, setSel] = useState({ dim1: "", val1: "", dim2Enabled: false, dim2: "", val2: "" });
@@ -375,6 +403,8 @@ export default function ResearchLab() {
                 </NeonPanel>
             ) : (
                 <>
+                    <ResearchContextBanner runName={runName} source={source} universeLabel={universeLabel} lazy={Boolean(runData?.lazy)} count={universe.length} />
+
                     <NeonPanel title="Active run">
                         <RunContext name={runName} summary={cohortSummary({ trades: universe, label: runName })} span={span} />
                     </NeonPanel>

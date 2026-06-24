@@ -49,9 +49,12 @@ export function CurrentResultViewPanel({
                 <div className="flex items-baseline gap-1.5">
                     <span className="text-[9.5px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--text-2)/0.8)]">Trades</span>
                     <span className="text-[13px] font-num tabular-nums font-semibold text-[hsl(var(--text-2))]">
-                        {isScenarioView && hasSelectedUniverseTrades
-                            ? selectedTradeCount
-                            : legacyTradeCount}
+                        {/* TRADE-UNIVERSE-DIVERGENCE-AUDIT-1 Phase 2: a scenario view ALWAYS
+                            shows its own resolved universe count (0 included) so the banner
+                            number equals the analysed universe — never the baseline count
+                            substituted in. Baseline view shows the baseline count. The
+                            "Baseline: N" reference line below is unchanged. */}
+                        {isScenarioView ? selectedTradeCount : legacyTradeCount}
                     </span>
                 </div>
                 <div className="flex items-baseline gap-1.5">

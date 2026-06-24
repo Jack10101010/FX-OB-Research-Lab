@@ -11,7 +11,6 @@ import ResearchResultViewBanner from "@/components/lab/ResearchResultViewBanner"
 import { buildBannerRunIdentity } from "@/components/lab/researchBanner/bannerRun";
 import { useDataset, getRunDisplayName } from "@/data/store";
 import { useRunVariant } from "@/data/useRunVariant";
-import { resolveRunDisplayUniverse } from "@/data/resolveDisplayTrades";
 import { isPerformanceTrade, isWinTrade, isLossTrade } from "@/data/tradeClassification";
 import { buildFillStateBreakdown, buildSessionBreakdown } from "@/data/fillStateBreakdown";
 import { buildResearchSignals } from "@/data/researchSignals";
@@ -51,19 +50,18 @@ const TOPIC_CHROME = {
 };
 
 export default function ResearchCockpit() {
-    const { ACTIVE_RUN, RUNS, ACTIVE_PROJECT, ACTIVE_TRADE_VARIANT, getRunData } = useDataset();
+    const { ACTIVE_RUN, RUNS, ACTIVE_PROJECT, getRunData } = useDataset();
 
     const runId = ACTIVE_RUN?.id || null;
     const runData = useMemo(() => (runId && getRunData ? getRunData(runId) : null), [runId, getRunData]);
-    // Read-only current trade-view context (Result View banner — same as Protection/News).
+    // CANONICAL trade universe — the SAME resolver RunDetail/Failures use
+    // (useRunVariant → useTradeUniverse → resolveTradeUniverse, scenario-aware and
+    // run-scoped). Cockpit must not have a separate trade-selection truth path that
+    // could disagree with Run Workspace (TRADE-UNIVERSE-MATERIALIZATION-AUDIT-1.md,
+    // Phase 0). useRunVariant also triggers lazy entry-variant hydration. `trades` is
+    // bound directly to this universe — no second resolver.
     const { universe } = useRunVariant(runId);
-    // Variant-aware: read the ACTIVE trade variant (e.g. "TrigE +2"), consistent with
-    // RunDetail / Strategy Map — not the bundle's base trades array.
-    // Bridge: resolve via the shared run-display universe (falls back to
-    // entryResults.tradesByMode for lazy entry-variant runs). Hydration is already
-    // triggered above by useRunVariant → useLazyEntryVariant. See RUN-DATA-PATH-AUDIT-1.md.
-    const resolved = useMemo(() => resolveRunDisplayUniverse(runData, ACTIVE_TRADE_VARIANT), [runData, ACTIVE_TRADE_VARIANT]);
-    const trades = resolved.trades;
+    const trades = useMemo(() => (Array.isArray(universe?.trades) ? universe.trades : []), [universe]);
 
     // ── reuse existing pure analytics over the active run's trades ──────────────
     const fillStateBreakdown = useMemo(() => buildFillStateBreakdown(trades), [trades]);

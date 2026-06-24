@@ -633,7 +633,14 @@ function indexEntryToRun(entry) {
         summary,
         trades: [],
         tradesByVariant: {},
-        primaryVariant: null,
+        // primaryVariant is set above from entry.primaryVariant; do NOT re-declare
+        // it as null here — a duplicate key would clobber the restored value, leaving
+        // the in-memory bundle variant-less. That makes resolveTradeUniverse pick a
+        // null variant, so a triggered-edge scenario resolves to a prefix-less
+        // sourceFile ("entry_…d25.csv" instead of "trades_<variant>__entry_…d25.csv").
+        // useLazyEntryVariant only hydrates files matching /__entry_/ (or the base
+        // pattern), so the prefix-less name is skipped → KPIs/equity stay empty after
+        // selecting an entry variant on a restored lazy/index-only run.
         tradeMarkers: [],
         tradeMarkersByVariant: {},
         equityCurve: [],
@@ -1285,22 +1292,35 @@ export function clearPreviewLens() {
 // SESSION-STRATEGY-PROFILES Phase 1 — inject the active session-profile matrix
 // into the scenario at read-time. Returns the SAME scenario reference when no
 // profiles are active, so resolveTradeUniverse stays on its byte-identical path.
+//
+// SESSION-CARD-OVERLAY-DEFAULT-OFF — this global frontend matrix
+// (`fxob_session_profiles_v1`) is NO LONGER applied to the canonical trade universe
+// by default. It silently mutated baseline + entry-variant results after the
+// backtest (masking governed cohorts), which made KPIs/equity inconsistent between
+// runs. The canonical universe must reflect the run's baked backend result, so
+// callers must OPT IN (`sessionProfilesPreview: true`) to apply the matrix — that
+// opt-in is reserved for the explicit Session-Portfolio preview surfaces, never the
+// default Run Workspace / Failures / Research / Cockpit reads. The backend-baked
+// `session_strategy_scenario` (per-session RR already in the imported rows) is
+// unaffected — it lives in the trade data, not this overlay.
 function scenarioWithSessionProfiles(scenario) {
     const profiles = state.sessionProfiles;
     if (!isProfilesActive(profiles)) return scenario;
     return { ...(scenario || {}), sessionProfiles: profiles };
 }
 
-export function getTradeUniverse(runId = null, scenarioOverride = null) {
+export function getTradeUniverse(runId = null, scenarioOverride = null, { sessionProfilesPreview = false } = {}) {
     const effectiveRunId = runId || state.activeRunId || null;
     const bundle = effectiveRunId ? bundleFor(effectiveRunId) : null;
     const scenario = scenarioOverride || state.scenario || null;
     const fallbackVariant = state.selectedTradeVariant
         || bundle?.primaryVariant
         || null;
+    // Default path = NO global session-card overlay (canonical = baked result).
+    const effectiveScenario = sessionProfilesPreview ? scenarioWithSessionProfiles(scenario) : scenario;
     return resolveTradeUniverse({
         bundle,
-        scenario: scenarioWithSessionProfiles(scenario),
+        scenario: effectiveScenario,
         fallbackVariant,
     });
 }
@@ -1334,16 +1354,17 @@ function tradeDataToken(bundle) {
     return parts.join("|");
 }
 
-export function getTradeUniverseSignature(runId = null, scenarioOverride = null) {
+export function getTradeUniverseSignature(runId = null, scenarioOverride = null, { sessionProfilesPreview = false } = {}) {
     const effectiveRunId = runId || state.activeRunId || null;
     const bundle = effectiveRunId ? bundleFor(effectiveRunId) : null;
     const scenario = scenarioOverride || state.scenario || null;
     const fallbackVariant = state.selectedTradeVariant || bundle?.primaryVariant || null;
     // Scenario is a small object; JSON captures family/threshold/fillMode/
     // directionalStorageKey/layers/runId so any selection change re-resolves.
-    // Merge in session profiles so the signature changes when the matrix changes
-    // (and stays identical when it is inactive — same scenario reference).
-    const scenarioForSig = scenarioWithSessionProfiles(scenario);
+    // SESSION-CARD-OVERLAY-DEFAULT-OFF — the global matrix is only folded into the
+    // signature when the caller explicitly previews it (matches getTradeUniverse), so
+    // the canonical signature no longer churns when the matrix toggles.
+    const scenarioForSig = sessionProfilesPreview ? scenarioWithSessionProfiles(scenario) : scenario;
     let scn = "";
     try { scn = scenarioForSig ? JSON.stringify(scenarioForSig) : ""; } catch { scn = String(scenarioForSig); }
     return `${effectiveRunId}::${fallbackVariant}::${scn}::${tradeDataToken(bundle)}`;
