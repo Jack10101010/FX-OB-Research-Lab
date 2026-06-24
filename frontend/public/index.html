@@ -97,14 +97,33 @@
                     }),
                     (e.__SV = 1));
             })(document, window.posthog || []);
-            posthog.init("phc_xAvL2Iq4tFmANRE7kzbKwaSqp1HJjN7x48s3vr0CMjs", {
-                api_host: "https://us.i.posthog.com",
-                person_profiles: "identified_only", // or 'always' to create profiles for anonymous users as well,
-                session_recording: {
-                    recordCrossOriginIframes: true,
-                    capturePerformance: false,
-                },
-            });
+            // POSTHOG-DEV-GATE — do NOT init PostHog on localhost / dev. This stops the
+            // remote /static/array.js (heatmaps/autocapture) from ever loading there, so
+            // the noisy "heatmaps.Or / calculateEventProperties: Invalid or unexpected
+            // token" console errors no longer fire in dev, and no dev telemetry is sent.
+            // The window.posthog stub above stays in place, so any posthog.* call is a
+            // harmless no-op queue. In non-local (production) environments PostHog still
+            // initializes — but with heatmaps explicitly disabled.
+            (function () {
+                var h = (location.hostname || "").toLowerCase();
+                var isLocal =
+                    h === "localhost" ||
+                    h === "127.0.0.1" ||
+                    h === "0.0.0.0" ||
+                    h === "[::1]" ||
+                    h === "::1" ||
+                    h.endsWith(".local");
+                if (isLocal) return; // skip init entirely in dev
+                posthog.init("phc_xAvL2Iq4tFmANRE7kzbKwaSqp1HJjN7x48s3vr0CMjs", {
+                    api_host: "https://us.i.posthog.com",
+                    person_profiles: "identified_only", // or 'always' to create profiles for anonymous users as well,
+                    enable_heatmaps: false, // disable heatmaps/autocapture heatmap path (source of the errors)
+                    session_recording: {
+                        recordCrossOriginIframes: true,
+                        capturePerformance: false,
+                    },
+                });
+            })();
         </script>
     </body>
 </html>
