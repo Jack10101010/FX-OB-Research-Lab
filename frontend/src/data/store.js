@@ -18,7 +18,7 @@ import {
     listCandleRunIds as idbListCandleRunIds,
 } from "./artifactStore";
 import { buildTradesByObId, deriveOBLifecycle } from "./obLifecycle";
-import { ingestRunBundle, enrichBeTradeRowsLazy, beTradeFileInfo, entryVariantStorageKeys, parseOrderBlocksCSV } from "./importer";
+import { ingestRunBundle, enrichBeTradeRowsLazy, beTradeFileInfo, entryVariantStorageKeys, parseOrderBlocksCSV, selectScenarioBaselineUniverse } from "./importer";
 import { getRunBundleByRunId, getRunCandlesByRunId, getRunFileByRunId, getRunManifestByRunId, listSidecarRuns } from "./sidecarClient";
 import { fetchProjectsFromBackend, saveProjectsToBackend } from "./projectsBackend";
 import { summarizeTradeClassifications } from "./tradeClassification";
@@ -1323,6 +1323,22 @@ export function getTradeUniverse(runId = null, scenarioOverride = null, { sessio
         scenario: effectiveScenario,
         fallbackVariant,
     });
+}
+
+// ── Fair Baseline comparison universe (Session-First P2.5) — READ-ONLY ───────────
+// Returns the backend Fair Baseline trade output (trades_<mode>__scenario_baseline.csv,
+// stored in bundle.scenarioBaselineResults) as a PARALLEL, never-selectable universe.
+// It is deliberately NOT routed through resolveTradeUniverse/getTradeUniverse and is
+// NOT a Result-View option, so it can never replace or pollute the custom universe.
+// Shape (stable, defensive):
+//   { available, executionMode, trades, stats, provenance, warnings, sourceFile }
+// Old runs (no CSV / no provenance) → { available:false, … } with empty trades/stats.
+export function getScenarioBaselineUniverse(runId = null) {
+    const effectiveRunId = runId || state.activeRunId || null;
+    const bundle = effectiveRunId ? bundleFor(effectiveRunId) : null;
+    // Pure derivation lives in importer.js (selectScenarioBaselineUniverse) so it is
+    // testable in the validation harness; this wrapper only resolves the bundle.
+    return selectScenarioBaselineUniverse(bundle);
 }
 
 // LAZY-RUN-PERFORMANCE Phase 1 — a cheap, stable signature of every input

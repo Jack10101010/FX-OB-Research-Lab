@@ -48,6 +48,7 @@ import { FftOverviewCard } from "@/components/lab/fft/FftOverviewCard";
 // the Result View; the header is an extracted, controlled component.
 import { useRunVariant } from "@/data/useRunVariant";
 import ResearchRunHeader from "@/components/lab/ResearchRunHeader";
+import FairBaselineComparison from "@/components/lab/FairBaselineComparison";
 import { summarizeBeCoverage } from "@/components/lab/researchBanner/bannerRun";
 import { buildAvailableOptions, collectAllEntryKeys, entryTradesByMode, buildCanonicalKey } from "@/data/tradeUniverse";
 // RW-4A: directional scenario label formatter
@@ -1810,6 +1811,16 @@ export default function RunDetail() {
                 baselineParityAudit={baselineParityAudit}
                 beCoverage={summarizeBeCoverage(runData || run)}
             />
+
+            {/* Fair Baseline comparison (P2.5) — Run Workspace only, read-only KPI trio.
+                Reads the parallel scenarioBaselineResults universe; never the Result View. */}
+            <div className="px-6 mb-3">
+                <FairBaselineComparison
+                    runId={runId}
+                    customTrades={selectedUniverseTrades}
+                    customLabel={universe?.label || "Custom Strategy"}
+                />
+            </div>
 
             {isLazyRun && (
                 <div className="px-6 mb-3 flex flex-wrap items-center gap-2">

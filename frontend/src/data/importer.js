@@ -963,6 +963,21 @@ function entryTradeFileInfo(name) {
     };
 }
 
+// ── Fair Baseline comparison output (Session-First P2 → P2.5) ────────────────────
+// Backend emits ONE sibling CSV per execution mode:
+//   trades_{execution_mode}__scenario_baseline.csv
+// It is the fair-baseline trade output for the SAME eligible cohort universe as the
+// custom session-first scenario (baseline entry + uniform baseline TP/BE). It MUST
+// be detected BEFORE the generic protectedTradeFileInfo catch-all — its "__scenario
+// _baseline" suffix matches the protected `(.+)` group and would otherwise be folded
+// into protectionTradesByMode and pollute the custom universe (P2.5 audit risk #1).
+function scenarioBaselineTradeFileInfo(name) {
+    const file = String(name || "").split(/[\\/]/).pop().toLowerCase();
+    const m = file.match(/^trades_(single_position|allow_multi_position|one_per_direction)__scenario_baseline\.csv$/);
+    if (!m) return null;
+    return { executionMode: m[1] };
+}
+
 // ─────────────────────── Break-even (BE) Exact Replay file parser ───────────────────────
 // Matches backend BE Exact Replay output (BE-FRONTEND-INTEGRATION Phase B):
 //   trades_{execution_mode}__be_{trigger}_{arm}R.csv
@@ -1128,6 +1143,10 @@ export function detectFileKind(name) {
         if (beTradeFileInfo(name))                            return "trades_be";
         if (entryTradeFileInfo(name))                         return "trades_entry";
         if (directionalTradeFileInfo(name))                   return "trades_directional";
+        // Fair Baseline (P2.5) MUST precede the generic protected catch-all below —
+        // "trades_<mode>__scenario_baseline.csv" matches protectedTradeFileInfo's
+        // `(.+)` group and would otherwise be swallowed into protectionTradesByMode.
+        if (scenarioBaselineTradeFileInfo(name))              return "trades_scenario_baseline";
         if (protectedTradeFileInfo(name))                     return "trades_protected";
         // OB Retest backend artifacts (Phase 2.4). MUST precede the order_blocks
         // catch below — "ob_retests.csv" / "ob_retest_summary.csv" both match the
@@ -1152,6 +1171,39 @@ export function detectFileKind(name) {
         if (n.includes("rr_sweep"))                          return "rr_sweep";
     }
     return "unknown";
+}
+
+// ── Fair Baseline comparison universe selector (Session-First P2.5) ─────────────
+// PURE: derive the read-only Fair Baseline universe from a bundle's
+// scenarioBaselineResults. Lives here (not store.js) so it stays importable by the
+// validation harness and reuses the canonical classifier. store.js's
+// getScenarioBaselineUniverse(runId) is a thin wrapper that resolves the bundle then
+// calls this. Never reads/affects the custom universe. Old runs → available:false.
+export function selectScenarioBaselineUniverse(bundle) {
+    const results = bundle?.scenarioBaselineResults || null;
+    const byMode = results?.tradesByMode || {};
+    const provenance = (results?.summary && typeof results.summary === "object") ? results.summary : {};
+    const warnings = Array.isArray(provenance.warnings) ? provenance.warnings : [];
+    // Prefer the run's primary variant's mode; else the first emitted mode.
+    const modes = Object.keys(byMode);
+    const preferred = bundle?.primaryVariant && Array.isArray(byMode[bundle.primaryVariant])
+        ? bundle.primaryVariant
+        : (modes[0] || null);
+    const trades = preferred && Array.isArray(byMode[preferred]) ? byMode[preferred] : [];
+    const available = trades.length > 0;
+    const sourceFile = (results?.sourceFiles || []).find((sf) => sf.mode === preferred)?.name
+        || (results?.sourceFiles || [])[0]?.name
+        || null;
+    return {
+        available,
+        executionMode: preferred,
+        trades,
+        // Same canonical classifier the custom universe uses → apples-to-apples KPIs.
+        stats: summarizeTradeClassifications(trades),
+        provenance,
+        warnings,
+        sourceFile,
+    };
 }
 
 // ─────────────────────── Large-run guardrail (LARGE-RUN-IMPORT Phase 1) ──────
@@ -1222,6 +1274,9 @@ export function assessBundleSize(fileList, thresholds = LARGE_BUNDLE_THRESHOLDS)
 const LAZY_EAGER_KINDS = new Set([
     "config", "summary", "order_blocks",
     "trades_single_position", "trades_allow_multi_position", "trades_one_per_direction", "trades_unknown",
+    // Fair Baseline is one tiny CSV per mode — parse it eagerly even on the lazy path
+    // so the Run Workspace comparison is available without an on-demand fetch.
+    "trades_scenario_baseline",
 ]);
 
 function isNewsCalendarFile(name) {
@@ -1377,6 +1432,10 @@ export async function ingestRunBundle(fileList, options = {}) {
         controlSourceFiles: [],
         protectionTradesByMode: {},
         protectionSourceFiles: [],
+        // Fair Baseline comparison (P2.5). Keyed by execution mode, kept ENTIRELY
+        // separate from the custom universe (tradesByVariant / entry / protection).
+        scenarioBaselineTradesByMode: {},
+        scenarioBaselineSourceFiles: [],
         // BE Exact Replay (BE-FRONTEND-INTEGRATION). Nested by execution mode →
         // scenario key, kept entirely separate from protection.
         beTradesByMode: {},
@@ -1511,6 +1570,21 @@ export async function ingestRunBundle(fileList, options = {}) {
                     collected.protectionTradesByMode[mode] = t;
                     collected.protectionSourceFiles.push({ name: f.name, kind, mode, baseVariant: info.baseVariant, rows: t.length });
                     collected.recognized.push({ name: f.name, kind, mode, baseVariant: info.baseVariant, rows: t.length });
+                    break;
+                }
+                case "trades_scenario_baseline": {
+                    // Fair Baseline comparison rows (P2.5). Routed into a DEDICATED
+                    // scenarioBaselineTradesByMode[executionMode] map — NEVER into
+                    // tradesByVariant / entryTradesByMode / protectionTradesByMode, so
+                    // the custom universe stays byte-identical.
+                    const info = scenarioBaselineTradeFileInfo(f.name);
+                    const parsed = parseCSV(text);
+                    validateCsvHeaders(kind, f.name, parsed.headers, collected.validationErrors, collected.validationWarnings);
+                    const t = parseTradesCSV(text);
+                    const mode = info.executionMode;
+                    collected.scenarioBaselineTradesByMode[mode] = t;
+                    collected.scenarioBaselineSourceFiles.push({ name: f.name, kind, mode, rows: t.length });
+                    collected.recognized.push({ name: f.name, kind, mode, rows: t.length });
                     break;
                 }
                 case "trades_be": {
@@ -1652,6 +1726,7 @@ export async function ingestRunBundle(fileList, options = {}) {
             equityCurveByVariant: {},
             protectionResults: { summary: {}, tradesByMode: {}, equityCurveByMode: {}, sourceFiles: [], tradesOmittedForStorage: false },
             entryResults: { summary: {}, tradesByMode: {}, equityCurveByMode: {}, sourceFiles: [], tradesOmittedForStorage: false },
+            scenarioBaselineResults: { summary: {}, tradesByMode: {}, equityCurveByMode: {}, sourceFiles: [], tradesOmittedForStorage: false },
             beResults: {},
             beTradesByMode: {},
             beSourceFiles: [],
@@ -1751,6 +1826,13 @@ export async function ingestRunBundle(fileList, options = {}) {
     );
     const entryTradesByMode = Object.fromEntries(
         Object.entries(collected.entryTradesByMode).map(([mode, trades]) => [mode, enrichTradesWithOrderBlocks(trades, obLookup, pipSize)]),
+    );
+    // Fair Baseline comparison trades (P2.5) — enriched identically, kept separate.
+    const scenarioBaselineTradesByMode = Object.fromEntries(
+        Object.entries(collected.scenarioBaselineTradesByMode).map(([mode, trades]) => [mode, enrichTradesWithOrderBlocks(trades, obLookup, pipSize)]),
+    );
+    const scenarioBaselineEquityCurveByMode = Object.fromEntries(
+        Object.entries(scenarioBaselineTradesByMode).map(([mode, trades]) => [mode, computeEquityCurve(trades)]),
     );
     // Auto-paired FFT-OFF control trades — enriched identically to entry/variant
     // trades so downstream pairing analytics have the same OB-derived fields.
@@ -1936,6 +2018,19 @@ export async function ingestRunBundle(fileList, options = {}) {
             tradesByMode: entryTradesByMode,
             equityCurveByMode: entryEquityCurveByMode,
             sourceFiles: collected.entrySourceFiles,
+            tradesOmittedForStorage: false,
+        },
+        // ── Fair Baseline comparison (Session-First P2.5) ─────────────────────
+        // Mirrors the protectionResults/entryResults shape but is a PARALLEL
+        // universe, never a slice of the custom one. `summary` carries the backend
+        // run_summary.scenario_baseline provenance verbatim (output_kind, mode,
+        // eligible_cohort_count, baseline_target_rr, baseline_be, warnings). Old
+        // bundles (no CSV, no provenance) → {} summary + empty maps.
+        scenarioBaselineResults: {
+            summary: sm.scenario_baseline || sm.scenarioBaseline || {},
+            tradesByMode: scenarioBaselineTradesByMode,
+            equityCurveByMode: scenarioBaselineEquityCurveByMode,
+            sourceFiles: collected.scenarioBaselineSourceFiles,
             tradesOmittedForStorage: false,
         },
         // ── BE Exact Replay (BE-FRONTEND-INTEGRATION) ─────────────────────────
