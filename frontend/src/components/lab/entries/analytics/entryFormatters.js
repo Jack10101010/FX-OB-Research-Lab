@@ -60,6 +60,9 @@ export function parseDate(value) {
     return Number.isFinite(d.getTime()) ? d : null;
 }
 
+// CANONICAL session schedule (P0.5): Asia <7, London <10, London Lull <12, New York
+// 12–15, NY PM 15–17, else Outside. NY PM is now first-class (matches backend
+// fill_session + cohortKeys + timingAnalytics).
 export function sessionOf(value) {
     const d = parseDate(value);
     if (!d) return "Unknown";
@@ -67,11 +70,12 @@ export function sessionOf(value) {
     if (h < 7)  return "Asia";
     if (h < 10) return "London";
     if (h < 12) return "London Lull";
-    if (h < 17) return "New York";
+    if (h < 15) return "New York";
+    if (h < 17) return "NY PM";
     return "Outside";
 }
 
-export const SESSIONS = ["Asia", "London", "London Lull", "New York", "Outside", "Unknown"];
+export const SESSIONS = ["Asia", "London", "London Lull", "New York", "NY PM", "Outside", "Unknown"];
 
 // ── Directional scenario formatters ──────────────────────────────────────────
 

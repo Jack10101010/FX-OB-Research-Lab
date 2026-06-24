@@ -24,10 +24,11 @@ const round2 = (v) => Number(Number(v).toFixed(2));
 
 export const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 export const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-// Session order + UTC hour boundaries mirror entryFormatters.sessionOf so timing
-// sessions match the rest of the app (Asia <7, London <10, London Lull <12,
-// New York <17, else Outside). Kept local to avoid a cross-workstream import.
-export const SESSION_ORDER = ["Asia", "London", "London Lull", "New York", "Outside"];
+// Session order + UTC hour boundaries follow the CANONICAL session schedule
+// (P0.5): Asia <7, London <10, London Lull <12, New York 12–15, NY PM 15–17, else
+// Outside. NY PM is now first-class (matches the backend fill_session + cohortKeys).
+// Kept local to avoid a cross-workstream import.
+export const SESSION_ORDER = ["Asia", "London", "London Lull", "New York", "NY PM", "Outside"];
 
 // ── Field readers (same conventions as the existing timing heatmaps) ──────────
 function rOf(t) {
@@ -53,7 +54,8 @@ function sessionOfTrade(t) {
     if (h < 7) return "Asia";
     if (h < 10) return "London";
     if (h < 12) return "London Lull";
-    if (h < 17) return "New York";
+    if (h < 15) return "New York";
+    if (h < 17) return "NY PM";       // P0.5 — NY PM is now first-class (15:00–17:00 UTC)
     return "Outside";
 }
 function directionOfTrade(t) {

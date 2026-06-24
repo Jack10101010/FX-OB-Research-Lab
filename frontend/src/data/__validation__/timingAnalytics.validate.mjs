@@ -87,10 +87,22 @@ console.log("\n[2] bucketing");
     ok(hours.find((h) => h.label === "08:00").trades === 2, "hour 08:00 has 2 trades");
 
     const sess = buildSessionBreakdown(trades);
-    ok(sess.slice(0, 5).map((s) => s.label).join(",") === SESSION_ORDER.join(","), "session rows in canonical order");
+    ok(sess.slice(0, SESSION_ORDER.length).map((s) => s.label).join(",") === SESSION_ORDER.join(","), "session rows in canonical order");
     ok(sess.find((s) => s.label === "London").trades === 2, "08:00 UTC → London (2 trades)");
     ok(sess.find((s) => s.label === "New York").trades === 1, "13:00 UTC → New York");
     ok(sess.find((s) => s.label === "Asia").trades === 1, "02:00 UTC → Asia");
+
+    // P0.5 — NY PM is first-class (15:00–17:00 UTC); New York is now AM-only (12–15).
+    ok(SESSION_ORDER.includes("NY PM") && SESSION_ORDER.length === 6, "SESSION_ORDER includes NY PM (6 sessions)");
+    const npm = buildSessionBreakdown([
+        T("2020-03-10T15:30:00Z", 1),  // NY PM
+        T("2020-03-10T14:30:00Z", -1), // New York (AM)
+        T("2020-03-10T16:59:00Z", 1),  // NY PM (upper boundary)
+        T("2020-03-10T17:30:00Z", 1),  // Outside
+    ]);
+    ok(npm.find((s) => s.label === "NY PM").trades === 2, "15:30 + 16:59 UTC → NY PM (2 trades)");
+    ok(npm.find((s) => s.label === "New York").trades === 1, "14:30 UTC → New York (AM)");
+    ok(npm.find((s) => s.label === "Outside").trades === 1, "17:30 UTC → Outside");
 
     const dir = buildDirectionBreakdown(trades);
     ok(dir.length === 2 && dir[0].label === "Bullish" && dir[1].label === "Bearish", "direction proxy: Bullish + Bearish always shown");
