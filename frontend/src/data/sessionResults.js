@@ -17,7 +17,9 @@
 // Scenario status + TP/BE settings come from scenarioConfig.cohorts (authoritative
 // per-cohort, incl. the ny_pm split which the legacy fill_session label lacks).
 
-import { SESSIONS, CELLS, SESSION_KEYS, CELL_KEYS, cohortOf } from "./sessionProfiles";
+// 4-Layer P0 — cohort primitives now come from the neutral cohortKeys.js (no overlay
+// dependency); identical exports, byte-identical behaviour.
+import { SESSIONS, CELLS, SESSION_KEYS, CELL_KEYS, cohortOf } from "./cohortKeys";
 import { classifyTrade, PERFORMANCE_CATEGORIES } from "./tradeClassification";
 
 const sessionLabelOf = (k) => SESSIONS.find((s) => s.key === k)?.label || k;
