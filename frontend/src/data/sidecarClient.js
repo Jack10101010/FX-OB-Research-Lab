@@ -63,6 +63,18 @@ export function getSidecarRunBundle(jobId, baseUrl = DEFAULT_SIDECAR_URL) {
     return requestSidecar(`/runs/${encodeURIComponent(jobId)}/bundle`, {}, baseUrl);
 }
 
+// Direct, EAGER, COMPLETE result import from the sidecar's own output folder. Same logical
+// file list as /bundle (candles excluded), but with a much larger size cap so a full sweep
+// imports in one step instead of hitting the 25 MB /bundle 413. Never lazy/partial.
+export function getResultBundleByRunId(jobId, baseUrl = DEFAULT_SIDECAR_URL) {
+    return requestSidecar(`/runs/${encodeURIComponent(jobId)}/result-bundle`, {}, baseUrl);
+}
+
+// Reveal a completed run's output folder in the OS file manager (macOS Finder via `open -R`).
+export function revealSidecarRun(jobId, baseUrl = DEFAULT_SIDECAR_URL) {
+    return requestSidecar(`/runs/${encodeURIComponent(jobId)}/reveal`, { method: "POST" }, baseUrl);
+}
+
 export function getRunBundleByRunId(runId, options = {}, baseUrl = DEFAULT_SIDECAR_URL) {
     const params = new URLSearchParams();
     if (options.includeCandles === true) params.set("include_candles", "true");

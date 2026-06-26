@@ -165,8 +165,18 @@ function validateJsonWarnings(value, file, kind, warnings) {
     }
 }
 
-function validateCsvHeaders(kind, file, headers, errors, warnings) {
+function validateCsvHeaders(kind, file, headers, errors, warnings, rowCount = null) {
     if (kind === "order_blocks") {
+        // EMPTY-RUN TOLERANCE: a backtest that detects zero order blocks (e.g. an empty
+        // date window) writes a header-only order_blocks.csv. The backend's enrichment
+        // pass adds news/lifecycle columns to the empty frame, so the saved header lacks
+        // the core `ob_id`/price columns — but there are 0 data rows, so nothing is lost.
+        // Treat a 0-row file as a valid empty OB set (warning, not a fatal bundle error).
+        // Non-empty files still require id/ob_id + price columns (real corruption fails).
+        if (rowCount === 0) {
+            warnings.push({ severity: "warning", file, kind, field: "order_blocks", message: `${file} has 0 order blocks (empty run) — importing with no order blocks` });
+            return;
+        }
         pushHeaderIssues(errors, "error", file, kind, headers, [
             { label: "id/ob_id", aliases: ["id", "ob_id"] },
             { label: "top/high", aliases: ["top", "high"] },
@@ -426,10 +436,36 @@ export function parseObRetestSummaryCSV(text) {
     }));
 }
 
+// TradingView-style chronological trade number for FILLED trades. PRESERVE the backend
+// `execution_trade_number` when the CSV carries it (new runs); otherwise DERIVE it (old
+// runs) by fill/entry time with a stable positional tie-breaker. Unfilled rows → null.
+// Pure additive: never reorders trades and never touches ob_id / id / r / outcome.
+export function assignExecutionTradeNumbers(trades) {
+    if (!Array.isArray(trades) || trades.length === 0) return trades;
+    const filled = trades.filter((t) => t && t.entry && String(t.entry).trim() !== "");
+    const backendHasAll = filled.length > 0 && filled.every((t) => t._rawExecTradeNum != null && String(t._rawExecTradeNum).trim() !== "" && Number.isFinite(Number(t._rawExecTradeNum)));
+    if (backendHasAll) {
+        for (const t of filled) t.executionTradeNumber = Number(t._rawExecTradeNum);
+    } else {
+        const pos = new Map(trades.map((t, i) => [t, i]));
+        [...filled].sort((a, b) => {
+            const ta = Date.parse(a.entry); const tb = Date.parse(b.entry);
+            const da = Number.isFinite(ta) ? ta : 0; const db = Number.isFinite(tb) ? tb : 0;
+            return da - db || pos.get(a) - pos.get(b);
+        }).forEach((t, n) => { t.executionTradeNumber = n + 1; });
+    }
+    for (const t of trades) {
+        if (t.executionTradeNumber == null) t.executionTradeNumber = null;
+        t.execution_trade_number = t.executionTradeNumber;  // snake mirror for table consumers
+        delete t._rawExecTradeNum;
+    }
+    return trades;
+}
+
 export function parseTradesCSV(text) {
     const { headers, rows } = parseCSV(text);
     const hasNewsCreatedTagFields = headers.some((header) => header.startsWith("ob_origin_news_") || header.startsWith("ob_detection_news_"));
-    return rows.map((r, i) => {
+    const parsed = rows.map((r, i) => {
         const directionRaw = pick(r, "direction", "side", "dir") || "Long";
         const directionText = String(directionRaw).toLowerCase();
         const direction = directionText.startsWith("bear") || directionText.startsWith("s") || directionText === "sell"
@@ -464,6 +500,10 @@ export function parseTradesCSV(text) {
             obId: rawObId,
             displayObId,
             num: i + 1,
+            // Backend chronological execution number (preserved when present); resolved by
+            // assignExecutionTradeNumbers() below. ob_id / id stay exactly as-is.
+            _rawExecTradeNum: pick(r, "execution_trade_number", "executionTradeNumber"),
+            executionTradeNumber: null,
             direction,
             structure: String(structRaw).toUpperCase().includes("CHOCH") ? "CHoCH" : "BOS",
             session: rawSession || fillSession || "—",
@@ -559,6 +599,30 @@ export function parseTradesCSV(text) {
             beExitTime:            String(pick(r, "be_exit_time", "beExitTime") || ""),
             be_exit_candle_index:  numOrNull(pick(r, "be_exit_candle_index", "beExitCandleIndex")),
             beExitCandleIndex:     numOrNull(pick(r, "be_exit_candle_index", "beExitCandleIndex")),
+            // ── Session-First v1 cohort management (backend additive) ──────────
+            // Per-cohort Risk Amount (pure post-fill weight) + move-stop risk
+            // reduction descriptors. weighted_r is ADDITIVE — net_r/pnl_r/r stay raw
+            // and are never replaced. All null/"" on old bundles → load unchanged.
+            risk_amount:              numOrNull(pick(r, "risk_amount", "riskAmount")),
+            riskAmount:               numOrNull(pick(r, "risk_amount", "riskAmount")),
+            weighted_r:               numOrNull(pick(r, "weighted_r", "weightedR")),
+            weightedR:                numOrNull(pick(r, "weighted_r", "weightedR")),
+            risk_amount_source:       String(pick(r, "risk_amount_source", "riskAmountSource") || ""),
+            riskAmountSource:         String(pick(r, "risk_amount_source", "riskAmountSource") || ""),
+            risk_reduction_applied:   boolOrNull(pick(r, "risk_reduction_applied", "riskReductionApplied")),
+            riskReductionApplied:     boolOrNull(pick(r, "risk_reduction_applied", "riskReductionApplied")),
+            risk_reduction_kind:      String(pick(r, "risk_reduction_kind", "riskReductionKind") || ""),
+            riskReductionKind:        String(pick(r, "risk_reduction_kind", "riskReductionKind") || ""),
+            risk_reduction_trigger_r: numOrNull(pick(r, "risk_reduction_trigger_r", "riskReductionTriggerR")),
+            riskReductionTriggerR:    numOrNull(pick(r, "risk_reduction_trigger_r", "riskReductionTriggerR")),
+            risk_reduction_stop_r:    numOrNull(pick(r, "risk_reduction_stop_r", "riskReductionStopR")),
+            riskReductionStopR:       numOrNull(pick(r, "risk_reduction_stop_r", "riskReductionStopR")),
+            risk_reduction_source:    String(pick(r, "risk_reduction_source", "riskReductionSource") || ""),
+            riskReductionSource:      String(pick(r, "risk_reduction_source", "riskReductionSource") || ""),
+            stop_moved_to_r:          numOrNull(pick(r, "stop_moved_to_r", "stopMovedToR")),
+            stopMovedToR:             numOrNull(pick(r, "stop_moved_to_r", "stopMovedToR")),
+            stop_move_time:           String(pick(r, "stop_move_time", "stopMoveTime") || ""),
+            stopMoveTime:             String(pick(r, "stop_move_time", "stopMoveTime") || ""),
             obWidth:        Number(pick(r, "ob_width", "obwidth") ?? 0),
             reverseConflict: Boolean(pick(r, "reverse_conflict", "reverse_cancel")),
             fill_candle_open: numOrNull(pick(r, "fill_candle_open")),
@@ -763,6 +827,8 @@ export function parseTradesCSV(text) {
             ghostFillSession: String(pick(r, "ghost_fill_session", "ghostFillSession") || ""),
         };
     });
+    // TradingView-style chronological numbering (preserve backend value, else derive).
+    return assignExecutionTradeNumbers(parsed);
 }
 
 export function parseNewsEventsCSV(text) {
@@ -873,8 +939,13 @@ function computeEquityCurve(trades) {
     return trades.map((t, i) => {
         cum += Number(t.r) || 0;
         const ref = t.entry ? new Date(t.entry) : new Date(Date.now() - (trades.length - i) * 86400000);
+        // TradingView-style chronological trade number for the x-axis / tooltip (NOT ob_id).
+        const tradeNumber = (t.executionTradeNumber != null) ? t.executionTradeNumber : (i + 1);
         return {
             i,
+            tradeNumber,
+            executionTradeNumber: t.executionTradeNumber ?? null,
+            obId: t.obId,            // kept separately for forensic parity (not the x label)
             date: isFinite(ref.getTime()) ? ref.toISOString().slice(0, 10) : "",
             label: isFinite(ref.getTime()) ? ref.toLocaleString("en", { month: "short", year: "2-digit" }) : "",
             netR: Number(cum.toFixed(2)),
@@ -893,6 +964,7 @@ function computeTradeMarkers(trades, candleIdx) {
             direction: t.direction,
             win: t.outcome === "Win",
             id: t.id,
+            executionTradeNumber: t.executionTradeNumber ?? null,
         };
     });
 }
@@ -1525,7 +1597,7 @@ export async function ingestRunBundle(fileList, options = {}) {
                 }
                 case "order_blocks": {
                     const parsed = parseCSV(text);
-                    validateCsvHeaders(kind, f.name, parsed.headers, collected.validationErrors, collected.validationWarnings);
+                    validateCsvHeaders(kind, f.name, parsed.headers, collected.validationErrors, collected.validationWarnings, parsed.rows.length);
                     collected.orderBlocks = parseOrderBlocksCSV(text);
                     collected.recognized.push({ name: f.name, kind, rows: collected.orderBlocks.length });
                     break;

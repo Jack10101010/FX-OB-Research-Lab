@@ -224,9 +224,13 @@ function TradeTooltip({ active, payload, accountMode = false, currency = "USD" }
 
     return (
         <div style={TT_STYLE}>
-            {/* Header: trade identity */}
+            {/* Header: TradingView-style chronological trade number (NOT the OB-derived id).
+                Prefer executionTradeNumber/tradeNumber; fall back to the chronological point
+                index (p.i, where 0 = START anchor) only if the number is missing. The OB id
+                stays available as a muted suffix for forensic/debug. */}
             <div style={{ fontWeight: 700, color: "hsl(var(--text-1))", marginBottom: 3 }}>
-                {p.displayTradeId || "—"} · {p.direction || "—"} · {p.structure || "—"}
+                {`Trade #${p.executionTradeNumber ?? p.tradeNumber ?? (Number.isFinite(Number(p.i)) ? Number(p.i) : "—")}`} · {p.direction || "—"} · {p.structure || "—"}
+                {p.displayObId ? <span style={{ color: "hsl(var(--muted))", fontWeight: 400, fontSize: 10 }}>{` · ${p.displayObId}`}</span> : null}
             </div>
             {/* Timestamp + session */}
             <div style={{ color: "hsl(var(--muted))", fontSize: 10, marginBottom: 5 }}>

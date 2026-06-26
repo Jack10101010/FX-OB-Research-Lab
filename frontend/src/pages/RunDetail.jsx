@@ -1113,6 +1113,12 @@ export default function RunDetail() {
                 structure:              trade.structure || "",
                 session:                trade.fillSession || trade.session || "",
                 displayTradeId:         trade.displayTradeId || trade.id || "",
+                // TradingView-style chronological execution number for the tooltip/markers
+                // (NOT the OB-derived T-{ob_id}). displayObId is kept for forensic/debug.
+                executionTradeNumber:   trade.executionTradeNumber ?? null,
+                tradeNumber:            (trade.executionTradeNumber != null ? trade.executionTradeNumber : idx + 1),
+                displayObId:            trade.displayObId || (trade.obId != null && trade.obId !== "" ? `OB-${trade.obId}` : ""),
+                obId:                   trade.obId,
                 entryTime:              trade.entry || "",
                 news_action:            trade.news_action || "",
                 news_flatten_r:         trade.news_flatten_r ?? null,
