@@ -6,6 +6,7 @@ import {
     utcDateKey, resampleDaily, classifyState, inGate,
     daily_regime_panel, stateForTrade, tradePassesRegime,
     BBW_THRESHOLD_BY_SYMBOL,
+    ribbonSegmentsFromPanel, emaLinePointsFromPanel, shortStateLabel, tradeStateBadge,
 } from "../marketState.js";
 
 let pass = 0, fail = 0;
@@ -119,6 +120,92 @@ ok("filter keeps when state ∈ allowed", tradePassesRegime(trade, panel, [rowFu
 ok("filter drops unmatched state", tradePassesRegime(trade, panel, ["___no_such_state___"]) === false);
 ok("filter keeps when allowed empty (gate off)", tradePassesRegime(trade, panel, []) === true);
 ok("filter keeps unknown trade day", tradePassesRegime({ fill_time: "1990-01-01T00:00:00Z" }, panel, ["Bear/Chop"]) === true);
+
+// ── 9) FROZEN PARITY FIXTURE (spec v1) ───────────────────────────────────────
+// Assert marketState.js reproduces the canonical frozen expected panel bit-for-bit
+// (the same fixture the future Python src/regime.py must match). Regenerate via
+// Lux-OB-Backtester/tests/regime/fixture_gen.py; see regime_spec.md §10.
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+const __dir = dirname(fileURLToPath(import.meta.url));
+let fx = null;
+try {
+    fx = JSON.parse(readFileSync(join(__dir, "..", "__fixtures__", "marketState.fixture.json"), "utf8"));
+} catch (e) { ok("fixture file present", false, String(e)); }
+if (fx) {
+    ok("fixture has candles + expected_panel", Array.isArray(fx.candles) && Array.isArray(fx.expected_panel) && fx.expected_panel.length > 0);
+    const fp = daily_regime_panel(fx.candles, fx.config, fx.symbol);
+    let numMax = 0, stateMiss = 0, confMiss = 0, knownMiss = 0, nullMiss = 0;
+    const NF = ["ema", "pxVsEma", "bbw", "adx"];
+    const rowsOk = fp.rows.length === fx.expected_panel.length;
+    ok("fixture: row count matches", rowsOk, `${fp.rows.length} vs ${fx.expected_panel.length}`);
+    if (rowsOk) {
+        for (let i = 0; i < fx.expected_panel.length; i++) {
+            const e = fx.expected_panel[i], g = fp.rows[i];
+            if (e.date !== g.date) stateMiss++;
+            for (const f of NF) {
+                const en = e[f], gn = g[f];
+                if (en == null || gn == null) { if ((en == null) !== (gn == null)) nullMiss++; }
+                else numMax = Math.max(numMax, Math.abs(en - gn));
+            }
+            if ((e.marketState || null) !== (g.marketState || null)) stateMiss++;
+            if (!!e.confirmed !== !!g.confirmed) confMiss++;
+            if (e.knownAt !== g.knownAt) knownMiss++;
+        }
+        ok("fixture: numeric parity ≤ 1e-9 (EMA/px/BBW/ADX)", numMax <= 1e-9, `max |Δ| = ${numMax.toExponential(3)}`);
+        ok("fixture: 0 state mismatches", stateMiss === 0, `${stateMiss}`);
+        ok("fixture: 0 confirmed mismatches", confMiss === 0, `${confMiss}`);
+        ok("fixture: 0 knownAt mismatches", knownMiss === 0, `${knownMiss}`);
+        ok("fixture: 0 nullness mismatches", nullMiss === 0, `${nullMiss}`);
+        const states = new Set(fx.expected_panel.map((r) => r.marketState).filter(Boolean));
+        ok("fixture: all 6 states covered",
+            ["Bull/Expand","Bull/Compress","Bull/Chop","Bear/Expand","Bear/Compress","Bear/Chop"].every((s) => states.has(s)),
+            [...states].join(","));
+        ok("fixture: panel source=client", fp.source === "client");
+    }
+}
+
+// ── 10) PHASE-2 OVERLAY HELPERS (pure derivation from the panel) ─────────────
+if (fx) {
+    const fp = daily_regime_panel(fx.candles, fx.config, fx.symbol);
+    const segs = ribbonSegmentsFromPanel(fp);
+    ok("ribbon: segments non-empty", segs.length > 0);
+    // contiguity: segments tile the panel days with no gap/overlap, in order
+    let contig = segs.length > 0 && segs[0].startDate === fp.rows[0].date
+        && segs[segs.length - 1].endDate === fp.rows[fp.rows.length - 1].date;
+    for (let i = 1; i < segs.length; i++) {
+        if (segs[i - 1].state === segs[i].state) contig = false;       // runs must be maximal
+        if (segs[i].startMs <= segs[i - 1].startMs) contig = false;    // strictly increasing
+    }
+    ok("ribbon: contiguous, maximal, ordered runs", contig);
+    // coverage: total days across segments == panel rows
+    const covered = segs.reduce((acc, s) => {
+        const d0 = Date.parse(`${s.startDate}T00:00:00Z`), d1 = Date.parse(`${s.endDate}T00:00:00Z`);
+        return acc + Math.round((d1 - d0) / 86400000) + 1;
+    }, 0);
+    ok("ribbon: day coverage == panel rows", covered === fp.rows.length, `${covered} vs ${fp.rows.length}`);
+    ok("ribbon: end exclusive of trade-day boundary (no look-ahead)",
+        segs.every((s) => s.endMs > s.startMs && s.knownAt.endsWith("T00:00:00Z")));
+    // ema line points: one per finite-ema day, ascending, warmup skipped
+    const ema = emaLinePointsFromPanel(fp);
+    const finiteEma = fp.rows.filter((r) => typeof r.ema === "number" && Number.isFinite(r.ema)).length;
+    ok("ema: point count == finite-ema rows", ema.length === finiteEma, `${ema.length} vs ${finiteEma}`);
+    ok("ema: warmup (row0 null) skipped", ema.length < fp.rows.length);
+    ok("ema: strictly ascending time", ema.every((p, i) => i === 0 || Date.parse(p.time) > Date.parse(ema[i - 1].time)));
+    // short labels
+    ok("shortStateLabel Bull/Expand→Bull/Exp", shortStateLabel("Bull/Expand") === "Bull/Exp");
+    ok("shortStateLabel Bear/Chop→Bear/Chp", shortStateLabel("Bear/Chop") === "Bear/Chp");
+    ok("shortStateLabel null→''", shortStateLabel(null) === "");
+    // per-trade badge matches stateForTrade
+    const lastDated = fp.rows.filter((r) => r.marketState).slice(-1)[0];
+    if (lastDated) {
+        const b = tradeStateBadge({ fill_time: `${lastDated.date}T12:00:00Z` }, fp);
+        ok("tradeStateBadge state matches panel", b && b.state === lastDated.marketState);
+        ok("tradeStateBadge carries knownAt", b && typeof b.knownAt === "string");
+    }
+    ok("tradeStateBadge unknown day → null", tradeStateBadge({ fill_time: "1980-01-01T00:00:00Z" }, fp) === null);
+}
 
 // ── summary ──────────────────────────────────────────────────────────────────
 console.log(`\nmarketState.validate: ${pass} passed, ${fail} failed`);

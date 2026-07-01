@@ -10,6 +10,9 @@ import { NeonPanel } from "@/components/lab/NeonPanel";
 import { NeonInput, NeonSelect, Segment, NeonButton, FilterToggle } from "@/components/lab/controls";
 import { Pill } from "@/components/lab/DataTable";
 import { CandleChart } from "@/components/lab/CandleChart";
+import { useMarketStatePanel, regimeCfgFromRunConfig } from "@/data/useMarketState";           // Market State (Phase 2B)
+import { ribbonSegmentsFromPanel, emaLinePointsFromPanel } from "@/data/marketState";           // Market State overlays (Phase 2B)
+import { buildExecutionMarkers } from "@/data/executionMarkers";
 import { IntrabarInspector } from "@/components/lab/IntrabarInspector";
 import { BeVerificationPanel } from "@/components/lab/protection/BeVerificationPanel";
 import { BeAffectedTradesCard } from "@/components/lab/protection/BeAffectedTradesCard";
@@ -85,6 +88,9 @@ const DEFAULT_LAYERS = {
     ghostLossMarkers: false,
     // FFT Debug overlay — pink tap/cancel markers + debug checklist in lifecycle panel
     fftDebug: false,
+    // Market State overlays (Phase 2B) — off by default
+    marketStateRibbon: false,
+    marketStateEma: false,
 };
 
 const DEFAULT_UI_SETTINGS = {
@@ -210,6 +216,10 @@ export default function StrategyMap() {
     const [showGhostWinMarkers, setShowGhostWinMarkers] = useState(initialUi.layers.ghostWinMarkers ?? false);
     const [showGhostLossMarkers, setShowGhostLossMarkers] = useState(initialUi.layers.ghostLossMarkers ?? false);
     const [showFftDebug, setShowFftDebug] = useState(initialUi.layers.fftDebug ?? false);
+    const [showMarketStateRibbon, setShowMarketStateRibbon] = useState(initialUi.layers.marketStateRibbon ?? false);
+    const [showMarketStateEma, setShowMarketStateEma] = useState(initialUi.layers.marketStateEma ?? false);
+    // Audit-only execution overlay (Entry/Exit price marks for the selected trade).
+    const [showExecutionMarkers, setShowExecutionMarkers] = useState(false);
     const [sessionSettings, setSessionSettings] = useState(initialUi.sessionSettings);
     const [tradeQuery, setTradeQuery] = useState("");
     const [tradeOutcomeFilter, setTradeOutcomeFilter] = useState("All");
@@ -439,6 +449,20 @@ export default function StrategyMap() {
     const activeTrades = isDirectionalMode ? directionalTrades : resolvedScenario.trades;
     const chartObBoxes = resolvedScenario.orderBlocks;
     const chartTradeMarkers = isDirectionalMode ? directionalTrades : resolvedScenario.tradeMarkers;
+
+    // ── Market State overlays (Phase 2B) ──────────────────────────────────────
+    // ONE leakage-safe daily panel (data/marketState.js), then memoized overlay
+    // arrays. No indicator math here — the chart never recomputes EMA/BBW/ADX.
+    const regimeCfg = useMemo(() => regimeCfgFromRunConfig(runConfig), [runConfig]);
+    const regimePanel = useMarketStatePanel(displayCandles, regimeCfg, heroSymbol);
+    const marketStateRibbon = useMemo(
+        () => (showMarketStateRibbon ? ribbonSegmentsFromPanel(regimePanel) : []),
+        [showMarketStateRibbon, regimePanel]
+    );
+    const emaLinePoints = useMemo(
+        () => (showMarketStateEma ? emaLinePointsFromPanel(regimePanel) : []),
+        [showMarketStateEma, regimePanel]
+    );
     const rrTools = isDirectionalMode ? [] : resolvedScenario.rrTools;
     const triggeredEdgeOverlays = isDirectionalMode ? [] : resolvedScenario.triggeredEdgeOverlays;
 
@@ -620,6 +644,8 @@ export default function StrategyMap() {
                 ghostWinMarkers: showGhostWinMarkers,
                 ghostLossMarkers: showGhostLossMarkers,
                 fftDebug: showFftDebug,
+                marketStateRibbon: showMarketStateRibbon,
+                marketStateEma: showMarketStateEma,
             },
             sessionSettings,
         });
@@ -656,7 +682,9 @@ export default function StrategyMap() {
         showGhostWinMarkers,
         showGhostLossMarkers,
         showFftDebug,
-        sessionSettings,
+        showMarketStateRibbon,
+        showMarketStateEma,
+    sessionSettings,
     ]);
 
     useEffect(() => {
@@ -769,6 +797,14 @@ export default function StrategyMap() {
             || rrLookupKey(o.tradeId) === key
         )) || null;
     }, [selectedTradeId, triggeredEdgeOverlays]);
+
+    // Audit-only execution markers — built ONLY for the selected trade when the
+    // toggle is on (scoped: never every trade). Pure; visualisation only.
+    const executionMarkers = useMemo(() => {
+        if (!showExecutionMarkers || !selectedTrade) return null;
+        const times = (displayCandles || []).map((c) => Number(c.time ?? c.t)).filter(Number.isFinite);
+        return buildExecutionMarkers(selectedTrade, times, { pipSize: Number(runConfig?.pip_size) || undefined });
+    }, [showExecutionMarkers, selectedTrade, displayCandles, runConfig]);
 
     // ── Intrabar inspector: full-resolution 1m window fetch ───────────────────
     // The overview chart uses aggregated display candles, which can't drive the M1
@@ -1088,11 +1124,14 @@ export default function StrategyMap() {
                                 <Toggle label={`Order Blocks (${chartObBoxes.length})`} checked={showOB} onChange={setShowOB} dot="primary" />
                                 <Toggle label="BOS / CHoCH" checked={showBC} onChange={setShowBC} dot="secondary" />
                                 <Toggle label="Sessions" checked={showSessions} onChange={setShowSessions} dot="primary" />
+                                <Toggle label="Market State Ribbon" checked={showMarketStateRibbon} onChange={setShowMarketStateRibbon} dot="secondary" title="Thin bottom strip coloured by daily market state (200-EMA × Bollinger × ADX). Leakage-safe: each day shows the value known at its start (shifted 1d). Visualisation only." />
+                                <Toggle label="EMA 200" checked={showMarketStateEma} onChange={setShowMarketStateEma} dot="primary" title="Daily 200-EMA line from the Market State panel (shifted 1d). Visualisation only — no strategy change." />
                                 <Toggle label="OB Origin" checked={showObOriginMarkers} onChange={setShowObOriginMarkers} dot="primary" />
                                 <Toggle label="OB Detection" checked={showObDetectionMarkers} onChange={setShowObDetectionMarkers} dot="warning" />
                                 <Toggle label="OB IDs" checked={showObLabels} onChange={setShowObLabels} dot="secondary" />
                                 <Toggle label="OB Details" checked={showObDetails} onChange={setShowObDetails} dot="secondary" />
                                 <Toggle label={`RR Tools${showRrTools ? ` (${rrTools.length})` : ""}`} checked={showRrTools} onChange={setShowRrTools} dot="success" />
+                                <Toggle label="Execution Markers" checked={showExecutionMarkers} onChange={setShowExecutionMarkers} dot="primary" title="Audit overlay: draws short Entry (blue) / Exit (orange) price marks at the selected trade's entry and exit candles, with exact price + tooltip. Select a trade first. Visualisation only — never changes fills, exits, or R." />
                                 <Toggle label={`News (${newsEventsAvailable.length})`} checked={showNewsEvents} onChange={setShowNewsEvents} dot="warning" />
                                 <Toggle label="News Labels" checked={showNewsLabels} onChange={setShowNewsLabels} dot="warning" />
                                 {resolvedScenario.resolvedFamily === "triggered_edge" && hasTriggeredEdgeTrades && (
@@ -1215,7 +1254,12 @@ export default function StrategyMap() {
                             showNewsLabels={showNewsLabels}
                             sessionRanges={sessionRanges}
                             showSessionHighlights={showSessions}
+                            marketStateRibbon={marketStateRibbon}
+                            showMarketStateRibbon={showMarketStateRibbon}
+                            emaLinePoints={emaLinePoints}
+                            showEma={showMarketStateEma}
                             selectedTradeId={selectedTradeId}
+                            executionMarkers={executionMarkers}
                             highlightObId={selectedOverlay?.obId ?? null}
                             beVerification={beVerification}
                             beAffectedObIds={beAffectedObIds}
@@ -1269,6 +1313,7 @@ export default function StrategyMap() {
                                 onFuturePad={setInspFutureMin}
                                 beVerification={beVerification}
                                 pipSize={Number(runConfig?.pip_size) || 0.0001}
+                                showExecutionMarkers={showExecutionMarkers}
                                 onClose={() => setSelectedTradeId(null)}
                             />
                         )}

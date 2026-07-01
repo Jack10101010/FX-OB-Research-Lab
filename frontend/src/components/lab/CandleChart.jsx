@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useLayoutEffect, useState } from "react";
 import { createChart, CrosshairMode, LineStyle } from "lightweight-charts";
+import { marketStateColor } from "@/lib/chartStyles"; // Market State ribbon colours (Phase 2B)
 
 // CandleChart — backed by lightweight-charts v4.
 // Public prop API is intentionally identical to the prior SVG implementation:
@@ -267,6 +268,10 @@ export function CandleChart({
     selectedTradeId,
     highlightObId = null,    // OB id to treat as "selected" (FFT map-link focus) — reuses the selected styling path
     verificationOverlay = null,
+    // AUDIT-ONLY execution overlay: the object returned by buildExecutionMarkers()
+    // for the SELECTED trade (null ⇒ off). Draws short horizontal Entry/Exit price
+    // marks at the entry/exit candles. Visualisation only — never affects fills/R.
+    executionMarkers = null,
     // BE visual verification (P1): { entryPrice, originalStop, originalTp,
     // beArmPrice, beStopPrice, beArmTime, beExitTime, armLevelR }. When set,
     // draws BE arm/stop + entry/SL/TP price lines and arm/exit markers for the
@@ -306,12 +311,22 @@ export function CandleChart({
     // FFT move-away threshold config — { pips, obMultiple, pipSize }
     // When set, draws threshold line above/below OB and places cancel dot at actual cancel price.
     fftMoveAwayConfig = null,
+    // Market State overlays (Phase 2B) — all default-off; data from the validated
+    // marketState.js helpers (ribbonSegmentsFromPanel / emaLinePointsFromPanel). No
+    // indicator math is computed here.
+    marketStateRibbon = [],
+    showMarketStateRibbon = false,
+    emaLinePoints = [],
+    showEma = false,
+    tradeStateBadges = [],           // reserved; badge rendering deferred (see notes)
+    showTradeStateBadges = false,    // reserved; deferred
 }) {
     const containerRef = useRef(null);
     const chartRef = useRef(null);
     const seriesRef = useRef(null);
     const priceLinesRef = useRef([]);
     const beLinesRef = useRef([]);
+    const emaSeriesRef = useRef(null);   // Market State EMA line series (Phase 2B)
     const [overlayKey, setOverlayKey] = useState(0); // triggers OB box reposition
     const hasRealCandleTime = candles.some((c) => normalizeChartTimestamp(c.time ?? c.t ?? c.timestamp ?? c.datetime) != null);
     const safeHeight = Number.isFinite(Number(height)) && Number(height) > 0 ? Math.round(Number(height)) : 460;
@@ -371,6 +386,9 @@ export function CandleChart({
     const transparent = "rgba(0, 0, 0, 0)";
     const upCandle = "rgba(188, 188, 188, 1)";
     const downCandle = "rgba(55, 65, 81, 1)";
+    // Audit execution-overlay marker colours (readable on the light chart canvas).
+    const execEntry = "rgba(37, 99, 235, 0.95)";   // blue  — entry
+    const execExit = "rgba(234, 88, 12, 0.95)";    // orange — exit
     const rewardStroke = "rgba(22, 163, 74, 0.18)";
     const rewardFill = "rgba(22, 163, 74, 0.12)";
     const riskStroke = "rgba(220, 38, 38, 0.18)";
@@ -598,6 +616,29 @@ export function CandleChart({
         return candleTimes[candleTimes.length - 1];
     };
 
+    // Market State EMA line series (Phase 2B). Points are pre-computed {time,value}
+    // from emaLinePointsFromPanel — NO EMA math here. Added/removed cleanly on toggle.
+    useEffect(() => {
+        const chart = chartRef.current;
+        if (!chart) return;
+        if (showEma && emaLinePoints?.length) {
+            if (!emaSeriesRef.current) {
+                emaSeriesRef.current = chart.addLineSeries({
+                    color: "#8aa0c6", lineWidth: 1, priceLineVisible: false,
+                    lastValueVisible: false, crosshairMarkerVisible: false,
+                });
+            }
+            const data = emaLinePoints
+                .map((p) => ({ time: normalizeChartTimestamp(p.time), value: p.value }))
+                .filter((p) => p.time != null && Number.isFinite(p.value))
+                .sort((a, b) => a.time - b.time);
+            emaSeriesRef.current.setData(data);
+        } else if (emaSeriesRef.current) {
+            chart.removeSeries(emaSeriesRef.current);
+            emaSeriesRef.current = null;
+        }
+    }, [showEma, emaLinePoints, overlayKey]);
+
     const sessionOverlays = (() => {
         if (!showSessionHighlights || !sessionRanges?.length) return [];
         const chart = chartRef.current;
@@ -637,6 +678,52 @@ export function CandleChart({
                 left,
                 width: Math.max(1, right - left),
                 height: maxHeight,
+            };
+        }).filter(Boolean);
+    })();
+
+    // Market State ribbon (Phase 2B) — thin bottom strip, one region per contiguous
+    // daily state run. Clones the sessionOverlays coordinate/clamp pattern. Segments
+    // come from ribbonSegmentsFromPanel (already leakage-safe / shifted). Never covers
+    // candles: fixed 12px strip anchored to the bottom of the pane.
+    const RIBBON_H = 12;
+    const marketStateRibbonOverlays = (() => {
+        if (!showMarketStateRibbon || !marketStateRibbon?.length) return [];
+        const chart = chartRef.current;
+        if (!chart || !candleTimes.length) return [];
+        const bounds = containerRef.current?.getBoundingClientRect();
+        const maxWidth = bounds?.width || 0;
+        const visibleRange = chart.timeScale().getVisibleRange?.();
+        const rangeFrom = normalizeChartTimestamp(visibleRange?.from);
+        const rangeTo = normalizeChartTimestamp(visibleRange?.to);
+        const toVisibleX = (time, boundary) => {
+            const x = chart.timeScale().timeToCoordinate(time);
+            if (x != null) return x;
+            return boundary === "left" ? 0 : maxWidth;
+        };
+        return (marketStateRibbon || []).map((seg, index) => {
+            const rawStart = normalizeChartTimestamp(seg.startTime);
+            const rawEnd = normalizeChartTimestamp(seg.endTime);
+            if (rawStart == null || rawEnd == null) return null;
+            const start = hasRealCandleTime ? snapFloor(rawStart) : rawStart;
+            const end = hasRealCandleTime ? snapCeil(rawEnd) : rawEnd;
+            if (start == null || end == null) return null;
+            const rangeStart = Math.min(start, end);
+            const rangeEnd = Math.max(start, end);
+            const drawStart = rangeFrom == null ? rangeStart : Math.max(rangeStart, rangeFrom);
+            const drawEnd = rangeTo == null ? rangeEnd : Math.min(rangeEnd, rangeTo);
+            if (drawEnd < drawStart) return null;
+            const x0 = toVisibleX(hasRealCandleTime ? snapCeil(drawStart) : drawStart, "left");
+            const x1 = toVisibleX(hasRealCandleTime ? snapFloor(drawEnd) : drawEnd, "right");
+            if (x0 == null || x1 == null) return null;
+            const left = clamp(Math.min(x0, x1), 0, Math.max(0, maxWidth - 1));
+            const right = clamp(Math.max(x0, x1), 0, Math.max(0, maxWidth));
+            const c = marketStateColor(seg.state);
+            return {
+                id: `ms-${seg.startDate || index}`,
+                state: seg.state, knownAt: seg.knownAt,
+                left, width: Math.max(1, right - left),
+                fill: c.fill, stroke: c.stroke,
             };
         }).filter(Boolean);
     })();
@@ -826,6 +913,45 @@ export function CandleChart({
             rewardTop: rewardBox.top,
             rewardHeight: rewardBox.height,
         };
+    })();
+
+    // Audit-only execution markers (selected trade): short horizontal Entry/Exit
+    // price marks anchored at the entry/exit candles. Mirrors the rrTool/verification
+    // coordinate approach (timeToCoordinate + priceToCoordinate). Never mutates data.
+    const executionMarkerShapes = (() => {
+        if (!executionMarkers || !executionMarkers.ok) return [];
+        const chart = chartRef.current;
+        const series = seriesRef.current;
+        if (!chart || !series) return [];
+        const bounds = containerRef.current?.getBoundingClientRect();
+        const maxWidth = bounds?.width || 0;
+        const maxHeight = bounds?.height || height;
+        const ts = chart.timeScale();
+        const out = [];
+        for (const m of executionMarkers.markers || []) {
+            const aTime = m.startTime ?? m.time;
+            const bTime = m.endTime ?? m.time;
+            let xa = aTime != null ? ts.timeToCoordinate(aTime) : null;
+            let xb = bTime != null ? ts.timeToCoordinate(bTime) : null;
+            if (xa == null && m.time != null) xa = ts.timeToCoordinate(m.time);
+            if (xb == null) xb = xa;
+            if (xa == null) continue; // off the visible range
+            const left = clamp(Math.min(xa, xb), 0, Math.max(0, maxWidth - 1));
+            const right = clamp(Math.max(xa, xb), left + 10, Math.max(left + 10, maxWidth));
+            const y = m.price != null ? series.priceToCoordinate(Number(m.price)) : null;
+            out.push({
+                id: `exec-${m.kind}`,
+                kind: m.kind,
+                label: m.label,
+                priceStr: m.priceStr,
+                tooltip: m.tooltipText,
+                left,
+                width: Math.max(10, right - left),
+                y: y == null ? null : clamp(y, 0, maxHeight),
+                known: m.known && y != null,
+            });
+        }
+        return out;
     })();
 
     const rrToolShapes = (() => {
@@ -1476,6 +1602,17 @@ export function CandleChart({
                 {sessionOverlays.map((session) => (
                     <SessionOverlay key={session.id} session={session} />
                 ))}
+                {marketStateRibbonOverlays.map((seg) => (
+                    <div
+                        key={seg.id}
+                        title={`${seg.state ?? "—"}${seg.knownAt ? ` · known ${seg.knownAt} (shifted 1d)` : ""}`}
+                        style={{
+                            position: "absolute", bottom: 0, left: seg.left, width: seg.width,
+                            height: RIBBON_H, background: seg.fill,
+                            borderTop: `1px solid ${seg.stroke}`, pointerEvents: "none",
+                        }}
+                    />
+                ))}
                 {newsEventLines.map((event) => (
                     <NewsEventLine key={event.id} event={event} showLabel={showNewsLabels} />
                 ))}
@@ -1647,6 +1784,28 @@ export function CandleChart({
                         )}
                     </>
                 )}
+                {executionMarkerShapes.map((shape) => {
+                    const color = shape.kind === "entry" ? execEntry : execExit;
+                    return (
+                        <div
+                            key={shape.id}
+                            data-testid={`exec-marker-${shape.kind}`}
+                            className="absolute"
+                            style={{ left: shape.left, width: shape.width, top: (shape.y ?? 8) - 1, zIndex: 13 }}
+                            title={shape.tooltip}
+                        >
+                            {shape.known && (
+                                <div style={{ height: 0, borderTop: `2px ${shape.kind === "entry" ? "solid" : "dashed"} ${color}` }} />
+                            )}
+                            <span
+                                className="absolute left-0 -top-2 whitespace-nowrap rounded-sm px-1 py-0.5 text-[9px] font-semibold"
+                                style={{ color: "rgba(248, 250, 252, 0.97)", background: color }}
+                            >
+                                {shape.label}{shape.known ? ` ${shape.priceStr}` : ""}
+                            </span>
+                        </div>
+                    );
+                })}
                 {debugOverlays && <OverlayDebugPanel info={debugInfo} />}
             </div>
         </div>

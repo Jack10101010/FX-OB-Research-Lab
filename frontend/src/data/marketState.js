@@ -413,3 +413,73 @@ export function tradePassesRegime(trade, panel, allowedStates) {
     if (!row || !row.marketState) return true;
     return allowed.includes(row.marketState);
 }
+
+// ── Strategy Map overlay derivation (Phase 2) ────────────────────────────────
+// PURE, side-effect-free helpers that turn an ALREADY-BUILT panel into chart
+// overlay arrays. They NEVER recompute EMA/BBW/ADX — they only read panel rows,
+// which are already leakage-safe (shifted 1 day; row FOR day D uses D-1 close).
+// Colour mapping intentionally lives in lib/chartStyles.js (marketStateColor);
+// this module stays dependency-free and returns state strings only.
+
+const DAY_MS = 86400000;
+function dayStartIso(date) { return `${date}T00:00:00Z`; }
+function dayStartMs(date) { return Date.parse(dayStartIso(date)); }
+
+/**
+ * Contiguous same-state daily regions for the Market State ribbon.
+ * The painted region for day D represents the value KNOWN AT THE START OF D
+ * (panel rows are already shifted 1 day → no look-ahead). Warmup/unknown rows
+ * (marketState==null) are emitted with state=null so the caller can render them
+ * neutral or skip. @returns [{state,startDate,endDate,startTime,endTime,startMs,endMs,knownAt}]
+ */
+export function ribbonSegmentsFromPanel(panel) {
+    const rows = panel?.rows || [];
+    const segs = [];
+    let cur = null;
+    for (const r of rows) {
+        const st = r.marketState ?? null;
+        if (cur && cur.state === st) { cur.endDate = r.date; }
+        else {
+            if (cur) segs.push(cur);
+            cur = { state: st, startDate: r.date, endDate: r.date, knownAt: r.knownAt ?? dayStartIso(r.date) };
+        }
+    }
+    if (cur) segs.push(cur);
+    return segs.map((s) => ({
+        state: s.state, startDate: s.startDate, endDate: s.endDate, knownAt: s.knownAt,
+        startTime: dayStartIso(s.startDate),                                   // inclusive
+        endTime: new Date(dayStartMs(s.endDate) + DAY_MS).toISOString(),       // exclusive (covers last day)
+        startMs: dayStartMs(s.startDate),
+        endMs: dayStartMs(s.endDate) + DAY_MS,
+    }));
+}
+
+/**
+ * EMA line points ({time,value}) for a lightweight-charts line series. Reads
+ * panel.row.ema (already shifted); skips warmup nulls. Stepped daily values.
+ */
+export function emaLinePointsFromPanel(panel) {
+    const rows = panel?.rows || [];
+    const out = [];
+    for (const r of rows) {
+        if (typeof r.ema === "number" && Number.isFinite(r.ema)) {
+            out.push({ time: dayStartIso(r.date), value: r.ema, date: r.date });
+        }
+    }
+    return out;
+}
+
+// Compact per-marker badge label, e.g. "Bull/Exp", "Bear/Chp".
+const SHORT_VOL = { Expand: "Exp", Compress: "Cmp", Chop: "Chp" };
+export function shortStateLabel(state) {
+    if (!state || typeof state !== "string") return "";
+    const [trend, vol] = state.split("/");
+    return `${trend}/${SHORT_VOL[vol] ?? vol}`;
+}
+
+/** Per-trade badge descriptor {state,label,knownAt} for a chart marker; null if unknown. */
+export function tradeStateBadge(trade, panel) {
+    const row = stateForTrade(trade, panel);
+    if (!row || !row.marketState) return null;
+    return { state: row.marketState, label: shortStateLabel(row.marketState), knownAt: row.knownAt };
+}
