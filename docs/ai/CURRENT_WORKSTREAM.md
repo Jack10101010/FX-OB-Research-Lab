@@ -2,7 +2,41 @@
 
 > The single active focus. Update this first when focus changes. Source for `/status`.
 
-*Last updated: 2026-06-13.*
+*Last updated: 2026-07-01.*
+
+## Focus (2026-07-01 — Market State / Regime Gate)
+
+**Active focus: Market State / Regime Gate — exposing the EMA / Bollinger-width / ADX
+regime engine through the app.** Off by default; additive; no production behaviour change
+when disabled.
+
+- **Phase 0 — foundation: COMMITTED** (`9856023` `feat(regime): add client market state
+  foundation`). New pure `frontend/src/data/marketState.js` (leakage-safe daily EMA200 /
+  BBW / Wilder-ADX + 6-state classifier, `.shift(1)`), a `regime` `CONFIG_REGISTRY` group
+  (23 fields, all default off, tier `instant_filter`), `configTranslator.buildRegimeConfig`
+  (emits `regime_*` only when enabled → byte-identical when off), `MARKET_STATE_COLORS`, and
+  `marketState.validate.mjs`. **Golden parity vs the validated research panel
+  (`eurusd_richer_regime_gates/rich_features.pkl`) is exact over 2015→2026: Δpx≈2e-13,
+  Δbbw≈1e-10, Δadx≈4e-14, state 3566/3566.** See `DECISIONS.md` D-017.
+- **Phase 1 — UI exposure: BUILT, NOT COMMITTED.** New `data/useMarketState.js` (memo hooks),
+  `components/lab/marketState/MarketStateControls.jsx` (registry-driven Strategy Builder
+  section) + `MarketStateCard.jsx` (per-trade snapshot), `configRegistry.defaultsForGroup`.
+  Wired into **Strategy Builder V2** (new "Market State" Section 4) and **TradeInspector**
+  (Overview card). Presentation-only; all math stays in `marketState.js`. Validated:
+  byte-identical-when-off, lossless persistence, 48/48 unit, Babel 8/8, SSR smoke.
+- **Blocker / caution:** `frontend/src/pages/StrategyBuilderV2.jsx` is **untracked** (owned by
+  the in-flight session-first stream) — the Phase-1 edit there co-mingles and cannot be
+  committed as an isolated regime hunk until that stream commits the file. `configRegistry.js`
+  and `TradeInspector.jsx` are cleanly scoped to this stream.
+- **Next (deferred, on approval):** Phase 2 Master Controls instant-filter lens; Phase 3
+  engine emission (Lux `src/regime.py`); Phase 4 backend filter; Phase 5 scenario sweep.
+  **No chart/overlay work yet** (StrategyMap/CandleChart untouched by design).
+
+> **⚠ Git reality (2026-07-01):** `codex-dev` HEAD is `9856023`, **1 commit ahead of
+> `origin/codex-dev`** (Phase 0 unpushed; push gated). The "15 commits ahead at `fe71537` /
+> Research Cockpit" wording in the older blocks below is **stale and unverified against git** —
+> none of those commits exist in the current history. The blocks below are retained as history
+> but should not be trusted for current state; they need their own owning-stream sync.
 
 ## Focus (2026-06-13 — needs confirmation)
 

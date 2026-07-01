@@ -4,7 +4,16 @@
 > git-coordination doc (dirty files, commits ahead). This one is the product/research
 > state. Verify against live git before trusting it.
 
-*Last updated: 2026-06-13 (synced after Research Cockpit Phase 1 + V2.0A and OB Lab Insights).*
+*Last updated: 2026-07-01 (synced after Market State / Regime Gate Phase 0 commit + Phase 1 build).*
+
+> **⚠ Git reality (2026-07-01, authoritative):** `codex-dev` HEAD is `9856023`
+> (`feat(regime): add client market state foundation`), **1 commit ahead of `origin/codex-dev`**
+> (unpushed; push gated). Recent real history: `20d31ae` import-UX + chronological trade
+> numbering, `d729223` fair baseline comparison, `1b7cb82` session-first scenario compiler,
+> `b2c7cd6` timing & regime lab foundation. **The "shipped/pushed to `origin` at `96fc733`",
+> "15 commits ahead at `fe71537`", and Research-Cockpit / Failures-Lab-V5 focus described below
+> are STALE** — those commits are not in the current git history. Treat the sections below as
+> unverified history until each owning stream re-syncs.
 
 ## Project
 
@@ -13,6 +22,16 @@ trading behavior via large-scale backtests. Backend: `Lux-OB-Backtester` (Python
 Branch: `codex-dev`. Theme: dark "neon lab" (do not change without request).
 
 ## Current major workstream
+
+**Market State / Regime Gate (2026-07-01).** Promoting the validated EMA200 / Bollinger-width /
+ADX regime engine out of research code into the app. **Phase 0 foundation committed** (`9856023`)
+— pure `data/marketState.js` (leakage-safe, golden-parity-exact vs `rich_features.pkl` over
+2015→2026: state 3566/3566), `regime` registry group (off by default), `buildRegimeConfig`
+(byte-identical when disabled). **Phase 1 UI built (uncommitted)** — registry-driven Market State
+section in Strategy Builder V2 + per-trade snapshot card in TradeInspector; presentation-only.
+Deferred: Phase 2 Master Controls filter lens, Phase 3+ engine emission/filter/sweep. See
+`CURRENT_WORKSTREAM.md`, `WORKSTREAMS.md`, and `DECISIONS.md` D-017. *(The Failures-Lab-V5 text
+below is retained history and is stale vs current git — see the git-reality note above.)*
 
 **Failures Lab V5 — decision layer.** V4 cleanup + V5 Phase 1 (Filter Discovery) shipped.
 V5 Phase 2 (confirmed false losers) + Phase 2B (Overview IA) **live end-to-end (verified 2026-06-12)** —

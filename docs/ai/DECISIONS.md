@@ -6,9 +6,83 @@ Append-only. Newest at top. Each entry: what we decided, why, and the consequenc
 > Validated **research conclusions** (what the data says) live in `FINDINGS.md`. Decisions cite
 > findings — e.g. D-003 is the *decision* to lead with Vacant, justified by F-001/F-002.
 
-*Last updated: 2026-06-13.*
+*Last updated: 2026-07-01.*
 
 ---
+
+### D-017 · Market State / Regime Gate is a client-side, leakage-safe, off-by-default feature promoted from research
+**Status: Phase 0 COMMITTED** (`codex-dev` `9856023` `feat(regime): add client market state
+foundation`); **Phase 1 UI BUILT, not committed.**
+
+The EMA200 / Bollinger-width / ADX regime gate — validated only in Lux-OB-Backtester **research
+code** (`outputs/research/eurusd_regime_gate`, `eurusd_market_state_engine`,
+`eurusd_richer_regime_gates`, `analyze_stopmove.py`) — is promoted into the app as a **first-class,
+leakage-audited, off-by-default** feature. **Decided shape:**
+- **Client-first.** `frontend/src/data/marketState.js` is a faithful JS port of the research
+  panel: daily resample → EMA200 (`ewm span=200 adjust=False`), `px_vs_200 %`, BBW `(4·sd20)/ma20·100`,
+  Wilder ADX(14), then `.shift(1)`; 6-state classifier (`ADX<18` chop overrides vol). **Golden
+  parity is exact over 2015→2026** (Δpx≈2e-13, Δbbw≈1e-10, Δadx≈4e-14, **state 3566/3566**) vs
+  `eurusd_richer_regime_gates/rich_features.pkl`.
+- **Leakage contract.** Every value uses only completed daily candles strictly before the trade
+  day; each snapshot carries `knownAt`, `shiftedDays=1`, `confirmed`, plus `source:"client"` +
+  `version` so a stamped value is never mistaken for authoritative engine truth. Validated by a
+  truncation-invariance + shift-proof harness (`marketState.validate.mjs`, 48/48).
+- **Schema-driven config.** A new `CONFIG_REGISTRY` group `regime` (23 fields, all default off,
+  tier `instant_filter`); `configTranslator.buildRegimeConfig` emits `regime_*` **only when
+  enabled** → existing runs are byte-identical. Builder defaults come from
+  `defaultsForGroup("regime")` (single source of truth — no duplicate config object).
+- **UI placement.** Market State panel in **Strategy Builder V2** (Section 4) + per-trade snapshot
+  card in **TradeInspector**; presentation-only (all math in `marketState.js`).
+
+**Why:** the regime gate is the most robust filter found in research (generalised EURUSD→GBPUSD,
+cut drawdown), but lived only in offline research — this makes it configurable, visualisable, and
+per-trade inspectable without forking analytics or changing any existing run.
+**Consequence:** additive frontend, byte-identical when disabled. **Deferred (separate phases):**
+Master Controls instant-filter lens (P2), Lux engine emission `src/regime.py` + per-trade columns
+(P3), backend filter mode (P4, a real strategy change), scenario sweep (P5). Chart/overlay work on
+StrategyMap/CandleChart is **explicitly not started**. **Evidence:** `9856023`;
+`ui_market_state_audit.md`, `market_state_config_design.md`, `backend_market_state_design.md`,
+`strategy_map_overlay_design.md`, `implementation_plan.md`.
+**Caution:** `pages/StrategyBuilderV2.jsx` is untracked (session-first stream) — the Phase-1 edit
+there co-mingles and can't be committed in isolation until that stream commits the file.
+
+### D-016 · Same-candle limit-fill exit ordering fix (TV↔Python baseline parity)
+**Status: COMPLETE + COMMITTED** — Lux-OB-Backtester `main`, commit `df64197`
+(`fix(execution): respect limit fill ordering on same-candle exits`). Baseline parity only.
+
+**Bug:** for limit entries the Python backend resolved the exit on the *fill candle* using that
+candle's **full** high/low, so a take-profit could be booked off a candle extreme that occurred
+**before the order filled**. A long limit fills on the down-leg, so the candle high can be
+pre-fill; a short fills on the up-leg, so the candle low can be pre-fill.
+
+**Proven by** (forensic audits, `_audit_ob24_baseline_parity/`): **OB24 / L_24** (long — Python
+WIN, TV LOSS; fill at 18:39 after the pre-fill high, real stop at 18:42) and **OB108 / S_108**
+(short — same mechanism; true TV match is a LOSS).
+
+**Fix:** new `_fill_candle_exit_outcome()` in `src/execution.py`, called at the two fill-candle
+exit sites only. It books a same-candle **TP** only when provably post-fill — the candle
+gap-filled at the open (whole candle post-fill) or the **close** confirms the target; otherwise
+the trade stays active and resolves on later candles via the unchanged `_exit_outcome`. The
+**stop** branch is unchanged — same-candle stops lie on the fill leg and remain valid (legit
+same-candle losses preserved). Active-loop (subsequent-candle) exits unchanged. Tests:
+`tests/test_same_candle_fill_ordering.py` (19/19); existing execution/BE/TE suite green.
+
+**Result (baseline rerun, same Dukascopy OBs+candles, 108 filled):**
+**39W / 69L · +48R → 37W / 71L · +40R**; **exactly 2 trades changed** (L_24, S_108 WIN→LOSS),
+trade count unchanged at 108, the 8 legitimate same-candle losses untouched. **TV matched-pair
+outcome disagreements 3 → 1.**
+
+**Remaining mismatch = L_41 (OB41)** — a **feed/data difference**, NOT this bug (replaying TV's
+own levels on the Dukascopy feed still yields LOSS; TV's exit price is absent from the Dukascopy
+feed). Left as-is.
+
+**Scope guards:** Dukascopy remains the **default** feed; **no Pine changes**; OB detection /
+mitigation / session / news / triggered-edge / risk / BE-protection logic untouched.
+**FOREX.com candle parity is blocked** by TradingView's ~20k/40k bar export limits (cannot
+export the full 9-month 1-minute window), so the same-source rerun is deferred. **Triggered
+Edge has not been audited for this bug yet** (the fix is general to limit fills, but TE parity
+is out of scope until separately audited). **Evidence:** `df64197`; `same_candle_fix_summary.md`,
+`before_vs_after_same_candle_fix.csv`, `updated_trade_comparison_vs_tv.csv`.
 
 ### D-015 · Research Cockpit is a read-only command centre that selects over existing analytics
 A new page at **`/cockpit`** (distinct from `/insights`, which is the saved-findings library) sits
