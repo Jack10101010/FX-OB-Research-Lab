@@ -56,6 +56,42 @@ partial pipeline) · **Investigating** · **Deprecated**.
 - **Status:** Validated (deprioritized)
 - **Date:** 2026-06-07
 
+### F-006 — Per-trade winner/loser separation does not survive leakage removal (Failure Lab exhausted)
+- **Summary:** Extensive per-trade feature mining in the Failure Lab found **no robust pre-trade
+  signal that separates winners from losers** once look-ahead is removed. Features that looked
+  predictive were either post-fill (excursion / run-up measured after entry) or cycle-specific.
+  The conclusion: the marginal return on mining more per-trade entry features is **exhausted** —
+  the leverage is not "which individual trade wins" but "which cohorts/regimes to deploy into."
+- **Evidence:** Failure Lab V4/V5 programme (confirmed-false-losers, loser run-up, distance-at-arm,
+  fill-state, MFE/MAE-by-dimension). Post-stop continuation is a *peak*, not a pre-trade predictor.
+- **Status:** Validated (research programme closed — do not reopen without new instrumentation).
+- **Date:** 2026-07-01
+
+### F-007 — Market Story / SMC feature families are flat (AUC ≈ 0.50), EUR + GBP
+- **Summary:** The Market Story Engine tested all five smart-money-concept feature families —
+  Near-Miss / Spent-OB, HTF Alignment, Premium/Discount, FVG/Displacement, and Liquidity Grab —
+  as pre-trade winner/loser discriminators. **All came in flat (AUC ≈ 0.50)** across both EURUSD
+  and GBPUSD. No SMC narrative feature adds tradeable pre-trade edge on this OB strategy.
+- **Evidence:** `outputs/research/market_story_engine/**` (story_builder, htf/fvg/liquidity builders,
+  near_miss_analysis, phase3_analyze, validate_*_features).
+- **Status:** Validated (research programme closed).
+- **Date:** 2026-07-01
+
+### F-008 — The durable edge is regime/cohort selection + allocation, not per-trade features
+- **Summary:** The one filter that generalised (EURUSD → GBPUSD) and cut drawdown across 65/65
+  triggered scenarios is the **Market State / Regime Gate** (daily 200-EMA direction + Bollinger-
+  width volatility + ADX chop) — a *regime/allocation-level* signal, not a per-trade feature. In
+  portfolio-selection research, **equal weighting beat dynamic weighting** and a balanced portfolio
+  is the preferred deployment; Risk Management Phase 1B characterised the managed cohorts but found
+  partial closes not worth implementing. Together these point the strategy from *edge discovery* to
+  *edge deployment*: cohort selection, market-state gating, allocation, and execution discipline.
+- **Evidence:** `eurusd_regime_gate`, `eurusd_extended_gate_validation`, `gbpusd_generalisation`,
+  `eurusd_market_state_engine/market_state_engine_manual.md`; Portfolio Selection Research;
+  Risk Management Phase 1B.
+- **Status:** Validated — the basis for the 2026-07-01 Portfolio/Deployment pivot (see `ROADMAP.md`,
+  `DECISIONS.md` D-018).
+- **Date:** 2026-07-01
+
 ---
 
 ## Deprecated Findings

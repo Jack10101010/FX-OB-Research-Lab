@@ -10,9 +10,35 @@ Append-only. Newest at top. Each entry: what we decided, why, and the consequenc
 
 ---
 
+### D-018 · Pivot from per-trade feature mining to portfolio selection & deployment
+**Status: ADOPTED 2026-07-01.** The strategic direction shifts from *finding a per-trade
+winner/loser filter* to *building the deployment layer over the completed research.*
+
+**What we decided:** treat per-trade feature mining as **exhausted** and make the **Portfolio /
+Deployment framework** the plan of record — sequenced Phase 1 Portfolio Manager → Phase 2 Cohort
+Intelligence → Phase 3 Edge Monitor → Phase 4 Decision Engine → Phase 5 Execution Layer
+(`ROADMAP.md`).
+
+**Why:** two large research programmes closed with negative results for per-trade prediction (see
+`FINDINGS.md` F-006 Failure Lab, F-007 Market Story Engine): after leakage removal there is **no
+robust pre-trade separator**, and all five SMC families come in flat (AUC ≈ 0.50) across EUR + GBP.
+Phase 1B showed partial closes add nothing. What *did* separate outcomes was **selection**
+(cohort, market-state), **allocation** (equal-weight beat dynamic weighting; balanced portfolio
+preferred), and **execution discipline** — none of which is a per-trade feature. Continuing to mine
+tiny effects risks overfitting; the higher-leverage work is deployment.
+
+**Consequence:** do **not** reopen completed Market-Story / SMC research or propose new per-trade
+SMC context unless it introduces information the engine has *never had before*. New build effort
+goes to the deployment framework, **extending existing seeds** (Edge Attribution / Run Intelligence
+→ Cohort Intelligence; session-first / portfolio-compare → Portfolio Manager) rather than parallel
+systems (AGENTS Existing Explorer Protection). Market State / Regime Gate remains in flight (its
+backend port, D-017) because it is a *selection* input, consistent with this pivot.
+
 ### D-017 · Market State / Regime Gate is a client-side, leakage-safe, off-by-default feature promoted from research
-**Status: Phase 0 COMMITTED** (`codex-dev` `9856023` `feat(regime): add client market state
-foundation`); **Phase 1 UI BUILT, not committed.**
+**Status: CLIENT COMPLETE + COMMITTED** — Phase 0 `9856023`, Phase 1 UI `03c0bc9` (inspector) +
+`fae2135` (Strategy Builder V2 + MS gate), **Phase 2 Strategy Map overlays `e6e9fbb`**. Backend:
+**Lux Phase 3a COMPLETE** (`f6740c6`, config accepts `regime_*`, no behaviour change); **Phase 3b
+`src/regime.py` NOT started** (backend computation not begun).
 
 The EMA200 / Bollinger-width / ADX regime gate — validated only in Lux-OB-Backtester **research
 code** (`outputs/research/eurusd_regime_gate`, `eurusd_market_state_engine`,
@@ -37,14 +63,22 @@ leakage-audited, off-by-default** feature. **Decided shape:**
 **Why:** the regime gate is the most robust filter found in research (generalised EURUSD→GBPUSD,
 cut drawdown), but lived only in offline research — this makes it configurable, visualisable, and
 per-trade inspectable without forking analytics or changing any existing run.
-**Consequence:** additive frontend, byte-identical when disabled. **Deferred (separate phases):**
-Master Controls instant-filter lens (P2), Lux engine emission `src/regime.py` + per-trade columns
-(P3), backend filter mode (P4, a real strategy change), scenario sweep (P5). Chart/overlay work on
-StrategyMap/CandleChart is **explicitly not started**. **Evidence:** `9856023`;
-`ui_market_state_audit.md`, `market_state_config_design.md`, `backend_market_state_design.md`,
-`strategy_map_overlay_design.md`, `implementation_plan.md`.
-**Caution:** `pages/StrategyBuilderV2.jsx` is untracked (session-first stream) — the Phase-1 edit
-there co-mingles and can't be committed in isolation until that stream commits the file.
+**Consequence:** additive frontend, byte-identical when disabled. **Phase 2 overlays now shipped**
+(`e6e9fbb`): pure `ribbonSegmentsFromPanel`/`emaLinePointsFromPanel` derivation (read the built
+panel; never recompute EMA/BBW/ADX), new `executionMarkers.js` (audit-only entry/exit price marks),
+a frozen parity fixture `marketState.fixture.json`, and default-off ribbon/EMA/execution toggles in
+`StrategyMap.jsx`/`CandleChart.jsx`; validators `marketState.validate.mjs` 70/70 +
+`executionMarkers.validate.mjs` 30/30, Babel OK; runs byte-identical when toggles off.
+**Backend port (Phase 3b) is the next step:** canonical Python `src/regime.py` in Lux-OB-Backtester
+mirroring the JS engine exactly, reusing the frozen fixture, byte-for-byte JS↔Python parity,
+**compute only** — no filtering, no execution change, no `regime_*` trade columns yet. **Deferred
+(later phases):** per-trade regime columns (P3c), backend filter mode (P4, a real strategy change),
+scenario sweep (P5), Master Controls instant-filter lens (parallel P2). **Evidence:** `9856023`,
+`03c0bc9`, `fae2135`, `e6e9fbb`, Lux `f6740c6`; `ui_market_state_audit.md`,
+`market_state_config_design.md`, `backend_market_state_design.md`, `strategy_map_overlay_design.md`,
+`strategy_map_market_state_overlay_notes.md`, `regime_spec.md`, `implementation_plan.md`.
+**Rule:** the JS engine + frozen fixture are the **source of truth** for the Python port — if the two
+sides differ, stop and investigate rather than "fixing" one side.
 
 ### D-016 · Same-candle limit-fill exit ordering fix (TV↔Python baseline parity)
 **Status: COMPLETE + COMMITTED** — Lux-OB-Backtester `main`, commit `df64197`

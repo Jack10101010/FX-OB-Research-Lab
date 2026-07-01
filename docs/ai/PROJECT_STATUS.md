@@ -4,16 +4,19 @@
 > git-coordination doc (dirty files, commits ahead). This one is the product/research
 > state. Verify against live git before trusting it.
 
-*Last updated: 2026-07-01 (synced after Market State / Regime Gate Phase 0 commit + Phase 1 build).*
+*Last updated: 2026-07-01 (synced after Market State overlays `e6e9fbb` + Portfolio/Deployment pivot).*
 
-> **⚠ Git reality (2026-07-01, authoritative):** `codex-dev` HEAD is `9856023`
-> (`feat(regime): add client market state foundation`), **1 commit ahead of `origin/codex-dev`**
-> (unpushed; push gated). Recent real history: `20d31ae` import-UX + chronological trade
-> numbering, `d729223` fair baseline comparison, `1b7cb82` session-first scenario compiler,
-> `b2c7cd6` timing & regime lab foundation. **The "shipped/pushed to `origin` at `96fc733`",
-> "15 commits ahead at `fe71537`", and Research-Cockpit / Failures-Lab-V5 focus described below
-> are STALE** — those commits are not in the current git history. Treat the sections below as
-> unverified history until each owning stream re-syncs.
+> **⚠ Git reality (2026-07-01, authoritative):**
+> - **FX-OB-Research-Lab** `codex-dev` HEAD = **`e6e9fbb`** (`feat(strategy-map): execution
+>   markers and Market State overlays`), **5 commits ahead of `origin/codex-dev`** (`20d31ae`,
+>   fetched 2026-06-26); **not pushed** (push gated). Unpushed range: `9856023` (client MS
+>   foundation) → `f86621e` (doc sync) → `03c0bc9` (MS inspector UI) → `fae2135` (Strategy Builder
+>   V2 + MS gate) → `e6e9fbb` (Strategy Map overlays).
+> - **Lux-OB-Backtester** `main` HEAD = **`f6740c6`** (`feat(config): accept regime_* keys (Phase
+>   3a, no behaviour change)`) per handoff. Phase 3b (`src/regime.py`) not started.
+> - **STALE below:** any "pushed at `96fc733`" / "15 commits ahead at `fe71537`" / Research-Cockpit
+>   / Failures-Lab-V5-as-current-focus wording is history only — those commits are not in current
+>   git history. Retained for provenance; do not trust for current state.
 
 ## Project
 
@@ -21,17 +24,39 @@
 trading behavior via large-scale backtests. Backend: `Lux-OB-Backtester` (Python).
 Branch: `codex-dev`. Theme: dark "neon lab" (do not change without request).
 
+## Strategic direction (2026-07-01 — the pivot)
+
+**The project has pivoted from per-trade feature mining to portfolio selection and deployment.**
+Two large research programmes are now **complete and treated as exhausted**: the **Failure Lab**
+(after leakage removal, no robust pre-trade winner/loser separator survives) and the **Market Story
+Engine** (all five SMC families — Near-Miss/Spent-OB, HTF Alignment, Premium/Discount,
+FVG/Displacement, Liquidity Grab — came in flat, AUC ≈ 0.50, across EUR and GBP). See `FINDINGS.md`
+F-006 / F-007. Phase 1B risk management is also complete (managed cohorts characterised; partial
+closes not worth implementing). The demonstrated edge is in **cohort selection, market-state
+selection, allocation, and execution discipline** — equal weighting beat dynamic weighting, and a
+balanced portfolio is the preferred deployment. The active strategic programme is therefore the
+**Portfolio / Deployment framework** (`ROADMAP.md`: Phase 1 Portfolio Manager → Phase 5 Execution
+Layer). Do **not** reopen completed Market-Story research unless genuinely new engine information
+appears.
+
 ## Current major workstream
 
-**Market State / Regime Gate (2026-07-01).** Promoting the validated EMA200 / Bollinger-width /
-ADX regime engine out of research code into the app. **Phase 0 foundation committed** (`9856023`)
-— pure `data/marketState.js` (leakage-safe, golden-parity-exact vs `rich_features.pkl` over
-2015→2026: state 3566/3566), `regime` registry group (off by default), `buildRegimeConfig`
-(byte-identical when disabled). **Phase 1 UI built (uncommitted)** — registry-driven Market State
-section in Strategy Builder V2 + per-trade snapshot card in TradeInspector; presentation-only.
-Deferred: Phase 2 Master Controls filter lens, Phase 3+ engine emission/filter/sweep. See
-`CURRENT_WORKSTREAM.md`, `WORKSTREAMS.md`, and `DECISIONS.md` D-017. *(The Failures-Lab-V5 text
-below is retained history and is stale vs current git — see the git-reality note above.)*
+**Market State / Regime Gate — client COMPLETE, backend port next.** The validated EMA200 /
+Bollinger-width / ADX regime engine has been promoted out of research code into the app end-to-end
+on the client:
+- **Phase 0 foundation committed** (`9856023`) — pure `data/marketState.js` (leakage-safe,
+  golden-parity-exact vs `rich_features.pkl`: state 3566/3566), `regime` registry group (off by
+  default), `buildRegimeConfig` (byte-identical when disabled).
+- **Phase 1 UI committed** (`03c0bc9` inspector UI, `fae2135` Strategy Builder V2 + MS gate) —
+  Market State section in Strategy Builder V2 + per-trade snapshot in TradeInspector.
+- **Phase 2 Strategy Map overlays committed** (`e6e9fbb`) — ribbon + EMA-200 line + audit execution
+  markers, all default-off; frozen parity fixture; validators 70/70 + 30/30 green.
+- **Backend:** Lux Phase 3a done (`f6740c6`, config accepts `regime_*`, no behaviour change).
+  **Phase 3b — canonical `src/regime.py` — NOT started; backend computation has not begun.**
+
+See `CURRENT_WORKSTREAM.md`, `WORKSTREAMS.md`, `ROADMAP.md`, and `DECISIONS.md` D-017.
+*(The Failures-Lab-V5 / Research-Cockpit text below is retained history and is stale vs current
+git — see the git-reality note above.)*
 
 **Failures Lab V5 — decision layer.** V4 cleanup + V5 Phase 1 (Filter Discovery) shipped.
 V5 Phase 2 (confirmed false losers) + Phase 2B (Overview IA) **live end-to-end (verified 2026-06-12)** —

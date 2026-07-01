@@ -6,7 +6,13 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` todo. Render with `/roadmap`.
 > to, in order. `BACKLOG.md` is the **unscheduled queue**. An item lives primarily in one place;
 > `/promote` moves it backlog → roadmap when it's picked up.
 
-*Last updated: 2026-06-10.*
+*Last updated: 2026-07-01 (Market State phases + Portfolio/Deployment framework added; research programmes closed).*
+
+> **Where we are (2026-07-01):** per-trade research (Fill-state, Research Signals, Distance,
+> Failures Lab, Market Story Engine) is **complete/exhausted**. The Market State engine is fully
+> ported to the client and its backend port is in progress. The **plan of record is now the
+> Portfolio / Deployment framework** (bottom of this file). Earlier per-trade phases are retained
+> below as completed history.
 
 ## Phase 1 — Fill-state foundation  `[x]`
 
@@ -36,11 +42,11 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` todo. Render with `/roadmap`.
 - [ ] Optional: confidence chips on the existing Signal Cards
 - [ ] (2b) `sumR2` in accumulators → true effect-SE confidence
 
-## Phase 3 — Distance  `[ ]`
+## Phase 3 — Distance  `[x]` *(shipped `449dc58`, D-014)*
 
-- [ ] Importer mapping for `price_distance_from_ob_at_arm_pips`
-- [ ] Distance breakdown section (0–2 / 2–5 / 5–10 / 10+ pips)
-- [ ] Confirm/derive "Outside" session availability for danger surfacing
+- [x] Importer mapping for `price_distance_from_ob_at_arm_pips`
+- [x] Distance breakdown section (occupied=0 / edge / 2–5 / 5–10 / 10+ pips, TE-only gated)
+- [ ] Confirm/derive "Outside" session availability for danger surfacing *(carried to BACKLOG)*
 
 ## Phase 4 — Comparison & library  `[~]`
 
@@ -50,7 +56,7 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` todo. Render with `/roadmap`.
 - [ ] Model Family Comparison (full: cross-run, per-variant equity/Sharpe, variant→signal) — deferred
 - [ ] Save findings / research library (persist + revisit named findings)
 
-## Failures Lab V4  `[~]` *(current focus — final cleanup, then pause)*
+## Failures Lab V4  `[x]` *(complete + committed; paused — research interpretation only)*
 
 - [x] Overview command center · shared aggregation engine (`failuresAggregation.js`)
 - [x] Failure Explorer (3 scopes, 2-dim cap, refine-by-dimension, persisted prefs)
@@ -58,9 +64,58 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` todo. Render with `/roadmap`.
       (cumulative + exclusive, upper-bound framing) · winner MAE stop pressure · MAE/MFE by
       dimension · penetration dimension · distance insights
 - [x] Verdict action engine (`bucketRowAction`) + validation
-- [~] Final integration cleanup — tab wiring · roadmap deps · MFE/MAE alias detection ·
-      text-diffable separator · verdict chip UI *(implemented; commit pending)*
+- [x] Final integration cleanup — tab wiring · roadmap deps · MFE/MAE alias detection ·
+      text-diffable separator · verdict chip UI
 - [ ] Future (post-pause): BE replay backtest · winner-cost modelling (see `roadmapStore` seeds)
+
+## Research programmes — CLOSED (exhausted)  `[x]`
+
+- [x] **Failure Lab** — after leakage removal, no robust pre-trade winner/loser separator survives
+      (F-006). Multiple apparent discoveries proven to be leakage and removed.
+- [x] **Market Story Engine** — all five SMC families (Near-Miss/Spent-OB · HTF Alignment ·
+      Premium/Discount · FVG/Displacement · Liquidity Grab) implemented as leakage-safe read-only
+      builders and analysed; all flat (AUC ≈ 0.50) across EUR + GBP (F-007). Per-trade SMC context
+      is exhausted; do not reopen without genuinely new engine information.
+- [x] **Phase 1B risk management** — managed cohorts characterised (NY BOS Short RR3 BE@1R strongest;
+      Asia BOS Short unmanaged RR2; London salvage/unmanaged). Partial closes reconstructed
+      mathematically → no meaningful improvement; not worth implementing.
+- [x] **Selection pivot** — edge is in cohort/market-state selection, allocation, and execution
+      discipline; equal weighting beat dynamic weighting; balanced portfolio is preferred deployment.
+
+## Market State / Regime Gate  `[~]` *(client complete; backend port in progress)*
+
+- [x] **Phase 0** — client engine `data/marketState.js` (EMA200 / BBW / Wilder-ADX + 6-state
+      classifier, leakage-safe `.shift(1)`), `regime` registry group, `buildRegimeConfig`
+      (byte-identical when off). Golden parity vs `rich_features.pkl` exact (3566/3566). `9856023`.
+- [x] **Phase 1** — UI exposure: Strategy Builder V2 Market State section + TradeInspector snapshot.
+      `03c0bc9`, `fae2135`.
+- [x] **Phase 2** — Strategy Map overlays: market-state ribbon + EMA-200 line + audit execution
+      markers (all default-off) + frozen parity fixture. `e6e9fbb`. Validators 70/70 + 30/30.
+- [x] **Lux Phase 3a** — backtester config accepts `regime_*` keys, no behaviour change. Lux `main`
+      `f6740c6`.
+- [~] **Lux Phase 3b** — canonical Python engine `src/regime.py` (mirror JS exactly, reuse frozen
+      fixture, JS↔Python byte parity, **compute only** — no filter, no execution change, no trade
+      columns). ⚠ blocked on Lux-OB-Backtester repo access in the Cowork session.
+- [ ] **Phase 3c** — per-trade regime columns emitted from the engine (still no filtering).
+- [ ] **Phase 4** — backend regime filter mode (first real strategy change; opt-in).
+- [ ] **Phase 5** — scenario sweep over regime gates. Plus (parallel) P2 Master Controls filter lens.
+
+## Portfolio / Deployment Framework  `[ ]` *(PLAN OF RECORD — active strategic direction)*
+
+> Rationale: per-trade filtering is exhausted (above). The measured edge lives in **selection,
+> allocation, and execution discipline**, so the product now builds the **deployment layer** on top
+> of the completed research. See `DECISIONS.md` D-018. Extend existing seeds (Edge Attribution;
+> session-first/portfolio compare) rather than building parallel systems.
+
+- [ ] **Phase 1 — Portfolio Manager** — cohort selection + allocation (equal-weight baseline;
+      balanced portfolio as preferred deployment). Seed: session-first / portfolio-compare layer.
+- [ ] **Phase 2 — Cohort Intelligence** — per-cohort edge/worth-trading intelligence + stability.
+      Seed: Edge Attribution / Run Intelligence (`edgeAttribution.js`).
+- [ ] **Phase 3 — Edge Monitor** — track live/ongoing edge health vs research expectation; drift/decay.
+- [ ] **Phase 4 — Decision Engine** — turn cohort + market-state + monitor signals into allocation /
+      enable-disable decisions.
+- [ ] **Phase 5 — Execution Layer** — deployment/execution discipline surface (orders remain
+      user-executed; no autonomous trading).
 
 ## Backlog candidates (not scheduled)
 

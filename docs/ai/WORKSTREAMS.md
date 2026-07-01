@@ -7,27 +7,55 @@
 
 *Last updated: 2026-07-01.*
 
-## Market State / Regime Gate  (active — Phase 0 committed, Phase 1 built)
+## Market State / Regime Gate  (client COMPLETE; backend Phase 3b next)
 
-- **Status:** **Phase 0 committed** (`9856023`); **Phase 1 UI built, uncommitted.** Promotes the
-  EMA200 / Bollinger-width / ADX regime engine from research into the app — off by default,
-  additive, byte-identical when disabled. Golden parity vs `rich_features.pkl` exact (state
-  3566/3566). See `DECISIONS.md` D-017 and `CURRENT_WORKSTREAM.md`.
-- **Lead:** Claude (design / research port / frontend).
-- **Owns:** `frontend/src/data/marketState.js`, `frontend/src/data/useMarketState.js`,
-  `frontend/src/data/__validation__/marketState.validate.mjs`,
-  `frontend/src/components/lab/marketState/*` (`MarketStateControls.jsx`, `MarketStateCard.jsx`),
-  the `regime` group in `data/configRegistry.js` + `buildRegimeConfig`/`mapRegimeTimeframe` in
-  `data/configTranslator.js`, `MARKET_STATE_COLORS` in `lib/chartStyles.js`. Design refs (repo
-  root): `ui_market_state_audit.md`, `market_state_config_design.md`, `backend_market_state_design.md`,
-  `strategy_map_overlay_design.md`, `implementation_plan.md`.
-- **Shared/caution:** `pages/StrategyBuilderV2.jsx` (**untracked**, owned by the session-first
-  stream — Phase-1 edit co-mingles; can't be staged in isolation until that stream commits it),
-  `pages/TradeInspector.jsx` (regime snapshot card — coordinate with any inspector work).
-- **Explicitly NOT touched:** `pages/StrategyMap.jsx`, `components/lab/CandleChart.jsx` — chart /
-  overlay work is deferred to a later phase.
-- **Next (deferred, on approval):** P2 Master Controls instant-filter lens (`tradeFilter.js`),
-  P3 Lux engine emission (`src/regime.py` + per-trade columns), P4 backend filter, P5 sweep.
+- **Status:** **Client complete & committed** — Phase 0 foundation (`9856023`), Phase 1 UI
+  (`03c0bc9` inspector, `fae2135` Strategy Builder V2 + MS gate), **Phase 2 Strategy Map overlays
+  (`e6e9fbb`)**. Off by default, additive, byte-identical when disabled. Golden parity vs
+  `rich_features.pkl` exact (state 3566/3566). **Backend:** Lux Phase 3a done (`f6740c6`, config
+  accepts `regime_*`, no behaviour change); **Phase 3b (`src/regime.py`) NOT started.** See
+  `DECISIONS.md` D-017 and `CURRENT_WORKSTREAM.md`.
+- **Lead:** Claude (design / research port / frontend + Python engine port).
+- **Owns (frontend):** `frontend/src/data/marketState.js`, `frontend/src/data/useMarketState.js`,
+  `frontend/src/data/executionMarkers.js`, `frontend/src/data/__validation__/marketState.validate.mjs`,
+  `frontend/src/data/__validation__/executionMarkers.validate.mjs`,
+  `frontend/src/data/__fixtures__/marketState.fixture.json` (frozen parity fixture),
+  `frontend/src/components/lab/marketState/*`, the `regime` group in `data/configRegistry.js` +
+  `buildRegimeConfig`/`mapRegimeTimeframe` in `data/configTranslator.js`, `MARKET_STATE_COLORS` /
+  `marketStateColor` in `lib/chartStyles.js`, and the Market-State overlay/execution-marker hunks of
+  `pages/StrategyMap.jsx` + `components/lab/CandleChart.jsx`. Design refs (repo root):
+  `ui_market_state_audit.md`, `market_state_config_design.md`, `backend_market_state_design.md`,
+  `strategy_map_overlay_design.md`, `strategy_map_market_state_overlay_notes.md`, `regime_spec.md`,
+  `implementation_plan.md`.
+- **Owns (backend, Phase 3b, pending repo access):** Lux-OB-Backtester `src/regime.py` + its parity
+  tests. **Source of truth = the JS engine + frozen fixture above.** Compute only — no filtering, no
+  execution change, no `regime_*` trade columns yet.
+- **Shared/caution:** `pages/TradeInspector.jsx` (regime snapshot card). `StrategyMap.jsx` /
+  `CandleChart.jsx` are AGENTS hotspots co-owned with the Strategy Map stream — overlay hunks only.
+- **⚠ Blocker (Phase 3b):** **Lux-OB-Backtester is not mounted in the current Cowork session.**
+  Creating/committing `src/regime.py` requires that repo to be connected.
+- **Next:** P3b canonical `src/regime.py` (compute-only, JS↔Python parity). Then (deferred) P3c
+  per-trade regime columns, P4 backend filter mode, P5 scenario sweep, P2 Master Controls filter lens.
+
+## Portfolio / Deployment Framework  (ACTIVE STRATEGIC DIRECTION — not yet started)
+
+- **Status:** **Newly canonical strategic programme** (see `ROADMAP.md` + `DECISIONS.md` D-018).
+  Replaces per-trade feature mining, which is exhausted (F-006/F-007). Five sequenced phases:
+  **P1 Portfolio Manager · P2 Cohort Intelligence · P3 Edge Monitor · P4 Decision Engine ·
+  P5 Execution Layer.** No phase implemented yet; Market State backend Phase 3b lands first.
+- **Lead:** Claude (design/architecture) + Codex (data/test).
+- **Existing seeds to EXTEND (do not build parallel systems):** the untracked **Edge Attribution /
+  Run Intelligence** layer (`frontend/src/data/edgeAttribution.js`, `components/lab/EdgeAttributionTab.jsx`,
+  `edgeAttribution.validate.mjs`) already computes per-cohort "worth trading" labels/flags — a natural
+  **Cohort Intelligence (P2)** seed. The **session-first / portfolio compare** layer
+  (`portfolioCompare`/`targetRescore`/`payloadWiring` validators, `sessionStrategy*`) is a **Portfolio
+  Manager (P1)** seed. Prefer additive enhancement of these over replacement (AGENTS Existing Explorer
+  Protection).
+- **Owns:** TBD as phases are scoped. Design refs (repo root): `EDGE-ATTRIBUTION-*.md`,
+  `_research/plans/LIVE-TRADING-CONTROL-TOWER-ARCHITECTURE-AUDIT.md`.
+- **Note:** Edge Attribution + session-first/portfolio validators are currently **untracked dirty
+  work** owned by their originating streams; register + commit them under their own scoped commits
+  before folding into this programme.
 
 ## Failures Lab V4  (committed; paused)
 

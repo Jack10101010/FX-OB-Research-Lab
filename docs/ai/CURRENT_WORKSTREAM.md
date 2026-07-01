@@ -2,41 +2,49 @@
 
 > The single active focus. Update this first when focus changes. Source for `/status`.
 
-*Last updated: 2026-07-01.*
+*Last updated: 2026-07-01 (post-`e6e9fbb` overlay commit + doc-reality sync).*
 
-## Focus (2026-07-01 — Market State / Regime Gate)
+## Focus (2026-07-01 — Market State backend port + Portfolio/Deployment pivot)
 
-**Active focus: Market State / Regime Gate — exposing the EMA / Bollinger-width / ADX
-regime engine through the app.** Off by default; additive; no production behaviour change
-when disabled.
+**Strategic direction has shifted.** Per-trade feature mining is considered **exhausted**
+(Failure Lab + Market Story Engine — see `FINDINGS.md` F-006/F-007). The active strategic
+programme is now the **Portfolio / Deployment framework** (Phase 1 Portfolio Manager → Phase 5
+Execution Layer — see `ROADMAP.md`). The **Market State / Regime Gate** client work is
+**complete and committed**; the immediate build task is porting the engine to canonical Python.
 
-- **Phase 0 — foundation: COMMITTED** (`9856023` `feat(regime): add client market state
-  foundation`). New pure `frontend/src/data/marketState.js` (leakage-safe daily EMA200 /
-  BBW / Wilder-ADX + 6-state classifier, `.shift(1)`), a `regime` `CONFIG_REGISTRY` group
-  (23 fields, all default off, tier `instant_filter`), `configTranslator.buildRegimeConfig`
-  (emits `regime_*` only when enabled → byte-identical when off), `MARKET_STATE_COLORS`, and
-  `marketState.validate.mjs`. **Golden parity vs the validated research panel
-  (`eurusd_richer_regime_gates/rich_features.pkl`) is exact over 2015→2026: Δpx≈2e-13,
-  Δbbw≈1e-10, Δadx≈4e-14, state 3566/3566.** See `DECISIONS.md` D-017.
-- **Phase 1 — UI exposure: BUILT, NOT COMMITTED.** New `data/useMarketState.js` (memo hooks),
-  `components/lab/marketState/MarketStateControls.jsx` (registry-driven Strategy Builder
-  section) + `MarketStateCard.jsx` (per-trade snapshot), `configRegistry.defaultsForGroup`.
-  Wired into **Strategy Builder V2** (new "Market State" Section 4) and **TradeInspector**
-  (Overview card). Presentation-only; all math stays in `marketState.js`. Validated:
-  byte-identical-when-off, lossless persistence, 48/48 unit, Babel 8/8, SSR smoke.
-- **Blocker / caution:** `frontend/src/pages/StrategyBuilderV2.jsx` is **untracked** (owned by
-  the in-flight session-first stream) — the Phase-1 edit there co-mingles and cannot be
-  committed as an isolated regime hunk until that stream commits the file. `configRegistry.js`
-  and `TradeInspector.jsx` are cleanly scoped to this stream.
-- **Next (deferred, on approval):** Phase 2 Master Controls instant-filter lens; Phase 3
-  engine emission (Lux `src/regime.py`); Phase 4 backend filter; Phase 5 scenario sweep.
-  **No chart/overlay work yet** (StrategyMap/CandleChart untouched by design).
+**Client / frontend Market State — COMPLETE (committed).**
+- **Phase 0 foundation** (`9856023`) — pure `frontend/src/data/marketState.js` (leakage-safe daily
+  EMA200 / BBW / Wilder-ADX + 6-state classifier, `.shift(1)`), `regime` `CONFIG_REGISTRY` group
+  (default off, tier `instant_filter`), `buildRegimeConfig` (byte-identical when off),
+  `MARKET_STATE_COLORS`, `marketState.validate.mjs`. Golden parity vs `rich_features.pkl` exact
+  over 2015→2026 (state 3566/3566). See D-017.
+- **Phase 1 UI exposure** (`03c0bc9` inspector UI; `fae2135` Strategy Builder V2 + market-state
+  gate) — `useMarketState.js`, `MarketStateControls.jsx`, `MarketStateCard.jsx`; wired into
+  Strategy Builder V2 (Section 4) + TradeInspector. Presentation-only.
+- **Phase 2 Strategy Map overlays — COMPLETE** (`e6e9fbb` `feat(strategy-map): execution markers
+  and Market State overlays`). `ribbonSegmentsFromPanel` / `emaLinePointsFromPanel` overlay
+  helpers in `marketState.js`, new `executionMarkers.js`, frozen parity fixture
+  `marketState.fixture.json`, ribbon + EMA-200 line + audit execution markers in
+  `StrategyMap.jsx` / `CandleChart.jsx`. All overlays default-off; runs byte-identical when off.
+  Validators: `marketState.validate.mjs` 70/70, `executionMarkers.validate.mjs` 30/30, Babel OK.
 
-> **⚠ Git reality (2026-07-01):** `codex-dev` HEAD is `9856023`, **1 commit ahead of
-> `origin/codex-dev`** (Phase 0 unpushed; push gated). The "15 commits ahead at `fe71537` /
-> Research Cockpit" wording in the older blocks below is **stale and unverified against git** —
-> none of those commits exist in the current history. The blocks below are retained as history
-> but should not be trusted for current state; they need their own owning-stream sync.
+**Backend Market State — Lux Phase 3a COMPLETE, Phase 3b NOT STARTED.**
+- **Phase 3a** (Lux-OB-Backtester `main` `f6740c6` `feat(config): accept regime_* keys (Phase 3a,
+  no behaviour change)`) — the backtester config layer now *accepts* `regime_*` keys with zero
+  behavioural change (no computation, no filtering, no trade emission).
+- **Phase 3b — the next build task — is to create the canonical Python engine `src/regime.py`**
+  in Lux-OB-Backtester: mirror the validated JS formulas exactly, reuse the frozen parity fixture,
+  maintain byte-for-byte JS↔Python parity, **compute only** (no filtering, no execution change, no
+  regime fields emitted into trades yet). **Backend computation has NOT yet begun.**
+
+> **⚠ Git reality (2026-07-01, authoritative):**
+> - **FX-OB-Research-Lab** `codex-dev` HEAD = **`e6e9fbb`**, **5 commits ahead** of
+>   `origin/codex-dev` (`20d31ae`, fetched 2026-06-26); **not pushed** (push gated). Unpushed
+>   range: `9856023` → `f86621e` → `03c0bc9` → `fae2135` → `e6e9fbb`.
+> - **Lux-OB-Backtester** `main` HEAD = **`f6740c6`** (Phase 3a) per handoff; that repo is **not
+>   mounted in the current Cowork session** — Phase 3b work requires it to be connected.
+> - The "15 commits ahead at `fe71537` / Research Cockpit" wording in the older blocks below is
+>   **stale** — those commits are not in current history. Blocks below are retained as history only.
 
 ## Focus (2026-06-13 — needs confirmation)
 
