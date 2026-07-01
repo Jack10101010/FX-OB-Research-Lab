@@ -9,10 +9,11 @@
 **Strategic direction has shifted.** Per-trade feature mining is considered **exhausted**
 (Failure Lab + Market Story Engine — see `FINDINGS.md` F-006/F-007). The active strategic
 programme is now the **Portfolio / Deployment framework** (Phase 1 Portfolio Manager → Phase 5
-Execution Layer — see `ROADMAP.md`). The **Market State / Regime Gate** work is now **complete
-and committed on both sides** — client (frontend) and the canonical Python engine (Lux `3de2b2a`);
-the remaining regime work (Phase 3c per-trade emission → Phase 4 filter → Phase 5 sweep) is
-deferred. Next active build effort is the **Portfolio / Deployment framework**.
+Execution Layer — see `ROADMAP.md`). The **Market State / Regime Gate** is now committed through
+**engine-side label emission**: client (frontend), the canonical Python engine (Lux `3de2b2a`),
+and per-trade label emission (Lux `e935ce6`). **No filtering is committed** — Phase 4 (filter mode)
+is **in progress / uncommitted** in the Lux tree. Remaining regime work (Phase 4 filter → Phase 5
+sweep) is deferred; next active build effort is the **Portfolio / Deployment framework**.
 
 **Client / frontend Market State — COMPLETE (committed).**
 - **Phase 0 foundation** (`9856023`) — pure `frontend/src/data/marketState.js` (leakage-safe daily
@@ -30,30 +31,40 @@ deferred. Next active build effort is the **Portfolio / Deployment framework**.
   `StrategyMap.jsx` / `CandleChart.jsx`. All overlays default-off; runs byte-identical when off.
   Validators: `marketState.validate.mjs` 70/70, `executionMarkers.validate.mjs` 30/30, Babel OK.
 
-**Backend Market State — Lux Phase 3a + Phase 3b COMPLETE (committed).**
-- **Phase 3a** (Lux-OB-Backtester `main` `f6740c6` `feat(config): accept regime_* keys (Phase 3a,
-  no behaviour change)`) — the backtester config layer now *accepts* `regime_*` keys (defaults off:
-  `regime_gate_enabled=False`, `regime_gate_mode="label"`) with zero behavioural change.
-- **Phase 3b COMPLETE** (Lux-OB-Backtester `main` `3de2b2a` `feat(regime): add canonical
-  market-state engine`, 2026-07-01) — **canonical Python engine `src/regime.py`** (318 lines):
-  faithful compute-only port of the JS engine (`ewm_adjust_false`, BBW ddof=1, Wilder ADX,
-  shift-by-1 leakage guard, confirmation, `SOURCE="engine"`, `VERSION="regime-1.0.0"`; documents
-  but does **not** emit the Phase-3c `CANONICAL_COLUMNS`). Ships with the frozen fixture
-  `tests/regime/marketState.fixture.json` (**byte-identical to the frontend fixture — same
-  SHA256**) and `tests/test_regime_parity.py`. **Verified this session:** parity test 4/4 pass
-  (numeric ≤1e-9; exact state/knownAt/confirmed; determinism; truncation-invariance leakage proof);
-  `grep` confirms **nothing in `src/` imports `regime`** (compute-only). Was already committed
-  before this session — the earlier "Phase 3b not started" note here was stale handoff context.
-- **Untracked in Lux** (not part of 3de2b2a): `tests/regime/fixture_gen.py` (fixture generator —
-  worth tracking for reproducibility) and `tests/regime/regime_parity.py` (a **stale Phase-1
-  scaffold** superseded by the committed `tests/test_regime_parity.py`).
+**Backend Market State — Lux Phase 3a + 3b + 3c COMPLETE (committed); Phase 4 in progress.**
+- **Phase 3a** (Lux `main` `f6740c6`) — the backtester config layer *accepts* `regime_*` keys
+  (defaults off: `regime_gate_enabled=False`, `regime_gate_mode="label"`) with zero behaviour change.
+- **Phase 3b** (Lux `main` `3de2b2a` `feat(regime): add canonical market-state engine`) —
+  **canonical Python engine `src/regime.py`** (compute-only port of the JS engine: `ewm_adjust_false`,
+  BBW ddof=1, Wilder ADX, shift-by-1 leakage, confirmation, `SOURCE="engine"`,
+  `VERSION="regime-1.0.0"`) + frozen fixture `tests/regime/marketState.fixture.json` (byte-identical
+  to the frontend fixture, same SHA256) + `tests/test_regime_parity.py`. Parity 4/4.
+- **Phase 3c COMPLETE** (Lux `main` `e935ce6` `feat(execution): emit market-state columns in label
+  mode`) — **engine-side per-trade regime label emission**. `enrich_trades_with_market_state()` is
+  a no-op when regime is disabled; the canonical `REGIME_TRADE_COLUMNS` are appended to exported
+  trades **only** in enabled label mode (gated by `regime_gate_enabled` + `regime_gate_mode="label"`).
+  Panel built **once per run** (`regime_emit_for_run` → `daily_regime_panel` → `panel_by_date`),
+  attached by `fill_time` via `state_for_trade` (O(1); no per-trade candle scan). **Label-only —
+  NO filtering, no execution change; off/disabled runs stay byte-identical (config_hash unchanged
+  when disabled).** Emitted columns: `market_state, trend_state, volatility_state, chop_state,
+  ema_value, ema_relation, px_vs_ema, bbw_value, bbw_threshold, adx_value, state_confirmed,
+  state_known_at, shifted_days, source, version`. **Verified this session (isolated `git archive`
+  of `e935ce6`):** `test_regime_emission.py` + `test_regime_config.py` + `test_regime_parity.py`
+  = **20/20** (off vs label identical + extra cols only; `state_known_at ≤ fill_time`; null-safe).
+- **Phase 4 (filter mode) — IN PROGRESS / UNCOMMITTED** in the Lux tree (dirty `src/execution.py`,
+  `scripts/run_backtest.py`, `tests/test_regime_config.py`, `tests/test_regime_emission.py`; untracked
+  `tests/test_regime_filter.py`). Adds `_regime_filter_blocks` + `REGIME_BLOCKED` (blocks fills whose
+  confirmed state ∉ allowed set, frees the slot). **A real behaviour change — not yet committed, under
+  audit; do not commit without approval + baseline-parity proof.**
+- **Lux untracked leftover:** `tests/regime/regime_duplication_inventory.csv` (audit artifact). The
+  Phase-1 scaffold `regime_parity.py` was removed and `fixture_gen.py` tracked in `4f86366`.
 
 > **⚠ Git reality (2026-07-01, authoritative):**
-> - **FX-OB-Research-Lab** `codex-dev` HEAD = **`e6e9fbb`** code + **`e6b64c3`** docs sync,
->   **6 commits ahead** of `origin/codex-dev` (`20d31ae`, fetched 2026-06-26); **not pushed**.
-> - **Lux-OB-Backtester** `main` HEAD = **`3de2b2a`** (Phase 3b engine), on top of `f6740c6`
->   (Phase 3a); **2 commits ahead of `origin/main`**, **not pushed** (push gated). Repo now
->   connected to the Cowork session.
+> - **FX-OB-Research-Lab** `codex-dev` HEAD = **`428008c`** (docs), on `e6e9fbb` code; **7 commits
+>   ahead** of `origin/codex-dev` (`20d31ae`, fetched 2026-06-26); **not pushed**. (+1 for this sync.)
+> - **Lux-OB-Backtester** `main` HEAD = **`e935ce6`** (Phase 3c label emission) →  `4f86366` →
+>   `3de2b2a` → `f6740c6`; **4 commits ahead of `origin/main`**, **not pushed** (push gated). Plus
+>   **uncommitted Phase 4 filter work** in the working tree (see above). Repo connected to the session.
 > - The "15 commits ahead at `fe71537` / Research Cockpit" wording in the older blocks below is
 >   **stale** — those commits are not in current history. Blocks below are retained as history only.
 

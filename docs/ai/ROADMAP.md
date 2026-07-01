@@ -97,9 +97,13 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` todo. Render with `/roadmap`.
       fixture, JS↔Python byte parity, **compute only** — no filter, no execution change, no trade
       columns). Lux `main` `3de2b2a`; `tests/test_regime_parity.py` 4/4; fixture byte-identical to
       frontend (same SHA256); nothing imports it.
-- [ ] **Phase 3c** — per-trade regime columns emitted from the engine (still no filtering).
-      The engine already documents the `CANONICAL_COLUMNS` snake_case contract (unemitted).
-- [ ] **Phase 4** — backend regime filter mode (first real strategy change; opt-in).
+- [x] **Lux Phase 3c** — engine-side per-trade regime **label** columns on exported trades
+      (still no filtering). Lux `main` `e935ce6`; `enrich_trades_with_market_state` appends the
+      canonical `REGIME_TRADE_COLUMNS` only in enabled label mode (no-op/byte-identical off); panel
+      built once/run, attached by `fill_time`. Emission+config+parity tests 20/20.
+- [~] **Phase 4** — backend regime filter mode (first real strategy change; opt-in). **In progress /
+      uncommitted** in the Lux tree (`_regime_filter_blocks` + `REGIME_BLOCKED`); under audit, not
+      staged. Requires opt-in gate + non-empty `regime_allowed_states` + baseline-parity proof.
 - [ ] **Phase 5** — scenario sweep over regime gates. Plus (parallel) P2 Master Controls filter lens.
 
 ## Portfolio / Deployment Framework  `[ ]` *(PLAN OF RECORD — active strategic direction)*

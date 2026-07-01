@@ -35,12 +35,16 @@ systems (AGENTS Existing Explorer Protection). Market State / Regime Gate remain
 backend port, D-017) because it is a *selection* input, consistent with this pivot.
 
 ### D-017 · Market State / Regime Gate is a client-side, leakage-safe, off-by-default feature promoted from research
-**Status: CLIENT + BACKEND-ENGINE COMPLETE + COMMITTED** — Phase 0 `9856023`, Phase 1 UI `03c0bc9`
-(inspector) + `fae2135` (Strategy Builder V2 + MS gate), **Phase 2 Strategy Map overlays `e6e9fbb`**.
-Backend: **Lux Phase 3a** (`f6740c6`, config accepts `regime_*`, no behaviour change) + **Phase 3b
-COMPLETE** (`3de2b2a`, canonical compute-only `src/regime.py` + frozen fixture + parity test;
-verified 4/4, byte-identical fixture, nothing imports it). Next: Phase 3c per-trade emission
-(deferred).
+**Status: CLIENT + BACKEND LABEL-EMISSION COMPLETE + COMMITTED** — Phase 0 `9856023`, Phase 1 UI
+`03c0bc9` + `fae2135`, **Phase 2 Strategy Map overlays `e6e9fbb`**. Backend: **Phase 3a** (`f6740c6`,
+config accepts `regime_*`) + **Phase 3b** (`3de2b2a`, compute-only `src/regime.py` + frozen fixture +
+parity 4/4) + **Phase 3c COMPLETE** (`e935ce6`, engine-side per-trade **label** emission —
+`enrich_trades_with_market_state`; canonical columns appended only in enabled label mode; no-op /
+byte-identical off; label-only, no filtering; verified 20/20). **Phase 4 (filter mode) is IN
+PROGRESS / UNCOMMITTED** — a real behaviour change; do not commit without approval + baseline-parity
+proof. Emitted label columns: `market_state, trend_state, volatility_state, chop_state, ema_value,
+ema_relation, px_vs_ema, bbw_value, bbw_threshold, adx_value, state_confirmed, state_known_at,
+shifted_days, source, version`.
 
 The EMA200 / Bollinger-width / ADX regime gate — validated only in Lux-OB-Backtester **research
 code** (`outputs/research/eurusd_regime_gate`, `eurusd_market_state_engine`,
