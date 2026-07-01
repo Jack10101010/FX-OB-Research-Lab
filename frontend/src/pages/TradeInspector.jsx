@@ -14,6 +14,8 @@ import { ActiveRunContext } from "@/components/lab/ActiveRunContext";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { buildTradeClassification } from "@/data/tradeClassificationDims";
 import { ClassificationBadge } from "@/components/lab/ClassificationBadge";
+import { useMarketStatePanel, useTradeMarketState, regimeCfgFromRunConfig } from "@/data/useMarketState";
+import { MarketStateCard } from "@/components/lab/marketState/MarketStateCard";
 import { getTagMeta } from "@/data/classificationRegistry";
 
 export default function TradeInspector() {
@@ -127,6 +129,14 @@ export default function TradeInspector() {
         findSelectedOrderBlock(trade, OB_BOXES_ENRICHED?.length ? OB_BOXES_ENRICHED : OB_BOXES) || buildTradeOrderBlock(trade, candleIndex)
     ), [trade, OB_BOXES, OB_BOXES_ENRICHED, candleIndex]);
     const chartSelectedOB = useMemo(() => buildSelectedTradeDisplayOB(selectedOB, trade, candleIndex), [selectedOB, trade, candleIndex]);
+
+    // ── Market State (Phase 1) — leakage-safe daily regime snapshot for the
+    // selected trade. All math lives in data/marketState.js; these hooks only
+    // memoize the pure-function results (panel built once per run, O(1) lookup).
+    const runSymbol = bundle?.summary?.symbol || bundle?.config?.symbol || "EURUSD";
+    const regimeCfg = useMemo(() => regimeCfgFromRunConfig(bundle?.config), [bundle]);
+    const regimePanel = useMarketStatePanel(CANDLES, regimeCfg, runSymbol);
+    const regimeSnapshot = useTradeMarketState(trade, regimePanel);
 
     // Prefer mapped imported trade location; fall back to legacy mock positioning.
     const candleWindow = Math.max(1, displayCandles.length - 80);
@@ -321,14 +331,19 @@ export default function TradeInspector() {
                         </TabsList>
                         <TabsContent value="overview" className="text-[11.5px] font-ui text-muted-lab pt-3 leading-relaxed">
                             {trade ? (
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
-                                    <Row k="Trade ID" v={displayTradeId(trade)} />
-                                    <Row k="Raw Trade ID" v={rawTradeId(trade)} />
-                                    <Row k="Direction" v={trade.direction} />
-                                    <Row k="Structure" v={trade.structure} />
-                                    <Row k="Session" v={trade.session} />
-                                    <RBreakdownRows trade={trade} />
-                                </div>
+                                <>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
+                                        <Row k="Trade ID" v={displayTradeId(trade)} />
+                                        <Row k="Raw Trade ID" v={rawTradeId(trade)} />
+                                        <Row k="Direction" v={trade.direction} />
+                                        <Row k="Structure" v={trade.structure} />
+                                        <Row k="Session" v={trade.session} />
+                                        <RBreakdownRows trade={trade} />
+                                    </div>
+                                    <div className="mt-3 max-w-[320px]">
+                                        <MarketStateCard snapshot={regimeSnapshot} />
+                                    </div>
+                                </>
                             ) : "No trade selected for this variant."}
                         </TabsContent>
                         <TabsContent value="ob" className="text-[11.5px] font-ui pt-3">

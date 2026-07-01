@@ -883,6 +883,22 @@ export function getRegistryByGroup(group) {
     return CONFIG_REGISTRY.filter((e) => e.group === group);
 }
 
+/**
+ * Default cfg values for a group as a flat { key: defaultValue } object — the
+ * single source of truth for a group's builder defaults. Consumers spread this
+ * into their cfg seed instead of re-declaring literals (e.g. StrategyBuilder's
+ * DEFAULT_CFG for the `regime` group). Arrays/objects are shallow-cloned so a
+ * caller can't mutate the registry default in place.
+ */
+export function defaultsForGroup(group) {
+    const out = {};
+    for (const e of CONFIG_REGISTRY) {
+        if (e.group !== group) continue;
+        out[e.key] = Array.isArray(e.defaultValue) ? [...e.defaultValue] : e.defaultValue;
+    }
+    return out;
+}
+
 /** All entries for a given tier number (1, 2, or 3). */
 export function getRegistryByTier(tier) {
     return CONFIG_REGISTRY.filter((e) => e.tier === tier);
