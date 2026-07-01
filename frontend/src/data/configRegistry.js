@@ -588,6 +588,160 @@ export const CONFIG_REGISTRY = [
         editable: true, masterControlsVisible: true, advancedMode: false,
         inputType: "number", options: null, validation: { min: 0, max: 5, step: 0.01 }, subgroup: "Costs",
     },
+
+    // ── Market State / Regime Gate ─────────────────────────────────────────────
+    // EMA(200) trend + Bollinger-width volatility + ADX chop → 6 market states.
+    // Client-computed (data/marketState.js); off by default so existing runs are
+    // byte-identical. Backend emission of regime_* is gated on regimeEnabled in
+    // configTranslator.buildRegimeConfig(). tier:1 = frontend-only (instant filter).
+    {
+        key: "regimeEnabled", label: "market state gate", group: "regime", tier: 1,
+        emitted: true, backendKey: "regime_gate_enabled", defaultValue: false,
+        editable: false, masterControlsVisible: false, advancedMode: false,
+        inputType: "boolean", options: null, validation: null, subgroup: "Market State",
+    },
+    {
+        key: "regimeMode", label: "regime mode", group: "regime", tier: 1,
+        emitted: true, backendKey: "regime_gate_mode", defaultValue: "label",
+        editable: false, masterControlsVisible: false, advancedMode: false,
+        inputType: "select", options: ["label", "filter"], validation: null, subgroup: "Market State",
+    },
+    // EMA (Trend axis)
+    {
+        key: "emaEnabled", label: "EMA trend enabled", group: "regime", tier: 1,
+        emitted: true, backendKey: "regime_ema_enabled", defaultValue: true,
+        editable: false, masterControlsVisible: false, advancedMode: false,
+        inputType: "boolean", options: null, validation: null, subgroup: "EMA (Trend)",
+    },
+    {
+        key: "emaTimeframe", label: "EMA timeframe", group: "regime", tier: 1,
+        emitted: true, backendKey: "regime_ema_tf", defaultValue: "Daily",
+        editable: false, masterControlsVisible: false, advancedMode: false,
+        inputType: "select", options: ["Daily", "4H", "1H"], validation: null, subgroup: "EMA (Trend)",
+    },
+    {
+        key: "emaLength", label: "EMA length", group: "regime", tier: 1,
+        emitted: true, backendKey: "regime_ema_length", defaultValue: 200,
+        editable: false, masterControlsVisible: false, advancedMode: false,
+        inputType: "number", options: null, validation: { min: 1, max: 500, step: 1 }, subgroup: "EMA (Trend)",
+    },
+    {
+        key: "emaLongCond", label: "long condition", group: "regime", tier: 1,
+        emitted: true, backendKey: "regime_ema_long_cond", defaultValue: "price_above",
+        editable: false, masterControlsVisible: false, advancedMode: true,
+        inputType: "readonly", options: null, validation: null, subgroup: "EMA (Trend)",
+    },
+    {
+        key: "emaShortCond", label: "short condition", group: "regime", tier: 1,
+        emitted: true, backendKey: "regime_ema_short_cond", defaultValue: "price_below",
+        editable: false, masterControlsVisible: false, advancedMode: true,
+        inputType: "readonly", options: null, validation: null, subgroup: "EMA (Trend)",
+    },
+    {
+        key: "emaConfirmDays", label: "confirmation days", group: "regime", tier: 1,
+        emitted: true, backendKey: "regime_ema_confirm", defaultValue: 0,
+        editable: false, masterControlsVisible: false, advancedMode: false,
+        inputType: "select", options: [0, 1, 2, 3], validation: null, subgroup: "EMA (Trend)",
+    },
+    // Bollinger width (Volatility axis)
+    {
+        key: "bbwEnabled", label: "Bollinger volatility enabled", group: "regime", tier: 1,
+        emitted: true, backendKey: "regime_bbw_enabled", defaultValue: true,
+        editable: false, masterControlsVisible: false, advancedMode: false,
+        inputType: "boolean", options: null, validation: null, subgroup: "Bollinger (Volatility)",
+    },
+    {
+        key: "bbwTimeframe", label: "Bollinger timeframe", group: "regime", tier: 1,
+        emitted: true, backendKey: "regime_bbw_tf", defaultValue: "Daily",
+        editable: false, masterControlsVisible: false, advancedMode: true,
+        inputType: "select", options: ["Daily"], validation: null, subgroup: "Bollinger (Volatility)",
+    },
+    {
+        key: "bbwLength", label: "Bollinger length", group: "regime", tier: 1,
+        emitted: true, backendKey: "regime_bbw_length", defaultValue: 20,
+        editable: false, masterControlsVisible: false, advancedMode: false,
+        inputType: "number", options: null, validation: { min: 2, max: 200, step: 1 }, subgroup: "Bollinger (Volatility)",
+    },
+    {
+        key: "bbwStdDev", label: "Bollinger std dev", group: "regime", tier: 1,
+        emitted: true, backendKey: "regime_bbw_std", defaultValue: 2,
+        editable: false, masterControlsVisible: false, advancedMode: false,
+        inputType: "number", options: null, validation: { min: 0.5, max: 5, step: 0.1 }, subgroup: "Bollinger (Volatility)",
+    },
+    {
+        key: "bbwThresholdMode", label: "width threshold mode", group: "regime", tier: 1,
+        emitted: true, backendKey: "regime_bbw_thr_mode", defaultValue: "fixed",
+        editable: false, masterControlsVisible: false, advancedMode: false,
+        inputType: "select", options: ["median", "percentile", "fixed"], validation: null, subgroup: "Bollinger (Volatility)",
+    },
+    {
+        key: "bbwThresholdValue", label: "width threshold", group: "regime", tier: 1,
+        emitted: true, backendKey: "regime_bbw_thr_value", defaultValue: 2.342,
+        editable: false, masterControlsVisible: false, advancedMode: false,
+        inputType: "number", options: null, validation: { min: 0, max: 20, step: 0.001 }, subgroup: "Bollinger (Volatility)",
+    },
+    {
+        key: "bbwPercentile", label: "width percentile", group: "regime", tier: 1,
+        emitted: true, backendKey: "regime_bbw_pctile", defaultValue: 50,
+        editable: false, masterControlsVisible: false, advancedMode: true,
+        inputType: "number", options: null, validation: { min: 0, max: 100, step: 1 }, subgroup: "Bollinger (Volatility)",
+    },
+    {
+        key: "bbwLongVolFilter", label: "long volatility filter", group: "regime", tier: 1,
+        emitted: true, backendKey: "regime_bbw_longvol", defaultValue: true,
+        editable: false, masterControlsVisible: false, advancedMode: false,
+        inputType: "boolean", options: null, validation: null, subgroup: "Bollinger (Volatility)",
+    },
+    // ADX (Chop axis)
+    {
+        key: "adxEnabled", label: "ADX chop enabled", group: "regime", tier: 1,
+        emitted: true, backendKey: "regime_adx_enabled", defaultValue: true,
+        editable: false, masterControlsVisible: false, advancedMode: false,
+        inputType: "boolean", options: null, validation: null, subgroup: "ADX (Chop)",
+    },
+    {
+        key: "adxTimeframe", label: "ADX timeframe", group: "regime", tier: 1,
+        emitted: true, backendKey: "regime_adx_tf", defaultValue: "Daily",
+        editable: false, masterControlsVisible: false, advancedMode: true,
+        inputType: "select", options: ["Daily"], validation: null, subgroup: "ADX (Chop)",
+    },
+    {
+        key: "adxLength", label: "ADX length", group: "regime", tier: 1,
+        emitted: true, backendKey: "regime_adx_length", defaultValue: 14,
+        editable: false, masterControlsVisible: false, advancedMode: false,
+        inputType: "number", options: null, validation: { min: 2, max: 100, step: 1 }, subgroup: "ADX (Chop)",
+    },
+    {
+        key: "adxChopThreshold", label: "ADX chop threshold", group: "regime", tier: 1,
+        emitted: true, backendKey: "regime_adx_chop", defaultValue: 18,
+        editable: false, masterControlsVisible: false, advancedMode: false,
+        inputType: "number", options: null, validation: { min: 0, max: 60, step: 1 }, subgroup: "ADX (Chop)",
+    },
+    {
+        key: "adxUseAs", label: "ADX use as", group: "regime", tier: 1,
+        emitted: true, backendKey: "regime_adx_use", defaultValue: "state_classifier",
+        editable: false, masterControlsVisible: false, advancedMode: false,
+        inputType: "select", options: ["label", "filter", "state_classifier"], validation: null, subgroup: "ADX (Chop)",
+    },
+    // Allowed-states (filter mode) + computed output
+    {
+        key: "regimeAllowedStates", label: "allowed market states", group: "regime", tier: 1,
+        emitted: true, backendKey: "regime_allowed_states", defaultValue: [
+            "Bull/Expand", "Bull/Compress", "Bull/Chop",
+            "Bear/Expand", "Bear/Compress", "Bear/Chop",
+        ],
+        editable: false, masterControlsVisible: false, advancedMode: false,
+        inputType: "multiselect", options: [
+            "Bull/Expand", "Bull/Compress", "Bull/Chop",
+            "Bear/Expand", "Bear/Compress", "Bear/Chop",
+        ], validation: null, subgroup: "Market State",
+    },
+    {
+        key: "marketState", label: "market state (computed)", group: "regime", tier: 1,
+        emitted: false, backendKey: "", defaultValue: "",
+        editable: false, masterControlsVisible: false, advancedMode: false,
+        inputType: "readonly", options: null, validation: null, subgroup: "Output",
+    },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -674,6 +828,7 @@ const RERUN_TIER_KEY_OVERRIDES = {
 const RERUN_TIER_GROUP_DEFAULTS = {
     cost:       "frontend_rescore",
     session:    "instant_filter",
+    regime:     "instant_filter",   // client-computed label/filter; no rerun (Phase 0-2)
     execution:  "backend_rescore",  // rr, stopBuffer, entryBuffer, obEntryDepthPct, verifyTicks
     entry:      "backend_rescore",  // entry models / penetration / triggered-edge fields
     protection: "backend_rescore",  // TE cancel / FFT — depend on execution path

@@ -523,6 +523,47 @@ export function buildBeConfig(cfg) {
     };
 }
 
+// Map a regime timeframe label to the backend token (mirrors mapDetectionTf style).
+export function mapRegimeTimeframe(value) {
+    return { Daily: "1D", "4H": "4h", "1H": "1h" }[value] ?? "1D";
+}
+
+// Market State / Regime Gate → backend fields. Emits nothing (byte-identical
+// config) unless regimeEnabled is truthy, mirroring the buildBeConfig discipline.
+// The gate is computed per-day from shifted daily candles (see data/marketState.js);
+// in label mode it stamps state only, in filter mode the backend may block fills
+// whose state ∉ regime_allowed_states.
+export function buildRegimeConfig(cfg) {
+    if (!cfg || !cfg.regimeEnabled) return {};
+    const states = Array.isArray(cfg.regimeAllowedStates) && cfg.regimeAllowedStates.length
+        ? cfg.regimeAllowedStates
+        : ["Bull/Expand", "Bull/Compress", "Bull/Chop", "Bear/Expand", "Bear/Compress", "Bear/Chop"];
+    return {
+        regime_gate_enabled:   true,
+        regime_gate_mode:      cfg.regimeMode === "filter" ? "filter" : "label",
+        regime_ema_enabled:    Boolean(cfg.emaEnabled ?? true),
+        regime_ema_tf:         mapRegimeTimeframe(cfg.emaTimeframe ?? "Daily"),
+        regime_ema_length:     Number(cfg.emaLength ?? 200),
+        regime_ema_long_cond:  "price_above",
+        regime_ema_short_cond: "price_below",
+        regime_ema_confirm:    Number(cfg.emaConfirmDays ?? 0),
+        regime_bbw_enabled:    Boolean(cfg.bbwEnabled ?? true),
+        regime_bbw_tf:         mapRegimeTimeframe(cfg.bbwTimeframe ?? "Daily"),
+        regime_bbw_length:     Number(cfg.bbwLength ?? 20),
+        regime_bbw_std:        Number(cfg.bbwStdDev ?? 2),
+        regime_bbw_thr_mode:   cfg.bbwThresholdMode ?? "fixed",
+        regime_bbw_thr_value:  Number(cfg.bbwThresholdValue ?? 2.342),
+        regime_bbw_pctile:     Number(cfg.bbwPercentile ?? 50),
+        regime_bbw_longvol:    Boolean(cfg.bbwLongVolFilter ?? true),
+        regime_adx_enabled:    Boolean(cfg.adxEnabled ?? true),
+        regime_adx_tf:         mapRegimeTimeframe(cfg.adxTimeframe ?? "Daily"),
+        regime_adx_length:     Number(cfg.adxLength ?? 14),
+        regime_adx_chop:       Number(cfg.adxChopThreshold ?? 18),
+        regime_adx_use:        cfg.adxUseAs ?? "state_classifier",
+        regime_allowed_states: states,
+    };
+}
+
 export function buildBacktesterConfig(cfg) {
     const allowedSessions = Boolean(cfg.sessionFilter) ? selectedAllowedSessions(cfg) : [];
 
@@ -704,6 +745,9 @@ export function buildBacktesterConfig(cfg) {
         // when on, adds be_arm_levels / be_trigger_bases / be_stop_buffer_r /
         // be_delay_candles so the backend generates trades_*__be_*.csv + be_results.
         ...buildBeConfig(cfg),
+        // ── Market State / Regime Gate ─────────────────────────────────────────
+        // Emits regime_* only when regimeEnabled (off by default → byte-identical).
+        ...buildRegimeConfig(cfg),
         session_filter_enabled:     Boolean(cfg.sessionFilter),
         allowed_sessions:           allowedSessions,
         news_blackout_enabled:      Boolean(cfg.newsBlackout),
