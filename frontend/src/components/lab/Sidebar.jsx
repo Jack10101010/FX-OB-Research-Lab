@@ -33,6 +33,7 @@ const NAV_GROUPS = [
         section: "Build & Run",
         items: [
             { to: "/strategy",       label: "Strategy Builder", icon: Wrench },
+            { to: "/strategy-v2",    label: "Strategy Builder V2", icon: Wrench, badge: "New" },
             { to: "/strategy-logic", label: "Strategy Logic",   icon: BookOpen },
             { to: "/session-portfolio-preview", label: "Session Portfolio Preview", icon: Beaker, badge: "Preview" },
         ],

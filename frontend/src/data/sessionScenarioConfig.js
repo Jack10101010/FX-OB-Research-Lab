@@ -25,14 +25,15 @@
 //   {
 //     enabled: boolean,                       // session_strategy_scenario.enabled
 //     globalDefault: {                        // optional per-run defaults (flat; not a ref)
-//       entry?: EntrySel, target?: { value }, be?: { trigger, armR }, riskReduction?: RiskRdn
+//       target?: { value }, be?: { trigger, armR }, riskReduction?: RiskRdn, riskAmount?: number
 //     } | null,
 //     sessions: {                             // Session Layer + Cohort Layer
 //       [sessionKey]: {
 //         enabled?: boolean,                  // default true
 //         setups: {                           // the cohorts this session trades
-//           [cellKey]: { enabled?: boolean, entry?: EntrySel, target?: { value },
-//                        be?: { trigger, armR }, riskReduction?: RiskRdn, exec?: ExecOverrides }
+//           [cellKey]: { enabled?: boolean, target?: { value },
+//                        be?: { trigger, armR }, riskReduction?: RiskRdn,
+//                        riskAmount?: number, exec?: ExecOverrides }
 //         }
 //       }
 //     },
@@ -42,8 +43,11 @@
 //     } | null,
 //     detection?: object                       // RESERVED — merged by the payload builder (P5); unused here
 //   }
-//   EntrySel = { model:"baseline" } | { model:"triggered_edge", threshold, arm } | { model:"penetration", threshold }
 //   RiskRdn  = { kind:"move_stop", atR, toR } | { kind:"partial_close", atR, fraction } | null
+//
+// V1 NOTE: ENTRY IS GLOBAL. The entry-variant sweep is a run-level setting (in cfg),
+// NOT a per-cohort dimension — so NO cohort and NO global_default emits an `entry`
+// key. The session grid governs only enabled / TP / BE / risk_reduction / risk_amount.
 
 import { SESSIONS, CELLS, buildEntryKey, armToFillMode } from "./cohortKeys";
 
@@ -80,6 +84,16 @@ function compileBe(sel) {
 function compileTarget(sel) {
     if (!sel || sel.value == null) return null;
     return { type: "rr", rr: Number(sel.value) };
+}
+
+// Per-cohort Risk Amount (v1) — pure post-fill weight (multiplier). Accepts a bare
+// number or { value }. Negative / invalid → null (= the backend's 1.0 default). 0 is
+// valid (contributes 0 weighted-R while still counting in raw).
+function compileRiskAmount(sel) {
+    const raw = sel != null && typeof sel === "object" ? sel.value : sel;
+    const n = numOrNull(raw);
+    if (n == null || n < 0) return null;
+    return n;
 }
 
 // Additive (backend support pending). Normalised to snake_case numeric params.
@@ -140,20 +154,22 @@ export function buildSessionScenarioConfig(input = {}) {
         for (const c of CELLS) {
             const setup = setups[c.key];
             const enabled = sessionOn && Boolean(setup) && setup.enabled !== false;
-            const effEntry  = enabled ? inherit(setup.entry, gd.entry) : null;
+            // V1: entry is GLOBAL (the run's entry-variant sweep) — never per-cohort.
+            // The session grid only governs enabled/TP/BE/risk_reduction/risk_amount.
             const effTarget = enabled ? inherit(setup.target, gd.target) : null;
             const effBe     = enabled ? inherit(setup.be, gd.be) : null;
             const effRR     = enabled ? inherit(setup.riskReduction, gd.riskReduction) : null;
+            const effRA     = enabled ? inherit(setup.riskAmount, gd.riskAmount) : null;
             cohorts.push({
                 session: s.key,
                 structure: c.structure,
                 direction: c.direction,
                 cohort_key: `${s.key}|${c.key}`,
                 enabled,
-                entry: enabled ? compileEntry(effEntry) : null,
                 be: enabled ? compileBe(effBe) : null,
                 target: enabled ? compileTarget(effTarget) : null,
                 risk_reduction: enabled ? compileRiskReduction(effRR) : null,
+                risk_amount: enabled ? compileRiskAmount(effRA) : null,   // null ⇒ backend 1.0 default
                 protection: null,                                      // reserved
                 exec: compileExec(enabled ? setup.exec : null),       // reserved (all-null by default)
             });
@@ -164,10 +180,12 @@ export function buildSessionScenarioConfig(input = {}) {
         version: SESSION_SCENARIO_VERSION,
         enabled: input.enabled === true,
         global_default: {
-            entry: compileEntry(gd.entry || null),
+            // V1: no entry in the global default — entry is the run-level sweep, not
+            // a scenario dimension. Only the per-cohort management knobs default here.
             be: compileBe(gd.be || null),
             target: compileTarget(gd.target || null),
             risk_reduction: compileRiskReduction(gd.riskReduction || null),
+            risk_amount: compileRiskAmount(gd.riskAmount),
         },
         cohorts,
         warnings: [],
@@ -177,6 +195,28 @@ export function buildSessionScenarioConfig(input = {}) {
         session_strategy_scenario: scenario,
         baseline_comparison: buildBaselineComparison(input.baseline, cohorts),
     };
+}
+
+/**
+ * Attach the compiled session-first blocks onto a base sidecar payload (P4B wiring).
+ * The SINGLE source of truth for how a run payload gains its scenario:
+ *   • session_strategy_scenario is attached only when enabled === true
+ *   • baseline_comparison is attached only when enabled === true
+ *   • the base payload (cfg-derived: pair/dates/TFs/entry sweep/stop buffer) is never
+ *     mutated and never has entry pulled from the scenario (entry stays global).
+ * Pure + deterministic → preview (this output) == submitted payload by construction.
+ * @returns {object} a NEW payload object (base spread + optional scenario/baseline)
+ */
+export function attachSessionStrategy(basePayload, sessionStrategy) {
+    const payload = { ...(basePayload || {}) };
+    const { session_strategy_scenario, baseline_comparison } = buildSessionScenarioConfig(sessionStrategy || {});
+    if (session_strategy_scenario && session_strategy_scenario.enabled === true) {
+        payload.session_strategy_scenario = session_strategy_scenario;
+    }
+    if (baseline_comparison && baseline_comparison.enabled === true) {
+        payload.baseline_comparison = baseline_comparison;
+    }
+    return payload;
 }
 
 export default buildSessionScenarioConfig;

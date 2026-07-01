@@ -12,6 +12,7 @@ import ClusterExplorer from "@/pages/ClusterExplorer";
 import WorkflowGuide from "@/pages/WorkflowGuide";
 import StrategyLogic from "@/pages/StrategyLogic";
 import StrategyBuilder from "@/pages/StrategyBuilder";
+import StrategyBuilderV2 from "@/pages/StrategyBuilderV2";
 import SessionPortfolioPreview from "@/pages/SessionPortfolioPreview";
 import Projects from "@/pages/Projects";
 import ProjectDetail from "@/pages/ProjectDetail";
@@ -65,6 +66,7 @@ function App() {
                         <Route path="/projects/:projectId" element={withRouteBoundary(<ProjectDetail />)} />
                         <Route path="/insights" element={withRouteBoundary(<Insights />)} />
                         <Route path="/strategy" element={withRouteBoundary(<StrategyBuilder />)} />
+                        <Route path="/strategy-v2" element={withRouteBoundary(<StrategyBuilderV2 />)} />
                         <Route path="/session-portfolio-preview" element={withRouteBoundary(<SessionPortfolioPreview />)} />
                         <Route path="/runs" element={withRouteBoundary(<Runs />)} />
                         <Route path="/runs/active" element={<ActiveRunRedirect />} />
