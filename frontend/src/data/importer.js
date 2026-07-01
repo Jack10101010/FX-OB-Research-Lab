@@ -2,6 +2,7 @@
 // A bundle = config.json + summary.json + order_blocks.csv + trades_*.csv (+ optional candles.csv).
 
 import { summarizeTradeClassifications } from "./tradeClassification";
+import { engineSnapshotFromRow } from "./marketStateSource";
 
 // ─────────────────────── CSV utilities ───────────────────────
 
@@ -720,6 +721,11 @@ export function parseTradesCSV(text) {
             retraceCancelDistancePips: numOrNull(pick(r, "retrace_cancel_distance_pips", "retraceCancelDistancePips")),
             fft_move_away_pips_at_cancel: numOrNull(pick(r, "fft_move_away_pips_at_cancel", "fftMoveAwayPipsAtCancel")),
             fftMoveAwayPipsAtCancel: numOrNull(pick(r, "fft_move_away_pips_at_cancel", "fftMoveAwayPipsAtCancel")),
+            // Engine-emitted Market State (Phase 3c/3d). Present only on runs produced
+            // by an engine with regime label emission; null on legacy runs → the UI
+            // falls back to client reconstruction (data/marketState.js). Preserves the
+            // canonical snapshot so TradeInspector prefers engine over client.
+            regimeEmit: engineSnapshotFromRow(r),
             // TE delay-window fields (exported by backend, used by FFT Debug layer)
             arm_candle_index: numOrNull(pick(r, "arm_candle_index", "armCandleIndex")),
             armCandleIndex: numOrNull(pick(r, "arm_candle_index", "armCandleIndex")),

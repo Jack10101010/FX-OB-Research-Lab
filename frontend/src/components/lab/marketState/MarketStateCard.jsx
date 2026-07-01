@@ -8,6 +8,7 @@
 
 import React from "react";
 import { marketStateColor } from "@/lib/chartStyles";
+import { formatMarketStateSource } from "@/data/marketStateSource";
 
 const fmt = (v, d = 2) => (v == null || Number.isNaN(Number(v)) ? "—" : Number(v).toFixed(d));
 
@@ -46,7 +47,7 @@ const ROW_DEFS = [
     },
     {
         label: "Source",
-        value: (s) => s.source ?? "—",
+        value: (s) => formatMarketStateSource(s.source),
         hint: (s) => (s.version ? `v${s.version}` : ""),
     },
 ];

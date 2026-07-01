@@ -13,9 +13,9 @@
 import { useMemo } from "react";
 import {
     daily_regime_panel,
-    stateForTrade,
     REGIME_DEFAULTS,
 } from "@/data/marketState";
+import { resolveTradeMarketState } from "@/data/marketStateSource";
 
 // Map a saved run config.json (backend regime_* keys) back to the marketState.js
 // cfg shape. Absent keys fall through to REGIME_DEFAULTS, so a run with no regime
@@ -65,14 +65,19 @@ export function useMarketStatePanel(candles, cfg, symbol) {
 }
 
 /**
- * Per-trade market-state snapshot (memoized). Returns null when the panel is empty
- * or the trade day is unknown / inside the warmup window.
+ * Per-trade market-state snapshot (memoized), ENGINE-PREFERRED (Phase 3d).
+ *
+ * If the trade carries an engine-emitted snapshot (`trade.regimeEmit`, source:"engine")
+ * it is returned directly and the client reconstruction is NOT invoked. Otherwise this
+ * falls back to the client panel lookup (source:"client"), preserving legacy behaviour.
+ * Returns null when neither is available (warmup / unknown day / no candles).
  */
 export function useTradeMarketState(trade, panel) {
     const id = trade?.id ?? trade?.fill_time ?? trade?.entry ?? null;
+    const hasEngine = !!(trade && trade.regimeEmit && trade.regimeEmit.marketState);
     return useMemo(
-        () => (panel ? stateForTrade(trade, panel) : null),
+        () => resolveTradeMarketState(trade, panel),
         // eslint-disable-next-line react-hooks/exhaustive-deps
-        [id, panel],
+        [id, panel, hasEngine],
     );
 }

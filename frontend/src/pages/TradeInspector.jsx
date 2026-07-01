@@ -130,12 +130,17 @@ export default function TradeInspector() {
     ), [trade, OB_BOXES, OB_BOXES_ENRICHED, candleIndex]);
     const chartSelectedOB = useMemo(() => buildSelectedTradeDisplayOB(selectedOB, trade, candleIndex), [selectedOB, trade, candleIndex]);
 
-    // ── Market State (Phase 1) — leakage-safe daily regime snapshot for the
-    // selected trade. All math lives in data/marketState.js; these hooks only
-    // memoize the pure-function results (panel built once per run, O(1) lookup).
+    // ── Market State (Phase 1 + engine-preferred Phase 3d) — the selected trade's
+    // leakage-safe regime snapshot. When the run carries ENGINE-emitted columns we use
+    // those directly and SKIP the client reconstruction entirely (empty candles ⇒ no
+    // panel build). Legacy runs (no engine columns) fall back to the client panel.
     const runSymbol = bundle?.summary?.symbol || bundle?.config?.symbol || "EURUSD";
+    const hasEngineRegime = useMemo(
+        () => (trades || []).some((t) => t?.regimeEmit?.marketState),
+        [trades],
+    );
     const regimeCfg = useMemo(() => regimeCfgFromRunConfig(bundle?.config), [bundle]);
-    const regimePanel = useMarketStatePanel(CANDLES, regimeCfg, runSymbol);
+    const regimePanel = useMarketStatePanel(hasEngineRegime ? [] : CANDLES, regimeCfg, runSymbol);
     const regimeSnapshot = useTradeMarketState(trade, regimePanel);
 
     // Prefer mapped imported trade location; fall back to legacy mock positioning.
