@@ -12,8 +12,8 @@
 >   fetched 2026-06-26); **not pushed** (push gated). Unpushed range: `9856023` (client MS
 >   foundation) → `f86621e` (doc sync) → `03c0bc9` (MS inspector UI) → `fae2135` (Strategy Builder
 >   V2 + MS gate) → `e6e9fbb` (Strategy Map overlays).
-> - **Lux-OB-Backtester** `main` HEAD = **`f6740c6`** (`feat(config): accept regime_* keys (Phase
->   3a, no behaviour change)`) per handoff. Phase 3b (`src/regime.py`) not started.
+> - **Lux-OB-Backtester** `main` HEAD = **`3de2b2a`** (`feat(regime): add canonical market-state
+>   engine`, Phase 3b) on top of `f6740c6` (Phase 3a); **2 ahead of `origin/main`**, not pushed.
 > - **STALE below:** any "pushed at `96fc733`" / "15 commits ahead at `fe71537`" / Research-Cockpit
 >   / Failures-Lab-V5-as-current-focus wording is history only — those commits are not in current
 >   git history. Retained for provenance; do not trust for current state.
@@ -52,7 +52,10 @@ on the client:
 - **Phase 2 Strategy Map overlays committed** (`e6e9fbb`) — ribbon + EMA-200 line + audit execution
   markers, all default-off; frozen parity fixture; validators 70/70 + 30/30 green.
 - **Backend:** Lux Phase 3a done (`f6740c6`, config accepts `regime_*`, no behaviour change).
-  **Phase 3b — canonical `src/regime.py` — NOT started; backend computation has not begun.**
+  **Phase 3b COMPLETE** (`3de2b2a`) — canonical compute-only `src/regime.py` + frozen fixture
+  (byte-identical to frontend, same SHA256) + `tests/test_regime_parity.py`; parity 4/4, nothing
+  imports it. Next regime step is Phase 3c per-trade emission (deferred). Lux `main` is 2 ahead of
+  `origin/main`, unpushed.
 
 See `CURRENT_WORKSTREAM.md`, `WORKSTREAMS.md`, `ROADMAP.md`, and `DECISIONS.md` D-017.
 *(The Failures-Lab-V5 / Research-Cockpit text below is retained history and is stale vs current

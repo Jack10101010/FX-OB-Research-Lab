@@ -9,8 +9,10 @@
 **Strategic direction has shifted.** Per-trade feature mining is considered **exhausted**
 (Failure Lab + Market Story Engine — see `FINDINGS.md` F-006/F-007). The active strategic
 programme is now the **Portfolio / Deployment framework** (Phase 1 Portfolio Manager → Phase 5
-Execution Layer — see `ROADMAP.md`). The **Market State / Regime Gate** client work is
-**complete and committed**; the immediate build task is porting the engine to canonical Python.
+Execution Layer — see `ROADMAP.md`). The **Market State / Regime Gate** work is now **complete
+and committed on both sides** — client (frontend) and the canonical Python engine (Lux `3de2b2a`);
+the remaining regime work (Phase 3c per-trade emission → Phase 4 filter → Phase 5 sweep) is
+deferred. Next active build effort is the **Portfolio / Deployment framework**.
 
 **Client / frontend Market State — COMPLETE (committed).**
 - **Phase 0 foundation** (`9856023`) — pure `frontend/src/data/marketState.js` (leakage-safe daily
@@ -28,21 +30,30 @@ Execution Layer — see `ROADMAP.md`). The **Market State / Regime Gate** client
   `StrategyMap.jsx` / `CandleChart.jsx`. All overlays default-off; runs byte-identical when off.
   Validators: `marketState.validate.mjs` 70/70, `executionMarkers.validate.mjs` 30/30, Babel OK.
 
-**Backend Market State — Lux Phase 3a COMPLETE, Phase 3b NOT STARTED.**
+**Backend Market State — Lux Phase 3a + Phase 3b COMPLETE (committed).**
 - **Phase 3a** (Lux-OB-Backtester `main` `f6740c6` `feat(config): accept regime_* keys (Phase 3a,
-  no behaviour change)`) — the backtester config layer now *accepts* `regime_*` keys with zero
-  behavioural change (no computation, no filtering, no trade emission).
-- **Phase 3b — the next build task — is to create the canonical Python engine `src/regime.py`**
-  in Lux-OB-Backtester: mirror the validated JS formulas exactly, reuse the frozen parity fixture,
-  maintain byte-for-byte JS↔Python parity, **compute only** (no filtering, no execution change, no
-  regime fields emitted into trades yet). **Backend computation has NOT yet begun.**
+  no behaviour change)`) — the backtester config layer now *accepts* `regime_*` keys (defaults off:
+  `regime_gate_enabled=False`, `regime_gate_mode="label"`) with zero behavioural change.
+- **Phase 3b COMPLETE** (Lux-OB-Backtester `main` `3de2b2a` `feat(regime): add canonical
+  market-state engine`, 2026-07-01) — **canonical Python engine `src/regime.py`** (318 lines):
+  faithful compute-only port of the JS engine (`ewm_adjust_false`, BBW ddof=1, Wilder ADX,
+  shift-by-1 leakage guard, confirmation, `SOURCE="engine"`, `VERSION="regime-1.0.0"`; documents
+  but does **not** emit the Phase-3c `CANONICAL_COLUMNS`). Ships with the frozen fixture
+  `tests/regime/marketState.fixture.json` (**byte-identical to the frontend fixture — same
+  SHA256**) and `tests/test_regime_parity.py`. **Verified this session:** parity test 4/4 pass
+  (numeric ≤1e-9; exact state/knownAt/confirmed; determinism; truncation-invariance leakage proof);
+  `grep` confirms **nothing in `src/` imports `regime`** (compute-only). Was already committed
+  before this session — the earlier "Phase 3b not started" note here was stale handoff context.
+- **Untracked in Lux** (not part of 3de2b2a): `tests/regime/fixture_gen.py` (fixture generator —
+  worth tracking for reproducibility) and `tests/regime/regime_parity.py` (a **stale Phase-1
+  scaffold** superseded by the committed `tests/test_regime_parity.py`).
 
 > **⚠ Git reality (2026-07-01, authoritative):**
-> - **FX-OB-Research-Lab** `codex-dev` HEAD = **`e6e9fbb`**, **5 commits ahead** of
->   `origin/codex-dev` (`20d31ae`, fetched 2026-06-26); **not pushed** (push gated). Unpushed
->   range: `9856023` → `f86621e` → `03c0bc9` → `fae2135` → `e6e9fbb`.
-> - **Lux-OB-Backtester** `main` HEAD = **`f6740c6`** (Phase 3a) per handoff; that repo is **not
->   mounted in the current Cowork session** — Phase 3b work requires it to be connected.
+> - **FX-OB-Research-Lab** `codex-dev` HEAD = **`e6e9fbb`** code + **`e6b64c3`** docs sync,
+>   **6 commits ahead** of `origin/codex-dev` (`20d31ae`, fetched 2026-06-26); **not pushed**.
+> - **Lux-OB-Backtester** `main` HEAD = **`3de2b2a`** (Phase 3b engine), on top of `f6740c6`
+>   (Phase 3a); **2 commits ahead of `origin/main`**, **not pushed** (push gated). Repo now
+>   connected to the Cowork session.
 > - The "15 commits ahead at `fe71537` / Research Cockpit" wording in the older blocks below is
 >   **stale** — those commits are not in current history. Blocks below are retained as history only.
 

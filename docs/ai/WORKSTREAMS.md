@@ -13,8 +13,9 @@
   (`03c0bc9` inspector, `fae2135` Strategy Builder V2 + MS gate), **Phase 2 Strategy Map overlays
   (`e6e9fbb`)**. Off by default, additive, byte-identical when disabled. Golden parity vs
   `rich_features.pkl` exact (state 3566/3566). **Backend:** Lux Phase 3a done (`f6740c6`, config
-  accepts `regime_*`, no behaviour change); **Phase 3b (`src/regime.py`) NOT started.** See
-  `DECISIONS.md` D-017 and `CURRENT_WORKSTREAM.md`.
+  accepts `regime_*`, no behaviour change); **Phase 3b COMPLETE (`3de2b2a`)** — canonical
+  compute-only `src/regime.py` + frozen fixture (byte-identical, same SHA256) +
+  `tests/test_regime_parity.py` (4/4). See `DECISIONS.md` D-017 and `CURRENT_WORKSTREAM.md`.
 - **Lead:** Claude (design / research port / frontend + Python engine port).
 - **Owns (frontend):** `frontend/src/data/marketState.js`, `frontend/src/data/useMarketState.js`,
   `frontend/src/data/executionMarkers.js`, `frontend/src/data/__validation__/marketState.validate.mjs`,
@@ -27,15 +28,15 @@
   `ui_market_state_audit.md`, `market_state_config_design.md`, `backend_market_state_design.md`,
   `strategy_map_overlay_design.md`, `strategy_map_market_state_overlay_notes.md`, `regime_spec.md`,
   `implementation_plan.md`.
-- **Owns (backend, Phase 3b, pending repo access):** Lux-OB-Backtester `src/regime.py` + its parity
-  tests. **Source of truth = the JS engine + frozen fixture above.** Compute only — no filtering, no
-  execution change, no `regime_*` trade columns yet.
+- **Owns (backend):** Lux-OB-Backtester `src/regime.py` (committed `3de2b2a`),
+  `tests/regime/marketState.fixture.json`, `tests/test_regime_parity.py`. **Source of truth = the JS
+  engine + frozen fixture.** Compute only — no filtering, no execution change, no `regime_*` trade
+  columns yet. Untracked in Lux: `tests/regime/fixture_gen.py` (generator, worth tracking),
+  `tests/regime/regime_parity.py` (stale Phase-1 scaffold, superseded — safe to drop).
 - **Shared/caution:** `pages/TradeInspector.jsx` (regime snapshot card). `StrategyMap.jsx` /
   `CandleChart.jsx` are AGENTS hotspots co-owned with the Strategy Map stream — overlay hunks only.
-- **⚠ Blocker (Phase 3b):** **Lux-OB-Backtester is not mounted in the current Cowork session.**
-  Creating/committing `src/regime.py` requires that repo to be connected.
-- **Next:** P3b canonical `src/regime.py` (compute-only, JS↔Python parity). Then (deferred) P3c
-  per-trade regime columns, P4 backend filter mode, P5 scenario sweep, P2 Master Controls filter lens.
+- **Next (deferred):** P3c per-trade regime column emission from the engine, P4 backend filter mode
+  (first real strategy change), P5 scenario sweep, P2 Master Controls instant-filter lens.
 
 ## Portfolio / Deployment Framework  (ACTIVE STRATEGIC DIRECTION — not yet started)
 

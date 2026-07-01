@@ -93,10 +93,12 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` todo. Render with `/roadmap`.
       markers (all default-off) + frozen parity fixture. `e6e9fbb`. Validators 70/70 + 30/30.
 - [x] **Lux Phase 3a** — backtester config accepts `regime_*` keys, no behaviour change. Lux `main`
       `f6740c6`.
-- [~] **Lux Phase 3b** — canonical Python engine `src/regime.py` (mirror JS exactly, reuse frozen
+- [x] **Lux Phase 3b** — canonical Python engine `src/regime.py` (mirrors JS exactly, reuses frozen
       fixture, JS↔Python byte parity, **compute only** — no filter, no execution change, no trade
-      columns). ⚠ blocked on Lux-OB-Backtester repo access in the Cowork session.
+      columns). Lux `main` `3de2b2a`; `tests/test_regime_parity.py` 4/4; fixture byte-identical to
+      frontend (same SHA256); nothing imports it.
 - [ ] **Phase 3c** — per-trade regime columns emitted from the engine (still no filtering).
+      The engine already documents the `CANONICAL_COLUMNS` snake_case contract (unemitted).
 - [ ] **Phase 4** — backend regime filter mode (first real strategy change; opt-in).
 - [ ] **Phase 5** — scenario sweep over regime gates. Plus (parallel) P2 Master Controls filter lens.
 

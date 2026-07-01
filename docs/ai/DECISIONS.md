@@ -35,10 +35,12 @@ systems (AGENTS Existing Explorer Protection). Market State / Regime Gate remain
 backend port, D-017) because it is a *selection* input, consistent with this pivot.
 
 ### D-017 · Market State / Regime Gate is a client-side, leakage-safe, off-by-default feature promoted from research
-**Status: CLIENT COMPLETE + COMMITTED** — Phase 0 `9856023`, Phase 1 UI `03c0bc9` (inspector) +
-`fae2135` (Strategy Builder V2 + MS gate), **Phase 2 Strategy Map overlays `e6e9fbb`**. Backend:
-**Lux Phase 3a COMPLETE** (`f6740c6`, config accepts `regime_*`, no behaviour change); **Phase 3b
-`src/regime.py` NOT started** (backend computation not begun).
+**Status: CLIENT + BACKEND-ENGINE COMPLETE + COMMITTED** — Phase 0 `9856023`, Phase 1 UI `03c0bc9`
+(inspector) + `fae2135` (Strategy Builder V2 + MS gate), **Phase 2 Strategy Map overlays `e6e9fbb`**.
+Backend: **Lux Phase 3a** (`f6740c6`, config accepts `regime_*`, no behaviour change) + **Phase 3b
+COMPLETE** (`3de2b2a`, canonical compute-only `src/regime.py` + frozen fixture + parity test;
+verified 4/4, byte-identical fixture, nothing imports it). Next: Phase 3c per-trade emission
+(deferred).
 
 The EMA200 / Bollinger-width / ADX regime gate — validated only in Lux-OB-Backtester **research
 code** (`outputs/research/eurusd_regime_gate`, `eurusd_market_state_engine`,
@@ -69,9 +71,10 @@ panel; never recompute EMA/BBW/ADX), new `executionMarkers.js` (audit-only entry
 a frozen parity fixture `marketState.fixture.json`, and default-off ribbon/EMA/execution toggles in
 `StrategyMap.jsx`/`CandleChart.jsx`; validators `marketState.validate.mjs` 70/70 +
 `executionMarkers.validate.mjs` 30/30, Babel OK; runs byte-identical when toggles off.
-**Backend port (Phase 3b) is the next step:** canonical Python `src/regime.py` in Lux-OB-Backtester
-mirroring the JS engine exactly, reusing the frozen fixture, byte-for-byte JS↔Python parity,
-**compute only** — no filtering, no execution change, no `regime_*` trade columns yet. **Deferred
+**Backend port (Phase 3b) is COMPLETE** (Lux `3de2b2a`): canonical Python `src/regime.py` mirrors
+the JS engine exactly, reuses the frozen fixture (byte-identical, same SHA256), holds byte-for-byte
+JS↔Python parity (`tests/test_regime_parity.py` 4/4, ≤1e-9), and is **compute only** — no filtering,
+no execution change, no `regime_*` trade columns, nothing imports it. **Deferred
 (later phases):** per-trade regime columns (P3c), backend filter mode (P4, a real strategy change),
 scenario sweep (P5), Master Controls instant-filter lens (parallel P2). **Evidence:** `9856023`,
 `03c0bc9`, `fae2135`, `e6e9fbb`, Lux `f6740c6`; `ui_market_state_audit.md`,
