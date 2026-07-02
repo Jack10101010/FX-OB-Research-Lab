@@ -320,6 +320,11 @@ export function CandleChart({
     showEma = false,
     tradeStateBadges = [],           // reserved; badge rendering deferred (see notes)
     showTradeStateBadges = false,    // reserved; deferred
+    // Market State OB sanity cards (Phase 5) — off by default. `marketStateCards` is an
+    // obId → card model map (built in StrategyMap via marketStateSource.obCardModel).
+    // Presentation only; this component performs NO indicator math.
+    marketStateCards = {},
+    showMarketStateCards = false,
 }) {
     const containerRef = useRef(null);
     const chartRef = useRef(null);
@@ -1644,6 +1649,12 @@ export function CandleChart({
                 {obMarkers.map((marker) => (
                     <OrderBlockMarker key={marker.id} marker={marker} />
                 ))}
+                {/* Market State OB sanity cards (Phase 5) — bearish above / bullish below. */}
+                {showMarketStateCards && showOB && overlays.map((o) => {
+                    const model = marketStateCards[String(o.id ?? o.obId ?? o.ob_id)];
+                    if (!model) return null;
+                    return <MarketStateSanityCard key={`ms-card-${o.id}`} ob={o} model={model} />;
+                })}
                 {/* Triggered-edge: trigger level dashed lines */}
                 {triggeredEdgeLevelShapes.map((shape) => (
                     <TriggeredEdgeLevelLine key={shape.id} shape={shape} />
@@ -1912,6 +1923,81 @@ function obDetailsContent(ob) {
     const structDisplay = structTag ? structTag.replace(/_/g, " ").slice(0, 18) : null;
 
     return { idText, dirText, statusText, rText, cancelDisplay, structDisplay };
+}
+
+// ── Market State OB sanity card (Phase 5) ────────────────────────────────────
+// Presentation-only. Renders a compact chip (state · verdict) positioned above a
+// bearish OB / below a bullish OB, expanding to a detail panel on hover. Consumes the
+// pre-built card model (marketStateSource.obCardModel) — NO indicator math here.
+const _MS_VERDICT_TONE = {
+    success: "#22c55e",
+    danger: "#ef4444",
+    warning: "#f59e0b",
+    neutral: "#94a3b8",
+};
+
+function _MsRow({ k, v }) {
+    return (
+        <div className="flex justify-between gap-2">
+            <span className="text-[hsl(var(--text-3))]">{k}</span>
+            <span className="text-right font-num">{v == null || v === "" ? "—" : String(v)}</span>
+        </div>
+    );
+}
+
+function MarketStateSanityCard({ ob, model }) {
+    const above = model.placement === "above";
+    const color = _MS_VERDICT_TONE[model.tone] || _MS_VERDICT_TONE.neutral;
+    const left = Math.max(0, ob.left);
+    const style = {
+        position: "absolute",
+        left,
+        pointerEvents: "auto",
+        zIndex: 22,
+        ...(above ? { top: Math.max(0, ob.top - 18) } : { top: ob.top + ob.height + 3 }),
+    };
+    const r = model.rows;
+    const fmt = (v, d = 2) => (v == null || Number.isNaN(Number(v)) ? "—" : Number(v).toFixed(d));
+    return (
+        <div className="absolute group select-none" style={style}>
+            <div
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 clip-bevel-sm border text-[9.5px] font-num whitespace-nowrap"
+                style={{ color, borderColor: color, background: "hsl(222 47% 11% / 0.92)" }}
+                data-testid="ms-sanity-chip"
+            >
+                <span>{model.marketState || "—"}</span>
+                <span style={{ opacity: 0.5 }}>·</span>
+                <span>{model.verdict}</span>
+            </div>
+            <div
+                className="hidden group-hover:block absolute left-0 w-[212px] p-2 clip-bevel-sm border text-[9.5px] font-ui leading-snug"
+                style={{
+                    borderColor: color, background: "hsl(222 47% 8% / 0.98)", color: "#e2e8f0",
+                    zIndex: 32, ...(above ? { bottom: "100%", marginBottom: 3 } : { top: "100%", marginTop: 3 }),
+                }}
+            >
+                <div className="font-semibold mb-1" style={{ color }}>{(model.marketState || "—")} · {model.verdict}</div>
+                <_MsRow k="Session" v={r.session} />
+                <_MsRow k="OB side" v={r.obSide} />
+                <_MsRow k="Source" v={`${r.source}${r.version ? " v" + r.version : ""}`} />
+                <_MsRow k="Known at" v={r.knownAt} />
+                <_MsRow k="EMA" v={r.emaRelation ? `${r.emaRelation} (${fmt(r.pxVsEma)}%)` : "—"} />
+                <_MsRow k="BBW" v={r.volatilityState ? `${r.volatilityState} ${fmt(r.bbw)} / ${fmt(r.bbwThreshold, 3)}` : "—"} />
+                <_MsRow k="ADX" v={r.chopState ? `${r.chopState} ${fmt(r.adx)}` : "—"} />
+                <_MsRow k="Confirmed" v={r.confirmed == null ? "—" : (r.confirmed ? "Yes" : "No")} />
+                {model.blocked ? (
+                    <div className="mt-1 pt-1 border-t border-[hsl(var(--border-soft))]" style={{ color }}>
+                        Blocked — {model.reason}
+                        <div className="font-num text-[hsl(var(--text-3))]">
+                            cancel: {model.blocked.cancelReason || "—"} · missed: {model.blocked.missedReason || "—"}
+                        </div>
+                    </div>
+                ) : (model.verdict !== "Allowed" && (
+                    <div className="mt-1 text-[9px]" style={{ color }}>{model.reason}</div>
+                ))}
+            </div>
+        </div>
+    );
 }
 
 function OrderBlockOverlay({ ob, debugIndex = 0, debugOverlays = false, showObLabels = false, showObDetails = false, selected = false, beAffected = false, suppressSelectionStyle = false, onClick, onDebugClick }) {

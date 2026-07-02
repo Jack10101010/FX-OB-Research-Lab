@@ -12,6 +12,7 @@ import { Pill } from "@/components/lab/DataTable";
 import { CandleChart } from "@/components/lab/CandleChart";
 import { useMarketStatePanel, regimeCfgFromRunConfig } from "@/data/useMarketState";           // Market State (Phase 2B)
 import { ribbonSegmentsFromPanel, emaLinePointsFromPanel } from "@/data/marketState";           // Market State overlays (Phase 2B)
+import { resolveTradeMarketState, obCardModel } from "@/data/marketStateSource";                // Market State sanity cards (Phase 5)
 import { buildExecutionMarkers } from "@/data/executionMarkers";
 import { IntrabarInspector } from "@/components/lab/IntrabarInspector";
 import { BeVerificationPanel } from "@/components/lab/protection/BeVerificationPanel";
@@ -91,6 +92,8 @@ const DEFAULT_LAYERS = {
     // Market State overlays (Phase 2B) — off by default
     marketStateRibbon: false,
     marketStateEma: false,
+    // Market State OB sanity cards (Phase 5) — off by default
+    marketStateCards: false,
 };
 
 const DEFAULT_UI_SETTINGS = {
@@ -218,6 +221,7 @@ export default function StrategyMap() {
     const [showFftDebug, setShowFftDebug] = useState(initialUi.layers.fftDebug ?? false);
     const [showMarketStateRibbon, setShowMarketStateRibbon] = useState(initialUi.layers.marketStateRibbon ?? false);
     const [showMarketStateEma, setShowMarketStateEma] = useState(initialUi.layers.marketStateEma ?? false);
+    const [showMarketStateCards, setShowMarketStateCards] = useState(initialUi.layers.marketStateCards ?? false);
     // Audit-only execution overlay (Entry/Exit price marks for the selected trade).
     const [showExecutionMarkers, setShowExecutionMarkers] = useState(false);
     const [sessionSettings, setSessionSettings] = useState(initialUi.sessionSettings);
@@ -463,6 +467,30 @@ export default function StrategyMap() {
         () => (showMarketStateEma ? emaLinePointsFromPanel(regimePanel) : []),
         [showMarketStateEma, regimePanel]
     );
+    // Market State OB sanity cards (Phase 5): obId → compact card model. Only OBs that
+    // have an associated trade row get a card. State is ENGINE-preferred
+    // (trade.regimeEmit via resolveTradeMarketState); client `regimePanel` is the legacy
+    // fallback. No indicator math here — resolveTradeMarketState only looks up.
+    const regimeAllowedStates = useMemo(() => runConfig?.regime_allowed_states || null, [runConfig]);
+    const marketStateCards = useMemo(() => {
+        if (!showMarketStateCards) return {};
+        const key = (v) => (v == null ? null : String(v));
+        const tradeByOb = {};
+        for (const t of activeTrades || []) {
+            const k = key(t.obId ?? t.ob_id ?? t.displayObId);
+            if (k != null && !(k in tradeByOb)) tradeByOb[k] = t;  // first trade per OB
+        }
+        const out = {};
+        for (const ob of chartObBoxes || []) {
+            const k = key(ob.id ?? ob.obId ?? ob.ob_id);
+            const trade = k != null ? tradeByOb[k] : null;
+            if (!trade) continue;  // only OBs with an associated trade row
+            const snapshot = resolveTradeMarketState(trade, regimePanel);
+            const model = obCardModel({ ob, trade, snapshot, allowedStates: regimeAllowedStates });
+            if (model && k != null) out[k] = model;
+        }
+        return out;
+    }, [showMarketStateCards, activeTrades, chartObBoxes, regimePanel, regimeAllowedStates]);
     const rrTools = isDirectionalMode ? [] : resolvedScenario.rrTools;
     const triggeredEdgeOverlays = isDirectionalMode ? [] : resolvedScenario.triggeredEdgeOverlays;
 
@@ -646,6 +674,7 @@ export default function StrategyMap() {
                 fftDebug: showFftDebug,
                 marketStateRibbon: showMarketStateRibbon,
                 marketStateEma: showMarketStateEma,
+                marketStateCards: showMarketStateCards,
             },
             sessionSettings,
         });
@@ -684,6 +713,7 @@ export default function StrategyMap() {
         showFftDebug,
         showMarketStateRibbon,
         showMarketStateEma,
+        showMarketStateCards,
     sessionSettings,
     ]);
 
@@ -1126,6 +1156,7 @@ export default function StrategyMap() {
                                 <Toggle label="Sessions" checked={showSessions} onChange={setShowSessions} dot="primary" />
                                 <Toggle label="Market State Ribbon" checked={showMarketStateRibbon} onChange={setShowMarketStateRibbon} dot="secondary" title="Thin bottom strip coloured by daily market state (200-EMA × Bollinger × ADX). Leakage-safe: each day shows the value known at its start (shifted 1d). Visualisation only." />
                                 <Toggle label="EMA 200" checked={showMarketStateEma} onChange={setShowMarketStateEma} dot="primary" title="Daily 200-EMA line from the Market State panel (shifted 1d). Visualisation only — no strategy change." />
+                                <Toggle label="MS Sanity Cards" checked={showMarketStateCards} onChange={setShowMarketStateCards} dot="secondary" title="Compact per-OB Market State cards (bearish above / bullish below) showing the trade's regime state + Allowed/Blocked verdict. Engine-emitted when available; sanity-check only." />
                                 <Toggle label="OB Origin" checked={showObOriginMarkers} onChange={setShowObOriginMarkers} dot="primary" />
                                 <Toggle label="OB Detection" checked={showObDetectionMarkers} onChange={setShowObDetectionMarkers} dot="warning" />
                                 <Toggle label="OB IDs" checked={showObLabels} onChange={setShowObLabels} dot="secondary" />
@@ -1258,6 +1289,8 @@ export default function StrategyMap() {
                             showMarketStateRibbon={showMarketStateRibbon}
                             emaLinePoints={emaLinePoints}
                             showEma={showMarketStateEma}
+                            marketStateCards={marketStateCards}
+                            showMarketStateCards={showMarketStateCards}
                             selectedTradeId={selectedTradeId}
                             executionMarkers={executionMarkers}
                             highlightObId={selectedOverlay?.obId ?? null}

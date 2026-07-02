@@ -101,3 +101,102 @@ export function formatMarketStateSource(source) {
     if (source === "client") return "Client Reconstruction";
     return source ?? "—";
 }
+
+// ── Phase 5 — OB-adjacent sanity-card helpers (pure) ─────────────────────────
+// Verdict + compact card model for the Strategy Map Market State sanity cards.
+// No indicator math — consumes the snapshot (engine trade.regimeEmit, else client
+// panel lookup) + the run's allowed-states + the trade's backend outcome.
+
+export const REGIME_VERDICT = Object.freeze({
+    ALLOWED: "Allowed",
+    BLOCKED: "Blocked",
+    UNKNOWN: "Unknown / Allowed",
+    MISMATCH: "Direction mismatch",
+});
+
+function _obIsBullish(obSide) {
+    return String(obSide || "").toLowerCase().startsWith("bull");
+}
+
+/**
+ * Decide the sanity verdict for an OB's trade.
+ * Precedence (per Phase 5 spec):
+ *   1. backend REGIME_BLOCKED wins → Blocked (authoritative).
+ *   2. no snapshot / unknown / unconfirmed → Unknown / Allowed.
+ *   3. marketState ∈ allowedStates → Allowed (but if the side conflicts with the
+ *      trend, downgrade to a Direction-mismatch WARNING — not a hard block).
+ *   4. marketState ∉ allowedStates → Blocked (would block in filter mode).
+ * @returns {{ verdict, tone, reason }} tone ∈ neutral|success|danger|warning
+ */
+export function marketStateVerdict({ snapshot, allowedStates, obSide, tradeOutcome } = {}) {
+    if (tradeOutcome === "REGIME_BLOCKED") {
+        return { verdict: REGIME_VERDICT.BLOCKED, tone: "danger", reason: "backend blocked this fill (regime_blocked)" };
+    }
+    if (!snapshot || !snapshot.marketState || snapshot.confirmed === false) {
+        return { verdict: REGIME_VERDICT.UNKNOWN, tone: "neutral", reason: "no confirmed market state — not gated" };
+    }
+    const allowed = Array.isArray(allowedStates) ? allowedStates : null;
+    const ms = snapshot.marketState;
+    if (allowed && allowed.length && !allowed.includes(ms)) {
+        return { verdict: REGIME_VERDICT.BLOCKED, tone: "danger", reason: `state ${ms} not in allowed states` };
+    }
+    // allowed (or no allowed-set constraint) → check side vs trend for a soft warning
+    const trend = snapshot.trendState;
+    if (obSide != null && trend) {
+        const bullOb = _obIsBullish(obSide);
+        const conflict = (bullOb && trend === "Bear") || (!bullOb && trend === "Bull");
+        if (conflict) {
+            return {
+                verdict: REGIME_VERDICT.MISMATCH, tone: "warning",
+                reason: `${bullOb ? "bullish" : "bearish"} OB while trend is ${trend}`,
+            };
+        }
+    }
+    return { verdict: REGIME_VERDICT.ALLOWED, tone: "success", reason: "state in allowed set" };
+}
+
+/**
+ * Build the compact card model for one OB's trade. Presentation-only formatting;
+ * `snapshot` is engine-preferred (trade.regimeEmit) or the client fallback resolved
+ * by the caller. Returns null when there is no trade snapshot AND the trade wasn't
+ * regime-blocked (nothing meaningful to show).
+ */
+export function obCardModel({ ob, trade, snapshot, allowedStates } = {}) {
+    const outcome = trade?.outcome ?? null;
+    if (!snapshot && outcome !== "REGIME_BLOCKED") return null;
+    const obSide = ob?.side ?? ob?.direction ?? trade?.direction ?? null;
+    const bullish = _obIsBullish(obSide);
+    const v = marketStateVerdict({ snapshot, allowedStates, obSide, tradeOutcome: outcome });
+    const px = snapshot?.pxVsEma;
+    return {
+        obId: ob?.id ?? ob?.obId ?? ob?.ob_id ?? trade?.obId ?? null,
+        side: bullish ? "bullish" : "bearish",
+        placement: bullish ? "below" : "above",     // bearish above, bullish below
+        marketState: snapshot?.marketState ?? null,
+        verdict: v.verdict,
+        tone: v.tone,
+        reason: v.reason,
+        rows: {
+            session: trade?.session ?? null,
+            obSide: bullish ? "Bullish OB" : "Bearish OB",
+            source: formatMarketStateSource(snapshot?.source),
+            version: snapshot?.version ?? null,
+            knownAt: snapshot?.knownAt ?? null,
+            emaRelation: snapshot?.emaRelation ?? (px == null ? null : px > 0 ? "above" : "below"),
+            pxVsEma: px ?? null,
+            volatilityState: snapshot?.volatilityState ?? null,
+            bbw: snapshot?.bbw ?? null,
+            bbwThreshold: snapshot?.bbwThreshold ?? null,
+            adx: snapshot?.adx ?? null,
+            chopState: snapshot?.chopState ?? null,
+            confirmed: snapshot?.confirmed ?? null,
+        },
+        blocked: outcome === "REGIME_BLOCKED"
+            ? {
+                outcome,
+                cancelReason: trade?.cancel_reason ?? trade?.cancelReason ?? null,
+                missedReason: trade?.missed_reason ?? trade?.missedReason ?? null,
+            }
+            : null,
+    };
+}
