@@ -16,6 +16,7 @@ import { buildTradeClassification } from "@/data/tradeClassificationDims";
 import { ClassificationBadge } from "@/components/lab/ClassificationBadge";
 import { useMarketStatePanel, useTradeMarketState, regimeCfgFromRunConfig } from "@/data/useMarketState";
 import { MarketStateCard } from "@/components/lab/marketState/MarketStateCard";
+import { PortfolioDecisionCard } from "@/components/lab/marketState/PortfolioDecisionCard";
 import { getTagMeta } from "@/data/classificationRegistry";
 
 export default function TradeInspector() {
@@ -345,8 +346,9 @@ export default function TradeInspector() {
                                         <Row k="Session" v={trade.session} />
                                         <RBreakdownRows trade={trade} />
                                     </div>
-                                    <div className="mt-3 max-w-[320px]">
+                                    <div className="mt-3 max-w-[320px] space-y-3">
                                         <MarketStateCard snapshot={regimeSnapshot} />
+                                        <PortfolioDecisionCard trade={trade} />
                                     </div>
                                 </>
                             ) : "No trade selected for this variant."}
