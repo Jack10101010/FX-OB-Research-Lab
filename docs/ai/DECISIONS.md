@@ -10,6 +10,42 @@ Append-only. Newest at top. Each entry: what we decided, why, and the consequenc
 
 ---
 
+### D-019 — Market State Filter Mode: opt-in execution gate
+**Status: Accepted / implemented.**
+**Repos / commits:**
+- Lux `c3c1f16` `feat(regime): add opt-in market-state filter mode (off by default)`
+- FX `8fa8d90` docs sync recording Phase 4 complete
+
+**Decision:** Market State filter mode is allowed as an **explicit opt-in execution gate**. It may
+block candidate fills only when all of: `regime_gate_enabled = true`, `regime_gate_mode = "filter"`,
+and `regime_allowed_states` is **non-empty and valid** (every value ∈ the six canonical states).
+
+**Behaviour:**
+- Blocked fills emit `REGIME_BLOCKED`.
+- Blocked rows are **unfilled / missed** rows (empty `fill_time`; slot freed via `continue`).
+- Blocked rows are **excluded from performance metrics** (`summarize_trades` counts only `fill_time != ""`).
+- Unknown, warmup-null, and **unconfirmed** states are **allowed** (never silently blocked).
+- **Disabled mode remains byte-identical**; **label mode remains non-blocking**.
+- Filter mode is the **first behaviour-changing** regime feature (label/emission and everything prior
+  are annotate-only).
+
+**Safety:**
+- Uses the **shifted daily regime panel** — **no same-day look-ahead** (`state_known_at` = start-of-day
+  boundary; `shifted_days = 1`).
+- Requires **valid states** (strict `validate_regime_config`); default remains **off**.
+- Regime suite **32/32 green**.
+
+**Testing note:** the penetration-batch fill path is covered **structurally** through the shared
+`_regime_filter_block_row` helper (both fill paths provably call the one helper) plus the main-loop
+end-to-end block test. Direct process-pool testing was **not** run in the sandbox because
+`simulate_entry_penetration_batch` orphaned worker processes and wedged the VM; any future direct
+batch/CLI smoke should run in a host environment where worker processes can be reaped cleanly.
+
+**Follow-up:**
+- UI should surface filter mode carefully and make state selection **explicit**.
+- The future Portfolio / Deployment framework should treat this as an **opt-in gate, not a default**.
+- **Push remains gated.**
+
 ### D-018 · Pivot from per-trade feature mining to portfolio selection & deployment
 **Status: ADOPTED 2026-07-01.** The strategic direction shifts from *finding a per-trade
 winner/loser filter* to *building the deployment layer over the completed research.*
