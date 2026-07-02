@@ -561,6 +561,12 @@ export function buildRegimeConfig(cfg) {
         regime_adx_chop:       Number(cfg.adxChopThreshold ?? 18),
         regime_adx_use:        cfg.adxUseAs ?? "state_classifier",
         regime_allowed_states: states,
+        // Direction-aware filter policy (Phase 4b). state_only ⇒ backend ignores the
+        // *_allows values; direction_aware ⇒ backend applies them after the state gate.
+        regime_direction_policy: cfg.regimeDirectionPolicy === "direction_aware" ? "direction_aware" : "state_only",
+        regime_bull_allows: cfg.regimeBullAllows ?? "long",
+        regime_bear_allows: cfg.regimeBearAllows ?? "short",
+        regime_chop_allows: cfg.regimeChopAllows ?? "both",
     };
 }
 

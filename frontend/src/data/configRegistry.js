@@ -736,6 +736,31 @@ export const CONFIG_REGISTRY = [
             "Bear/Expand", "Bear/Compress", "Bear/Chop",
         ], validation: null, subgroup: "Market State",
     },
+    // ── Direction-aware filter policy (Phase 4b) — orthogonal to regimeMode ──────
+    {
+        key: "regimeDirectionPolicy", label: "direction policy", group: "regime", tier: 1,
+        emitted: true, backendKey: "regime_direction_policy", defaultValue: "state_only",
+        editable: false, masterControlsVisible: false, advancedMode: false,
+        inputType: "select", options: ["state_only", "direction_aware"], validation: null, subgroup: "Market State",
+    },
+    {
+        key: "regimeBullAllows", label: "bull states allow", group: "regime", tier: 1,
+        emitted: true, backendKey: "regime_bull_allows", defaultValue: "long",
+        editable: false, masterControlsVisible: false, advancedMode: false,
+        inputType: "select", options: ["long", "both", "none"], validation: null, subgroup: "Market State",
+    },
+    {
+        key: "regimeBearAllows", label: "bear states allow", group: "regime", tier: 1,
+        emitted: true, backendKey: "regime_bear_allows", defaultValue: "short",
+        editable: false, masterControlsVisible: false, advancedMode: false,
+        inputType: "select", options: ["short", "both", "none"], validation: null, subgroup: "Market State",
+    },
+    {
+        key: "regimeChopAllows", label: "chop states allow", group: "regime", tier: 1,
+        emitted: true, backendKey: "regime_chop_allows", defaultValue: "both",
+        editable: false, masterControlsVisible: false, advancedMode: false,
+        inputType: "select", options: ["both", "long", "short", "none"], validation: null, subgroup: "Market State",
+    },
     {
         key: "marketState", label: "market state (computed)", group: "regime", tier: 1,
         emitted: false, backendKey: "", defaultValue: "",
