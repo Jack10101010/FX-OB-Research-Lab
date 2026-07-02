@@ -6,6 +6,7 @@ import {
     Beaker, Boxes, ChevronRight, MonitorCog, Lock, CalendarRange, ShieldAlert,
     MousePointerClick, TestTubeDiagonal, Newspaper, FolderKanban,
     BookOpen, ChevronLeft, Microscope, Lightbulb, Clock, Gauge, Telescope, Atom,
+    ClipboardList,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme, THEMES } from "@/context/ThemeContext";
@@ -36,6 +37,7 @@ const NAV_GROUPS = [
             { to: "/strategy-v2",    label: "Strategy Builder V2", icon: Wrench, badge: "New" },
             { to: "/strategy-logic", label: "Strategy Logic",   icon: BookOpen },
             { to: "/session-portfolio-preview", label: "Session Portfolio Preview", icon: Beaker, badge: "Preview" },
+            { to: "/portfolio-manager", label: "Portfolio Manager", icon: ClipboardList, badge: "v1" },
         ],
     },
     {
