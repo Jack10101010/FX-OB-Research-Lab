@@ -15,7 +15,7 @@ import { SESSIONS, CELLS } from "@/data/cohortKeys";
 import { attachSessionStrategy } from "@/data/sessionScenarioConfig";
 import { buildBacktesterConfig, BE_ARM_LEVEL_CHOICES } from "@/data/configTranslator";
 import { defaultsForGroup } from "@/data/configRegistry";
-import { MarketStateControls } from "@/components/lab/marketState/MarketStateControls";
+import { MarketStateControls, regimeFilterInvalid } from "@/components/lab/marketState/MarketStateControls";
 import { startSidecarRun, getSidecarRun, getSidecarRunBundle, getResultBundleByRunId, revealSidecarRun, cancelSidecarRun, getRunFileByRunId, getMarketDataStatus } from "@/data/sidecarClient";
 import { ingestRunBundle } from "@/data/importer";
 import { addRunBundle } from "@/data/store";
@@ -897,7 +897,10 @@ export default function StrategyBuilderV2() {
                 </div>
                 <div className="flex items-center gap-3">
                     <span className="text-[11px] px-2.5 py-1 clip-bevel-sm border border-[hsl(var(--border-mid))] text-muted-lab">Active Config · Unsaved</span>
-                    <NeonButton tone="primary" icon={Play} onClick={onRun} disabled={running || runInProgress}>{runInProgress ? "Run in progress…" : "Run Backtest Locally"}</NeonButton>
+                    <NeonButton tone="primary" icon={Play} onClick={onRun} disabled={running || runInProgress || regimeFilterInvalid(cfg)} title={regimeFilterInvalid(cfg) ? "Market State filter mode has no allowed states — select at least one." : undefined}>{runInProgress ? "Run in progress…" : "Run Backtest Locally"}</NeonButton>
+                    {regimeFilterInvalid(cfg) && (
+                        <span className="text-[11px] text-[hsl(var(--danger))]" data-testid="run-regime-invalid">Filter mode: select ≥1 allowed Market State to run.</span>
+                    )}
                 </div>
             </div>
 

@@ -7,8 +7,28 @@
 // `onField(key, value)`. It performs NO indicator math.
 
 import React from "react";
-import { Field, NeonInput, NeonSelect, NeonToggle } from "@/components/lab/controls";
+import { Field, NeonInput, NeonSelect, NeonToggle, Segment, FilterToggle } from "@/components/lab/controls";
 import { getRegistryEntry } from "@/data/configRegistry";
+
+// The six canonical market states (registry `regimeAllowedStates` values) with
+// display labels for the Allowed-States checklist. Order = canonical panel order.
+const REGIME_STATES = [
+    { value: "Bull/Expand", label: "Bull Expand" },
+    { value: "Bull/Compress", label: "Bull Compress" },
+    { value: "Bull/Chop", label: "Bull Chop" },
+    { value: "Bear/Expand", label: "Bear Expand" },
+    { value: "Bear/Compress", label: "Bear Compress" },
+    { value: "Bear/Chop", label: "Bear Chop" },
+];
+const ALL_REGIME_STATE_VALUES = REGIME_STATES.map((s) => s.value);
+
+// True when filter mode is selected but no states are allowed → run should be blocked.
+export function regimeFilterInvalid(cfg) {
+    if (!cfg?.regimeEnabled) return false;
+    if (cfg.regimeMode !== "filter") return false;
+    const allowed = Array.isArray(cfg.regimeAllowedStates) ? cfg.regimeAllowedStates : [];
+    return allowed.length === 0;
+}
 
 // Display copy only (the registry owns constraints/defaults). Grouped by sub-card.
 const GROUPS = [
@@ -117,6 +137,72 @@ function SubCard({ title, enableKey, fields, cfg, onField, gateOn }) {
  * @param {Object}   cfg      the builder cfg (registry-keyed)
  * @param {Function} onField  (key, value) => void  — writes into cfg
  */
+// Mode (Label / Filter) + Allowed-States checklist. Writes cfg.regimeMode and
+// cfg.regimeAllowedStates (registry-keyed). Defaults (label + all six) are unchanged.
+function ModeAndAllowedStates({ cfg, onField, gateOn }) {
+    const mode = cfg.regimeMode === "filter" ? "filter" : "label";
+    const allowed = Array.isArray(cfg.regimeAllowedStates) ? cfg.regimeAllowedStates : ALL_REGIME_STATE_VALUES;
+    const isFilter = mode === "filter";
+    const dim = !gateOn;
+    const toggleState = (value) => {
+        const set = new Set(allowed);
+        if (set.has(value)) set.delete(value); else set.add(value);
+        // preserve canonical order
+        onField("regimeAllowedStates", ALL_REGIME_STATE_VALUES.filter((v) => set.has(v)));
+    };
+    const invalid = isFilter && allowed.length === 0;
+    return (
+        <div className={`border border-[hsl(var(--border-soft)/0.6)] bg-[hsl(var(--panel-2))] clip-bevel-sm p-4 ${dim ? "opacity-50 pointer-events-none" : ""}`}>
+            <div className="flex items-start justify-between gap-4 mb-3">
+                <div>
+                    <span className="text-[13px] font-semibold text-[hsl(var(--accent-primary))] uppercase tracking-wide">Mode</span>
+                    <div className="mt-2">
+                        <Segment
+                            testId="regime-regimeMode"
+                            value={mode}
+                            onChange={(v) => onField("regimeMode", v)}
+                            options={[{ value: "label", label: "Label only" }, { value: "filter", label: "Filter trades" }]}
+                        />
+                    </div>
+                </div>
+            </div>
+            <div className="text-[11px] text-[hsl(var(--text-2))] leading-relaxed max-w-[640px]">
+                <span className="text-[hsl(var(--text-1))] font-medium">Label mode:</span> computes and records Market
+                State but never changes trade selection.<br />
+                <span className="text-[hsl(var(--text-1))] font-medium">Filter mode:</span> blocks trades whose Market
+                State is not in the selected list.
+            </div>
+
+            <div className="mt-3">
+                <div className="control-label uppercase mb-1.5">Allowed Market States</div>
+                <div className="flex flex-wrap gap-1.5" data-testid="regime-allowed-states">
+                    {REGIME_STATES.map((s) => (
+                        <FilterToggle
+                            key={s.value}
+                            testId={`regime-allowed-${s.value.replace("/", "-").toLowerCase()}`}
+                            active={allowed.includes(s.value)}
+                            onClick={() => toggleState(s.value)}
+                            tone="primary"
+                            title={isFilter ? "Trades in this state are allowed (filter mode)" : "Applies when Filter mode is on"}
+                        >
+                            {s.label}
+                        </FilterToggle>
+                    ))}
+                </div>
+                {invalid && (
+                    <div className="mt-2 text-[11px] text-[hsl(var(--danger))]" data-testid="regime-filter-invalid">
+                        Filter mode requires at least one allowed state — Run is disabled until you select one.
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+/**
+ * @param {Object}   cfg      the builder cfg (registry-keyed)
+ * @param {Function} onField  (key, value) => void  — writes into cfg
+ */
 export function MarketStateControls({ cfg, onField }) {
     const gateOn = !!cfg.regimeEnabled;
     return (
@@ -137,6 +223,8 @@ export function MarketStateControls({ cfg, onField }) {
                     label={gateOn ? "On" : "Off"}
                 />
             </div>
+
+            <ModeAndAllowedStates cfg={cfg} onField={onField} gateOn={gateOn} />
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                 {GROUPS.map((g) => (
