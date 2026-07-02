@@ -101,9 +101,10 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` todo. Render with `/roadmap`.
       (still no filtering). Lux `main` `e935ce6`; `enrich_trades_with_market_state` appends the
       canonical `REGIME_TRADE_COLUMNS` only in enabled label mode (no-op/byte-identical off); panel
       built once/run, attached by `fill_time`. Emission+config+parity tests 20/20.
-- [~] **Phase 4** — backend regime filter mode (first real strategy change; opt-in). **In progress /
-      uncommitted** in the Lux tree (`_regime_filter_blocks` + `REGIME_BLOCKED`); under audit, not
-      staged. Requires opt-in gate + non-empty `regime_allowed_states` + baseline-parity proof.
+- [x] **Lux Phase 4** — backend regime **filter mode** (first real strategy change; opt-in, off by
+      default). Lux `main` `c3c1f16`. Confirmed disallowed-state fills blocked (`REGIME_BLOCKED`, slot
+      freed); disabled/label byte-identical; shared block helper both fill paths; strict
+      `allowed_states` validation. Regime suite 32/32.
 - [ ] **Phase 5** — scenario sweep over regime gates. Plus (parallel) P2 Master Controls filter lens.
 
 ## Portfolio / Deployment Framework  `[ ]` *(PLAN OF RECORD — active strategic direction)*

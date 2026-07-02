@@ -7,7 +7,7 @@
 
 *Last updated: 2026-07-01.*
 
-## Market State / Regime Gate  (client + engine label emission COMPLETE; Phase 4 filter in progress)
+## Market State / Regime Gate  (client + engine label + filter COMPLETE; Phase 5 sweep deferred)
 
 - **Status:** **Client complete & committed** — Phase 0 (`9856023`), Phase 1 UI (`03c0bc9`,
   `fae2135`), **Phase 2 Strategy Map overlays (`e6e9fbb`)**. Off by default, byte-identical when
@@ -15,9 +15,10 @@
   (`f6740c6`, config accepts `regime_*`), **Phase 3b (`3de2b2a`)** compute-only `src/regime.py` +
   frozen fixture (byte-identical, same SHA256) + parity test (4/4), **Phase 3c (`e935ce6`)**
   engine-side per-trade **label emission** (`enrich_trades_with_market_state`; canonical columns
-  appended only in enabled label mode; no-op/byte-identical when off; label-only, no filtering);
-  verified 20/20. **Phase 4 (filter mode) is IN PROGRESS / UNCOMMITTED** — do not stage without
-  approval + baseline-parity proof. See `DECISIONS.md` D-017 and `CURRENT_WORKSTREAM.md`.
+  appended only in enabled label mode; no-op/byte-identical when off); verified 20/20. **Phase 4
+  (`c3c1f16`)** opt-in **filter mode** — confirmed disallowed-state fills blocked (`REGIME_BLOCKED`,
+  slot freed); disabled/label byte-identical; shared block helper across both fill paths; strict
+  `allowed_states` validation; regime suite 32/32. See `DECISIONS.md` D-017 and `CURRENT_WORKSTREAM.md`.
 - **Lead:** Claude (design / research port / frontend + Python engine port).
 - **Owns (frontend):** `frontend/src/data/marketState.js`, `frontend/src/data/useMarketState.js`,
   `frontend/src/data/executionMarkers.js`, `frontend/src/data/__validation__/marketState.validate.mjs`,
@@ -35,15 +36,16 @@
   in `src/execution.py` + `scripts/run_backtest.py` + `tests/test_regime_emission.py` +
   `tests/test_regime_config.py` (`e935ce6`). **Source of truth = the JS engine + frozen fixture.**
   Label emission is compute+annotate only — no filtering, no execution change; disabled ⇒ byte-identical.
-- **Phase 4 (filter) — uncommitted, under audit:** dirty `src/execution.py` (`_regime_filter_blocks`,
-  `REGIME_BLOCKED`), `scripts/run_backtest.py`, `tests/test_regime_config.py`,
-  `tests/test_regime_emission.py`; untracked `tests/test_regime_filter.py`. This is a real behaviour
-  change — **do not stage until approved**, and only with a baseline-parity proof (disabled/label runs
-  byte-identical). Untracked leftover: `tests/regime/regime_duplication_inventory.csv` (audit artifact).
+- **Phase 4 (filter) — COMMITTED (`c3c1f16`):** `src/execution.py` (`_regime_filter_blocks` +
+  `_regime_filter_block_row` shared helper, `REGIME_BLOCKED`), `scripts/run_backtest.py` (mode
+  threading + strict `allowed_states` validation), `tests/test_regime_config.py`,
+  `tests/test_regime_emission.py`, new `tests/test_regime_filter.py`. Opt-in; disabled/label
+  byte-identical; regime suite 32/32. Untracked leftover: `tests/regime/regime_duplication_inventory.csv`
+  (audit artifact, not committed).
 - **Shared/caution:** `pages/TradeInspector.jsx` (regime snapshot card). `StrategyMap.jsx` /
   `CandleChart.jsx` are AGENTS hotspots co-owned with the Strategy Map stream — overlay hunks only.
-- **Next (deferred):** P4 backend filter mode (first real strategy change; in-progress), P5 scenario
-  sweep, P2 Master Controls instant-filter lens.
+- **Next (deferred):** P5 scenario sweep over regime gates, P2 Master Controls instant-filter lens.
+  (P4 filter mode committed at `c3c1f16`.)
 
 ## Portfolio / Deployment Framework  (ACTIVE STRATEGIC DIRECTION — not yet started)
 

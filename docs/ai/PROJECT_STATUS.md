@@ -12,10 +12,9 @@
 >   fetched 2026-06-26); **not pushed** (push gated). Unpushed range: `9856023` (client MS
 >   foundation) → `f86621e` (doc sync) → `03c0bc9` (MS inspector UI) → `fae2135` (Strategy Builder
 >   V2 + MS gate) → `e6e9fbb` (Strategy Map overlays).
-> - **Lux-OB-Backtester** `main` HEAD = **`e935ce6`** (`feat(execution): emit market-state columns
->   in label mode`, Phase 3c) → `4f86366` → `3de2b2a` (Phase 3b) → `f6740c6` (Phase 3a); **4 ahead
->   of `origin/main`**, not pushed. **Uncommitted Phase 4 (filter mode) work sits in the Lux tree**
->   (execution/run_backtest/tests dirty + untracked `test_regime_filter.py`) — under audit, not staged.
+> - **Lux-OB-Backtester** `main` HEAD = **`c3c1f16`** (`feat(regime): add opt-in market-state filter
+>   mode`, Phase 4) → `e935ce6` (3c) → `4f86366` → `3de2b2a` (3b) → `f6740c6` (3a); **5 ahead of
+>   `origin/main`**, not pushed. Regime files committed & clean; regime suite 32/32.
 > - **STALE below:** any "pushed at `96fc733`" / "15 commits ahead at `fe71537`" / Research-Cockpit
 >   / Failures-Lab-V5-as-current-focus wording is history only — those commits are not in current
 >   git history. Retained for provenance; do not trust for current state.
@@ -65,9 +64,11 @@ on the client:
   `market_state, trend_state, volatility_state, chop_state, ema_value, ema_relation, px_vs_ema,
   bbw_value, bbw_threshold, adx_value, state_confirmed, state_known_at, shifted_days, source, version`.
   Verified 20/20 (emission + config + parity) in an isolated `git archive` of `e935ce6`.
-- **Backend Phase 4 (filter mode) — IN PROGRESS / UNCOMMITTED** in the Lux tree (real behaviour
-  change: blocks disallowed-state fills via `REGIME_BLOCKED`). Under audit; not staged. Lux `main` is
-  **4 ahead** of `origin/main`, unpushed.
+- **Backend Phase 4 COMPLETE** (`c3c1f16` `feat(regime): add opt-in market-state filter mode`) —
+  opt-in filter mode: confirmed disallowed-state fills are blocked (`REGIME_BLOCKED`, slot freed);
+  **disabled/label byte-identical**; shared block helper across both fill paths; strict
+  `allowed_states` validation. Regime suite 32/32. Lux `main` **5 ahead** of `origin/main`, unpushed.
+  Next regime step: Phase 5 scenario sweep (deferred).
 
 See `CURRENT_WORKSTREAM.md`, `WORKSTREAMS.md`, `ROADMAP.md`, and `DECISIONS.md` D-017.
 *(The Failures-Lab-V5 / Research-Cockpit text below is retained history and is stale vs current

@@ -10,10 +10,9 @@
 (Failure Lab + Market Story Engine — see `FINDINGS.md` F-006/F-007). The active strategic
 programme is now the **Portfolio / Deployment framework** (Phase 1 Portfolio Manager → Phase 5
 Execution Layer — see `ROADMAP.md`). The **Market State / Regime Gate** is now committed through
-**engine-side label emission**: client (frontend), the canonical Python engine (Lux `3de2b2a`),
-and per-trade label emission (Lux `e935ce6`). **No filtering is committed** — Phase 4 (filter mode)
-is **in progress / uncommitted** in the Lux tree. Remaining regime work (Phase 4 filter → Phase 5
-sweep) is deferred; next active build effort is the **Portfolio / Deployment framework**.
+**opt-in filter mode**: client (frontend), the canonical Python engine (Lux `3de2b2a`), per-trade
+label emission (Lux `e935ce6`), and **Phase 4 opt-in filter mode (Lux `c3c1f16`)**. Remaining regime
+work (Phase 5 sweep) is deferred; next active build effort is the **Portfolio / Deployment framework**.
 
 **Client / frontend Market State — COMPLETE (committed).**
 - **Phase 0 foundation** (`9856023`) — pure `frontend/src/data/marketState.js` (leakage-safe daily
@@ -31,7 +30,7 @@ sweep) is deferred; next active build effort is the **Portfolio / Deployment fra
   `StrategyMap.jsx` / `CandleChart.jsx`. All overlays default-off; runs byte-identical when off.
   Validators: `marketState.validate.mjs` 70/70, `executionMarkers.validate.mjs` 30/30, Babel OK.
 
-**Backend Market State — Lux Phase 3a + 3b + 3c COMPLETE (committed); Phase 4 in progress.**
+**Backend Market State — Lux Phase 3a + 3b + 3c + 4 COMPLETE (committed).**
 - **Phase 3a** (Lux `main` `f6740c6`) — the backtester config layer *accepts* `regime_*` keys
   (defaults off: `regime_gate_enabled=False`, `regime_gate_mode="label"`) with zero behaviour change.
 - **Phase 3b** (Lux `main` `3de2b2a` `feat(regime): add canonical market-state engine`) —
@@ -51,20 +50,28 @@ sweep) is deferred; next active build effort is the **Portfolio / Deployment fra
   state_known_at, shifted_days, source, version`. **Verified this session (isolated `git archive`
   of `e935ce6`):** `test_regime_emission.py` + `test_regime_config.py` + `test_regime_parity.py`
   = **20/20** (off vs label identical + extra cols only; `state_known_at ≤ fill_time`; null-safe).
-- **Phase 4 (filter mode) — IN PROGRESS / UNCOMMITTED** in the Lux tree (dirty `src/execution.py`,
-  `scripts/run_backtest.py`, `tests/test_regime_config.py`, `tests/test_regime_emission.py`; untracked
-  `tests/test_regime_filter.py`). Adds `_regime_filter_blocks` + `REGIME_BLOCKED` (blocks fills whose
-  confirmed state ∉ allowed set, frees the slot). **A real behaviour change — not yet committed, under
-  audit; do not commit without approval + baseline-parity proof.**
+- **Phase 4 COMPLETE** (Lux `main` `c3c1f16` `feat(regime): add opt-in market-state filter mode (off
+  by default)`) — **opt-in filter mode**. When `regime_gate_enabled=True` + `regime_gate_mode="filter"`
+  + non-empty `regime_allowed_states`, a candidate fill whose leakage-safe **confirmed** state ∉ the
+  allowed set is blocked (`outcome="REGIME_BLOCKED"`, missed row, slot freed via `continue`); unknown /
+  warmup / unconfirmed → allowed. Shared `_regime_filter_block_row` helper used by both fill paths (main
+  loop + penetration batch — de-duplicated). **Fully opt-in: disabled/label runs byte-identical.**
+  Hardening added this session: `validate_regime_config` now rejects non-canonical `allowed_states`;
+  block logic de-duplicated; new `tests/test_regime_filter.py` (single-position slot-freeing, filter<
+  label smoke, shared-helper structural test) + updated config/emission tests. **Regime suite 32/32.**
+  *(Note: the full `run_backtest` CLI smoke was done at `simulate_trades` level — the CLI spawns a
+  process pool that destabilised the sandbox; simulate-level tests prove the same byte-identical /
+  reduced-trades guarantees.)*
 - **Lux untracked leftover:** `tests/regime/regime_duplication_inventory.csv` (audit artifact). The
   Phase-1 scaffold `regime_parity.py` was removed and `fixture_gen.py` tracked in `4f86366`.
 
 > **⚠ Git reality (2026-07-01, authoritative):**
-> - **FX-OB-Research-Lab** `codex-dev` HEAD = **`428008c`** (docs), on `e6e9fbb` code; **7 commits
->   ahead** of `origin/codex-dev` (`20d31ae`, fetched 2026-06-26); **not pushed**. (+1 for this sync.)
-> - **Lux-OB-Backtester** `main` HEAD = **`e935ce6`** (Phase 3c label emission) →  `4f86366` →
->   `3de2b2a` → `f6740c6`; **4 commits ahead of `origin/main`**, **not pushed** (push gated). Plus
->   **uncommitted Phase 4 filter work** in the working tree (see above). Repo connected to the session.
+> - **FX-OB-Research-Lab** `codex-dev` HEAD ≈ **`bfe9566`** (docs) + `c2d5787` (frontend prefer-engine)
+>   on `e6e9fbb` code; **~9 commits ahead** of `origin/codex-dev` (`20d31ae`, fetched 2026-06-26); **not
+>   pushed**. (This Phase-4 doc sync adds one more.)
+> - **Lux-OB-Backtester** `main` HEAD = **`c3c1f16`** (Phase 4 filter mode) → `e935ce6` (3c) →
+>   `4f86366` → `3de2b2a` (3b) → `f6740c6` (3a); **5 commits ahead of `origin/main`**, **not pushed**
+>   (push gated). Working tree clean for the regime files. Repo connected to the session.
 > - The "15 commits ahead at `fe71537` / Research Cockpit" wording in the older blocks below is
 >   **stale** — those commits are not in current history. Blocks below are retained as history only.
 
