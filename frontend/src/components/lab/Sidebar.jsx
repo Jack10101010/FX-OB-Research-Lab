@@ -38,6 +38,7 @@ const NAV_GROUPS = [
             { to: "/strategy-logic", label: "Strategy Logic",   icon: BookOpen },
             { to: "/session-portfolio-preview", label: "Session Portfolio Preview", icon: Beaker, badge: "Preview" },
             { to: "/portfolio-manager", label: "Portfolio Manager", icon: ClipboardList, badge: "v1" },
+            { to: "/strategy-doctor", label: "Strategy Doctor", icon: Activity, badge: "Monitor" },
         ],
     },
     {

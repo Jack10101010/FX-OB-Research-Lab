@@ -15,6 +15,7 @@ import StrategyBuilder from "@/pages/StrategyBuilder";
 import StrategyBuilderV2 from "@/pages/StrategyBuilderV2";
 import SessionPortfolioPreview from "@/pages/SessionPortfolioPreview";
 import PortfolioManager from "@/pages/PortfolioManager";
+import StrategyDoctor from "@/pages/StrategyDoctor";
 import Projects from "@/pages/Projects";
 import ProjectDetail from "@/pages/ProjectDetail";
 import Insights from "@/pages/Insights";
@@ -70,6 +71,7 @@ function App() {
                         <Route path="/strategy-v2" element={withRouteBoundary(<StrategyBuilderV2 />)} />
                         <Route path="/session-portfolio-preview" element={withRouteBoundary(<SessionPortfolioPreview />)} />
                         <Route path="/portfolio-manager" element={withRouteBoundary(<PortfolioManager />)} />
+                        <Route path="/strategy-doctor" element={withRouteBoundary(<StrategyDoctor />)} />
                         <Route path="/runs" element={withRouteBoundary(<Runs />)} />
                         <Route path="/runs/active" element={<ActiveRunRedirect />} />
                         <Route path="/runs/:runId" element={withRouteBoundary(<RunDetail />)} />

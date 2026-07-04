@@ -1,0 +1,15 @@
+{
+  "generated_at": "2026-06-17",
+  "as_of_date": "2026-06-17",
+  "policy_version": "2026-07-02.1",
+  "policy_sha256": "5c249b23dfdb09ede8b591d9c9511bf388085a08ffc20940f886a87a8d958acb",
+  "validated_stack": "v1 whole-cohort tradeability + global RR2 + no BE + no protection + equal 1.0x risk",
+  "overall_state": "HEALTHY",
+  "actionable_alert_count": 0,
+  "watch_count": 3,
+  "degraded_count": 0,
+  "low_data_count": 9,
+  "research_queue_count": 1,
+  "recommended_next_action": "Keep validated stack unchanged; leave EM-2026-0001 as WATCH/monitoring; optionally review the seeded folder.",
+  "no_change_assertion": "No execution, deployed policy, risk, sizing, or cohort change. All signals are research prompts only; human approval required for any future change."
+}
