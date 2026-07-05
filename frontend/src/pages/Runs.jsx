@@ -7,6 +7,7 @@ import { Field, NeonSelect, NeonInput } from "@/components/lab/controls";
 import { useDataset, updateRunBundle, deleteRunBundle, clearAllRuns, getRunsBackupPayload, importRunsBackup, getRunDisplayName, compactTimeframe, formatRunDateRange, reloadFullRunFromSidecar, autoReloadIndexedRunsFromSidecar } from "@/data/store";
 import { Check, Copy, Download, Edit3, RefreshCw, ShieldAlert, Trash2, Upload, X } from "lucide-react";
 import { summarizeBeCoverage } from "@/components/lab/researchBanner/bannerRun";
+import RunBatchSection from "@/components/lab/runs/RunBatchSection";
 
 const RUN_SORT_OPTIONS = [
     { value: "created_asc", label: "Created ↑ oldest first" },
@@ -37,6 +38,13 @@ export default function Runs() {
         }
     });
     const [q, setQ] = useState("");
+    const [viewMode, setViewMode] = useState(() => {
+        try {
+            return localStorage.getItem("fxob_runs_view_v1") === "cards" ? "cards" : "table";
+        } catch {
+            return "table";
+        }
+    });
     const [editingId, setEditingId] = useState("");
     const [editName, setEditName] = useState("");
     const [reloadBusyId, setReloadBusyId] = useState("");
@@ -84,6 +92,12 @@ export default function Runs() {
             localStorage.setItem("fxob_runs_sort_v1", sort);
         } catch {}
     }, [sort]);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem("fxob_runs_view_v1", viewMode);
+        } catch {}
+    }, [viewMode]);
 
     const startRename = (event, run) => {
         event?.preventDefault();
@@ -214,7 +228,23 @@ export default function Runs() {
                     />
                 </Field>
                 <div className="flex items-center gap-2">
-                    <Pill tone="muted">{filtered.length} rows</Pill>
+                    <div className="inline-flex rounded border border-[hsl(var(--border-soft))] overflow-hidden" role="group" aria-label="Runs view">
+                        {["table", "cards"].map((mode) => (
+                            <button
+                                key={mode}
+                                type="button"
+                                data-testid={`runs-view-${mode}`}
+                                onClick={() => setViewMode(mode)}
+                                className="px-2 py-1 text-[10px] font-ui capitalize"
+                                style={viewMode === mode
+                                    ? { background: "hsl(var(--accent-primary))", color: "hsl(var(--bg-0,var(--panel)))" }
+                                    : { color: "hsl(var(--text-2))" }}
+                            >
+                                {mode}
+                            </button>
+                        ))}
+                    </div>
+                    <Pill tone="muted">{filtered.length} runs</Pill>
                     {importedCount > 0 && <Pill tone="primary">{importedCount} imported</Pill>}
                     <button
                         type="button"
@@ -327,6 +357,21 @@ export default function Runs() {
                 </div>
             )}
 
+            {viewMode === "cards" ? (
+                <div className="px-6 space-y-3" data-testid="runs-cards">
+                    {filtered.map((r) => (
+                        <RunBatchSection key={r.id} run={r} getRunData={getRunData} />
+                    ))}
+                    {!filtered.length && (
+                        <div className="py-10 text-center">
+                            <div className="font-ui text-[10px] uppercase tracking-[0.14em] text-muted-lab">No Real Runs</div>
+                            <div className="mt-2 text-[12px] text-[hsl(var(--text-2))]">
+                                Import a completed run or launch one from Strategy Builder to populate this view.
+                            </div>
+                        </div>
+                    )}
+                </div>
+            ) : (
             <div className="px-6">
                 <NeonPanel dense>
                     <DataTable
@@ -371,6 +416,7 @@ export default function Runs() {
                     )}
                 </NeonPanel>
             </div>
+            )}
         </div>
     );
 }
