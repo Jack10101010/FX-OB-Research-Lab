@@ -6,8 +6,19 @@
 
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
-import { buildRunBatch, CONTEXT_MODES } from "@/data/runs/scenarioPresentation";
+import { buildRunBatch, CONTEXT_MODES, formatDate as fmtDate } from "@/data/runs/scenarioPresentation";
 
+const LAYER_TONE = {
+    market_state_gate: "accent-secondary",
+    portfolio_manager: "warning",
+    session_policy: "accent-primary",
+};
+const FAMILY_TONE = {
+    baseline: "border-mid",
+    triggered_entry: "accent-secondary",
+    session_scenarios: "accent-primary", // prominent — the user must instantly see this
+    fair_baseline: "success",
+};
 const CONTEXT_TONE = {
     [CONTEXT_MODES.WARMED]: "success",
     [CONTEXT_MODES.COLD]: "warning",
@@ -77,7 +88,13 @@ function ScenarioCard({ s, storeId }) {
 export default function RunBatchSection({ run, getRunData }) {
     const storeId = run?._bundleId || run?.id;
     const bundle = typeof getRunData === "function" ? getRunData(storeId) : null;
-    const merged = { ...run, config: bundle?.config || run?.config, entryResults: bundle?.entryResults || run?.entryResults };
+    const merged = {
+        ...run,
+        config: bundle?.config || run?.config,
+        entryResults: bundle?.entryResults || run?.entryResults,
+        scenarioBaselineResults: bundle?.scenarioBaselineResults || run?.scenarioBaselineResults,
+        runMetadata: run?.runMetadata || run?.run_metadata || bundle?.runMetadata || bundle?.run_metadata,
+    };
     const batch = buildRunBatch(merged);
     const ctxTone = CONTEXT_TONE[batch.contextMode] || "border-mid";
     const [showAll, setShowAll] = useState(false);
@@ -93,21 +110,51 @@ export default function RunBatchSection({ run, getRunData }) {
                 <Link to={`/runs/${encodeURIComponent(storeId)}`} className="text-[12.5px] font-ui text-[hsl(var(--accent-primary))] hover:text-white">
                     {batch.title || batch.symbol || batch.shortRunId}
                 </Link>
-                <Chip tone="border-mid">{batch.scenarioType}</Chip>
-                <Chip tone={ctxTone}>{CONTEXT_LABEL[batch.contextMode]}{batch.contextConfidence === "heuristic" ? " · heuristic" : ""}</Chip>
+                <Chip tone={ctxTone}>{CONTEXT_LABEL[batch.contextMode]}{batch.contextConfidence ? ` · ${batch.contextConfidence}` : ""}</Chip>
                 {batch.status && <Chip tone="border-mid">{batch.status}</Chip>}
                 <span className="ml-auto text-[10px] text-muted-lab font-ui">
-                    {batch.scenarioCount} scenario{batch.scenarioCount === 1 ? "" : "s"} · #{batch.shortRunId}{batch.configHashShort ? ` / cfg ${batch.configHashShort}` : ""}
+                    #{batch.shortRunId}{batch.configHashShort ? ` / cfg ${batch.configHashShort}` : ""}
                 </span>
             </div>
 
-            {/* Base config chips (run-level) */}
-            <div className="mt-1.5 flex flex-wrap gap-1">
-                <Chip tone="border-mid">{batch.dateRange}</Chip>
+            {/* ROW: trading window + context detail */}
+            <div className="mt-1 text-[10px] font-ui text-muted-lab">
+                Trading: <span className="text-[hsl(var(--text-1))]">{batch.dateRange}</span>
+                {batch.warmupStart
+                    ? <> · Context: preloaded from <span className="text-[hsl(var(--text-1))]">{fmtDate(batch.warmupStart)}</span></>
+                    : (batch.contextMode === CONTEXT_MODES.COLD ? <> · <span style={{ color: "hsl(var(--warning))" }}>cold start — no prior context loaded</span></> : null)}
+            </div>
+
+            {/* ROW: ACTIVE LAYERS (run-level) */}
+            {batch.activeLayers.length > 0 && (
+                <div className="mt-2 flex flex-wrap items-center gap-1">
+                    <span className="text-[9px] uppercase tracking-wide text-muted-lab font-ui mr-1">Active layers</span>
+                    {batch.activeLayers.map((l) => (
+                        <Chip key={l.layer} tone={LAYER_TONE[l.layer] || "accent-secondary"}>
+                            {l.label}{l.directionAware ? " · dir-aware" : ""}
+                        </Chip>
+                    ))}
+                </div>
+            )}
+
+            {/* ROW: SCENARIOS RUN (families actually present) */}
+            {batch.scenarioFamilies.length > 0 && (
+                <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                    <span className="text-[9px] uppercase tracking-wide text-muted-lab font-ui mr-1">Scenarios run</span>
+                    {batch.scenarioFamilies.map((f) => (
+                        <Chip key={f.family} tone={FAMILY_TONE[f.family] || "border-mid"}>
+                            {f.label}{f.count ? ` · ${f.count}${f.family === "triggered_entry" ? " variants" : ""}` : ""}
+                        </Chip>
+                    ))}
+                </div>
+            )}
+
+            {/* ROW: secondary config (demoted) */}
+            <div className="mt-1.5 flex flex-wrap gap-1 opacity-70">
                 {batch.baseConfigChips.map((c, i) => <Chip key={i} tone="border-mid">{c}</Chip>)}
             </div>
 
-            {/* Context / warm-up warnings (heuristic) */}
+            {/* Context / warm-up warnings (only when heuristic/cold) */}
             {batch.contextWarning.length > 0 && (
                 <div className="mt-2 text-[10px] font-ui" style={{ color: `hsl(var(--${ctxTone}))` }}>
                     {batch.contextWarning.map((w, i) => <div key={i}>⚠ {w}</div>)}

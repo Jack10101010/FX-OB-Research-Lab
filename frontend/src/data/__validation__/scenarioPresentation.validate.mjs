@@ -151,5 +151,64 @@ ok("35 compact ordering deterministic (baseline first)", dkeys[0] === "baseline"
 const runsSrc = fs.readFileSync("src/pages/Runs.jsx", "utf8");
 ok("36 Table view still present in Runs.jsx", runsSrc.includes("runs-table") && runsSrc.includes("runs-view-") && runsSrc.includes("viewMode"));
 
+// ── Phase-2: scenario families + layers + explicit context ──────────────────
+// Session scenario + fair baseline (from bundle) + baseline entry; MS gate layer.
+const sessRun = {
+    id: "sess1",
+    config: { symbol: "EURUSD", date_from: "2020-01-02", date_to: "2026-06-18", entry_models: ["baseline"],
+        regime_gate_enabled: true, regime_direction_policy: "direction_aware",
+        session_strategy_scenario: { enabled: true, cohorts: [
+            { cohort_key: "london|bos_long", enabled: true }, { cohort_key: "asia|bos_long", enabled: false },
+            { cohort_key: "ny_pm|choch_short", enabled: true } ] } },
+    executionMode: "allow_multi_position",
+    entryResults: { summary: { allow_multi_position: { baseline: { net_r: 4.0, max_drawdown_r: -8.0, filled_trades: 20 } } } },
+    scenarioBaselineResults: { sourceFiles: [{ name: "trades_allow_multi_position__scenario_baseline.csv", rows: 225 }], tradesByMode: { allow_multi_position: [{}, {}] } },
+};
+const sbatch = P.buildRunBatch(sessRun);
+const sfam = Object.fromEntries(sbatch.scenarioFamilies.map((f) => [f.family, f]));
+ok("37 Session Scenarios family present when session policy has enabled cohorts", !!sfam.session_scenarios);
+ok("38 Session Scenarios count = enabled cohorts (2)", sfam.session_scenarios.count === 2);
+ok("39 Fair Baseline family present when scenarioBaselineResults has output", !!sfam.fair_baseline);
+ok("40 baseline family present", !!sfam.baseline);
+ok("41 MS Gate layer present + dir-aware", sbatch.activeLayers.some((l) => l.layer === "market_state_gate" && l.directionAware));
+ok("42 session_policy layer present", sbatch.activeLayers.some((l) => l.layer === "session_policy"));
+
+// Triggered-entry run: NO session family, NO fair (nothing-to-run), correct TE count
+const teFamRun = {
+    id: "tefam", config: { symbol: "EURUSD", date_from: "2021-04-01", date_to: "2021-06-18", entry_models: ["triggered_edge"], regime_gate_enabled: true },
+    executionMode: "allow_multi_position",
+    entryResults: { summary: { allow_multi_position: { baseline: {}, entry_triggered_edge_10p0_d3: {}, entry_triggered_edge_25p0_d5: {} } } },
+    scenarioBaselineResults: { sourceFiles: [], tradesByMode: {} },
+    scenario_baseline: { enabled: true, eligible_cohort_count: 0, warnings: ["nothing to run"] },
+};
+const tb = P.buildRunBatch(teFamRun);
+const tfam = tb.scenarioFamilies.map((f) => f.family);
+ok("43 no Session Scenarios family when absent", !tfam.includes("session_scenarios"));
+ok("44 no Fair Baseline when nothing-to-run", !tfam.includes("fair_baseline"));
+ok("45 Triggered Entry family count correct", P.deriveScenarioFamilies(teFamRun.config, teFamRun).find((f) => f.family === "triggered_entry").count === 2);
+ok("46 triggered compaction does not affect family strip (session/fair still derivable elsewhere)", tb.scenarioFamilies.some((f) => f.family === "triggered_entry"));
+
+// Explicit Lux metadata overrides heuristic
+const metaRun = {
+    id: "meta1", config: { symbol: "EURUSD", date_from: "2021-04-01", date_to: "2021-06-18" },
+    runMetadata: { scenario_families_present: [{ family: "session_scenarios", label: "Session Scenarios", count: 6 }],
+        layers: [{ layer: "market_state_gate", label: "Market State Gate", direction_aware: true }],
+        context: { context_mode: "window_with_preload", requested_start: "2021-04-01", requested_end: "2021-06-18", warmup_start: "2020-01-02" } },
+    entryResults: { summary: {} },
+};
+const mb = P.buildRunBatch(metaRun);
+ok("47 explicit Lux families override derivation", mb.scenarioFamilies.length === 1 && mb.scenarioFamilies[0].count === 6);
+ok("48 explicit context overrides heuristic", mb.contextMode === P.CONTEXT_MODES.PRELOAD && mb.contextConfidence === "explicit" && mb.warmupStart === "2020-01-02");
+
+// legacy run (no metadata, no families) falls back safely / no fabricated families
+const legacy = P.buildRunBatch({ id: "legacy", config: { symbol: "EURUSD", date_from: "2020-01-02", date_to: "2026-06-18" }, entryResults: { summary: {} } });
+ok("49 legacy run: no fabricated families, heuristic context", Array.isArray(legacy.scenarioFamilies) && legacy.scenarioFamilies.length === 0 && legacy.contextConfidence === "heuristic");
+ok("50 no fabricated fair baseline without output", !legacy.scenarioFamilies.some((f) => f.family === "fair_baseline"));
+
+// component renders the family/layer strips + no hard-coded hex
+const compSrc = fs.readFileSync("src/components/lab/runs/RunBatchSection.jsx", "utf8");
+ok("51 component renders SCENARIOS RUN + ACTIVE LAYERS strips", /Scenarios run/i.test(compSrc) && /Active layers/i.test(compSrc));
+ok("52 no hard-coded hex in component", !/#[0-9a-fA-F]{3,6}/.test(compSrc));
+
 console.log(failed === 0 ? "\nALL SCENARIO-PRESENTATION CHECKS PASSED" : `\n${failed} CHECK(S) FAILED`);
 process.exit(failed === 0 ? 0 : 1);

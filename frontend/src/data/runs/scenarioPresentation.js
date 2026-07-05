@@ -170,6 +170,65 @@ export function deriveBatchTitle(config = {}, run = {}) {
     return parts.join(" · ");
 }
 
+// ── scenario families ACTUALLY present + run-level layers ───────────────────
+// Prefer explicit Lux metadata (run.runMetadata.scenario_families_present); else derive from the actual
+// produced outputs (entry_results keys, session cohorts, scenarioBaselineResults). Never fabricate.
+function entryKeysOf(run) {
+    const er = (run.entryResults && run.entryResults.summary) || run.entry_results || {};
+    const keys = [];
+    if (er && typeof er === "object") Object.values(er).forEach((b) => { if (b && typeof b === "object") keys.push(...Object.keys(b)); });
+    return keys;
+}
+export function deriveScenarioFamilies(config = {}, run = {}) {
+    const meta = run.runMetadata || run.run_metadata;
+    if (meta && Array.isArray(meta.scenario_families_present)) {
+        return meta.scenario_families_present.map((f) => ({ family: f.family, label: f.label || f.family, count: f.count ?? null }));
+    }
+    const fams = [];
+    const keys = entryKeysOf(run);
+    if (keys.some((k) => k === "baseline" || k === "entry_baseline") || (Array.isArray(config.entry_models) && config.entry_models.includes("baseline"))) {
+        fams.push({ family: "baseline", label: "Baseline", count: null });
+    }
+    const te = keys.filter((k) => String(k).startsWith("entry_triggered_edge"));
+    if (te.length) fams.push({ family: "triggered_entry", label: "Triggered Entry", count: te.length });
+    const sess = config.session_strategy_scenario;
+    if (sess && typeof sess === "object" && sess.enabled) {
+        const enabled = (sess.cohorts || []).filter((c) => c && c.enabled).length;
+        if (enabled) fams.push({ family: "session_scenarios", label: "Session Scenarios", count: enabled });
+    }
+    const sbr = run.scenarioBaselineResults;
+    const fairFromBundle = !!sbr && ((Array.isArray(sbr.sourceFiles) && sbr.sourceFiles.length > 0)
+        || (sbr.tradesByMode && Object.values(sbr.tradesByMode).some((t) => Array.isArray(t) && t.length > 0)));
+    const sb = run.scenario_baseline || (run.summary && run.summary.scenario_baseline);
+    const fairFromSummary = !!sb && sb.enabled && !(Array.isArray(sb.warnings) && sb.warnings.length > 0) && Number(sb.eligible_cohort_count || 0) > 0;
+    if (fairFromBundle || fairFromSummary) fams.push({ family: "fair_baseline", label: "Fair Baseline", count: sb ? (sb.eligible_cohort_count ?? null) : null });
+    return fams;
+}
+export function deriveLayers(config = {}, run = {}) {
+    const meta = run.runMetadata || run.run_metadata;
+    if (meta && Array.isArray(meta.layers)) {
+        return meta.layers.map((l) => ({ layer: l.layer, label: l.label || l.layer, directionAware: !!l.direction_aware }));
+    }
+    const layers = [];
+    if (config.regime_gate_enabled) layers.push({ layer: "market_state_gate", label: "Market State Gate", directionAware: config.regime_direction_policy === "direction_aware" });
+    if (config.portfolio_policy_enabled) layers.push({ layer: "portfolio_manager", label: "Portfolio Manager", directionAware: false });
+    const sess = config.session_strategy_scenario;
+    if (sess && typeof sess === "object" && sess.enabled) layers.push({ layer: "session_policy", label: "Session Policy", directionAware: false });
+    return layers;
+}
+function resolveContext(config = {}, run = {}) {
+    const meta = run.runMetadata || run.run_metadata;
+    const modeMap = { cold_window_start: CONTEXT_MODES.COLD, window_with_preload: CONTEXT_MODES.PRELOAD, full_history_warmed: CONTEXT_MODES.WARMED, unknown: CONTEXT_MODES.UNKNOWN };
+    if (meta && meta.context && meta.context.context_mode && meta.context.context_mode !== "unknown") {
+        return { mode: modeMap[meta.context.context_mode] || CONTEXT_MODES.UNKNOWN, confidence: "explicit",
+            requestedStart: meta.context.requested_start || null, requestedEnd: meta.context.requested_end || null,
+            warmupStart: meta.context.warmup_start || null };
+    }
+    const h = inferContextMode(config);
+    return { mode: h.mode, confidence: h.confidence,
+        requestedStart: config.date_from || config.start_date || null, requestedEnd: config.date_to || config.end_date || null, warmupStart: null };
+}
+
 // ── build the whole Run Batch view-model ────────────────────────────────────
 export function buildRunBatch(run = {}) {
     const config = run.config || {};
@@ -178,7 +237,9 @@ export function buildRunBatch(run = {}) {
     const configHash = run.configHash || run.config_hash || config.config_hash || "";
     const status = run.status || "";
     const createdAt = run.createdAt || run.created_at || run.importedAt || "";
-    const ctx = inferContextMode(config);
+    const ctx = resolveContext(config, run);
+    const scenarioFamilies = deriveScenarioFamilies(config, run);
+    const activeLayers = deriveLayers(config, run);
 
     // scenarios: entry_results.<exec_mode>.<scenario_key>. Prefer the primary exec mode.
     const erSummary = (run.entryResults && run.entryResults.summary) || run.entry_results || {};
@@ -276,6 +337,8 @@ export function buildRunBatch(run = {}) {
         dateRange: formatDateRange(rawRange), dateRangeRaw: rawRange,
         scenarioType: classifyScenarioType(config),
         contextMode: ctx.mode, contextConfidence: ctx.confidence, contextWarning: contextWarnings(ctx.mode),
+        requestedStart: ctx.requestedStart, requestedEnd: ctx.requestedEnd, warmupStart: ctx.warmupStart,
+        activeLayers, scenarioFamilies,
         baseConfigChips: baseConfigChips(config),
         status, createdAt, scenarioCount: scenarios.length,
         teVariantCount, defaultScenarios, hiddenVariantLabels, bestSummary,
