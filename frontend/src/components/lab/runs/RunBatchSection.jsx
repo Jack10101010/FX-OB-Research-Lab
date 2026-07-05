@@ -4,7 +4,7 @@
 // Read-only. Metrics come from summary.json → entry_results (via buildRunBatch). No fabricated values; missing
 // per-scenario blocked counts render as "—". Intra-batch scenario comparison is inherently fair (same config).
 
-import React from "react";
+import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import { buildRunBatch, CONTEXT_MODES } from "@/data/runs/scenarioPresentation";
 
@@ -36,7 +36,8 @@ const fmt = (v, d = 2) => (v === null || v === undefined ? "—" : Number(v).toF
 const rTone = (v) => (v === null || v === undefined ? "text-2" : v > 0 ? "success" : v < 0 ? "danger" : "text-2");
 
 function ScenarioCard({ s, storeId }) {
-    const ring = s.isBestNetR || s.isBestNetDd ? "hsl(var(--accent-secondary))" : "hsl(var(--border-soft))";
+    const best = s.isBestNetRTE || s.isBestNetDdTE || s.isBestNetR || s.isBestNetDd;
+    const ring = best ? "hsl(var(--accent-secondary))" : "hsl(var(--border-soft))";
     return (
         <Link
             to={`/runs/${encodeURIComponent(storeId)}`}
@@ -46,8 +47,8 @@ function ScenarioCard({ s, storeId }) {
             <div className="flex items-center justify-between gap-1">
                 <span className="text-[11px] font-ui text-[hsl(var(--text-1))]">{s.label}</span>
                 <div className="flex gap-1">
-                    {s.isBestNetR && <Chip tone="accent-secondary">best NetR</Chip>}
-                    {s.isBestNetDd && <Chip tone="accent-secondary">best N/DD</Chip>}
+                    {s.isBestNetRTE && <Chip tone="accent-secondary">Best Net R</Chip>}
+                    {s.isBestNetDdTE && <Chip tone="accent-secondary">Best Net/DD</Chip>}
                 </div>
             </div>
             <div className="mt-1 grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10.5px] font-ui">
@@ -79,6 +80,11 @@ export default function RunBatchSection({ run, getRunData }) {
     const merged = { ...run, config: bundle?.config || run?.config, entryResults: bundle?.entryResults || run?.entryResults };
     const batch = buildRunBatch(merged);
     const ctxTone = CONTEXT_TONE[batch.contextMode] || "border-mid";
+    const [showAll, setShowAll] = useState(false);
+
+    const shown = showAll ? batch.scenarios : batch.defaultScenarios;
+    const compact = batch.canCollapse && !showAll;
+    const bs = batch.bestSummary;
 
     return (
         <section className="rounded-md border border-[hsl(var(--border-soft))] bg-[hsl(var(--bg-1,var(--panel)))] p-3">
@@ -111,10 +117,40 @@ export default function RunBatchSection({ run, getRunData }) {
                 <div key={i} className="mt-1 text-[10px] font-ui text-[hsl(var(--warning))]">⚠ {w}</div>
             ))}
 
+            {/* Compact summary + expand control (only when trigger×arm variants are collapsed) */}
+            {batch.canCollapse && (
+                <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] font-ui text-muted-lab">
+                    <span>
+                        {batch.teVariantCount} triggered-entry variant{batch.teVariantCount === 1 ? "" : "s"} tested
+                        {compact ? " · showing best" : " · showing all"}
+                    </span>
+                    {compact && bs.bestNetRLabel && (
+                        <span>· Best Net R: <span className="text-[hsl(var(--text-1))]">{bs.bestNetRLabel}</span>
+                            {bs.bestNetRNetR !== null ? ` · ${bs.bestNetRNetR > 0 ? "+" : ""}${bs.bestNetRNetR}R` : ""}</span>
+                    )}
+                    {compact && bs.bestNetDdLabel && (
+                        <span>· Best Net/DD: <span className="text-[hsl(var(--text-1))]">{bs.bestNetDdLabel}</span></span>
+                    )}
+                    <button
+                        type="button"
+                        data-testid="runs-scenario-toggle"
+                        onClick={() => setShowAll((v) => !v)}
+                        className="underline text-[hsl(var(--accent-primary))] hover:text-white"
+                    >
+                        {showAll ? "Hide variants" : `Show all variants (${batch.scenarioCount})`}
+                    </button>
+                </div>
+            )}
+            {compact && batch.hiddenVariantLabels.length > 0 && (
+                <div className="mt-1 text-[10px] font-ui text-muted-lab opacity-80">
+                    Also tested: {batch.hiddenVariantLabels.join(", ")}
+                </div>
+            )}
+
             {/* Scenario grid */}
-            {batch.scenarios.length > 0 && (
+            {shown.length > 0 && (
                 <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-                    {batch.scenarios.map((s) => <ScenarioCard key={s.scenarioKey} s={s} storeId={storeId} />)}
+                    {shown.map((s) => <ScenarioCard key={s.scenarioKey} s={s} storeId={storeId} />)}
                 </div>
             )}
         </section>

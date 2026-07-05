@@ -24,6 +24,23 @@ export const CONTEXT_WARNINGS = {
 const num = (v) => (v === null || v === undefined || v === "" || Number.isNaN(Number(v)) ? null : Number(v));
 const round = (v, d = 2) => (v === null ? null : Number(Number(v).toFixed(d)));
 
+// ── date display: "YYYY-MM-DD" → "DD Mon YYYY" (raw dates keep their format elsewhere) ──
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+export function formatDate(value) {
+    if (!value || typeof value !== "string") return value || "";
+    const m = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return value; // unknown/malformed → return as-is (safe fallback)
+    const mi = Number(m[2]) - 1;
+    if (mi < 0 || mi > 11) return value;
+    return `${m[3]} ${MONTHS[mi]} ${m[1]}`;
+}
+export function formatDateRange(range) {
+    if (!range || typeof range !== "string") return range || "";
+    const parts = range.split("→").map((p) => p.trim());
+    if (parts.length === 2) return `${formatDate(parts[0])} → ${formatDate(parts[1])}`;
+    return range;
+}
+
 // ── scenario key parsing ────────────────────────────────────────────────────
 // "baseline" / "entry_baseline" → baseline (immediate entry)
 // "entry_triggered_edge_10p0_d3" → TE, trigger 10, arm C3
@@ -149,7 +166,7 @@ export function deriveBatchTitle(config = {}, run = {}) {
     }
     if (Array.isArray(trigs) && trigs.length) parts.push(`${trigs.join("/")}%`);
     if (config.rr_multiple !== undefined) parts.push(`RR${config.rr_multiple}`);
-    parts.push(`${from}→${to}`);
+    parts.push(`${formatDate(from)}→${formatDate(to)}`);
     return parts.join(" · ");
 }
 
@@ -212,21 +229,57 @@ export function buildRunBatch(run = {}) {
         bestNd.isBestNetDd = true;
     }
 
+    // ── compact default selection (reduce trigger×arm variant spam) ──────────
+    // Best-of among TRIGGERED-EDGE variants only (baseline / PM / session / fair are shown separately).
+    const te = scenarios.filter((s) => s.family === "triggered_edge");
+    const teVariantCount = te.length;
+    const teWithNet = te.filter((s) => s.netR !== null);
+    const bestNetRTE = teWithNet.length ? teWithNet.reduce((a, b) => (b.netR > a.netR ? b : a)) : null;
+    const teWithNd = te.filter((s) => s.netDd !== null);
+    const bestNetDdTE = teWithNd.length ? teWithNd.reduce((a, b) => (b.netDd > a.netDd ? b : a)) : null;
+    if (bestNetRTE) bestNetRTE.isBestNetRTE = true;
+    if (bestNetDdTE) bestNetDdTE.isBestNetDdTE = true;
+
+    // Show-all when few scenarios or ≤1 TE variant; otherwise compact to best(s) + all non-TE.
+    const showAllByDefault = scenarios.length <= 3 || teVariantCount <= 1;
+    let defaultScenarios;
+    if (showAllByDefault) {
+        defaultScenarios = scenarios;
+    } else {
+        const picks = new Set();
+        if (bestNetRTE) picks.add(bestNetRTE.scenarioKey);
+        if (bestNetDdTE && bestNetDdTE.scenarioKey !== (bestNetRTE && bestNetRTE.scenarioKey)) picks.add(bestNetDdTE.scenarioKey);
+        // keep all non-TE scenarios (baseline / PM / session / fair / unknown) + the picked TE best(s)
+        defaultScenarios = scenarios.filter((s) => s.family !== "triggered_edge" || picks.has(s.scenarioKey));
+    }
+    const shownKeys = new Set(defaultScenarios.map((s) => s.scenarioKey));
+    const hiddenVariantLabels = te.filter((s) => !shownKeys.has(s.scenarioKey)).map((s) => s.label);
+    const bestSummary = {
+        teVariantCount,
+        bestNetRLabel: bestNetRTE ? bestNetRTE.label : null,
+        bestNetRNetR: bestNetRTE ? bestNetRTE.netR : null,
+        bestNetDdLabel: bestNetDdTE && bestNetDdTE.scenarioKey !== (bestNetRTE && bestNetRTE.scenarioKey) ? bestNetDdTE.label : null,
+        bestNetDdValue: bestNetDdTE && bestNetDdTE.scenarioKey !== (bestNetRTE && bestNetRTE.scenarioKey) ? bestNetDdTE.netDd : null,
+    };
+
     const warnings = [];
     if (ctx.mode === CONTEXT_MODES.COLD) warnings.push("COLD WINDOW START — early trades may not match a full-history run.");
     if (ctx.mode === CONTEXT_MODES.UNKNOWN) warnings.push("Context unknown (heuristic) — warm-up state not confirmed.");
     if (!scenarios.length) warnings.push("No scenario metrics available for this run (entry_results missing).");
 
+    const rawRange = run.dateRangeRaw || run.dateRange || `${config.date_from || config.start_date || "?"} → ${config.date_to || config.end_date || "?"}`;
     return {
         runId, shortRunId, configHashShort: String(configHash).slice(0, 8),
         title: deriveBatchTitle(config, run),
         userDisplayName: run.displayName || run.name || "",
         symbol: config.symbol || run.symbol || "",
-        dateRange: run.dateRange || `${config.date_from || config.start_date || "?"} → ${config.date_to || config.end_date || "?"}`,
+        dateRange: formatDateRange(rawRange), dateRangeRaw: rawRange,
         scenarioType: classifyScenarioType(config),
         contextMode: ctx.mode, contextConfidence: ctx.confidence, contextWarning: contextWarnings(ctx.mode),
         baseConfigChips: baseConfigChips(config),
         status, createdAt, scenarioCount: scenarios.length,
+        teVariantCount, defaultScenarios, hiddenVariantLabels, bestSummary,
+        canCollapse: hiddenVariantLabels.length > 0, showAllByDefault,
         warnings, scenarios,
     };
 }
