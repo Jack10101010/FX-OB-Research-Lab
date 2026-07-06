@@ -247,5 +247,71 @@ ok("66 date range still DD Mon YYYY", /\d{2} [A-Z][a-z]{2} \d{4}/.test(gv.dateRa
 const legacy2 = P.buildRunBatch({ id: "leg2", config: {}, entryResults: { summary: {} } });
 ok("67 legacy run safe: empty ran, notRun computed, no throw", Array.isArray(legacy2.ranFamilies) && Array.isArray(legacy2.notRunMajor) && Array.isArray(legacy2.triggerVariantGroups));
 
+// ── Phase-4: gated context warnings + config labels + scenario deep-links ────
+// `batch` (top run) = COLD window + Market State gate ACTIVE (regime_gate_enabled + direction_aware).
+const shownW = (b) => b.contextWarnings.filter((w) => w.show);
+ok("68 contextWarnings are structured objects (type/show/text/tone)",
+    Array.isArray(batch.contextWarnings)
+    && batch.contextWarnings.length > 0
+    && batch.contextWarnings.every((w) => w && typeof w === "object" && "type" in w && "show" in w && "text" in w && "tone" in w));
+ok("69 MS warm-up warning present ONLY-with / when Market State gate active (COLD)",
+    batch.activeLayers.some((l) => l.layer === "market_state_gate")
+    && shownW(batch).some((w) => w.type === "market_state_warmup"));
+
+// COLD window, NO Market State gate → must NOT receive the MS warm-up warning.
+const coldNoMs = P.buildRunBatch({
+    id: "coldnoms",
+    config: { symbol: "EURUSD", date_from: "2021-04-01", date_to: "2021-06-18", entry_models: ["baseline"], rr_multiple: 2, spread_pips: 0.2 },
+    executionMode: "allow_multi_position",
+    entryResults: { summary: { allow_multi_position: { baseline: { net_r: 1.0, max_drawdown_r: -2.0, filled_trades: 5 } } } },
+});
+ok("70 no Market State gate active on baseline/no-gate run", !coldNoMs.activeLayers.some((l) => l.layer === "market_state_gate"));
+ok("71 NO Market-State warm-up warning when gate NOT active (COLD) — proves no-MS run is unaffected",
+    !shownW(coldNoMs).some((w) => w.type === "market_state_warmup"));
+ok("72 COLD warning is concise (cold-window + OB-before-start only, no MS spam)",
+    coldNoMs.contextMode === P.CONTEXT_MODES.COLD
+    && shownW(coldNoMs).some((w) => w.type === "cold_short")
+    && shownW(coldNoMs).some((w) => w.type === "ob_before_start")
+    && shownW(coldNoMs).length === 2);
+
+// UNKNOWN window (ambiguous 1–5yr), no gate → a single mild note, not a warning storm.
+const unknownRun = P.buildRunBatch({
+    id: "unk",
+    config: { symbol: "EURUSD", date_from: "2022-01-01", date_to: "2024-06-01", entry_models: ["baseline"] },
+    executionMode: "allow_multi_position",
+    entryResults: { summary: { allow_multi_position: { baseline: { net_r: 1.0, max_drawdown_r: -2.0, filled_trades: 5 } } } },
+});
+ok("73 UNKNOWN context is a single mild note (border-mid), not a warning storm",
+    unknownRun.contextMode === P.CONTEXT_MODES.UNKNOWN
+    && shownW(unknownRun).length === 1
+    && shownW(unknownRun)[0].type === "unknown_note"
+    && shownW(unknownRun)[0].tone === "border-mid");
+ok("74 no OB-before-start / cold warning on UNKNOWN", !shownW(unknownRun).some((w) => w.type === "ob_before_start" || w.type === "cold_short"));
+ok("75 no MS warm-up on UNKNOWN when gate inactive", !shownW(unknownRun).some((w) => w.type === "market_state_warmup"));
+
+// config labels available (secondary chips)
+ok("76 base config chips available (readable secondary labels)", Array.isArray(batch.baseConfigChips) && batch.baseConfigChips.length > 0);
+
+// variant groups available for TE batch; none for baseline-only run (→ no right panel)
+ok("77 trigger variant groups available for TE batch (right panel populated)", batch.triggerVariantGroups.length > 0);
+ok("78 NO trigger variant groups for baseline-only run (→ right panel suppressed)", coldNoMs.triggerVariantGroups.length === 0);
+
+// scenario deep-links in component: encoded ?scenario=<scenarioKey>; baseline valid
+ok("79 scenario cards deep-link with URL-encoded ?scenario= param",
+    /\?scenario=\$\{encodeURIComponent\(s\.scenarioKey\)\}/.test(compSrc));
+ok("80 baseline scenarioKey present → forms a valid ?scenario=baseline link", !!byKey.baseline && byKey.baseline.scenarioKey === "baseline");
+
+// RunDetail: non-breaking ?scenario read support (exact-match on resultViewOptions, guarded)
+const rdSrc = fs.readFileSync("src/pages/RunDetail.jsx", "utf8");
+ok("81 RunDetail reads ?scenario via useSearchParams, exact-match + guarded, /runs/:runId still works",
+    /useSearchParams/.test(rdSrc)
+    && /searchParams\.get\("scenario"\)/.test(rdSrc)
+    && /resultViewOptions\.find\(\(opt\) => opt\.key === scenarioParam\)/.test(rdSrc)
+    && /appliedScenarioRef/.test(rdSrc));
+
+// invalid / odd input never throws when building the (now structured-warning) batch
+throwsOrSafe("82 structured-warning batch safe on malformed dates", () =>
+    P.buildRunBatch({ id: "z", config: { date_from: "garbage", date_to: "worse" }, entryResults: { summary: {} } }));
+
 console.log(failed === 0 ? "\nALL SCENARIO-PRESENTATION CHECKS PASSED" : `\n${failed} CHECK(S) FAILED`);
 process.exit(failed === 0 ? 0 : 1);

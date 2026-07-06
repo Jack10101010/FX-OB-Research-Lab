@@ -1,5 +1,5 @@
 import React from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { NeonPanel } from "@/components/lab/NeonPanel";
 import { LabRunHero } from "@/components/lab/LabRunHero";
 import { MetricChip } from "@/components/lab/MetricChip";
@@ -7,6 +7,7 @@ import { EquityCurveV2, MiniLine } from "@/components/lab/EquityCurve";
 import { DataTable, Pill } from "@/components/lab/DataTable";
 import SessionResults from "@/components/lab/sessionProfiles/SessionResults";
 import TimingRegimeLab from "@/components/lab/timing/TimingRegimeLab";
+import EdgeAttributionTab from "@/components/lab/EdgeAttributionTab";
 import EntryVariantOverlap from "@/components/lab/EntryVariantOverlap";
 import LazyImportStatus from "@/components/lab/LazyImportStatus";
 import { NeonButton, NeonInput, NeonSelect, FilterToggle } from "@/components/lab/controls";
@@ -268,6 +269,7 @@ export default function RunDetail() {
     // RB-8b: basis + account config consumed through the canonical lens hook.
     const lens = useResultsLens();
     const params = useParams();
+    const [searchParams] = useSearchParams();
     const navigate = useNavigate();
     const runId = params.runId === "active" ? ACTIVE_RUN.id : decodeURIComponent(params.runId || ACTIVE_RUN.id);
     const run = RUNS.find((r) => r.id === runId) || ACTIVE_RUN;
@@ -394,6 +396,25 @@ export default function RunDetail() {
         });
         return views;
     }, [runData]);
+
+    // Scenario deep-link (?scenario=<key>) — non-breaking, opt-in.
+    // A Runs "Cards" scenario link may carry ?scenario=<resultViewOption.key>.
+    // We honour it exactly ONCE per (run, param) pair, and ONLY when the value
+    // exactly matches an available Result View option key. Anything unknown,
+    // absent, or malformed is a no-op — so `/runs/:runId` still opens on the
+    // config-derived primary view exactly as before. Guarded by a ref so a later
+    // manual lens change is never overridden by the URL.
+    const scenarioParam = searchParams.get("scenario");
+    const appliedScenarioRef = React.useRef(null);
+    React.useEffect(() => {
+        if (!scenarioParam) return;
+        const guardKey = `${runId}::${scenarioParam}`;
+        if (appliedScenarioRef.current === guardKey) return;
+        const match = resultViewOptions.find((opt) => opt.key === scenarioParam);
+        if (!match) { appliedScenarioRef.current = guardKey; return; } // unknown → safe no-op
+        appliedScenarioRef.current = guardKey;
+        setResultView(match); // setResultView consumes the full option object (family/threshold/fillMode)
+    }, [scenarioParam, runId, resultViewOptions, setResultView]);
 
     // RW-10A note: the former `resultViewGroups` memo (a hardcoded C0–C6 slot grid)
     // was dead code — never rendered — and duplicated the legacy shallow-arm
@@ -1474,6 +1495,7 @@ export default function RunDetail() {
         { id: "variant-overlap", label: "Variant Overlap" },
         { id: "entry-timing", label: "Entry Timing" },
         { id: "timing-regime", label: "Timing & Regime" },
+        { id: "edge-attribution", label: "Edge Attribution" },
         { id: "research",    label: "Research" },
     ]), []);
     const currentResultsTab = resultsTabs.some((tab) => tab.id === activeResultsTab)
@@ -3206,6 +3228,7 @@ export default function RunDetail() {
                     </>
                 )}
                 {showResultsSection("timing-regime") && <TimingRegimeLab trades={displayTrades} />}
+                {showResultsSection("edge-attribution") && <EdgeAttributionTab trades={displayTrades} bundle={runData} />}
                 {showResultsSection("research") && (
                     <ResearchStrip
                         project={linkedProject}

@@ -48,31 +48,41 @@ function Chip({ tone = "border-mid", filled = false, muted = false, children }) 
 const fmt = (v, d = 2) => (v === null || v === undefined ? "—" : Number(v).toFixed(d));
 const rTone = (v) => (v === null || v === undefined ? "text-2" : v > 0 ? "success" : v < 0 ? "danger" : "text-2");
 
+function Metric({ label, value, tone }) {
+    return (
+        <div>
+            <span className="text-[9px] uppercase tracking-wide text-muted-lab font-ui">{label} </span>
+            <span className="text-[11.5px] font-ui" style={{ color: tone ? `hsl(var(--${tone}))` : "hsl(var(--text-1))" }}>{value}</span>
+        </div>
+    );
+}
+
 function ScenarioCard({ s, storeId }) {
     const best = s.isBestNetRTE || s.isBestNetDdTE || s.isBestNetR || s.isBestNetDd;
     const ring = best ? "hsl(var(--accent-secondary))" : "hsl(var(--border-soft))";
+    const scenarioParam = s.scenarioKey ? `?scenario=${encodeURIComponent(s.scenarioKey)}` : "";
     return (
         <Link
-            to={`/runs/${encodeURIComponent(storeId)}`}
+            to={`/runs/${encodeURIComponent(storeId)}${scenarioParam}`}
             className="block rounded-md border bg-[hsl(var(--panel))] p-2 hover:border-[hsl(var(--accent-primary))] transition-colors"
             style={{ borderColor: ring }}
         >
             <div className="flex items-center justify-between gap-1">
-                <span className="text-[11px] font-ui text-[hsl(var(--text-1))]">{s.label}</span>
+                <span className="text-[12.5px] font-ui font-semibold text-[hsl(var(--text-1))]">{s.label}</span>
                 <div className="flex gap-1">
-                    {s.isBestNetRTE && <Chip tone="accent-secondary">Best Net R</Chip>}
-                    {s.isBestNetDdTE && <Chip tone="accent-secondary">Best Net/DD</Chip>}
+                    {s.isBestNetRTE && <Chip filled tone="accent-secondary">Best Net R</Chip>}
+                    {s.isBestNetDdTE && <Chip filled tone="accent-secondary">Best Net/DD</Chip>}
                 </div>
             </div>
-            <div className="mt-1 grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10.5px] font-ui">
-                <div>Net R <span style={{ color: `hsl(var(--${rTone(s.netR)}))` }}>{fmt(s.netR)}</span></div>
-                <div className="text-muted-lab">Max DD {fmt(s.maxDd)}</div>
-                <div className="text-muted-lab">Net/DD {fmt(s.netDd)}</div>
-                <div className="text-muted-lab">PF {s.profitFactor === null ? "—" : fmt(s.profitFactor)}</div>
-                <div className="text-muted-lab">WR {s.winRate === null ? "—" : `${fmt(s.winRate, 1)}%`}</div>
-                <div className="text-muted-lab">filled {s.filledTrades ?? "—"}</div>
-                <div className="text-muted-lab">missed {s.missed ?? "—"}</div>
-                <div className="text-muted-lab">blocked {s.blockedRegime === null ? "—" : s.blockedRegime}</div>
+            <div className="mt-1.5 grid grid-cols-2 gap-x-2 gap-y-1">
+                <Metric label="Net R" value={fmt(s.netR)} tone={rTone(s.netR)} />
+                <Metric label="Max DD" value={fmt(s.maxDd)} />
+                <Metric label="Net/DD" value={fmt(s.netDd)} />
+                <Metric label="PF" value={s.profitFactor === null ? "—" : fmt(s.profitFactor)} />
+                <Metric label="WR" value={s.winRate === null ? "—" : `${fmt(s.winRate, 1)}%`} />
+                <Metric label="filled" value={s.filledTrades ?? "—"} />
+                <Metric label="missed" value={s.missed ?? "—"} />
+                <Metric label="blocked" value={s.blockedRegime === null ? "—" : s.blockedRegime} />
             </div>
             {s.deltaVsBaseline && (
                 <div className="mt-1 text-[10px] font-ui text-muted-lab">
@@ -120,99 +130,113 @@ export default function RunBatchSection({ run, getRunData }) {
                 </span>
             </div>
 
-            {/* ROW 2: prominent date range */}
-            <div className="mt-1 text-[14px] font-ui text-[hsl(var(--text-1))]">{batch.dateRange}</div>
-            <div className="text-[10px] font-ui text-muted-lab">
-                {batch.warmupStart
-                    ? <>context: preloaded from <span className="text-[hsl(var(--text-2))]">{fmtDate(batch.warmupStart)}</span></>
-                    : (batch.contextMode === CONTEXT_MODES.COLD ? <span style={{ color: "hsl(var(--warning))" }}>cold start — no prior context loaded</span> : null)}
-            </div>
+            {/* Two-column header: details left, triggered-entry panel right */}
+            <div className="mt-1 flex flex-col lg:flex-row lg:gap-4">
+                {/* LEFT: window, families, config, warnings */}
+                <div className="min-w-0 flex-1">
+                    {/* prominent date range */}
+                    <div className="text-[14px] font-ui text-[hsl(var(--text-1))]">{batch.dateRange}</div>
+                    <div className="text-[10px] font-ui text-muted-lab">
+                        {batch.warmupStart
+                            ? <>context: preloaded from <span className="text-[hsl(var(--text-2))]">{fmtDate(batch.warmupStart)}</span></>
+                            : (batch.contextMode === CONTEXT_MODES.COLD ? <span style={{ color: "hsl(var(--warning))" }}>cold start — no prior context loaded</span> : null)}
+                    </div>
 
-            {/* ROW 3: RAN IN THIS BATCH (bright/active) */}
-            {(batch.ranFamilies.length > 0 || batch.activeLayers.length > 0) && (
-                <div className="mt-2 flex flex-wrap items-center gap-1">
-                    <span className="text-[9px] uppercase tracking-wide text-[hsl(var(--success))] font-ui mr-1">Ran in this batch</span>
-                    {batch.ranFamilies.map((f) => (
-                        <Chip key={f.family} filled tone={FAMILY_TONE[f.family] || "success"}>
-                            ✓ {f.label}{f.count ? ` · ${f.count}${f.family === "triggered_entry" ? " variants" : (f.family === "session_scenarios" ? " cohorts" : "")}` : ""}
-                        </Chip>
-                    ))}
-                    {batch.activeLayers.map((l) => (
-                        <Chip key={l.layer} filled tone={LAYER_TONE[l.layer] || "accent-secondary"}>
-                            ✓ {l.label}{l.directionAware ? " · dir-aware" : ""}
-                        </Chip>
-                    ))}
-                </div>
-            )}
-
-            {/* ROW 4: NOT RUN / ABSENT (muted) */}
-            {batch.notRunMajor.length > 0 && (
-                <div className="mt-1 flex flex-wrap items-center gap-1">
-                    <span className="text-[9px] uppercase tracking-wide text-muted-lab font-ui mr-1">Not run</span>
-                    {batch.notRunMajor.map((m) => (
-                        <Chip key={m.key} muted>
-                            {m.label}: {m.status === "no_output" ? "no eligible output" : "not run"}
-                        </Chip>
-                    ))}
-                </div>
-            )}
-
-            {/* ROW 5: secondary config (demoted) */}
-            <div className="mt-1.5 flex flex-wrap gap-1 opacity-60">
-                {batch.baseConfigChips.map((c, i) => <Chip key={i} muted>{c}</Chip>)}
-            </div>
-
-            {/* Context / warm-up warnings (only when heuristic/cold) */}
-            {batch.contextWarning.length > 0 && (
-                <div className="mt-2 text-[10px] font-ui" style={{ color: `hsl(var(--${ctxTone}))` }}>
-                    {batch.contextWarning.map((w, i) => <div key={i}>⚠ {w}</div>)}
-                </div>
-            )}
-            {batch.warnings.filter((w) => /No scenario/.test(w)).map((w, i) => (
-                <div key={i} className="mt-1 text-[10px] font-ui text-[hsl(var(--warning))]">⚠ {w}</div>
-            ))}
-
-            {/* Compact summary + expand control (only when trigger×arm variants are collapsed) */}
-            {batch.canCollapse && (
-                <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] font-ui text-muted-lab">
-                    <span>
-                        {batch.teVariantCount} triggered-entry variant{batch.teVariantCount === 1 ? "" : "s"} tested
-                        {compact ? " · showing best" : " · showing all"}
-                    </span>
-                    {compact && bs.bestNetRLabel && (
-                        <span>· Best Net R: <span className="text-[hsl(var(--text-1))]">{bs.bestNetRLabel}</span>
-                            {bs.bestNetRNetR !== null ? ` · ${bs.bestNetRNetR > 0 ? "+" : ""}${bs.bestNetRNetR}R` : ""}</span>
+                    {/* RAN IN THIS BATCH (bright/active) */}
+                    {(batch.ranFamilies.length > 0 || batch.activeLayers.length > 0) && (
+                        <div className="mt-2 flex flex-wrap items-center gap-1">
+                            <span className="text-[9px] uppercase tracking-wide text-[hsl(var(--success))] font-ui mr-1">Ran in this batch</span>
+                            {batch.ranFamilies.map((f) => (
+                                <Chip key={f.family} filled tone={FAMILY_TONE[f.family] || "success"}>
+                                    ✓ {f.label}{f.count ? ` · ${f.count}${f.family === "triggered_entry" ? " variants" : (f.family === "session_scenarios" ? " cohorts" : "")}` : ""}
+                                </Chip>
+                            ))}
+                            {batch.activeLayers.map((l) => (
+                                <Chip key={l.layer} filled tone={LAYER_TONE[l.layer] || "accent-secondary"}>
+                                    ✓ {l.label}{l.directionAware ? " · dir-aware" : ""}
+                                </Chip>
+                            ))}
+                        </div>
                     )}
-                    {compact && bs.bestNetDdLabel && (
-                        <span>· Best Net/DD: <span className="text-[hsl(var(--text-1))]">{bs.bestNetDdLabel}</span></span>
+
+                    {/* NOT RUN / ABSENT (muted) */}
+                    {batch.notRunMajor.length > 0 && (
+                        <div className="mt-1 flex flex-wrap items-center gap-1">
+                            <span className="text-[9px] uppercase tracking-wide text-muted-lab font-ui mr-1">Not run</span>
+                            {batch.notRunMajor.map((m) => (
+                                <Chip key={m.key} muted>
+                                    {m.label}: {m.status === "no_output" ? "no eligible output" : "not run"}
+                                </Chip>
+                            ))}
+                        </div>
                     )}
-                    <button
-                        type="button"
-                        data-testid="runs-scenario-toggle"
-                        onClick={() => setShowAll((v) => !v)}
-                        className="underline text-[hsl(var(--accent-primary))] hover:text-white"
-                    >
-                        {showAll ? "Hide variants" : `Show all variants (${batch.scenarioCount})`}
-                    </button>
+
+                    {/* secondary config (readable but secondary: accent-primary outline) */}
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                        <span className="text-[9px] uppercase tracking-wide text-muted-lab font-ui mr-1">Config</span>
+                        {batch.baseConfigChips.map((c, i) => <Chip key={i} tone="accent-primary">{c}</Chip>)}
+                    </div>
+
+                    {/* Context / warm-up warnings (structured, gated, per-warning tone) */}
+                    {batch.contextWarnings.filter((w) => w.show).length > 0 && (
+                        <div className="mt-2 space-y-0.5 text-[10px] font-ui">
+                            {batch.contextWarnings.filter((w) => w.show).map((w, i) => (
+                                <div key={w.type || i} style={{ color: `hsl(var(--${w.tone || ctxTone}))` }}>⚠ {w.text}</div>
+                            ))}
+                        </div>
+                    )}
+                    {batch.warnings.filter((w) => /No scenario/.test(w)).map((w, i) => (
+                        <div key={i} className="mt-1 text-[10px] font-ui text-[hsl(var(--warning))]">⚠ {w}</div>
+                    ))}
                 </div>
-            )}
-            {compact && batch.triggerVariantGroups.length > 0 && (
-                <div className="mt-1 text-[10px] font-ui text-muted-lab">
-                    <span className="uppercase tracking-wide mr-1">Variants tested</span>
-                    <span className="inline-flex flex-wrap gap-x-3 gap-y-0.5 align-top">
-                        {batch.triggerVariantGroups.slice(0, showAllGroups ? undefined : 4).map((g) => (
-                            <span key={g.trigger}>
-                                <span className="text-[hsl(var(--text-2))]">{g.trigger}:</span> {g.arms.join(" · ")}
-                            </span>
-                        ))}
-                        {!showAllGroups && batch.triggerVariantGroups.length > 4 && (
-                            <button type="button" onClick={() => setShowAllGroups(true)} className="underline text-[hsl(var(--accent-primary))] hover:text-white">
-                                + {batch.triggerVariantGroups.length - 4} more
+
+                {/* RIGHT: triggered-entry variant panel (only when TE variants exist) */}
+                {batch.triggerVariantGroups.length > 0 && (
+                    <div className="mt-3 lg:mt-0 lg:w-64 shrink-0 rounded-md border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel))] p-2">
+                        <div className="text-[9px] uppercase tracking-wide text-[hsl(var(--accent-secondary))] font-ui mb-1">Triggered Entry</div>
+                        <div className="text-[10px] font-ui text-muted-lab">
+                            {batch.teVariantCount} variant{batch.teVariantCount === 1 ? "" : "s"} tested
+                            {batch.canCollapse ? (compact ? " · showing best" : " · showing all") : ""}
+                        </div>
+                        {compact && bs.bestNetRLabel && (
+                            <div className="mt-1 text-[10px] font-ui text-muted-lab">
+                                Best Net R: <span className="text-[hsl(var(--text-1))]">{bs.bestNetRLabel}</span>
+                                {bs.bestNetRNetR !== null ? ` · ${bs.bestNetRNetR > 0 ? "+" : ""}${bs.bestNetRNetR}R` : ""}
+                            </div>
+                        )}
+                        {compact && bs.bestNetDdLabel && (
+                            <div className="text-[10px] font-ui text-muted-lab">
+                                Best Net/DD: <span className="text-[hsl(var(--text-1))]">{bs.bestNetDdLabel}</span>
+                            </div>
+                        )}
+                        <div className="mt-1.5 text-[10px] font-ui text-muted-lab">
+                            <div className="uppercase tracking-wide mb-0.5">Variants</div>
+                            <div className="flex flex-col gap-0.5">
+                                {batch.triggerVariantGroups.slice(0, showAllGroups ? undefined : 6).map((g) => (
+                                    <div key={g.trigger}>
+                                        <span className="text-[hsl(var(--text-2))]">{g.trigger}:</span> {g.arms.join(" · ")}
+                                    </div>
+                                ))}
+                                {!showAllGroups && batch.triggerVariantGroups.length > 6 && (
+                                    <button type="button" onClick={() => setShowAllGroups(true)} className="self-start underline text-[hsl(var(--accent-primary))] hover:text-white">
+                                        + {batch.triggerVariantGroups.length - 6} more
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                        {batch.canCollapse && (
+                            <button
+                                type="button"
+                                data-testid="runs-scenario-toggle"
+                                onClick={() => setShowAll((v) => !v)}
+                                className="mt-1.5 underline text-[10px] font-ui text-[hsl(var(--accent-primary))] hover:text-white"
+                            >
+                                {showAll ? "Hide variants" : `Show all variants (${batch.scenarioCount})`}
                             </button>
                         )}
-                    </span>
-                </div>
-            )}
+                    </div>
+                )}
+            </div>
 
             {/* Scenario grid */}
             {shown.length > 0 && (

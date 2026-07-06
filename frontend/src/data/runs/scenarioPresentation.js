@@ -115,10 +115,19 @@ export function inferContextMode(config = {}) {
     return { mode: CONTEXT_MODES.UNKNOWN, confidence: "heuristic" };
 }
 
-function contextWarnings(mode) {
-    if (mode === CONTEXT_MODES.COLD) return [CONTEXT_WARNINGS.cold, CONTEXT_WARNINGS.warmup, CONTEXT_WARNINGS.obs];
-    if (mode === CONTEXT_MODES.UNKNOWN) return [CONTEXT_WARNINGS.warmup];
-    return [];
+// Structured, relevance-gated warnings. The Market-State warm-up warning appears ONLY when the Market State
+// gate is actually active — never on Raw Baseline / no-gate runs. Unknown context is a mild note, not a storm.
+function buildContextWarnings(mode, hasMsGate, usesOb = true) {
+    const out = [];
+    if (mode === CONTEXT_MODES.COLD) {
+        out.push({ type: "cold_short", show: true, tone: "warning", text: CONTEXT_WARNINGS.cold });
+        if (usesOb) out.push({ type: "ob_before_start", show: true, tone: "warning", text: CONTEXT_WARNINGS.obs });
+        if (hasMsGate) out.push({ type: "market_state_warmup", show: true, tone: "warning", text: CONTEXT_WARNINGS.warmup });
+    } else if (mode === CONTEXT_MODES.UNKNOWN) {
+        out.push({ type: "unknown_note", show: true, tone: "border-mid", text: "Context not confirmed (heuristic) — early-window behaviour may vary." });
+        if (hasMsGate) out.push({ type: "market_state_warmup", show: true, tone: "border-mid", text: CONTEXT_WARNINGS.warmup });
+    }
+    return out;
 }
 
 // ── scenario-type classifier + base config chips (run-level) ────────────────
@@ -280,6 +289,8 @@ export function buildRunBatch(run = {}) {
     const majorStatus = deriveMajorStatus(config, run, scenarioFamilies, activeLayers);
     const notRunMajor = majorStatus.filter((m) => m.status === "not_run" || m.status === "no_output");
     const triggerVariantGroups = deriveTriggerVariantGroups(run);
+    const hasMsGate = activeLayers.some((l) => l.layer === "market_state_gate");
+    const structuredWarnings = buildContextWarnings(ctx.mode, hasMsGate);
 
     // scenarios: entry_results.<exec_mode>.<scenario_key>. Prefer the primary exec mode.
     const erSummary = (run.entryResults && run.entryResults.summary) || run.entry_results || {};
@@ -376,7 +387,9 @@ export function buildRunBatch(run = {}) {
         symbol: config.symbol || run.symbol || "",
         dateRange: formatDateRange(rawRange), dateRangeRaw: rawRange,
         scenarioType: classifyScenarioType(config),
-        contextMode: ctx.mode, contextConfidence: ctx.confidence, contextWarning: contextWarnings(ctx.mode),
+        contextMode: ctx.mode, contextConfidence: ctx.confidence,
+        contextWarnings: structuredWarnings,
+        contextWarning: structuredWarnings.filter((w) => w.show).map((w) => w.text), // back-compat (strings)
         requestedStart: ctx.requestedStart, requestedEnd: ctx.requestedEnd, warmupStart: ctx.warmupStart,
         activeLayers, scenarioFamilies, ranFamilies: scenarioFamilies,
         majorStatus, notRunMajor, triggerVariantGroups,
