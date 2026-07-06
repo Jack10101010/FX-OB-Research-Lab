@@ -8,6 +8,20 @@ import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import { buildRunBatch, CONTEXT_MODES, formatDate as fmtDate } from "@/data/runs/scenarioPresentation";
 
+// Distinct, high-contrast tones per family/layer so a run's composition is readable at a glance.
+// All are existing theme tokens (no new colours). Fair Baseline shares Session Scenarios' tone because it
+// only runs alongside session scenarios.
+const FAMILY_TONE = {
+    baseline: "accent-secondary",   // secondary accent blue
+    triggered_entry: "accent-primary", // purple / magenta
+    session_scenarios: "success",   // green
+    fair_baseline: "success",       // same as session scenarios (they run together)
+};
+const LAYER_TONE = {
+    market_state_gate: "warning",   // amber / yellow
+    portfolio_manager: "danger",    // red
+    session_policy: "success",      // green (session family)
+};
 const CONTEXT_TONE = {
     [CONTEXT_MODES.WARMED]: "success",
     [CONTEXT_MODES.COLD]: "warning",
@@ -21,16 +35,16 @@ const CONTEXT_LABEL = {
     [CONTEXT_MODES.UNKNOWN]: "UNKNOWN CONTEXT",
 };
 
-function Chip({ tone = "border-mid", filled = false, muted = false, active = false, children }) {
-    // `active`: RAN/enabled state — the existing SECONDARY accent (accent-secondary) as bright text on a
-    // faint tint of the same token. Reads as clearly "on"/lit and stays legible on the dark panel, without a
-    // solid-button look and without introducing any new blue. `muted`: absent/not-run. `filled`: solid badge.
+function Chip({ tone = "accent-secondary", filled = false, muted = false, active = false, children }) {
+    // `active`: RAN/enabled state — the chip's `tone` token as bright text on a faint tint of the same token.
+    // Reads as clearly "on"/lit and stays legible on the dark panel, without a solid-button look. The tone is
+    // colour-coded per family/layer (see FAMILY_TONE / LAYER_TONE). `muted`: absent/not-run. `filled`: solid.
     let style;
     if (active) {
         style = {
-            background: "hsl(var(--accent-secondary) / 0.14)",
-            borderColor: "hsl(var(--accent-secondary))",
-            color: "hsl(var(--accent-secondary))",
+            background: `hsl(var(--${tone}) / 0.14)`,
+            borderColor: `hsl(var(--${tone}))`,
+            color: `hsl(var(--${tone}))`,
         };
     } else if (filled) {
         style = { background: `hsl(var(--${tone}))`, borderColor: `hsl(var(--${tone}))`, color: "hsl(var(--bg-0,var(--panel)))" };
@@ -130,9 +144,14 @@ export default function RunBatchSection({ run, getRunData }) {
                 <Link to={`/runs/${encodeURIComponent(storeId)}`} className="text-[12.5px] font-ui text-[hsl(var(--accent-primary))] hover:text-white">
                     {batch.symbol} · {batch.scenarioType}
                 </Link>
-                <Chip tone={ctxTone} muted={contextMuted}>
-                    {CONTEXT_LABEL[batch.contextMode]}{!contextMuted && batch.contextConfidence ? ` · ${batch.contextConfidence}` : ""}
-                </Chip>
+                {/* The context mode is a date-span heuristic; it only means something when the Market State
+                    gate ran (or a COLD window). Otherwise it's noise (WARMED vs UNKNOWN on equivalent runs),
+                    so hide it entirely rather than show two confusing labels. */}
+                {!contextMuted && (
+                    <Chip tone={ctxTone}>
+                        {CONTEXT_LABEL[batch.contextMode]}{batch.contextConfidence ? ` · ${batch.contextConfidence}` : ""}
+                    </Chip>
+                )}
                 {batch.status && <Chip tone="border-mid">{batch.status}</Chip>}
                 <span className="ml-auto text-[10px] text-muted-lab font-ui">
                     #{batch.shortRunId}{batch.configHashShort ? ` / cfg ${batch.configHashShort}` : ""}
@@ -146,8 +165,13 @@ export default function RunBatchSection({ run, getRunData }) {
             <div className="mt-1 flex flex-col lg:flex-row lg:items-start lg:gap-4">
                 {/* LEFT: window, families, config, warnings */}
                 <div className="min-w-0 flex-1">
-                    {/* prominent date range */}
-                    <div className="text-[14px] font-ui text-[hsl(var(--text-1))]">{batch.dateRange}</div>
+                    {/* prominent date range + span in months (│ separator) */}
+                    <div className="text-[14px] font-ui text-[hsl(var(--text-1))]">
+                        {batch.dateRange}
+                        {batch.spanMonths ? (
+                            <span className="text-[hsl(var(--text-2))]"> │ <span className="text-[12px]">{batch.spanMonths} months</span></span>
+                        ) : null}
+                    </div>
                     <div className="text-[10px] font-ui text-muted-lab">
                         {batch.warmupStart
                             ? <>context: preloaded from <span className="text-[hsl(var(--text-2))]">{fmtDate(batch.warmupStart)}</span></>
@@ -159,12 +183,12 @@ export default function RunBatchSection({ run, getRunData }) {
                         <div className="mt-2 flex flex-wrap items-center gap-1">
                             <span className="text-[9px] uppercase tracking-wide text-[hsl(var(--success))] font-ui mr-1">Ran in this batch</span>
                             {batch.ranFamilies.map((f) => (
-                                <Chip key={f.family} active>
+                                <Chip key={f.family} active tone={FAMILY_TONE[f.family] || "accent-secondary"}>
                                     ✓ {f.label}{f.count ? ` · ${f.count}${f.family === "triggered_entry" ? " variants" : (f.family === "session_scenarios" ? " cohorts" : "")}` : ""}
                                 </Chip>
                             ))}
                             {batch.activeLayers.map((l) => (
-                                <Chip key={l.layer} active>
+                                <Chip key={l.layer} active tone={LAYER_TONE[l.layer] || "accent-secondary"}>
                                     ✓ {l.label}{l.directionAware ? " · dir-aware" : ""}
                                 </Chip>
                             ))}

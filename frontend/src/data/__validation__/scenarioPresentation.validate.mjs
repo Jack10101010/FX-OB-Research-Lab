@@ -336,25 +336,39 @@ ok("84 COLD + Market State run still shows cold + OB + warm-up warnings",
     && shownW(batch).some((w) => w.type === "ob_before_start")
     && shownW(batch).some((w) => w.type === "market_state_warmup"));
 
-// Component: active RAN chips vs muted absent chips are visually distinct treatments.
+// Component: active RAN chips (colour-coded per family/layer) vs muted absent chips are distinct treatments.
 ok("85 RAN chips use the `active` treatment; NOT-RUN chips use `muted` (distinct)",
-    /ranFamilies\.map[\s\S]*?<Chip key=\{f\.family\} active>/.test(compSrc)
-    && /activeLayers\.map[\s\S]*?<Chip key=\{l\.layer\} active>/.test(compSrc)
+    /ranFamilies\.map[\s\S]*?<Chip key=\{f\.family\} active tone=\{FAMILY_TONE/.test(compSrc)
+    && /activeLayers\.map[\s\S]*?<Chip key=\{l\.layer\} active tone=\{LAYER_TONE/.test(compSrc)
     && /notRunMajor\.map[\s\S]*?<Chip key=\{m\.key\} muted>/.test(compSrc));
-// Active chip maps to the EXISTING secondary accent token (no new blue), not accent-primary.
-ok("86 active chip style uses accent-secondary token (existing secondary accent, no new blue)",
+// Active chip is tone-driven (colour-coded); family/layer maps use existing tokens with distinct high-contrast tones.
+ok("86 active chip style is tone-driven (per-family/layer colour, all existing tokens)",
     (() => {
         const m = compSrc.match(/if \(active\) \{([\s\S]*?)\} else if \(filled\)/);
         const branch = m ? m[1] : "";
-        return branch.includes("--accent-secondary") && !branch.includes("--accent-primary");
+        return branch.includes("--${tone})") && branch.includes("/ 0.14");
+    })()
+    && /baseline: "accent-secondary"/.test(compSrc)
+    && /triggered_entry: "accent-primary"/.test(compSrc)
+    && /session_scenarios: "success"/.test(compSrc)
+    && /fair_baseline: "success"/.test(compSrc)
+    && /market_state_gate: "warning"/.test(compSrc)
+    && /portfolio_manager: "danger"/.test(compSrc));
+// Fair Baseline shares the Session Scenarios tone (they run together).
+ok("86b Fair Baseline tone == Session Scenarios tone (green)",
+    (() => {
+        const fam = compSrc.match(/const FAMILY_TONE = \{([\s\S]*?)\};/);
+        const body = fam ? fam[1] : "";
+        const se = body.match(/session_scenarios: "([^"]+)"/);
+        const fb = body.match(/fair_baseline: "([^"]+)"/);
+        return se && fb && se[1] === fb[1];
     })());
 
-// Context badge is de-emphasised (muted, no "· heuristic") for any non-COLD run without a Market State gate
-// — so "FULL-HISTORY WARMED · heuristic" no longer reads as a meaningful green badge on no-gate runs.
-ok("87 context badge de-emphasised for non-COLD runs without a Market State gate",
+// Context badge is HIDDEN (not just muted) for any non-COLD run without a Market State gate — so
+// "FULL-HISTORY WARMED" and "UNKNOWN CONTEXT" no longer appear as two confusing labels on equivalent runs.
+ok("87 context badge hidden for non-COLD runs without a Market State gate",
     /const contextMuted = !hasMsGate && batch\.contextMode !== CONTEXT_MODES\.COLD/.test(compSrc)
-    && /muted=\{contextMuted\}/.test(compSrc)
-    && /!contextMuted && batch\.contextConfidence/.test(compSrc));
+    && /\{!contextMuted && \([\s\S]*?<Chip tone=\{ctxTone\}>/.test(compSrc));
 
 // Max DD numeric value is danger-toned; the label stays neutral. Net R keeps its sign tone.
 ok("88 Max DD value danger-toned (label stays neutral)",
@@ -406,6 +420,14 @@ ok("96 WARMED + no Market State gate → no warning lines (context badge is info
     warmedNoMs.contextMode === P.CONTEXT_MODES.WARMED
     && !warmedNoMs.activeLayers.some((l) => l.layer === "market_state_gate")
     && shownW(warmedNoMs).length === 0);
+
+// ── Phase-7: month-span after date range ────
+ok("97 monthSpan computes calendar months between two dates",
+    P.monthSpan("2020-01-02", "2026-06-18") === 78 && P.monthSpan("2021-04-01", "2021-06-18") === 3);
+ok("98 monthSpan safe on malformed / missing dates", P.monthSpan("garbage", "2026-06-18") === null && P.monthSpan(null, null) === null);
+ok("99 batch exposes spanMonths for the date range", warmedNoMs.spanMonths === 78 && batch.spanMonths === 3);
+ok("100 component renders month span after the date range (│ separator)",
+    /\{batch\.dateRange\}[\s\S]*?batch\.spanMonths \?[\s\S]*?│[\s\S]*?\{batch\.spanMonths\} months/.test(compSrc));
 
 console.log(failed === 0 ? "\nALL SCENARIO-PRESENTATION CHECKS PASSED" : `\n${failed} CHECK(S) FAILED`);
 process.exit(failed === 0 ? 0 : 1);

@@ -40,6 +40,15 @@ export function formatDateRange(range) {
     if (parts.length === 2) return `${formatDate(parts[0])} → ${formatDate(parts[1])}`;
     return range;
 }
+// Whole-month span between two YYYY-MM-DD dates (calendar months, +1 day rounding). Null when undeterminable.
+export function monthSpan(from, to) {
+    const a = from ? String(from).match(/^(\d{4})-(\d{2})-(\d{2})/) : null;
+    const b = to ? String(to).match(/^(\d{4})-(\d{2})-(\d{2})/) : null;
+    if (!a || !b) return null;
+    let months = (Number(b[1]) - Number(a[1])) * 12 + (Number(b[2]) - Number(a[2]));
+    if (Number(b[3]) >= Number(a[3])) months += 1; // include the trailing partial month
+    return months > 0 ? months : null;
+}
 
 // ── scenario key parsing ────────────────────────────────────────────────────
 // "baseline" / "entry_baseline" → baseline (immediate entry)
@@ -396,12 +405,16 @@ export function buildRunBatch(run = {}) {
     if (!scenarios.length) warnings.push("No scenario metrics available for this run (entry_results missing).");
 
     const rawRange = run.dateRangeRaw || run.dateRange || `${config.date_from || config.start_date || "?"} → ${config.date_to || config.end_date || "?"}`;
+    const spanMonths = monthSpan(
+        config.date_from || config.start_date || ctx.requestedStart,
+        config.date_to || config.end_date || ctx.requestedEnd,
+    );
     return {
         runId, shortRunId, configHashShort: String(configHash).slice(0, 8),
         title: deriveBatchTitle(config, run),
         userDisplayName: run.displayName || run.name || "",
         symbol: config.symbol || run.symbol || "",
-        dateRange: formatDateRange(rawRange), dateRangeRaw: rawRange,
+        dateRange: formatDateRange(rawRange), dateRangeRaw: rawRange, spanMonths,
         scenarioType: classifyScenarioType(config),
         contextMode: ctx.mode, contextConfidence: ctx.confidence,
         contextWarnings: structuredWarnings,
