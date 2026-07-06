@@ -160,23 +160,39 @@ export function classifyScenarioType(config = {}) {
     return "Raw Baseline";
 }
 
+// Config chips: a CONSISTENT slot set so every card is comparable. Each chip is {text, absent}; `absent`
+// means the field was not recorded in this run's saved config (rendered muted as "n/a") rather than dropped,
+// so cards no longer look like they have "missing" chips. Values are never fabricated — absent stays "n/a".
 function baseConfigChips(config = {}) {
     const chips = [];
+    const push = (text, absent = false) => chips.push({ text, absent });
+
     const rr = config.rr_multiple;
-    if (rr !== undefined && rr !== null && rr !== "") chips.push(`RR${rr}`);
-    if (config.regime_gate_enabled) {
-        chips.push(config.regime_direction_policy === "direction_aware" ? "MS Gate · dir-aware" : "MS Gate");
-    } else chips.push("MS Gate off");
-    chips.push(config.portfolio_policy_enabled ? "Portfolio v1" : "PM off");
-    if (config.session_strategy_scenario || config.session_filter_enabled) chips.push("Session scenario");
-    else chips.push("All sessions");
+    const hasRr = rr !== undefined && rr !== null && rr !== "";
+    push(hasRr ? `RR${rr}` : "RR n/a", !hasRr);
+
+    if (config.regime_gate_enabled) push(config.regime_direction_policy === "direction_aware" ? "MS Gate · dir-aware" : "MS Gate");
+    else push("MS Gate off");
+
+    push(config.portfolio_policy_enabled ? "Portfolio v1" : "PM off");
+    push(config.session_strategy_scenario || config.session_filter_enabled ? "Session scenario" : "All sessions");
+
     const sp = config.spread_pips, sl = config.slippage_pips;
-    if (sp !== undefined || sl !== undefined) chips.push(`costs ${sp ?? "?"}/${sl ?? "?"}`);
-    if (Array.isArray(config.news_blackout_impacts) && config.news_blackout_impacts.length) {
-        chips.push(`news ${config.news_blackout_impacts.join("/")} ${config.news_blackout_minutes_before ?? "?"}/${config.news_blackout_minutes_after ?? "?"}m`);
-    }
-    if (config.stop_buffer_pips !== undefined) chips.push(`stop ${config.stop_buffer_pips}p`);
-    if (config.trade_direction) chips.push(`${config.trade_direction} dirs`);
+    const hasCosts = sp !== undefined || sl !== undefined;
+    push(hasCosts ? `costs ${sp ?? "?"}/${sl ?? "?"}` : "costs n/a", !hasCosts);
+
+    // Empty/absent news list is a genuine, meaningful state ("news off"), not an unrecorded field.
+    const hasNews = Array.isArray(config.news_blackout_impacts) && config.news_blackout_impacts.length;
+    push(hasNews
+        ? `news ${config.news_blackout_impacts.join("/")} ${config.news_blackout_minutes_before ?? "?"}/${config.news_blackout_minutes_after ?? "?"}m`
+        : "news off");
+
+    const hasStop = config.stop_buffer_pips !== undefined && config.stop_buffer_pips !== null;
+    push(hasStop ? `stop ${config.stop_buffer_pips}p` : "stop n/a", !hasStop);
+
+    const hasDir = !!config.trade_direction;
+    push(hasDir ? `${config.trade_direction} dirs` : "dir n/a", !hasDir);
+
     return chips;
 }
 

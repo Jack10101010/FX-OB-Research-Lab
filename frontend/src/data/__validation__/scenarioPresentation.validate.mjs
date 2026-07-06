@@ -341,21 +341,20 @@ ok("85 RAN chips use the `active` treatment; NOT-RUN chips use `muted` (distinct
     /ranFamilies\.map[\s\S]*?<Chip key=\{f\.family\} active tone=\{FAMILY_TONE/.test(compSrc)
     && /activeLayers\.map[\s\S]*?<Chip key=\{l\.layer\} active tone=\{LAYER_TONE/.test(compSrc)
     && /notRunMajor\.map[\s\S]*?<Chip key=\{m\.key\} muted>/.test(compSrc));
-// Active chip is tone-driven (colour-coded); family/layer maps use existing tokens with distinct high-contrast tones.
-ok("86 active chip style is tone-driven (per-family/layer colour, all existing tokens)",
-    (() => {
-        const m = compSrc.match(/if \(active\) \{([\s\S]*?)\} else if \(filled\)/);
-        const branch = m ? m[1] : "";
-        return branch.includes("--${tone})") && branch.includes("/ 0.14");
-    })()
+// Active chip is colour-driven: an explicit HSL triplet (`color`) or a theme token (`tone`), tinted at 0.14.
+ok("86 active chip is colour-driven (explicit HSL or token) with distinct per-family/layer colours",
+    /const c = color \? color : `var\(--\$\{tone\}\)`;/.test(compSrc)
+    && /background: `hsl\(\$\{c\} \/ 0\.14\)`/.test(compSrc)
     && /baseline: "accent-secondary"/.test(compSrc)
-    && /triggered_entry: "accent-primary"/.test(compSrc)
     && /session_scenarios: "success"/.test(compSrc)
     && /fair_baseline: "success"/.test(compSrc)
-    && /market_state_gate: "warning"/.test(compSrc)
     && /portfolio_manager: "danger"/.test(compSrc));
-// Fair Baseline shares the Session Scenarios tone (they run together).
-ok("86b Fair Baseline tone == Session Scenarios tone (green)",
+// Triggered Entry = light purple, Market State Gate = yellow (fixed HSL triplets, theme-independent, no hex).
+ok("86b Triggered Entry = light purple + Market State Gate = yellow (fixed HSL)",
+    /triggered_entry: "270 90% 80%"/.test(compSrc)
+    && /market_state_gate: "52 100% 60%"/.test(compSrc));
+// Fair Baseline shares the Session Scenarios colour (they run together).
+ok("86c Fair Baseline colour == Session Scenarios colour (green/success)",
     (() => {
         const fam = compSrc.match(/const FAMILY_TONE = \{([\s\S]*?)\};/);
         const body = fam ? fam[1] : "";
@@ -363,6 +362,10 @@ ok("86b Fair Baseline tone == Session Scenarios tone (green)",
         const fb = body.match(/fair_baseline: "([^"]+)"/);
         return se && fb && se[1] === fb[1];
     })());
+// RAN chips pass the fixed colour maps through so the pinned purple/yellow actually render.
+ok("86d RAN chips forward FAMILY_COLOR / LAYER_COLOR to the chip",
+    /active tone=\{FAMILY_TONE\[f\.family\] \|\| "accent-secondary"\} color=\{FAMILY_COLOR\[f\.family\]\}/.test(compSrc)
+    && /active tone=\{LAYER_TONE\[l\.layer\] \|\| "accent-secondary"\} color=\{LAYER_COLOR\[l\.layer\]\}/.test(compSrc));
 
 // Context badge is HIDDEN (not just muted) for any non-COLD run without a Market State gate — so
 // "FULL-HISTORY WARMED" and "UNKNOWN CONTEXT" no longer appear as two confusing labels on equivalent runs.
@@ -428,6 +431,33 @@ ok("98 monthSpan safe on malformed / missing dates", P.monthSpan("garbage", "202
 ok("99 batch exposes spanMonths for the date range", warmedNoMs.spanMonths === 78 && batch.spanMonths === 3);
 ok("100 component renders month span after the date range (│ separator)",
     /\{batch\.dateRange\}[\s\S]*?batch\.spanMonths \?[\s\S]*?│[\s\S]*?\{batch\.spanMonths\} months/.test(compSrc));
+
+// ── Phase-8: consistent config-chip slots (no more "missing" chips) ────
+const minCfg = P.buildRunBatch({
+    id: "mincfg",
+    config: { symbol: "GBPUSD", date_from: "2020-01-02", date_to: "2026-06-18", entry_models: ["triggered_edge"], rr_multiple: 2 },
+    executionMode: "allow_multi_position",
+    entryResults: { summary: { allow_multi_position: { baseline: { net_r: 1, max_drawdown_r: -2, filled_trades: 5 } } } },
+});
+const cc = minCfg.baseConfigChips;
+ok("101 config chips are {text, absent} objects", Array.isArray(cc) && cc.length > 0 && cc.every((c) => c && typeof c === "object" && "text" in c && "absent" in c));
+ok("102 unrecorded costs/stop/direction still appear as muted 'n/a' slots (cards stay comparable)",
+    cc.some((c) => c.text === "costs n/a" && c.absent)
+    && cc.some((c) => c.text === "stop n/a" && c.absent)
+    && cc.some((c) => c.text === "dir n/a" && c.absent));
+ok("103 empty news list → meaningful 'news off' (not a muted placeholder)",
+    cc.some((c) => c.text === "news off" && !c.absent));
+// A fully-specified run: recorded values are NOT muted placeholders.
+const cFull = batch.baseConfigChips;
+ok("104 recorded config values are not muted (costs/dirs present, no n/a)",
+    cFull.some((c) => /^costs /.test(c.text) && !c.absent)
+    && cFull.some((c) => /dirs$/.test(c.text) && !c.absent)
+    && !cFull.some((c) => c.text === "costs n/a"));
+ok("105 component renders config chip text + mutes absent slots",
+    /baseConfigChips\.map\(\(c, i\) => <Chip key=\{i\} tone="accent-primary" muted=\{c\.absent\}>\{c\.text\}<\/Chip>\)/.test(compSrc));
+// every card shows the same core slot count (8) regardless of how much config was recorded
+ok("106 config slot set is consistent across runs (same chip count, minimal == full == 8)",
+    minCfg.baseConfigChips.length === 8 && batch.baseConfigChips.length === 8);
 
 console.log(failed === 0 ? "\nALL SCENARIO-PRESENTATION CHECKS PASSED" : `\n${failed} CHECK(S) FAILED`);
 process.exit(failed === 0 ? 0 : 1);

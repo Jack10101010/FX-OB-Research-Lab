@@ -8,19 +8,25 @@ import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import { buildRunBatch, CONTEXT_MODES, formatDate as fmtDate } from "@/data/runs/scenarioPresentation";
 
-// Distinct, high-contrast tones per family/layer so a run's composition is readable at a glance.
-// All are existing theme tokens (no new colours). Fair Baseline shares Session Scenarios' tone because it
-// only runs alongside session scenarios.
+// Distinct, high-contrast colours per family/layer so a run's composition is readable at a glance.
+// Most use existing theme tokens; Triggered Entry (light purple) and Market State Gate (yellow) use fixed
+// HSL values because no theme token renders reliably purple/yellow across every theme (requested explicitly).
+// Fair Baseline shares Session Scenarios' colour because it only runs alongside session scenarios.
 const FAMILY_TONE = {
     baseline: "accent-secondary",   // secondary accent blue
-    triggered_entry: "accent-primary", // purple / magenta
     session_scenarios: "success",   // green
     fair_baseline: "success",       // same as session scenarios (they run together)
 };
 const LAYER_TONE = {
-    market_state_gate: "warning",   // amber / yellow
     portfolio_manager: "danger",    // red
     session_policy: "success",      // green (session family)
+};
+// Fixed HSL triplets (theme-independent) for the two chips the user pinned to specific colours.
+const FAMILY_COLOR = {
+    triggered_entry: "270 90% 80%", // light purple
+};
+const LAYER_COLOR = {
+    market_state_gate: "52 100% 60%", // yellow
 };
 const CONTEXT_TONE = {
     [CONTEXT_MODES.WARMED]: "success",
@@ -35,16 +41,17 @@ const CONTEXT_LABEL = {
     [CONTEXT_MODES.UNKNOWN]: "UNKNOWN CONTEXT",
 };
 
-function Chip({ tone = "accent-secondary", filled = false, muted = false, active = false, children }) {
-    // `active`: RAN/enabled state — the chip's `tone` token as bright text on a faint tint of the same token.
-    // Reads as clearly "on"/lit and stays legible on the dark panel, without a solid-button look. The tone is
-    // colour-coded per family/layer (see FAMILY_TONE / LAYER_TONE). `muted`: absent/not-run. `filled`: solid.
+function Chip({ tone = "accent-secondary", color = null, filled = false, muted = false, active = false, children }) {
+    // `active`: RAN/enabled state — bright text on a faint tint of the same colour. Reads as clearly "on"/lit
+    // and stays legible on the dark panel, without a solid-button look. Colour is either an explicit HSL triplet
+    // (`color`, for the pinned purple/yellow chips) or a theme token (`tone`). `muted`: absent. `filled`: solid.
+    const c = color ? color : `var(--${tone})`;
     let style;
     if (active) {
         style = {
-            background: `hsl(var(--${tone}) / 0.14)`,
-            borderColor: `hsl(var(--${tone}))`,
-            color: `hsl(var(--${tone}))`,
+            background: `hsl(${c} / 0.14)`,
+            borderColor: `hsl(${c})`,
+            color: `hsl(${c})`,
         };
     } else if (filled) {
         style = { background: `hsl(var(--${tone}))`, borderColor: `hsl(var(--${tone}))`, color: "hsl(var(--bg-0,var(--panel)))" };
@@ -183,12 +190,12 @@ export default function RunBatchSection({ run, getRunData }) {
                         <div className="mt-2 flex flex-wrap items-center gap-1">
                             <span className="text-[9px] uppercase tracking-wide text-[hsl(var(--success))] font-ui mr-1">Ran in this batch</span>
                             {batch.ranFamilies.map((f) => (
-                                <Chip key={f.family} active tone={FAMILY_TONE[f.family] || "accent-secondary"}>
+                                <Chip key={f.family} active tone={FAMILY_TONE[f.family] || "accent-secondary"} color={FAMILY_COLOR[f.family]}>
                                     ✓ {f.label}{f.count ? ` · ${f.count}${f.family === "triggered_entry" ? " variants" : (f.family === "session_scenarios" ? " cohorts" : "")}` : ""}
                                 </Chip>
                             ))}
                             {batch.activeLayers.map((l) => (
-                                <Chip key={l.layer} active tone={LAYER_TONE[l.layer] || "accent-secondary"}>
+                                <Chip key={l.layer} active tone={LAYER_TONE[l.layer] || "accent-secondary"} color={LAYER_COLOR[l.layer]}>
                                     ✓ {l.label}{l.directionAware ? " · dir-aware" : ""}
                                 </Chip>
                             ))}
@@ -207,10 +214,10 @@ export default function RunBatchSection({ run, getRunData }) {
                         </div>
                     )}
 
-                    {/* secondary config (readable but secondary: accent-primary outline) */}
+                    {/* secondary config — a consistent slot set; unrecorded fields render muted ("n/a") */}
                     <div className="mt-1.5 flex flex-wrap items-center gap-1">
                         <span className="text-[9px] uppercase tracking-wide text-muted-lab font-ui mr-1">Config</span>
-                        {batch.baseConfigChips.map((c, i) => <Chip key={i} tone="accent-primary">{c}</Chip>)}
+                        {batch.baseConfigChips.map((c, i) => <Chip key={i} tone="accent-primary" muted={c.absent}>{c.text}</Chip>)}
                     </div>
 
                     {/* Context / warm-up warnings (structured, gated, per-warning tone) */}
