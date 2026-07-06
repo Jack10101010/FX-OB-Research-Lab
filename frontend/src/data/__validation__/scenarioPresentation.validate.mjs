@@ -349,9 +349,10 @@ ok("86 active chip style uses accent-secondary token (existing secondary accent,
         return branch.includes("--accent-secondary") && !branch.includes("--accent-primary");
     })());
 
-// Context badge is de-emphasised (muted, no "· heuristic") when UNKNOWN and no MS gate.
-ok("87 context badge de-emphasised when UNKNOWN & no Market State gate",
-    /const contextMuted = batch\.contextMode === CONTEXT_MODES\.UNKNOWN && !hasMsGate/.test(compSrc)
+// Context badge is de-emphasised (muted, no "· heuristic") for any non-COLD run without a Market State gate
+// — so "FULL-HISTORY WARMED · heuristic" no longer reads as a meaningful green badge on no-gate runs.
+ok("87 context badge de-emphasised for non-COLD runs without a Market State gate",
+    /const contextMuted = !hasMsGate && batch\.contextMode !== CONTEXT_MODES\.COLD/.test(compSrc)
     && /muted=\{contextMuted\}/.test(compSrc)
     && /!contextMuted && batch\.contextConfidence/.test(compSrc));
 
@@ -366,11 +367,11 @@ ok("89 negative Net R still uses danger tone via rTone (preserved)",
 ok("90 header row top-aligned (items-start) so the right panel can't stretch/push cards",
     /lg:flex-row lg:items-start/.test(compSrc));
 ok("91 right variant panel width-constrained + only rendered when TE variants exist",
-    /batch\.triggerVariantGroups\.length > 0 &&/.test(compSrc) && /lg:w-52 shrink-0/.test(compSrc));
+    /batch\.triggerVariantGroups\.length > 0 &&/.test(compSrc) && /lg:w-72 shrink-0/.test(compSrc));
 ok("92 scenario grid sits below the two-column header row (declared after the flex row + panel)",
     (() => {
         const flexIdx = compSrc.indexOf("lg:flex-row lg:items-start");
-        const panelIdx = compSrc.indexOf("lg:w-52 shrink-0");
+        const panelIdx = compSrc.indexOf("lg:w-72 shrink-0");
         const gridIdx = compSrc.indexOf("{/* Scenario grid */}");
         return flexIdx > 0 && panelIdx > flexIdx && gridIdx > panelIdx;
     })());
@@ -378,6 +379,33 @@ ok("92 scenario grid sits below the two-column header row (declared after the fl
 // scenario cards still generated correctly (unchanged core behaviour)
 ok("93 scenario cards still generated (baseline + TE variants intact)",
     batch.scenarios.length === 5 && !!byKey.baseline && Object.keys(byKey).some((k) => k.startsWith("entry_triggered_edge")));
+
+// ── Phase-6: overflow fix + best-badge restyle + warmed-badge de-emphasis ────
+// Variant lines must wrap inside the panel (no whitespace-nowrap → no right-edge overflow); panel clips as safety.
+ok("94 variant panel wraps long arm lists (no whitespace-nowrap; break-words + overflow-hidden)",
+    !/triggerVariantGroups\.slice[\s\S]*?whitespace-nowrap/.test(compSrc)
+    && /triggerVariantGroups\.slice[\s\S]*?break-words/.test(compSrc)
+    && /lg:w-72 shrink-0 overflow-hidden/.test(compSrc));
+// Best Net R / Best Net/DD badges now use the same `active` secondary-accent chip style (not solid `filled`).
+ok("95 best-scenario badges use the active secondary-accent chip style (not filled)",
+    /isBestNetRTE && <Chip active>Best Net R<\/Chip>/.test(compSrc)
+    && /isBestNetDdTE && <Chip active>Best Net\/DD<\/Chip>/.test(compSrc)
+    && !/<Chip filled tone="accent-secondary">Best/.test(compSrc));
+// A WARMED run without a Market State gate: helper emits NO warning line (badge de-emphasis is component-side).
+const warmedNoMs = P.buildRunBatch({
+    id: "warmnoms",
+    config: { symbol: "GBPUSD", date_from: "2020-01-02", date_to: "2026-06-18", entry_models: ["triggered_edge"],
+        triggered_edge_trigger_thresholds: [10, 25], triggered_edge_candle_delays: [2, 3, 4] },
+    executionMode: "allow_multi_position",
+    entryResults: { summary: { allow_multi_position: {
+        baseline: { net_r: -48.58, max_drawdown_r: -77.23, filled_trades: 994, missed_trades: 146, win_rate: 0.336 },
+        entry_triggered_edge_25p0_d4: { net_r: -1.06, max_drawdown_r: -34.35, filled_trades: 626, missed_trades: 514, win_rate: 0.346 },
+    } } },
+});
+ok("96 WARMED + no Market State gate → no warning lines (context badge is informational only)",
+    warmedNoMs.contextMode === P.CONTEXT_MODES.WARMED
+    && !warmedNoMs.activeLayers.some((l) => l.layer === "market_state_gate")
+    && shownW(warmedNoMs).length === 0);
 
 console.log(failed === 0 ? "\nALL SCENARIO-PRESENTATION CHECKS PASSED" : `\n${failed} CHECK(S) FAILED`);
 process.exit(failed === 0 ? 0 : 1);

@@ -71,8 +71,8 @@ function ScenarioCard({ s, storeId }) {
             <div className="flex items-center justify-between gap-1">
                 <span className="text-[12.5px] font-ui font-semibold text-[hsl(var(--text-1))]">{s.label}</span>
                 <div className="flex gap-1">
-                    {s.isBestNetRTE && <Chip filled tone="accent-secondary">Best Net R</Chip>}
-                    {s.isBestNetDdTE && <Chip filled tone="accent-secondary">Best Net/DD</Chip>}
+                    {s.isBestNetRTE && <Chip active>Best Net R</Chip>}
+                    {s.isBestNetDdTE && <Chip active>Best Net/DD</Chip>}
                 </div>
             </div>
             <div className="mt-1.5 grid grid-cols-2 gap-x-2 gap-y-1">
@@ -111,9 +111,11 @@ export default function RunBatchSection({ run, getRunData }) {
     const batch = buildRunBatch(merged);
     const ctxTone = CONTEXT_TONE[batch.contextMode] || "border-mid";
     const hasMsGate = batch.activeLayers.some((l) => l.layer === "market_state_gate");
-    // UNKNOWN context only matters when a context-sensitive layer is active. Otherwise de-emphasise the
-    // badge (muted, no confusing "· heuristic" suffix) so it doesn't read as a warning.
-    const contextMuted = batch.contextMode === CONTEXT_MODES.UNKNOWN && !hasMsGate;
+    // The context mode (WARMED / PRELOAD / UNKNOWN) is a date-span heuristic and only carries meaning when a
+    // context-sensitive layer (the Market State gate) actually ran. With no gate active, "FULL-HISTORY WARMED"
+    // etc. is noise — de-emphasise the badge (muted, no "· heuristic" suffix). COLD stays prominent because its
+    // OB/cold-window caveat is genuine regardless of the gate.
+    const contextMuted = !hasMsGate && batch.contextMode !== CONTEXT_MODES.COLD;
     const [showAll, setShowAll] = useState(false);
     const [showAllGroups, setShowAllGroups] = useState(false);
 
@@ -203,27 +205,28 @@ export default function RunBatchSection({ run, getRunData }) {
                 {/* RIGHT: compact triggered-entry variant panel (only when TE variants exist).
                     Kept short (inline-wrapped variants, single best line) so it never dominates header height. */}
                 {batch.triggerVariantGroups.length > 0 && (
-                    <div className="mt-3 lg:mt-0 lg:w-52 shrink-0 rounded-md border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel))] px-2 py-1.5">
+                    <div className="mt-3 lg:mt-0 lg:w-72 shrink-0 overflow-hidden rounded-md border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel))] px-2 py-1.5">
                         <div className="flex items-baseline justify-between gap-1">
                             <span className="text-[9px] uppercase tracking-wide text-[hsl(var(--accent-secondary))] font-ui">Triggered Entry</span>
                             <span className="text-[9px] font-ui text-muted-lab">{batch.teVariantCount} variant{batch.teVariantCount === 1 ? "" : "s"}</span>
                         </div>
                         {compact && bs.bestNetRLabel && (
-                            <div className="mt-1 text-[10px] font-ui text-muted-lab leading-tight">
+                            <div className="mt-1 text-[10px] font-ui text-muted-lab leading-tight break-words">
                                 Best: <span className="text-[hsl(var(--text-1))]">{bs.bestNetRLabel}</span>
                                 {bs.bestNetRNetR !== null ? ` · ${bs.bestNetRNetR > 0 ? "+" : ""}${bs.bestNetRNetR}R` : ""}
                                 {bs.bestNetDdLabel ? <span className="text-muted-lab"> · best Net/DD {bs.bestNetDdLabel}</span> : null}
                             </div>
                         )}
-                        <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] font-ui text-muted-lab leading-tight">
+                        {/* one threshold per line; long arm lists WRAP inside the panel (never overflow right) */}
+                        <div className="mt-1 flex flex-col gap-0.5 text-[10px] font-ui text-muted-lab leading-tight">
                             {batch.triggerVariantGroups.slice(0, showAllGroups ? undefined : 4).map((g) => (
-                                <span key={g.trigger} className="whitespace-nowrap">
-                                    <span className="text-[hsl(var(--text-2))]">{g.trigger}:</span> {g.arms.join("·")}
-                                </span>
+                                <div key={g.trigger} className="break-words">
+                                    <span className="text-[hsl(var(--text-2))]">{g.trigger}:</span> {g.arms.join(" · ")}
+                                </div>
                             ))}
                             {!showAllGroups && batch.triggerVariantGroups.length > 4 && (
-                                <button type="button" onClick={() => setShowAllGroups(true)} className="underline text-[hsl(var(--accent-secondary))] hover:text-white">
-                                    +{batch.triggerVariantGroups.length - 4}
+                                <button type="button" onClick={() => setShowAllGroups(true)} className="self-start underline text-[hsl(var(--accent-secondary))] hover:text-white">
+                                    +{batch.triggerVariantGroups.length - 4} more
                                 </button>
                             )}
                         </div>
