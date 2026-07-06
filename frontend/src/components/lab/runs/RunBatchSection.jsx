@@ -32,12 +32,14 @@ const CONTEXT_LABEL = {
     [CONTEXT_MODES.UNKNOWN]: "UNKNOWN CONTEXT",
 };
 
-function Chip({ tone = "border-mid", children }) {
+function Chip({ tone = "border-mid", filled = false, muted = false, children }) {
+    const style = filled
+        ? { background: `hsl(var(--${tone}))`, borderColor: `hsl(var(--${tone}))`, color: "hsl(var(--bg-0,var(--panel)))" }
+        : muted
+            ? { borderColor: "hsl(var(--border-soft))", color: "hsl(var(--text-2))", opacity: 0.7 }
+            : { borderColor: `hsl(var(--${tone}))`, color: `hsl(var(--${tone}))` };
     return (
-        <span
-            className="inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-ui"
-            style={{ borderColor: `hsl(var(--${tone}))`, color: `hsl(var(--${tone}))` }}
-        >
+        <span className="inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-ui" style={style}>
             {children}
         </span>
     );
@@ -98,6 +100,7 @@ export default function RunBatchSection({ run, getRunData }) {
     const batch = buildRunBatch(merged);
     const ctxTone = CONTEXT_TONE[batch.contextMode] || "border-mid";
     const [showAll, setShowAll] = useState(false);
+    const [showAllGroups, setShowAllGroups] = useState(false);
 
     const shown = showAll ? batch.scenarios : batch.defaultScenarios;
     const compact = batch.canCollapse && !showAll;
@@ -105,10 +108,10 @@ export default function RunBatchSection({ run, getRunData }) {
 
     return (
         <section className="rounded-md border border-[hsl(var(--border-soft))] bg-[hsl(var(--bg-1,var(--panel)))] p-3">
-            {/* Batch header */}
+            {/* ROW 1: title + status/context */}
             <div className="flex flex-wrap items-center gap-2">
                 <Link to={`/runs/${encodeURIComponent(storeId)}`} className="text-[12.5px] font-ui text-[hsl(var(--accent-primary))] hover:text-white">
-                    {batch.title || batch.symbol || batch.shortRunId}
+                    {batch.symbol} · {batch.scenarioType}
                 </Link>
                 <Chip tone={ctxTone}>{CONTEXT_LABEL[batch.contextMode]}{batch.contextConfidence ? ` · ${batch.contextConfidence}` : ""}</Chip>
                 {batch.status && <Chip tone="border-mid">{batch.status}</Chip>}
@@ -117,41 +120,46 @@ export default function RunBatchSection({ run, getRunData }) {
                 </span>
             </div>
 
-            {/* ROW: trading window + context detail */}
-            <div className="mt-1 text-[10px] font-ui text-muted-lab">
-                Trading: <span className="text-[hsl(var(--text-1))]">{batch.dateRange}</span>
+            {/* ROW 2: prominent date range */}
+            <div className="mt-1 text-[14px] font-ui text-[hsl(var(--text-1))]">{batch.dateRange}</div>
+            <div className="text-[10px] font-ui text-muted-lab">
                 {batch.warmupStart
-                    ? <> · Context: preloaded from <span className="text-[hsl(var(--text-1))]">{fmtDate(batch.warmupStart)}</span></>
-                    : (batch.contextMode === CONTEXT_MODES.COLD ? <> · <span style={{ color: "hsl(var(--warning))" }}>cold start — no prior context loaded</span></> : null)}
+                    ? <>context: preloaded from <span className="text-[hsl(var(--text-2))]">{fmtDate(batch.warmupStart)}</span></>
+                    : (batch.contextMode === CONTEXT_MODES.COLD ? <span style={{ color: "hsl(var(--warning))" }}>cold start — no prior context loaded</span> : null)}
             </div>
 
-            {/* ROW: ACTIVE LAYERS (run-level) */}
-            {batch.activeLayers.length > 0 && (
+            {/* ROW 3: RAN IN THIS BATCH (bright/active) */}
+            {(batch.ranFamilies.length > 0 || batch.activeLayers.length > 0) && (
                 <div className="mt-2 flex flex-wrap items-center gap-1">
-                    <span className="text-[9px] uppercase tracking-wide text-muted-lab font-ui mr-1">Active layers</span>
+                    <span className="text-[9px] uppercase tracking-wide text-[hsl(var(--success))] font-ui mr-1">Ran in this batch</span>
+                    {batch.ranFamilies.map((f) => (
+                        <Chip key={f.family} filled tone={FAMILY_TONE[f.family] || "success"}>
+                            ✓ {f.label}{f.count ? ` · ${f.count}${f.family === "triggered_entry" ? " variants" : (f.family === "session_scenarios" ? " cohorts" : "")}` : ""}
+                        </Chip>
+                    ))}
                     {batch.activeLayers.map((l) => (
-                        <Chip key={l.layer} tone={LAYER_TONE[l.layer] || "accent-secondary"}>
-                            {l.label}{l.directionAware ? " · dir-aware" : ""}
+                        <Chip key={l.layer} filled tone={LAYER_TONE[l.layer] || "accent-secondary"}>
+                            ✓ {l.label}{l.directionAware ? " · dir-aware" : ""}
                         </Chip>
                     ))}
                 </div>
             )}
 
-            {/* ROW: SCENARIOS RUN (families actually present) */}
-            {batch.scenarioFamilies.length > 0 && (
-                <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                    <span className="text-[9px] uppercase tracking-wide text-muted-lab font-ui mr-1">Scenarios run</span>
-                    {batch.scenarioFamilies.map((f) => (
-                        <Chip key={f.family} tone={FAMILY_TONE[f.family] || "border-mid"}>
-                            {f.label}{f.count ? ` · ${f.count}${f.family === "triggered_entry" ? " variants" : ""}` : ""}
+            {/* ROW 4: NOT RUN / ABSENT (muted) */}
+            {batch.notRunMajor.length > 0 && (
+                <div className="mt-1 flex flex-wrap items-center gap-1">
+                    <span className="text-[9px] uppercase tracking-wide text-muted-lab font-ui mr-1">Not run</span>
+                    {batch.notRunMajor.map((m) => (
+                        <Chip key={m.key} muted>
+                            {m.label}: {m.status === "no_output" ? "no eligible output" : "not run"}
                         </Chip>
                     ))}
                 </div>
             )}
 
-            {/* ROW: secondary config (demoted) */}
-            <div className="mt-1.5 flex flex-wrap gap-1 opacity-70">
-                {batch.baseConfigChips.map((c, i) => <Chip key={i} tone="border-mid">{c}</Chip>)}
+            {/* ROW 5: secondary config (demoted) */}
+            <div className="mt-1.5 flex flex-wrap gap-1 opacity-60">
+                {batch.baseConfigChips.map((c, i) => <Chip key={i} muted>{c}</Chip>)}
             </div>
 
             {/* Context / warm-up warnings (only when heuristic/cold) */}
@@ -188,9 +196,21 @@ export default function RunBatchSection({ run, getRunData }) {
                     </button>
                 </div>
             )}
-            {compact && batch.hiddenVariantLabels.length > 0 && (
-                <div className="mt-1 text-[10px] font-ui text-muted-lab opacity-80">
-                    Also tested: {batch.hiddenVariantLabels.join(", ")}
+            {compact && batch.triggerVariantGroups.length > 0 && (
+                <div className="mt-1 text-[10px] font-ui text-muted-lab">
+                    <span className="uppercase tracking-wide mr-1">Variants tested</span>
+                    <span className="inline-flex flex-wrap gap-x-3 gap-y-0.5 align-top">
+                        {batch.triggerVariantGroups.slice(0, showAllGroups ? undefined : 4).map((g) => (
+                            <span key={g.trigger}>
+                                <span className="text-[hsl(var(--text-2))]">{g.trigger}:</span> {g.arms.join(" · ")}
+                            </span>
+                        ))}
+                        {!showAllGroups && batch.triggerVariantGroups.length > 4 && (
+                            <button type="button" onClick={() => setShowAllGroups(true)} className="underline text-[hsl(var(--accent-primary))] hover:text-white">
+                                + {batch.triggerVariantGroups.length - 4} more
+                            </button>
+                        )}
+                    </span>
                 </div>
             )}
 

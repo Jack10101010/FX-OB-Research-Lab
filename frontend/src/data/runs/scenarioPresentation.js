@@ -216,6 +216,43 @@ export function deriveLayers(config = {}, run = {}) {
     if (sess && typeof sess === "object" && sess.enabled) layers.push({ layer: "session_policy", label: "Session Policy", directionAware: false });
     return layers;
 }
+// Group triggered-entry variants by trigger threshold → [{ trigger:"10%", arms:["C2","C3","C4","C5"] }]
+export function deriveTriggerVariantGroups(run = {}) {
+    const keys = entryKeysOf(run).filter((k) => String(k).startsWith("entry_triggered_edge"));
+    const map = new Map();
+    keys.forEach((k) => {
+        const p = parseScenarioKey(k);
+        if (p.triggerThreshold === null || p.triggerThreshold === undefined) return;
+        const t = `${p.triggerThreshold}%`;
+        if (!map.has(t)) map.set(t, { trigger: t, triggerNum: p.triggerThreshold, arms: [] });
+        map.get(t).arms.push({ label: p.armLabel || "?", sort: p.armDelay ?? p.sortArm ?? 1e9 });
+    });
+    const groups = [...map.values()].sort((a, b) => a.triggerNum - b.triggerNum);
+    return groups.map((g) => ({ trigger: g.trigger, arms: g.arms.sort((a, b) => a.sort - b.sort).map((a) => a.label) }));
+}
+
+// Major run-content items with explicit status: 'ran' | 'active' | 'not_run' | 'no_output'.
+// Keeps ACTIVE (ran/active) strictly separate from ABSENT (not_run/no_output) — never mixed.
+export function deriveMajorStatus(config = {}, run = {}, ranFamilies = [], activeLayers = []) {
+    const ranSet = new Set(ranFamilies.map((f) => f.family));
+    const layerSet = new Set(activeLayers.map((l) => l.layer));
+    const teCount = (ranFamilies.find((f) => f.family === "triggered_entry") || {}).count || null;
+    const sessCount = (ranFamilies.find((f) => f.family === "session_scenarios") || {}).count || null;
+    const msLayer = activeLayers.find((l) => l.layer === "market_state_gate");
+    const sb = run.scenario_baseline || (run.summary && run.summary.scenario_baseline);
+    let fairStatus;
+    if (ranSet.has("fair_baseline")) fairStatus = "ran";
+    else if (sb && sb.enabled) fairStatus = "no_output"; // requested/configured but produced nothing
+    else fairStatus = "not_run";
+    return [
+        { key: "market_state_gate", label: "Market State Gate", status: layerSet.has("market_state_gate") ? "active" : "not_run", directionAware: !!(msLayer && msLayer.directionAware) },
+        { key: "portfolio_manager", label: "Portfolio Manager", status: layerSet.has("portfolio_manager") ? "active" : "not_run" },
+        { key: "session_scenarios", label: "Session Scenarios", status: ranSet.has("session_scenarios") ? "ran" : "not_run", count: sessCount },
+        { key: "triggered_entry", label: "Triggered Entry", status: ranSet.has("triggered_entry") ? "ran" : "not_run", count: teCount },
+        { key: "fair_baseline", label: "Fair Baseline", status: fairStatus },
+    ];
+}
+
 function resolveContext(config = {}, run = {}) {
     const meta = run.runMetadata || run.run_metadata;
     const modeMap = { cold_window_start: CONTEXT_MODES.COLD, window_with_preload: CONTEXT_MODES.PRELOAD, full_history_warmed: CONTEXT_MODES.WARMED, unknown: CONTEXT_MODES.UNKNOWN };
@@ -240,6 +277,9 @@ export function buildRunBatch(run = {}) {
     const ctx = resolveContext(config, run);
     const scenarioFamilies = deriveScenarioFamilies(config, run);
     const activeLayers = deriveLayers(config, run);
+    const majorStatus = deriveMajorStatus(config, run, scenarioFamilies, activeLayers);
+    const notRunMajor = majorStatus.filter((m) => m.status === "not_run" || m.status === "no_output");
+    const triggerVariantGroups = deriveTriggerVariantGroups(run);
 
     // scenarios: entry_results.<exec_mode>.<scenario_key>. Prefer the primary exec mode.
     const erSummary = (run.entryResults && run.entryResults.summary) || run.entry_results || {};
@@ -338,7 +378,8 @@ export function buildRunBatch(run = {}) {
         scenarioType: classifyScenarioType(config),
         contextMode: ctx.mode, contextConfidence: ctx.confidence, contextWarning: contextWarnings(ctx.mode),
         requestedStart: ctx.requestedStart, requestedEnd: ctx.requestedEnd, warmupStart: ctx.warmupStart,
-        activeLayers, scenarioFamilies,
+        activeLayers, scenarioFamilies, ranFamilies: scenarioFamilies,
+        majorStatus, notRunMajor, triggerVariantGroups,
         baseConfigChips: baseConfigChips(config),
         status, createdAt, scenarioCount: scenarios.length,
         teVariantCount, defaultScenarios, hiddenVariantLabels, bestSummary,

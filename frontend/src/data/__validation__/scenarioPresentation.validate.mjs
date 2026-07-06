@@ -205,10 +205,47 @@ const legacy = P.buildRunBatch({ id: "legacy", config: { symbol: "EURUSD", date_
 ok("49 legacy run: no fabricated families, heuristic context", Array.isArray(legacy.scenarioFamilies) && legacy.scenarioFamilies.length === 0 && legacy.contextConfidence === "heuristic");
 ok("50 no fabricated fair baseline without output", !legacy.scenarioFamilies.some((f) => f.family === "fair_baseline"));
 
-// component renders the family/layer strips + no hard-coded hex
+// component renders strips + no hard-coded hex
 const compSrc = fs.readFileSync("src/components/lab/runs/RunBatchSection.jsx", "utf8");
-ok("51 component renders SCENARIOS RUN + ACTIVE LAYERS strips", /Scenarios run/i.test(compSrc) && /Active layers/i.test(compSrc));
+ok("51 component renders RAN + NOT RUN strips", /Ran in this batch/i.test(compSrc) && /Not run/i.test(compSrc));
 ok("52 no hard-coded hex in component", !/#[0-9a-fA-F]{3,6}/.test(compSrc));
+
+// ── Phase-3: ran vs not-run + grouped variants + prominence ─────────────────
+// sessRun (session + fair + baseline + MS gate) reused from above
+ok("53 ran families include Baseline when baseline exists", sbatch.ranFamilies.some((f) => f.family === "baseline"));
+ok("54 Session Scenarios in RAN when policy has enabled cohorts", sbatch.ranFamilies.some((f) => f.family === "session_scenarios" && f.count === 2));
+ok("55 Fair Baseline active only when output exists", sbatch.ranFamilies.some((f) => f.family === "fair_baseline"));
+ok("56 MS Gate is an ACTIVE layer (not a family)", sbatch.activeLayers.some((l) => l.layer === "market_state_gate") && !sbatch.ranFamilies.some((f) => f.family === "market_state_gate"));
+ok("57 Portfolio Manager appears in NOT RUN when disabled", sbatch.notRunMajor.some((m) => m.key === "portfolio_manager" && m.status === "not_run"));
+
+// teFamRun (triggered edge, MS gate, no session, fair 'nothing to run')
+const tb2 = P.buildRunBatch(teFamRun);
+ok("58 Session Scenarios absent → appears in NOT RUN", tb2.notRunMajor.some((m) => m.key === "session_scenarios" && m.status === "not_run"));
+ok("59 Fair Baseline no-output distinct status", tb2.notRunMajor.some((m) => m.key === "fair_baseline" && m.status === "no_output"));
+ok("60 Triggered Entry counted as RAN with count", tb2.ranFamilies.some((f) => f.family === "triggered_entry" && f.count === 2));
+ok("61 active and absent not mixed (disjoint keys)", (() => {
+    const ran = new Set([...tb2.ranFamilies.map((f) => f.family), ...tb2.activeLayers.map((l) => l.layer)]);
+    return tb2.notRunMajor.every((m) => !ran.has(m.key));
+})());
+
+// grouped trigger variants
+const gv = P.buildRunBatch({ id: "gv", config: { symbol: "EURUSD", date_from: "2020-01-02", date_to: "2026-06-18", entry_models: ["triggered_edge"] },
+    executionMode: "allow_multi_position",
+    entryResults: { summary: { allow_multi_position: {
+        baseline: {}, entry_triggered_edge_1p0_d1: {}, entry_triggered_edge_1p0_d3: {}, entry_triggered_edge_1p0_d2: {},
+        entry_triggered_edge_10p0_d2: {}, entry_triggered_edge_10p0_d1: {}, entry_triggered_edge_25p0_d4: {} } } } });
+const grp = Object.fromEntries(gv.triggerVariantGroups.map((g) => [g.trigger, g.arms]));
+ok("62 variants grouped by trigger threshold", "1%" in grp && "10%" in grp && "25%" in grp);
+ok("63 arms sorted ascending within threshold", JSON.stringify(grp["1%"]) === JSON.stringify(["C1", "C2", "C3"]) && JSON.stringify(grp["10%"]) === JSON.stringify(["C1", "C2"]));
+ok("64 groups sorted by threshold ascending", gv.triggerVariantGroups.map((g) => g.trigger)[0] === "1%");
+ok("65 flat hiddenVariantLabels no longer the default display (groups exist)", gv.triggerVariantGroups.length >= 3);
+
+// date range still DD Mon YYYY, prominent value in model
+ok("66 date range still DD Mon YYYY", /\d{2} [A-Z][a-z]{2} \d{4}/.test(gv.dateRange));
+
+// legacy safe
+const legacy2 = P.buildRunBatch({ id: "leg2", config: {}, entryResults: { summary: {} } });
+ok("67 legacy run safe: empty ran, notRun computed, no throw", Array.isArray(legacy2.ranFamilies) && Array.isArray(legacy2.notRunMajor) && Array.isArray(legacy2.triggerVariantGroups));
 
 console.log(failed === 0 ? "\nALL SCENARIO-PRESENTATION CHECKS PASSED" : `\n${failed} CHECK(S) FAILED`);
 process.exit(failed === 0 ? 0 : 1);
