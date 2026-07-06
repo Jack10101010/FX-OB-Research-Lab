@@ -281,13 +281,14 @@ const unknownRun = P.buildRunBatch({
     executionMode: "allow_multi_position",
     entryResults: { summary: { allow_multi_position: { baseline: { net_r: 1.0, max_drawdown_r: -2.0, filled_trades: 5 } } } },
 });
-ok("73 UNKNOWN context is a single mild note (border-mid), not a warning storm",
+ok("73 UNKNOWN + no Market State gate → NO warning line at all (badge only, no scary generic text)",
     unknownRun.contextMode === P.CONTEXT_MODES.UNKNOWN
-    && shownW(unknownRun).length === 1
-    && shownW(unknownRun)[0].type === "unknown_note"
-    && shownW(unknownRun)[0].tone === "border-mid");
+    && shownW(unknownRun).length === 0);
 ok("74 no OB-before-start / cold warning on UNKNOWN", !shownW(unknownRun).some((w) => w.type === "ob_before_start" || w.type === "cold_short"));
 ok("75 no MS warm-up on UNKNOWN when gate inactive", !shownW(unknownRun).some((w) => w.type === "market_state_warmup"));
+// the old scary generic copy must be gone entirely
+ok("75b no 'early-window behaviour may vary' scare on a no-MS UNKNOWN run",
+    !shownW(unknownRun).some((w) => /early-window behaviour may vary/i.test(w.text)));
 
 // config labels available (secondary chips)
 ok("76 base config chips available (readable secondary labels)", Array.isArray(batch.baseConfigChips) && batch.baseConfigChips.length > 0);
@@ -312,6 +313,71 @@ ok("81 RunDetail reads ?scenario via useSearchParams, exact-match + guarded, /ru
 // invalid / odd input never throws when building the (now structured-warning) batch
 throwsOrSafe("82 structured-warning batch safe on malformed dates", () =>
     P.buildRunBatch({ id: "z", config: { date_from: "garbage", date_to: "worse" }, entryResults: { summary: {} } }));
+
+// ── Phase-5: active-chip token, context-badge de-emphasis, Max DD colour, layout ────
+// UNKNOWN window WITH Market State gate → a line SHOULD appear (context-sensitive).
+const unknownMs = P.buildRunBatch({
+    id: "unkms",
+    config: { symbol: "EURUSD", date_from: "2022-01-01", date_to: "2024-06-01", entry_models: ["baseline"],
+        regime_gate_enabled: true, regime_direction_policy: "direction_aware" },
+    executionMode: "allow_multi_position",
+    entryResults: { summary: { allow_multi_position: { baseline: { net_r: 1.0, max_drawdown_r: -2.0, filled_trades: 5 } } } },
+});
+ok("83 UNKNOWN + Market State gate active → exactly one context line shown (warm-up matters)",
+    unknownMs.contextMode === P.CONTEXT_MODES.UNKNOWN
+    && unknownMs.activeLayers.some((l) => l.layer === "market_state_gate")
+    && shownW(unknownMs).length === 1
+    && shownW(unknownMs)[0].type === "unknown_note");
+
+// COLD + Market State cold-window run still warns appropriately (regression guard).
+ok("84 COLD + Market State run still shows cold + OB + warm-up warnings",
+    batch.contextMode === P.CONTEXT_MODES.COLD
+    && shownW(batch).some((w) => w.type === "cold_short")
+    && shownW(batch).some((w) => w.type === "ob_before_start")
+    && shownW(batch).some((w) => w.type === "market_state_warmup"));
+
+// Component: active RAN chips vs muted absent chips are visually distinct treatments.
+ok("85 RAN chips use the `active` treatment; NOT-RUN chips use `muted` (distinct)",
+    /ranFamilies\.map[\s\S]*?<Chip key=\{f\.family\} active>/.test(compSrc)
+    && /activeLayers\.map[\s\S]*?<Chip key=\{l\.layer\} active>/.test(compSrc)
+    && /notRunMajor\.map[\s\S]*?<Chip key=\{m\.key\} muted>/.test(compSrc));
+// Active chip maps to the EXISTING secondary accent token (no new blue), not accent-primary.
+ok("86 active chip style uses accent-secondary token (existing secondary accent, no new blue)",
+    (() => {
+        const m = compSrc.match(/if \(active\) \{([\s\S]*?)\} else if \(filled\)/);
+        const branch = m ? m[1] : "";
+        return branch.includes("--accent-secondary") && !branch.includes("--accent-primary");
+    })());
+
+// Context badge is de-emphasised (muted, no "· heuristic") when UNKNOWN and no MS gate.
+ok("87 context badge de-emphasised when UNKNOWN & no Market State gate",
+    /const contextMuted = batch\.contextMode === CONTEXT_MODES\.UNKNOWN && !hasMsGate/.test(compSrc)
+    && /muted=\{contextMuted\}/.test(compSrc)
+    && /!contextMuted && batch\.contextConfidence/.test(compSrc));
+
+// Max DD numeric value is danger-toned; the label stays neutral. Net R keeps its sign tone.
+ok("88 Max DD value danger-toned (label stays neutral)",
+    /label="Max DD" value=\{fmt\(s\.maxDd\)\} tone=\{s\.maxDd === null \|\| s\.maxDd === undefined \? undefined : "danger"\}/.test(compSrc));
+ok("89 negative Net R still uses danger tone via rTone (preserved)",
+    /label="Net R" value=\{fmt\(s\.netR\)\} tone=\{rTone\(s\.netR\)\}/.test(compSrc)
+    && /v < 0 \? "danger"/.test(compSrc));
+
+// Layout: header row is items-start; right panel is width-constrained and not inside the grid row.
+ok("90 header row top-aligned (items-start) so the right panel can't stretch/push cards",
+    /lg:flex-row lg:items-start/.test(compSrc));
+ok("91 right variant panel width-constrained + only rendered when TE variants exist",
+    /batch\.triggerVariantGroups\.length > 0 &&/.test(compSrc) && /lg:w-52 shrink-0/.test(compSrc));
+ok("92 scenario grid sits below the two-column header row (declared after the flex row + panel)",
+    (() => {
+        const flexIdx = compSrc.indexOf("lg:flex-row lg:items-start");
+        const panelIdx = compSrc.indexOf("lg:w-52 shrink-0");
+        const gridIdx = compSrc.indexOf("{/* Scenario grid */}");
+        return flexIdx > 0 && panelIdx > flexIdx && gridIdx > panelIdx;
+    })());
+
+// scenario cards still generated correctly (unchanged core behaviour)
+ok("93 scenario cards still generated (baseline + TE variants intact)",
+    batch.scenarios.length === 5 && !!byKey.baseline && Object.keys(byKey).some((k) => k.startsWith("entry_triggered_edge")));
 
 console.log(failed === 0 ? "\nALL SCENARIO-PRESENTATION CHECKS PASSED" : `\n${failed} CHECK(S) FAILED`);
 process.exit(failed === 0 ? 0 : 1);

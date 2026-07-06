@@ -116,16 +116,27 @@ export function inferContextMode(config = {}) {
 }
 
 // Structured, relevance-gated warnings. The Market-State warm-up warning appears ONLY when the Market State
-// gate is actually active — never on Raw Baseline / no-gate runs. Unknown context is a mild note, not a storm.
+// gate is actually active — never on Raw Baseline / no-gate runs. UNKNOWN context is conveyed by the header
+// badge alone: it only emits a warning LINE when a context-sensitive layer (Market State warm-up) makes the
+// early window genuinely uncertain. For plain / no-gate runs a heuristic UNKNOWN produces NO scary line.
 function buildContextWarnings(mode, hasMsGate, usesOb = true) {
     const out = [];
     if (mode === CONTEXT_MODES.COLD) {
+        // COLD is a specific, genuine condition (short window, no prior context) — keep its warnings.
         out.push({ type: "cold_short", show: true, tone: "warning", text: CONTEXT_WARNINGS.cold });
         if (usesOb) out.push({ type: "ob_before_start", show: true, tone: "warning", text: CONTEXT_WARNINGS.obs });
         if (hasMsGate) out.push({ type: "market_state_warmup", show: true, tone: "warning", text: CONTEXT_WARNINGS.warmup });
     } else if (mode === CONTEXT_MODES.UNKNOWN) {
-        out.push({ type: "unknown_note", show: true, tone: "border-mid", text: "Context not confirmed (heuristic) — early-window behaviour may vary." });
-        if (hasMsGate) out.push({ type: "market_state_warmup", show: true, tone: "border-mid", text: CONTEXT_WARNINGS.warmup });
+        // Only surface a line when Market State warm-up makes it matter. Otherwise the muted UNKNOWN
+        // badge in the header says enough — no generic "early-window behaviour may vary" scare.
+        out.push({
+            type: "unknown_note",
+            show: hasMsGate,
+            tone: "border-mid",
+            text: hasMsGate
+                ? "Context source unknown with Market State active — warm-up can affect early trades; compare short windows carefully."
+                : "Context source unknown — compare short windows carefully.",
+        });
     }
     return out;
 }
@@ -290,7 +301,12 @@ export function buildRunBatch(run = {}) {
     const notRunMajor = majorStatus.filter((m) => m.status === "not_run" || m.status === "no_output");
     const triggerVariantGroups = deriveTriggerVariantGroups(run);
     const hasMsGate = activeLayers.some((l) => l.layer === "market_state_gate");
-    const structuredWarnings = buildContextWarnings(ctx.mode, hasMsGate);
+    // OB-based strategy: baseline / triggered-edge / penetration entries all rely on order blocks that may
+    // form before a cold window starts. Defaults true (the strategy is order-block based) when unspecified.
+    const usesOb = Array.isArray(config.entry_models)
+        ? config.entry_models.some((m) => /baseline|triggered|edge|penetration|order/i.test(String(m)))
+        : true;
+    const structuredWarnings = buildContextWarnings(ctx.mode, hasMsGate, usesOb);
 
     // scenarios: entry_results.<exec_mode>.<scenario_key>. Prefer the primary exec mode.
     const erSummary = (run.entryResults && run.entryResults.summary) || run.entry_results || {};

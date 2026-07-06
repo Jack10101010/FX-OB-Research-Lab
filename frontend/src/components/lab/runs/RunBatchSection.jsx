@@ -8,17 +8,6 @@ import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import { buildRunBatch, CONTEXT_MODES, formatDate as fmtDate } from "@/data/runs/scenarioPresentation";
 
-const LAYER_TONE = {
-    market_state_gate: "accent-secondary",
-    portfolio_manager: "warning",
-    session_policy: "accent-primary",
-};
-const FAMILY_TONE = {
-    baseline: "border-mid",
-    triggered_entry: "accent-secondary",
-    session_scenarios: "accent-primary", // prominent — the user must instantly see this
-    fair_baseline: "success",
-};
 const CONTEXT_TONE = {
     [CONTEXT_MODES.WARMED]: "success",
     [CONTEXT_MODES.COLD]: "warning",
@@ -32,14 +21,26 @@ const CONTEXT_LABEL = {
     [CONTEXT_MODES.UNKNOWN]: "UNKNOWN CONTEXT",
 };
 
-function Chip({ tone = "border-mid", filled = false, muted = false, children }) {
-    const style = filled
-        ? { background: `hsl(var(--${tone}))`, borderColor: `hsl(var(--${tone}))`, color: "hsl(var(--bg-0,var(--panel)))" }
-        : muted
-            ? { borderColor: "hsl(var(--border-soft))", color: "hsl(var(--text-2))", opacity: 0.7 }
-            : { borderColor: `hsl(var(--${tone}))`, color: `hsl(var(--${tone}))` };
+function Chip({ tone = "border-mid", filled = false, muted = false, active = false, children }) {
+    // `active`: RAN/enabled state — the existing SECONDARY accent (accent-secondary) as bright text on a
+    // faint tint of the same token. Reads as clearly "on"/lit and stays legible on the dark panel, without a
+    // solid-button look and without introducing any new blue. `muted`: absent/not-run. `filled`: solid badge.
+    let style;
+    if (active) {
+        style = {
+            background: "hsl(var(--accent-secondary) / 0.14)",
+            borderColor: "hsl(var(--accent-secondary))",
+            color: "hsl(var(--accent-secondary))",
+        };
+    } else if (filled) {
+        style = { background: `hsl(var(--${tone}))`, borderColor: `hsl(var(--${tone}))`, color: "hsl(var(--bg-0,var(--panel)))" };
+    } else if (muted) {
+        style = { borderColor: "hsl(var(--border-soft))", color: "hsl(var(--text-2))", opacity: 0.7 };
+    } else {
+        style = { borderColor: `hsl(var(--${tone}))`, color: `hsl(var(--${tone}))` };
+    }
     return (
-        <span className="inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-ui" style={style}>
+        <span className="inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-ui font-medium" style={style}>
             {children}
         </span>
     );
@@ -76,7 +77,7 @@ function ScenarioCard({ s, storeId }) {
             </div>
             <div className="mt-1.5 grid grid-cols-2 gap-x-2 gap-y-1">
                 <Metric label="Net R" value={fmt(s.netR)} tone={rTone(s.netR)} />
-                <Metric label="Max DD" value={fmt(s.maxDd)} />
+                <Metric label="Max DD" value={fmt(s.maxDd)} tone={s.maxDd === null || s.maxDd === undefined ? undefined : "danger"} />
                 <Metric label="Net/DD" value={fmt(s.netDd)} />
                 <Metric label="PF" value={s.profitFactor === null ? "—" : fmt(s.profitFactor)} />
                 <Metric label="WR" value={s.winRate === null ? "—" : `${fmt(s.winRate, 1)}%`} />
@@ -109,6 +110,10 @@ export default function RunBatchSection({ run, getRunData }) {
     };
     const batch = buildRunBatch(merged);
     const ctxTone = CONTEXT_TONE[batch.contextMode] || "border-mid";
+    const hasMsGate = batch.activeLayers.some((l) => l.layer === "market_state_gate");
+    // UNKNOWN context only matters when a context-sensitive layer is active. Otherwise de-emphasise the
+    // badge (muted, no confusing "· heuristic" suffix) so it doesn't read as a warning.
+    const contextMuted = batch.contextMode === CONTEXT_MODES.UNKNOWN && !hasMsGate;
     const [showAll, setShowAll] = useState(false);
     const [showAllGroups, setShowAllGroups] = useState(false);
 
@@ -123,15 +128,20 @@ export default function RunBatchSection({ run, getRunData }) {
                 <Link to={`/runs/${encodeURIComponent(storeId)}`} className="text-[12.5px] font-ui text-[hsl(var(--accent-primary))] hover:text-white">
                     {batch.symbol} · {batch.scenarioType}
                 </Link>
-                <Chip tone={ctxTone}>{CONTEXT_LABEL[batch.contextMode]}{batch.contextConfidence ? ` · ${batch.contextConfidence}` : ""}</Chip>
+                <Chip tone={ctxTone} muted={contextMuted}>
+                    {CONTEXT_LABEL[batch.contextMode]}{!contextMuted && batch.contextConfidence ? ` · ${batch.contextConfidence}` : ""}
+                </Chip>
                 {batch.status && <Chip tone="border-mid">{batch.status}</Chip>}
                 <span className="ml-auto text-[10px] text-muted-lab font-ui">
                     #{batch.shortRunId}{batch.configHashShort ? ` / cfg ${batch.configHashShort}` : ""}
                 </span>
             </div>
 
-            {/* Two-column header: details left, triggered-entry panel right */}
-            <div className="mt-1 flex flex-col lg:flex-row lg:gap-4">
+            {/* Two-column header: details left, triggered-entry panel right.
+                `items-start` keeps both columns top-aligned so the right panel never stretches, and the
+                panel is kept compact so it isn't the tallest element — the scenario grid below then sits
+                directly under the header without vertical dead space. */}
+            <div className="mt-1 flex flex-col lg:flex-row lg:items-start lg:gap-4">
                 {/* LEFT: window, families, config, warnings */}
                 <div className="min-w-0 flex-1">
                     {/* prominent date range */}
@@ -147,12 +157,12 @@ export default function RunBatchSection({ run, getRunData }) {
                         <div className="mt-2 flex flex-wrap items-center gap-1">
                             <span className="text-[9px] uppercase tracking-wide text-[hsl(var(--success))] font-ui mr-1">Ran in this batch</span>
                             {batch.ranFamilies.map((f) => (
-                                <Chip key={f.family} filled tone={FAMILY_TONE[f.family] || "success"}>
+                                <Chip key={f.family} active>
                                     ✓ {f.label}{f.count ? ` · ${f.count}${f.family === "triggered_entry" ? " variants" : (f.family === "session_scenarios" ? " cohorts" : "")}` : ""}
                                 </Chip>
                             ))}
                             {batch.activeLayers.map((l) => (
-                                <Chip key={l.layer} filled tone={LAYER_TONE[l.layer] || "accent-secondary"}>
+                                <Chip key={l.layer} active>
                                     ✓ {l.label}{l.directionAware ? " · dir-aware" : ""}
                                 </Chip>
                             ))}
@@ -190,48 +200,41 @@ export default function RunBatchSection({ run, getRunData }) {
                     ))}
                 </div>
 
-                {/* RIGHT: triggered-entry variant panel (only when TE variants exist) */}
+                {/* RIGHT: compact triggered-entry variant panel (only when TE variants exist).
+                    Kept short (inline-wrapped variants, single best line) so it never dominates header height. */}
                 {batch.triggerVariantGroups.length > 0 && (
-                    <div className="mt-3 lg:mt-0 lg:w-64 shrink-0 rounded-md border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel))] p-2">
-                        <div className="text-[9px] uppercase tracking-wide text-[hsl(var(--accent-secondary))] font-ui mb-1">Triggered Entry</div>
-                        <div className="text-[10px] font-ui text-muted-lab">
-                            {batch.teVariantCount} variant{batch.teVariantCount === 1 ? "" : "s"} tested
-                            {batch.canCollapse ? (compact ? " · showing best" : " · showing all") : ""}
+                    <div className="mt-3 lg:mt-0 lg:w-52 shrink-0 rounded-md border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel))] px-2 py-1.5">
+                        <div className="flex items-baseline justify-between gap-1">
+                            <span className="text-[9px] uppercase tracking-wide text-[hsl(var(--accent-secondary))] font-ui">Triggered Entry</span>
+                            <span className="text-[9px] font-ui text-muted-lab">{batch.teVariantCount} variant{batch.teVariantCount === 1 ? "" : "s"}</span>
                         </div>
                         {compact && bs.bestNetRLabel && (
-                            <div className="mt-1 text-[10px] font-ui text-muted-lab">
-                                Best Net R: <span className="text-[hsl(var(--text-1))]">{bs.bestNetRLabel}</span>
+                            <div className="mt-1 text-[10px] font-ui text-muted-lab leading-tight">
+                                Best: <span className="text-[hsl(var(--text-1))]">{bs.bestNetRLabel}</span>
                                 {bs.bestNetRNetR !== null ? ` · ${bs.bestNetRNetR > 0 ? "+" : ""}${bs.bestNetRNetR}R` : ""}
+                                {bs.bestNetDdLabel ? <span className="text-muted-lab"> · best Net/DD {bs.bestNetDdLabel}</span> : null}
                             </div>
                         )}
-                        {compact && bs.bestNetDdLabel && (
-                            <div className="text-[10px] font-ui text-muted-lab">
-                                Best Net/DD: <span className="text-[hsl(var(--text-1))]">{bs.bestNetDdLabel}</span>
-                            </div>
-                        )}
-                        <div className="mt-1.5 text-[10px] font-ui text-muted-lab">
-                            <div className="uppercase tracking-wide mb-0.5">Variants</div>
-                            <div className="flex flex-col gap-0.5">
-                                {batch.triggerVariantGroups.slice(0, showAllGroups ? undefined : 6).map((g) => (
-                                    <div key={g.trigger}>
-                                        <span className="text-[hsl(var(--text-2))]">{g.trigger}:</span> {g.arms.join(" · ")}
-                                    </div>
-                                ))}
-                                {!showAllGroups && batch.triggerVariantGroups.length > 6 && (
-                                    <button type="button" onClick={() => setShowAllGroups(true)} className="self-start underline text-[hsl(var(--accent-primary))] hover:text-white">
-                                        + {batch.triggerVariantGroups.length - 6} more
-                                    </button>
-                                )}
-                            </div>
+                        <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] font-ui text-muted-lab leading-tight">
+                            {batch.triggerVariantGroups.slice(0, showAllGroups ? undefined : 4).map((g) => (
+                                <span key={g.trigger} className="whitespace-nowrap">
+                                    <span className="text-[hsl(var(--text-2))]">{g.trigger}:</span> {g.arms.join("·")}
+                                </span>
+                            ))}
+                            {!showAllGroups && batch.triggerVariantGroups.length > 4 && (
+                                <button type="button" onClick={() => setShowAllGroups(true)} className="underline text-[hsl(var(--accent-secondary))] hover:text-white">
+                                    +{batch.triggerVariantGroups.length - 4}
+                                </button>
+                            )}
                         </div>
                         {batch.canCollapse && (
                             <button
                                 type="button"
                                 data-testid="runs-scenario-toggle"
                                 onClick={() => setShowAll((v) => !v)}
-                                className="mt-1.5 underline text-[10px] font-ui text-[hsl(var(--accent-primary))] hover:text-white"
+                                className="mt-1 underline text-[10px] font-ui text-[hsl(var(--accent-secondary))] hover:text-white"
                             >
-                                {showAll ? "Hide variants" : `Show all variants (${batch.scenarioCount})`}
+                                {showAll ? "Hide variants" : `Show all (${batch.scenarioCount})`}
                             </button>
                         )}
                     </div>
