@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "policy_version": "2026-07-07.te-v1.1",
-  "created_at": "2026-07-02T00:00:00Z",
-  "source_research": "outputs/research/portfolio_manager_v1/",
-  "notes": "Generated from portfolio_manager_policy_table.csv. decision_policy.regime is the only populated decision field in v1; rr/be/risk/entry/protections/position_sizing are reserved for later phases. MORE_DATA_REQUIRED cohorts fail safe to LABEL.",
+  "policy_version": "2026-07-09.te-v1.2-surgical-disable",
+  "created_at": "2026-07-09",
+  "source_research": "outputs/research/pm_exact_deployed_substrate_rederivation/ + pm_v1_2_predeploy_confirmation/",
+  "notes": "Deployed PM v1.2. Surgical disable of two deployed-substrate losing cohorts (newYork BOS Long, london BOS Short) from the exact deployed-substrate re-derivation, pre-deploy confirmed via true enforce runs. decision_policy.regime is the only populated decision field in v1; rr/be/risk reserved. MORE_DATA_REQUIRED cohorts fail safe to LABEL.",
   "cohorts": [
     {
       "instrument": "EURUSD",
@@ -12,7 +12,7 @@
       "direction": "Long",
       "cohort_key": "EURUSD|newYork|bos_long",
       "decision_policy": {
-        "regime": "STATE_ONLY"
+        "regime": "DISABLE"
       },
       "recommendation": "USE_STATE_ONLY",
       "confidence": "HIGH",
@@ -183,7 +183,7 @@
       "direction": "Short",
       "cohort_key": "EURUSD|london|bos_short",
       "decision_policy": {
-        "regime": "LABEL"
+        "regime": "DISABLE"
       },
       "recommendation": "USE_LABEL",
       "confidence": "HIGH",
@@ -918,12 +918,13 @@
       "source_research": "portfolio_manager_policy_table.csv"
     }
   ],
-  "source_commit": "925866c",
+  "source_commit": "4044c53",
   "derived_from": {
-    "policy_version": "2026-07-02.1",
-    "policy_sha256": "5c249b23dfdb09ede8b591d9c9511bf388085a08ffc20940f886a87a8d958acb",
-    "change": "EURUSD|newYork|CHoCH|Short DISABLE->DIRECTION_AWARE",
-    "research": "pm_v1_1 frozen deployment candidate"
+    "policy_version": "2026-07-07.te-v1.1",
+    "policy_sha256": "82f1172bf3614c6dcfb83d94a1f6188c8d64512d378861dcdfbf120ce72b1883",
+    "change": "EURUSD|newYork|bos_long STATE_ONLY->DISABLE; EURUSD|london|bos_short LABEL->DISABLE",
+    "research": "pm_exact_deployed_substrate_rederivation + pm_v1_2_predeploy_confirmation"
   },
-  "policy_sha256": "82f1172bf3614c6dcfb83d94a1f6188c8d64512d378861dcdfbf120ce72b1883"
+  "rationale": "Surgical disable of two deployed-substrate losing cohorts: newYork BOS Long and london BOS Short.",
+  "policy_sha256": "86ff709c6346dc5e0e695de5c550577d15877ebda0b4025e70da327bfb5c00a9"
 }

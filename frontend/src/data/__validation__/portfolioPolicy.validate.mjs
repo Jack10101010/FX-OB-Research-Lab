@@ -50,10 +50,11 @@ ok(table.cohorts.every((c) => c.cohortKey === `${c.instrument}|${c.session}|${(c
 
 console.log("\n[3] policy counts match expected");
 const cp = table.counts.byPolicy;
-ok(cp.DISABLE === 19, `DISABLE=19 (got ${cp.DISABLE})`);
-ok(cp.LABEL === 17, `LABEL=17 (got ${cp.LABEL})`);
-ok(cp.STATE_ONLY === 6, `STATE_ONLY=6 (got ${cp.STATE_ONLY})`);
-ok(cp.DIRECTION_AWARE === 6, `DIRECTION_AWARE=6 (got ${cp.DIRECTION_AWARE})`);
+// PM v1.2 (2026-07-09.te-v1.2-surgical-disable): EURUSD NY BOS Long STATE_ONLY→DISABLE, London BOS Short LABEL→DISABLE
+ok(cp.DISABLE === 20, `DISABLE=20 (got ${cp.DISABLE})`);
+ok(cp.LABEL === 16, `LABEL=16 (got ${cp.LABEL})`);
+ok(cp.STATE_ONLY === 5, `STATE_ONLY=5 (got ${cp.STATE_ONLY})`);
+ok(cp.DIRECTION_AWARE === 7, `DIRECTION_AWARE=7 (got ${cp.DIRECTION_AWARE})`);
 ok(cp.DISABLE + cp.LABEL + cp.STATE_ONLY + cp.DIRECTION_AWARE === 48, "policy counts sum to 48");
 
 console.log("\n[4] confidence counts match expected");
@@ -76,7 +77,7 @@ console.log("\n[7] filters work");
 const onlyGbp = pp.filterCohorts(table.cohorts, { instrument: "GBPUSD" });
 ok(onlyGbp.length === 24 && onlyGbp.every((c) => c.instrument === "GBPUSD"), "filter instrument=GBPUSD → 24 rows");
 const dirAware = pp.filterCohorts(table.cohorts, { policy: "DIRECTION_AWARE" });
-ok(dirAware.length === 6 && dirAware.every((c) => c.policy === "DIRECTION_AWARE"), "filter policy=DIRECTION_AWARE → 6 rows");
+ok(dirAware.length === 7 && dirAware.every((c) => c.policy === "DIRECTION_AWARE"), "filter policy=DIRECTION_AWARE → 7 rows");
 const combo = pp.filterCohorts(table.cohorts, { instrument: "EURUSD", structure: "BOS", direction: "Short" });
 ok(combo.every((c) => c.instrument === "EURUSD" && c.structure === "BOS" && c.direction === "Short"), "combined filter respects all keys");
 ok(pp.filterCohorts(table.cohorts, {}).length === 48, "empty filter → all 48");
