@@ -6,12 +6,14 @@ import { MetricChip } from "@/components/lab/MetricChip";
 import { EquityCurveV2, MiniLine } from "@/components/lab/EquityCurve";
 import { DataTable, Pill } from "@/components/lab/DataTable";
 import SessionResults from "@/components/lab/sessionProfiles/SessionResults";
+import RunPortfolioAttribution from "@/components/lab/portfolio/RunPortfolioAttribution";
 import TimingRegimeLab from "@/components/lab/timing/TimingRegimeLab";
 import EdgeAttributionTab from "@/components/lab/EdgeAttributionTab";
 import EntryVariantOverlap from "@/components/lab/EntryVariantOverlap";
 import LazyImportStatus from "@/components/lab/LazyImportStatus";
 import { NeonButton, NeonInput, NeonSelect, FilterToggle } from "@/components/lab/controls";
 import { compactTimeframe, formatRunDateRange, getRunDisplayName, reloadFullRunFromSidecar, updateRunBundle, useDataset } from "@/data/store";
+import { deriveRunName, shortPolicyVersion } from "@/data/runs/scenarioPresentation";
 import { setActiveRunId, setSelectedTradeVariant, setFocusedFftEvent } from "@/data/store";
 import { getNextStep, resolveRunReference, summarizeRunForDelta, buildRunDelta } from "@/data/projectWorkflow";
 import { ResearchStrip } from "@/components/lab/ResearchStrip";
@@ -460,6 +462,18 @@ export default function RunDetail() {
 
     const runConfig = runData?.config || run?.config || {};
     const displayName = getRunDisplayName(runData || run);
+    // Canonical run name (single source: scenarioPresentation.deriveRunName), derived from
+    // the run's CONFIG — never a stale manual display_name. If the stored display_name is a
+    // manual nickname (not the derived canonical, not a raw id), show it as the header with
+    // the canonical name/detail as the subheader.
+    const canonicalName = React.useMemo(
+        () => deriveRunName(runConfig, runData || run || {}, { pmVersionLabel: shortPolicyVersion(runConfig.portfolio_policy_version) }),
+        [runConfig, runData, run],
+    );
+    const _looksLikeRunId = (s) => /^[0-9a-f]{8,}$/i.test(String(s || "").trim()) || /^\d{8}_\d{6}/.test(String(s || "").trim());
+    const runNickname = (displayName && displayName !== canonicalName.title && displayName !== canonicalName.full && !_looksLikeRunId(displayName))
+        ? displayName : null;
+    const canonicalSettingsLine = canonicalName.detail.split(" · ").slice(1).join(" · "); // drop leading date (shown separately)
     const projectId = runData?.projectId || runData?.summary?.projectId || run?.projectId || run?.summary?.projectId;
     // WF-2: surface the project workflow "next step" on the Run Workspace.
     const linkedProject = projectId ? (PROJECTS || []).find((p) => p.id === projectId) || null : null;
@@ -623,6 +637,37 @@ export default function RunDetail() {
     const isScenarioView = Boolean(resultView?.family && resultView.family !== "baseline");
     const displayTrades = tradesForRun;
 
+    // TRADE-UNIVERSE-DIVERGENCE-AUDIT-1 Phase 3 — compact provenance of the ACTIVE
+    // universe, passed to every results surface (Session Results / Management /
+    // market-state lens) so each shows exactly which scenario + source file it reads
+    // and can never silently present a different universe than the headline. The
+    // directional bypass gets an equivalent descriptor (no CSV sourceFile — rows live
+    // under directionalResults.tradesByScenario[storageKey]).
+    const universeProvenance = React.useMemo(() => {
+        if (isDirectionalView) {
+            return {
+                universeType: "directional",
+                label: `Directional · ${directionalStorageKey || "—"}`,
+                sourceFile: null,
+                sourceKey: directionalStorageKey ? `directional::${directionalStorageKey}` : "directional",
+                variant: selectedRunVariant || runData?.primaryVariant || null,
+                warnings: [],
+            };
+        }
+        if (!universe) return null;
+        return {
+            universeType: universe.universeType,
+            label: universe.label,
+            sourceFile: universe.sourceFile || null,
+            sourceKey: universe.sourceKey || null,
+            variant: universe.variant || runData?.primaryVariant || null,
+            // Resolved scenario axes (family/threshold/fillMode) — consumed by the
+            // research-draft STRATEGY SIGNATURE so drafts never leak across universes.
+            scenario: universe.scenario || null,
+            warnings: Array.isArray(universe.warnings) ? universe.warnings : [],
+        };
+    }, [isDirectionalView, directionalStorageKey, selectedRunVariant, runData, universe]);
+
     // ── Config tab: per-session scenario config (additive, read-only) ──────────
     // When the run was produced from a Session Scenario, runData.config carries a
     // `session_strategy_scenario` block whose cohorts hold per-session RR / entry /
@@ -637,13 +682,27 @@ export default function RunDetail() {
         && Array.isArray(sessionScenarioConfig.cohorts)
         && sessionScenarioConfig.cohorts.length
     );
+    // Portfolio Manager context for the run, derived from the SELECTED run's config —
+    // never hardcoded. PM OFF runs → null (PM stays OFF; no PM-aware status/blocks).
+    // Passed to buildSessionResults so cohort status + PM-blocked separation are correct
+    // (without it, PM defaults to disabled inside the model and suppresses PM-blocked rows).
+    const portfolioCtxForRun = React.useMemo(() => {
+        const cfg = runData?.config || {};
+        const enabled = cfg.portfolio_policy_enabled === true || cfg.portfolio_policy_enabled === "true";
+        if (!enabled) return null;
+        return {
+            enabled: true,
+            instrument: cfg.symbol || cfg.instrument || "",
+            version: cfg.portfolio_policy_version || null,
+        };
+    }, [runData]);
     const scenarioSessions = React.useMemo(() => {
         if (!hasSessionScenario) return [];
         // buildSessionResults returns the fixed 6-session grid; each cohort carries
         // entryLabel / tpLabel (RR) / beLabel / status ("enabled"|"disabled").
-        const { sessions } = buildSessionResults(displayTrades, sessionScenarioConfig);
+        const { sessions } = buildSessionResults(displayTrades, sessionScenarioConfig, portfolioCtxForRun);
         return Array.isArray(sessions) ? sessions : [];
-    }, [hasSessionScenario, sessionScenarioConfig, displayTrades]);
+    }, [hasSessionScenario, sessionScenarioConfig, displayTrades, portfolioCtxForRun]);
 
     // ── RW-3A: dev-only baseline parity audit ─────────────────────────────────
     // Compares universe.trades (resolved via resolveBaselineUniverse) against
@@ -1491,6 +1550,7 @@ export default function RunDetail() {
         { id: "outcomes", label: "Outcomes" },
         { id: "monthly", label: "Monthly" },
         { id: "baseline-splits", label: "Baseline Splits" },
+        { id: "portfolio-run", label: "PM · This Run" },
         { id: "session-results", label: "Session Results" },
         { id: "variant-overlap", label: "Variant Overlap" },
         { id: "entry-timing", label: "Entry Timing" },
@@ -1698,8 +1758,8 @@ export default function RunDetail() {
         <div className="pb-12">
             <LabRunHero
                 pageLabel="Run Workspace"
-                title={displayName}
-                runLine={`Run: ${displayName} · ${totalTradeRows || Number(run.trades) || 0} trades`}
+                title={runNickname || canonicalName.title}
+                runLine={`${runNickname ? `${canonicalName.title} · ` : ""}${canonicalSettingsLine}${(totalTradeRows || Number(run.trades) || 0) ? ` · ${totalTradeRows || Number(run.trades) || 0} trades` : ""}`}
                 configLine={[
                     structureFilter ? `Structure ${formatStructureFilterValue(structureFilter)}` : null,
                     entryDepthPct != null ? `Entry Depth ${formatPercentValue(entryDepthPct)}` : null,
@@ -2441,7 +2501,15 @@ export default function RunDetail() {
                 >
                 {showResultsSection("baseline-splits") && <SessionSplit trades={displayTrades} />}
 
-                {showResultsSection("session-results") && <SessionResults trades={displayTrades} bundle={runData} />}
+                {showResultsSection("portfolio-run") && <RunPortfolioAttribution trades={displayTrades} bundle={runData} />}
+                {showResultsSection("session-results") && (
+                    <SessionResults
+                        trades={displayTrades}
+                        bundle={runData}
+                        universe={universeProvenance}
+                        universeStatus={universeStatus}
+                    />
+                )}
 
                 {showResultsSection("variant-overlap") && (
                     // GUARD: cross-variant overlap aggregates trade rows ACROSS variants. A lazily-

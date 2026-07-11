@@ -139,12 +139,16 @@ console.log("\n[I] suggested run name: exact format + entry-model token + date r
         !== buildName({ symbol: "AUDUSD", detectionTf: "M15", selectedEntryModel: "triggered_edge", rr: 2, dateFrom: "2020-01-02", dateTo: "2025-05-18" }));
 }
 
-console.log("\n[J] run-name auto-suggest behaviour: dirty flag preserves manual edits");
-ok("source: runNameDirty state exists", /runNameDirty/.test(SRC) && /setRunNameDirty/.test(SRC));
-ok("source: effect syncs runName only when NOT dirty", /if\s*\(!runNameDirty\)\s*setRunName\(suggestedRunName\)/.test(SRC));
-ok("source: manual edit sets dirty (onRunNameEdit)", /onRunNameEdit\s*=\s*\(e\)\s*=>\s*\{\s*setRunNameDirty\(true\);\s*setRunName\(e\.target\.value\)/.test(SRC));
-ok("source: suggestion re-derives on symbol/TF/model/RR/dates", /\[cfg\.symbol,\s*cfg\.detectionTf,\s*cfg\.selectedEntryModel,\s*cfg\.rr,\s*cfg\.dateFrom,\s*cfg\.dateTo\]/.test(SRC));
-ok("source: Run Name input uses onRunNameEdit (not raw setRunName)", /onChange=\{onRunNameEdit\}/.test(SRC));
+console.log("\n[J] run-name: canonical auto name (deriveRunName) + optional nickname override");
+ok("source: canonical auto name via deriveRunName", /deriveRunName\(autoNameConfig,/.test(SRC));
+ok("source: auto name derived from the exact submitted config", /const autoNameConfig = useMemo\(\(\) => \{[\s\S]*buildBacktesterConfig\(cfg\)[\s\S]*attachSessionStrategy\(stripped, sessionStrategy\)/.test(SRC));
+ok("source: PM version label from deployed mirror", /shortPolicyVersion\(deployedPolicyDoc\.policy_version\)/.test(SRC));
+ok("source: effective name = nickname || auto name", /const effectiveRunName = \(runName \|\| ""\)\.trim\(\) \|\| autoName\.full/.test(SRC));
+ok("source: nickname edit just sets runName (no dirty coupling)", /const onRunNameEdit = \(e\) => setRunName\(e\.target\.value\)/.test(SRC));
+ok("source: reset-to-auto clears the nickname", /const resetToAutoName = \(\) => setRunName\(""\)/.test(SRC));
+ok("source: live auto-name preview + nickname field present", /data-testid="run-autoname"/.test(SRC) && /data-testid="run-nickname"/.test(SRC) && /data-testid="run-reset-auto"/.test(SRC));
+ok("source: 'Leave blank to use automatic name' hint", /Leave blank to use automatic name/.test(SRC));
+ok("source: nickname input uses onRunNameEdit (not raw setRunName)", /onChange=\{onRunNameEdit\}/.test(SRC));
 
 console.log("\n[K] news blackout default 5/5 + stop buffer 1 (defaults + payload)");
 ok("DEFAULT_CFG newsBlackoutBefore = 5", /newsBlackoutBefore:\s*5\b/.test(SRC));
@@ -159,14 +163,22 @@ ok("DEFAULT_CFG newsBlackoutAfter = 5", /newsBlackoutAfter:\s*5\b/.test(SRC));
 console.log("\n[L] date controls reuse the original NeonDatePicker + Max Range");
 ok("source: imports NeonDatePicker", /import\s*\{\s*NeonDatePicker\s*\}\s*from\s*"@\/components\/lab\/NeonDatePicker"/.test(SRC));
 ok("source: Start/End use NeonDatePicker, no native type=\"date\"", /NeonDatePicker[^>]*v2-date-from/.test(SRC) && /NeonDatePicker[^>]*v2-date-to/.test(SRC) && !/type="date"/.test(SRC));
-ok("source: NeonDatePicker onChange updates cfg dateFrom/dateTo", /onChange=\{\(v\)\s*=>\s*set\("dateFrom"\)\(v\)\}/.test(SRC) && /endDateEdited\.current = true;\s*set\("dateTo"\)\(v\)/.test(SRC));
-ok("source: Max Range sets dateFrom = 2020-01-02", /onMaxRange\s*=\s*\(\)\s*=>\s*setCfg\(\(c\)\s*=>\s*\(\{\s*\.\.\.c,\s*dateFrom:\s*"2020-01-02"/.test(SRC));
+ok("source: NeonDatePicker onChange updates cfg dateFrom (via setDateFrom) / dateTo", /onChange=\{\(v\)\s*=>\s*setDateFrom\(v\)\}/.test(SRC) && /endDateEdited\.current = true;\s*set\("dateTo"\)\(v\)/.test(SRC));
+// Max Range = true Full History (earliest→latest of the widest dataset), NOT a hardcoded
+// 2020 start. The old behaviour (dateFrom:"2020-01-02") produced 2020-start "Full history"
+// runs; it is now resolved deterministically via resolveFullHistory().
+{
+    const mr = (SRC.match(/const onMaxRange\s*=\s*[^\n]*/) || [""])[0];
+    ok("source: Max Range applies resolveFullHistory() (no hardcoded 2020 start)",
+        /resolveFullHistory\(\)/.test(mr) && !/2020-01-02/.test(mr));
+}
 
 console.log("\n[L2] End date defaults to last available candle (market-data status)");
 ok("source: imports getMarketDataStatus", /getMarketDataStatus\s*\}?.*from\s*"@\/data\/sidecarClient"|getMarketDataStatus,/.test(SRC) || /getMarketDataStatus/.test(SRC));
 ok("source: fetches status on symbol change", /getMarketDataStatus\(cfg\.symbol\)/.test(SRC) && /\}, \[cfg\.symbol\]\);/.test(SRC));
 ok("source: sets dateTo to last_candle unless manually edited", /endDateEdited\.current\) return;/.test(SRC) && /dateTo === last \? prev : \{ \.\.\.prev, dateTo: last \}/.test(SRC));
-ok("source: clamps pickers to data range (min/max bounds)", /min=\{dataDateBounds\?\.min\} max=\{dataDateBounds\?\.max\}/.test(SRC));
+ok("source: pickers span the union range so pre-2020 dates are always selectable", /min=\{effectiveDateBounds\?\.min\} max=\{effectiveDateBounds\?\.max\}/.test(SRC) && /const effectiveDateBounds = unionBounds\(\)/.test(SRC));
+ok("source: picking a pre-2020 start auto-switches the candle file (candleFileForStart)", /const setDateFrom = \(v\) => setCfg\(\(c\) => \(\{ \.\.\.c, dateFrom: v, dataFile: candleFileForStart\(v, c\.dataFile\) \}\)\);/.test(SRC));
 
 console.log("\n[M] BE trigger basis is single-select (Wick default) in V2 Global Strategy");
 ok("DEFAULT_CFG beTriggerBases = ['wick'] (single)", /beTriggerBases:\s*\["wick"\]/.test(SRC));
@@ -316,7 +328,7 @@ console.log("\n[S] Run-complete summary helpers (pure, snapshot-driven)");
 }
 
 console.log("\n[T] What-was-run uses the SUBMITTED snapshot + run-complete UI wiring");
-ok("source: onRun snapshots cfg/sessionStrategy/payload at submit", /setRunSnapshot\(\{ cfg, sessionStrategy, runName: \(runName \|\| ""\)\.trim\(\), payload \}\)/.test(SRC));
+ok("source: onRun snapshots cfg/sessionStrategy/payload at submit (effective name)", /const submitName = effectiveRunName;/.test(SRC) && /setRunSnapshot\(\{ cfg, sessionStrategy, runName: submitName, payload \}\)/.test(SRC));
 ok("source: What-was-run reads runSnapshot (not live cfg)", /globalStrategyLines\(runSnapshot\.cfg\)/.test(SRC) && /<VariantGroupView cfg=\{runSnapshot\.cfg\}/.test(SRC) && /sessionPlanDetailed\(runSnapshot\.sessionStrategy\)/.test(SRC));
 ok("source: sessionPlan excludes disabled sessions via summarizeEnabledCohorts + off flag", /summarizeEnabledCohorts\(sessionStrategy\)/.test(SRC) && /enabled: \{ \.\.\. \}|sessionsCfg\[s\.key\]\?\.enabled === false/.test(SRC));
 ok("source: Fair Baseline block reads payload.baseline_comparison", /runSnapshot\.payload\.baseline_comparison/.test(SRC));

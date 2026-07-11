@@ -609,7 +609,7 @@ export const CONFIG_REGISTRY = [
     // EMA (Trend axis)
     {
         key: "emaEnabled", label: "EMA trend enabled", group: "regime", tier: 1,
-        emitted: true, backendKey: "regime_ema_enabled", defaultValue: true,
+        emitted: true, backendKey: "regime_ema_enabled", defaultValue: false,
         editable: false, masterControlsVisible: false, advancedMode: false,
         inputType: "boolean", options: null, validation: null, subgroup: "EMA (Trend)",
     },
@@ -646,7 +646,7 @@ export const CONFIG_REGISTRY = [
     // Bollinger width (Volatility axis)
     {
         key: "bbwEnabled", label: "Bollinger volatility enabled", group: "regime", tier: 1,
-        emitted: true, backendKey: "regime_bbw_enabled", defaultValue: true,
+        emitted: true, backendKey: "regime_bbw_enabled", defaultValue: false,
         editable: false, masterControlsVisible: false, advancedMode: false,
         inputType: "boolean", options: null, validation: null, subgroup: "Bollinger (Volatility)",
     },
@@ -695,7 +695,7 @@ export const CONFIG_REGISTRY = [
     // ADX (Chop axis)
     {
         key: "adxEnabled", label: "ADX chop enabled", group: "regime", tier: 1,
-        emitted: true, backendKey: "regime_adx_enabled", defaultValue: true,
+        emitted: true, backendKey: "regime_adx_enabled", defaultValue: false,
         editable: false, masterControlsVisible: false, advancedMode: false,
         inputType: "boolean", options: null, validation: null, subgroup: "ADX (Chop)",
     },
@@ -766,6 +766,31 @@ export const CONFIG_REGISTRY = [
         emitted: false, backendKey: "", defaultValue: "",
         editable: false, masterControlsVisible: false, advancedMode: false,
         inputType: "readonly", options: null, validation: null, subgroup: "Output",
+    },
+
+    // ── Portfolio Manager (deployed cohort policy) ────────────────────────────
+    // Backend emission of portfolio_policy_* is gated on portfolioEnabled in
+    // configTranslator.buildPortfolioConfig() — byte-identical when off except the
+    // explicit portfolio_policy_enabled:false flag (backend default is false; it only
+    // participates in run identity when enabled). "enforce" is the only supported mode.
+    {
+        key: "portfolioEnabled", label: "portfolio manager", group: "portfolio", tier: 1,
+        emitted: true, backendKey: "portfolio_policy_enabled", defaultValue: false,
+        editable: false, masterControlsVisible: false, advancedMode: false,
+        inputType: "boolean", options: null, validation: null, subgroup: "Portfolio Manager",
+    },
+    {
+        key: "portfolioMode", label: "portfolio mode", group: "portfolio", tier: 1,
+        emitted: true, backendKey: "portfolio_policy_mode", defaultValue: "enforce",
+        editable: true, masterControlsVisible: false, advancedMode: false,
+        inputType: "select", options: ["enforce", "label"], validation: null, subgroup: "Portfolio Manager",
+    },
+    {
+        key: "portfolioPolicyFile", label: "portfolio policy file", group: "portfolio", tier: 1,
+        emitted: true, backendKey: "portfolio_policy_file",
+        defaultValue: "configs/policy/deployed_policy.v1.json",
+        editable: false, masterControlsVisible: false, advancedMode: false,
+        inputType: "readonly", options: null, validation: null, subgroup: "Portfolio Manager",
     },
 ];
 

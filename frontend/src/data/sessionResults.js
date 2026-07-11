@@ -21,6 +21,8 @@
 // dependency); identical exports, byte-identical behaviour.
 import { SESSIONS, CELLS, SESSION_KEYS, CELL_KEYS, cohortOf } from "./cohortKeys";
 import { classifyTrade, PERFORMANCE_CATEGORIES } from "./tradeClassification";
+import { portfolioDecisionForTrade } from "./portfolioDecision";
+import { POLICY_LABELS } from "./portfolioLabels";
 
 const sessionLabelOf = (k) => SESSIONS.find((s) => s.key === k)?.label || k;
 const cellMeta = (k) => CELLS.find((c) => c.key === k) || { key: k, label: k, structure: "", direction: "" };
@@ -28,6 +30,60 @@ const cellMeta = (k) => CELLS.find((c) => c.key === k) || { key: k, label: k, st
 function isDisabledRow(t) {
     return String(t?.outcomeRaw || "").toUpperCase() === "COHORT_DISABLED"
         || String(t?.missed_reason || t?.missedReason || "").toLowerCase() === "cohort_disabled";
+}
+// A row the Portfolio Manager REMOVED from the portfolio (enforce mode). These are the
+// "would-have-been" candidates: they never contribute to executed stats, and must be
+// kept DISTINCT from ordinary unfilled/cancelled/news-cancelled "missed" rows. Prefer the
+// authoritative per-trade PM adapter (block reason / portfolio_status); fall back to the
+// raw REGIME_BLOCKED outcome so PM-blocked rows are caught even on bundles that dropped
+// the portfolio_* columns. COHORT_DISABLED (a Session-Scenario disable) is NEVER a PM block.
+function isPortfolioBlockedRow(t) {
+    if (isDisabledRow(t)) return false;
+    const d = portfolioDecisionForTrade(t);
+    if (d && d.blocked) return true;
+    const oc = String(t?.outcomeRaw || t?.outcome || "").toUpperCase().replace(/[^A-Z]+/g, "_");
+    return oc === "REGIME_BLOCKED";
+}
+// Canonical PM action (LABEL / STATE_ONLY / DIRECTION_AWARE / DISABLE) stamped on a row.
+const _REGIMES = new Set(["LABEL", "STATE_ONLY", "DIRECTION_AWARE", "DISABLE"]);
+function pmActionFromRow(t) {
+    const v = String(t?.portfolio_policy_regime || t?.portfolioPolicyRegime || "").toUpperCase();
+    return _REGIMES.has(v) ? v : null;
+}
+// Portfolio-aware DISPLAY state for one already-bucketed cohort. PURE. When PM is OFF this
+// returns the LEGACY scenario-only status so existing runs render byte-identically. When PM
+// is ON it distinguishes: scenario-disabled · PM NEVER TRADE (disabled) · PM-blocked with
+// visible would-have-been trades · enabled-no-setups · enabled-no-fills · active-traded.
+//   state ∈ scenario_disabled | pm_disabled | pm_blocked | enabled_no_setups |
+//           enabled_no_fills | active | enabled
+//   tone  ∈ danger (scenario) | caution (PM disable/block) | muted (no data) | neutral | ok
+export function deriveCohortDisplay(cohort, pmCtx) {
+    const scenarioDisabled = cohort.status === "disabled";
+    const exec = cohort.executedCount || 0;
+    const blocked = cohort.portfolioBlockedCount || 0;
+    const missed = cohort.cancelledMissedCount || 0;
+    const scenBlocked = cohort.disabledCount || 0;
+    const pmOn = !!(pmCtx && pmCtx.enabled);
+    const action = pmOn ? (cohort.pmAction || null) : null;
+    const actionLabel = action ? (POLICY_LABELS[action] || action) : null;
+
+    if (scenarioDisabled) {
+        return { state: "scenario_disabled", label: "Disabled by scenario", tone: "danger", pmAction: action, pmActionLabel: actionLabel };
+    }
+    if (pmOn && action === "DISABLE") {
+        return { state: "pm_disabled", label: "Disabled by Portfolio Manager", tone: "caution", pmAction: action, pmActionLabel: actionLabel };
+    }
+    if (pmOn && blocked > 0 && exec === 0) {
+        return { state: "pm_blocked", label: "Blocked by PM — would-have-been trades available", tone: "caution", pmAction: action, pmActionLabel: actionLabel };
+    }
+    if (exec > 0) {
+        return { state: "active", label: pmOn && actionLabel ? actionLabel : "Enabled", tone: "ok", pmAction: action, pmActionLabel: actionLabel };
+    }
+    if (exec === 0 && blocked === 0 && missed === 0 && scenBlocked === 0) {
+        return { state: "enabled_no_setups", label: "Enabled · no setups", tone: "muted", pmAction: action, pmActionLabel: actionLabel };
+    }
+    // setups existed (missed/unfilled) but nothing filled and nothing PM-blocked
+    return { state: "enabled_no_fills", label: "Enabled · no fills", tone: "neutral", pmAction: action, pmActionLabel: actionLabel };
 }
 function isExecutedRow(t) {
     return PERFORMANCE_CATEGORIES.has(classifyTrade(t));
@@ -94,9 +150,15 @@ function statsFor(executed) {
  * @param {object|null} scenarioConfig  run's session_strategy_scenario (or null)
  * @returns {{ hasScenario, meta, sessions:[...] }}
  */
-export function buildSessionResults(trades, scenarioConfig) {
+export function buildSessionResults(trades, scenarioConfig, portfolioCtx = null) {
     const list = Array.isArray(trades) ? trades : [];
     const hasScenario = !!(scenarioConfig && Array.isArray(scenarioConfig.cohorts) && scenarioConfig.cohorts.length);
+    // Portfolio Manager context (from the run config): { enabled, instrument, version,
+    // policyByKey:Map<"INSTR|session|cell",{policy}> }. When absent/OFF, PM has no effect
+    // on cohort status and legacy behaviour is preserved exactly.
+    const pmOn = !!(portfolioCtx && portfolioCtx.enabled);
+    const pmInstrument = (portfolioCtx && portfolioCtx.instrument) || "";
+    const pmByKey = (portfolioCtx && portfolioCtx.policyByKey) || null;
 
     // Per-cohort rule lookup keyed "session|Structure|Direction" (authoritative).
     const ruleBy = new Map();
@@ -117,11 +179,20 @@ export function buildSessionResults(trades, scenarioConfig) {
     const exByCohort = new Map();
     const disByCohort = new Map();
     const cmByCohort = new Map();
+    const pbByCohort = new Map();   // Portfolio-Manager-blocked would-have-been rows
     const unassigned = [];
     for (const t of list) {
         const ck = cohortOf(t); // "session|cell" or "unknown|cell"
         if (isDisabledRow(t)) {
             push(disByCohort, ck, t);
+        } else if (isPortfolioBlockedRow(t)) {
+            // PM removed this candidate from the portfolio — keep it SEPARATE from the
+            // ordinary missed/unfilled bucket so "blocked by PM" ≠ "no fill". Checked
+            // BEFORE executed: a REGIME_BLOCKED row has net_r=0 and must never be counted
+            // as a breakeven fill (belt-and-suspenders with the classifyTrade hard-exclude
+            // for REGIME_BLOCKED, so blocked candidates never leak into Executed Trades).
+            if (SESSION_SET.has(ck.split("|")[0])) push(pbByCohort, ck, t);
+            else unassigned.push(t);
         } else if (isExecutedRow(t)) {
             push(exByCohort, ck, t);
         } else {
@@ -138,16 +209,33 @@ export function buildSessionResults(trades, scenarioConfig) {
             const executed = exByCohort.get(ck) || [];
             const disabled = disByCohort.get(ck) || [];
             const cancelledMissed = cmByCohort.get(ck) || [];
+            const portfolioBlocked = pbByCohort.get(ck) || [];
             const rule = ruleBy.get(`${sKey}|${cm.structure}|${cm.direction}`) || null;
             const status = rule ? (rule.enabled === false ? "disabled" : "enabled") : "enabled";
             const st = statsFor(executed);
-            return {
+            // Resolve this cohort's PM action (canonical enum) when PM is ON: prefer what the
+            // backend actually stamped on any row of the cohort (version-proof), else fall
+            // back to the deployed policy table keyed by INSTR|session|cell (covers cohorts
+            // with zero setups — e.g. a NEVER TRADE cohort that produced no rows at all).
+            let pmAction = null;
+            let pmActionSource = null;
+            if (pmOn) {
+                for (const t of [...executed, ...portfolioBlocked, ...cancelledMissed]) {
+                    const a = pmActionFromRow(t);
+                    if (a) { pmAction = a; pmActionSource = "row"; break; }
+                }
+                if (!pmAction && pmByKey) {
+                    const pol = pmByKey.get(`${pmInstrument}|${sKey}|${cKey}`);
+                    if (pol && pol.policy) { pmAction = pol.policy; pmActionSource = "policy"; }
+                }
+            }
+            const cohort = {
                 key: cKey,                    // cell key (e.g. "bos_long"); unique within a session
                 cellKey: cKey,
                 label: cm.label,
                 structure: cm.structure,
                 direction: cm.direction,
-                status,                       // "enabled" | "disabled" (from config)
+                status,                       // "enabled" | "disabled" (SESSION-SCENARIO layer only)
                 hasRule: !!rule,
                 entryLabel: entryLabelFromRule(rule),
                 tpLabel: tpLabelFromRule(rule),
@@ -155,17 +243,26 @@ export function buildSessionResults(trades, scenarioConfig) {
                 executedCount: executed.length,
                 disabledCount: disabled.length,
                 cancelledMissedCount: cancelledMissed.length,
+                portfolioBlockedCount: portfolioBlocked.length,
                 netR: st.netR,
                 summary: st,                  // full per-cohort stats (executed only)
-                // Canonical drilldown row sets — three mutually-exclusive buckets.
+                // ── Portfolio Manager (distinct from the Session-Scenario status above) ──
+                pmEnabled: pmOn,
+                pmAction,                     // "LABEL"|"STATE_ONLY"|"DIRECTION_AWARE"|"DISABLE"|null
+                pmActionLabel: pmAction ? (POLICY_LABELS[pmAction] || pmAction) : null,
+                pmActionSource,               // "row" | "policy" | null
+                // Canonical drilldown row sets — mutually-exclusive buckets.
                 executedTrades: executed,
                 disabledOpportunities: disabled,
                 cancelledOrMissedOpportunities: cancelledMissed,
-                allRows: [...executed, ...disabled, ...cancelledMissed],
+                portfolioBlockedOpportunities: portfolioBlocked,
+                allRows: [...executed, ...disabled, ...cancelledMissed, ...portfolioBlocked],
                 // Back-compat aliases for existing consumers.
                 executed,
                 disabled,
             };
+            cohort.display = deriveCohortDisplay(cohort, portfolioCtx);
+            return cohort;
         });
 
         // Session summary from cohort stats.
@@ -173,8 +270,11 @@ export function buildSessionResults(trades, scenarioConfig) {
         const summaryStats = statsFor(allExecuted);
         const disabledOpportunities = cohorts.reduce((n, c) => n + c.disabledCount, 0);
         const cancelledMissed = cohorts.reduce((n, c) => n + c.cancelledMissedCount, 0);
+        const portfolioBlocked = cohorts.reduce((n, c) => n + c.portfolioBlockedCount, 0);
         const disabledCohorts = cohorts.filter((c) => c.status === "disabled").length;
-        const activeCohorts = cohorts.length - disabledCohorts;
+        const pmDisabledCohorts = cohorts.filter((c) => c.display && c.display.state === "pm_disabled").length;
+        const pmBlockedCohorts = cohorts.filter((c) => c.display && c.display.state === "pm_blocked").length;
+        const activeCohorts = cohorts.length - disabledCohorts - pmDisabledCohorts;
 
         return {
             key: sKey,
@@ -191,15 +291,36 @@ export function buildSessionResults(trades, scenarioConfig) {
                 winRate: summaryStats.winRate,
                 activeCohorts,
                 disabledCohorts,
+                portfolioBlocked,
+                pmDisabledCohorts,
+                pmBlockedCohorts,
             },
             cohorts,
         };
     });
 
+    // Run-level PM-blocked aggregate (across ALL sessions) + reason split, so the UI can
+    // show a single authoritative "PM blocked: N (direction / state / disabled)" summary
+    // without re-deriving. Numbers are never hard-coded — they sum the classified rows.
+    const pmBlockedRows = sessions.flatMap((s) => s.cohorts.flatMap((c) => c.portfolioBlockedOpportunities || []));
+    const portfolioSummary = { total: 0, directionMismatch: 0, stateNotAllowed: 0, policyDisabled: 0, other: 0, blockedCohorts: 0 };
+    for (const t of pmBlockedRows) {
+        portfolioSummary.total += 1;
+        const raw = String(t.regime_block_reason || t.regimeBlockReason || t.portfolio_decision_reason || t.portfolioDecisionReason || "").toLowerCase();
+        if (raw.includes("direction")) portfolioSummary.directionMismatch += 1;
+        else if (raw.includes("state")) portfolioSummary.stateNotAllowed += 1;
+        else if (raw.includes("disabl")) portfolioSummary.policyDisabled += 1;
+        else portfolioSummary.other += 1;
+    }
+    portfolioSummary.blockedCohorts = sessions.reduce((n, s) => n + (s.summary.pmBlockedCohorts || 0), 0);
+
     return {
         hasScenario,
+        portfolioEnabled: pmOn,
         meta: (scenarioConfig && scenarioConfig.meta) || null,
         sessions,
+        // Run-level PM-blocked aggregate (present regardless of selected session tab).
+        portfolioSummary,
         // Cancelled/missed rows with no recorded fill session (could not be mapped
         // to a session). Surfaced separately so they are never lost or mis-assigned.
         unassigned,
@@ -331,7 +452,7 @@ export function cohortExcursionSnapshot(executedTrades) {
 // still resolve 0.5/1/2/3 by exact match, so adding levels is non-breaking.
 export const TARGET_SUITABILITY_LEVELS = [
     0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.25, 1.5, 1.75, 2.0,
-    2.25, 2.5, 2.75, 3.0, 3.25, 3.5, 5.0,
+    2.25, 2.5, 2.75, 3.0, 3.25, 3.5, 3.75, 4.0, 4.25, 4.5, 4.75, 5.0,
 ];
 
 export function cohortTargetSuitability(executedTrades, levels = TARGET_SUITABILITY_LEVELS) {

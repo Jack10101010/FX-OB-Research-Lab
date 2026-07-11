@@ -3010,6 +3010,46 @@ export async function loadCandlesForRun(runId, options = {}) {
     return candles;
 }
 
+// Market-State lens (Phase 1): DAILY candles for the client regime panel of runs
+// whose bundles carry no candles at all (sidecar result-bundle imports exclude
+// candles.csv by design). The daily regime panel only needs UTC-day OHLC, so we ask
+// the sidecar for epoch-aligned 1D buckets (~1 row/day instead of millions) and cache
+// them on the run under `regimeDailyCandles` — NEVER run.candles (full-resolution
+// consumers) and NEVER run.displayCandles (Strategy-Map aggregation slot), so neither
+// existing consumer can be contaminated. Fail-soft: returns null when the run has no
+// sidecar reference or the sidecar is unreachable (callers show "unavailable" and
+// leave rows Unlabelled — states are never invented). Idempotent + de-duped.
+const REGIME_DAILY_INFLIGHT = new Map();
+export async function loadDailyRegimeCandles(runId) {
+    const current = runId ? state.runs[runId] : null;
+    if (!current) return null;
+    if (Array.isArray(current.regimeDailyCandles) && current.regimeDailyCandles.length) {
+        return current.regimeDailyCandles;
+    }
+    if (REGIME_DAILY_INFLIGHT.has(runId)) return REGIME_DAILY_INFLIGHT.get(runId);
+    const identifiers = runReloadIdentifiers(runId, current);
+    if (!identifiers.length) return null;
+    const task = (async () => {
+        let payload = null;
+        for (const identifier of identifiers) {
+            try {
+                payload = await getRunCandlesByRunId(identifier, { aggregate: "ohlc", bucket: "1D" });
+                break;
+            } catch (_error) { /* try the next identifier; fail-soft overall */ }
+        }
+        const candles = payload && Array.isArray(payload.candles) ? payload.candles : null;
+        if (!candles || !candles.length || !state.runs[runId]) return null;
+        state = {
+            ...state,
+            runs: { ...state.runs, [runId]: { ...state.runs[runId], regimeDailyCandles: candles } },
+        };
+        notify();
+        return candles;
+    })().finally(() => { REGIME_DAILY_INFLIGHT.delete(runId); });
+    REGIME_DAILY_INFLIGHT.set(runId, task);
+    return task;
+}
+
 // Intrabar inspector: fetch a SMALL full-resolution (1m) candle window around a
 // selected event via the sidecar range endpoint (no aggregation). Cached per
 // window in run.intrabarCandlesByWindow[`${start}_${end}`] — NEVER touches

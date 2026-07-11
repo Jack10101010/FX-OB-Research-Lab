@@ -726,6 +726,42 @@ export function parseTradesCSV(text) {
             // falls back to client reconstruction (data/marketState.js). Preserves the
             // canonical snapshot so TradeInspector prefers engine over client.
             regimeEmit: engineSnapshotFromRow(r),
+            // ── Portfolio Manager decision columns (backend Phase 2/4) ──────────
+            // Stamped on a trade row when a deployed portfolio policy is active. Absent
+            // on non-PM runs → "" (no throw); dual-keyed (snake_case + camelCase) so the
+            // per-trade PortfolioDecisionCard AND Session Results (portfolio-aware cohort
+            // status) can read the cohort's action + any block reason directly from the
+            // run rows rather than re-deriving it. The actual BLOCK is on outcome
+            // (REGIME_BLOCKED) + a block reason below.
+            portfolio_policy_regime: String(pick(r, "portfolio_policy_regime", "portfolioPolicyRegime") || ""),
+            portfolioPolicyRegime: String(pick(r, "portfolio_policy_regime", "portfolioPolicyRegime") || ""),
+            portfolio_status: String(pick(r, "portfolio_status", "portfolioStatus") || ""),
+            portfolioStatus: String(pick(r, "portfolio_status", "portfolioStatus") || ""),
+            portfolio_cohort_key: String(pick(r, "portfolio_cohort_key", "portfolioCohortKey") || ""),
+            portfolioCohortKey: String(pick(r, "portfolio_cohort_key", "portfolioCohortKey") || ""),
+            portfolio_decision_reason: String(pick(r, "portfolio_decision_reason", "portfolioDecisionReason") || ""),
+            portfolioDecisionReason: String(pick(r, "portfolio_decision_reason", "portfolioDecisionReason") || ""),
+            portfolio_confidence: String(pick(r, "portfolio_confidence", "portfolioConfidence") || ""),
+            portfolioConfidence: String(pick(r, "portfolio_confidence", "portfolioConfidence") || ""),
+            portfolio_policy_version: String(pick(r, "portfolio_policy_version", "portfolioPolicyVersion") || ""),
+            portfolioPolicyVersion: String(pick(r, "portfolio_policy_version", "portfolioPolicyVersion") || ""),
+            regime_block_reason: String(pick(r, "regime_block_reason", "regimeBlockReason") || ""),
+            regimeBlockReason: String(pick(r, "regime_block_reason", "regimeBlockReason") || ""),
+            portfolio_block_reason: String(pick(r, "portfolio_block_reason", "portfolioBlockReason") || ""),
+            portfolioBlockReason: String(pick(r, "portfolio_block_reason", "portfolioBlockReason") || ""),
+            // ── PM ANNOTATE-mode attribution (baseline/control walks; see Lux
+            // PM-SERIAL-PATH-WIRING-AUDIT-1). HYPOTHETICAL decision only — a would-block
+            // row kept its real fill/outcome/R, so these must NEVER be treated as an
+            // actual PM block (portfolioDecisionForTrade / isPortfolioBlockedRow
+            // intentionally ignore them; they key off regime_block_reason/REGIME_BLOCKED).
+            portfolio_would_block: boolOrNull(pick(r, "portfolio_would_block", "portfolioWouldBlock")),
+            portfolioWouldBlock: boolOrNull(pick(r, "portfolio_would_block", "portfolioWouldBlock")),
+            portfolio_would_block_reason: String(pick(r, "portfolio_would_block_reason", "portfolioWouldBlockReason") || ""),
+            portfolioWouldBlockReason: String(pick(r, "portfolio_would_block_reason", "portfolioWouldBlockReason") || ""),
+            // Eligibility provenance (SB-V2): "rescued" on fills that exist only because
+            // a state-level ALLOW rescued them inside a disabled-base cohort.
+            state_eligibility: String(pick(r, "state_eligibility", "stateEligibility") || ""),
+            stateEligibility: String(pick(r, "state_eligibility", "stateEligibility") || ""),
             // TE delay-window fields (exported by backend, used by FFT Debug layer)
             arm_candle_index: numOrNull(pick(r, "arm_candle_index", "armCandleIndex")),
             armCandleIndex: numOrNull(pick(r, "arm_candle_index", "armCandleIndex")),

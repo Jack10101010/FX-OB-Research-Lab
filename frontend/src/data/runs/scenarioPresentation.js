@@ -8,6 +8,8 @@
 // as run.entryResults.summary). Metrics NOT present (regime_blocked / portfolio_blocked per scenario) are
 // returned as null — never fabricated. This module is pure: it does not mutate its input.
 
+import { dataRangeLabel } from "../dataRanges";
+
 export const CONTEXT_MODES = {
     COLD: "COLD_WINDOW_START",
     WARMED: "FULL_HISTORY_WARMED",
@@ -213,6 +215,93 @@ export function deriveBatchTitle(config = {}, run = {}) {
     if (config.rr_multiple !== undefined) parts.push(`RR${config.rr_multiple}`);
     parts.push(`${formatDate(from)}→${formatDate(to)}`);
     return parts.join(" · ");
+}
+
+// ── canonical run NAME (title + detail) — the single source used by Strategy ──
+// Builder preview, Run Workspace header, and (for its title) the Runs cards. Derived
+// from config/run metadata, NEVER a stale manual display_name. Pure.
+
+// "C3/C4" for a small set, "C1–C5" for a range of >2 arms.
+export function armRangeLabel(delays) {
+    if (!Array.isArray(delays) || !delays.length) return "";
+    const ds = [...new Set(delays.map(Number).filter((n) => Number.isFinite(n)))].sort((a, b) => a - b);
+    if (!ds.length) return "";
+    if (ds.length <= 2) return ds.map((d) => `C${d}`).join("/");
+    return `C${ds[0]}–C${ds[ds.length - 1]}`;
+}
+
+// Short policy label: "2026-07-07.te-v1.1" → "v1.1"; else "v1" when a policy is present.
+export function shortPolicyVersion(v) {
+    if (!v) return null;
+    const m = String(v).match(/v(\d+(?:\.\d+)?)/i);
+    if (m) return `v${m[1]}`;
+    return "v1";
+}
+
+/**
+ * Canonical run name.
+ * @returns {{ title:string, detail:string, full:string }}
+ *   title  = "PAIR · Strategy family"     (e.g. "EURUSD · Portfolio Manager")
+ *   detail = "DD Mon YYYY → DD Mon YYYY · RR2 · 25% C3/C4 · PM v1.1 · MS off · All sessions"
+ *   full   = "title — detail"
+ * opts.pmVersionLabel overrides the PM version token (e.g. from the deployed mirror).
+ */
+export function deriveRunName(config = {}, run = {}, opts = {}) {
+    const symbol = config.symbol || run.symbol || "?";
+    const type = classifyScenarioType(config);
+    const title = `${symbol} · ${type}`;
+
+    const from = config.date_from || config.start_date || (run.dateRange ? String(run.dateRange).split("→")[0].trim() : null);
+    const to = config.date_to || config.end_date || (run.dateRange ? String(run.dateRange).split("→").pop().trim() : null);
+
+    const bits = [];
+    if (from || to) bits.push(`${formatDate(from)} → ${formatDate(to)}`);
+
+    // Data range descriptor ("Full history" / "Recent/UI range") from the candle file —
+    // makes the dataset obvious in the run name + Run Workspace (avoids the 330-vs-337 confusion).
+    const drLabel = dataRangeLabel(config);
+    if (drLabel) bits.push(drLabel);
+
+    const rr = config.rr_multiple;
+    if (rr !== undefined && rr !== null && rr !== "") bits.push(`RR${rr}`);
+
+    const te = Array.isArray(config.entry_models) && config.entry_models.includes("triggered_edge");
+    const trigs = config.triggered_edge_trigger_thresholds;
+    const delays = config.triggered_edge_candle_delays;
+    if (te && Array.isArray(trigs) && trigs.length) {
+        const arm = armRangeLabel(delays);
+        bits.push(`${trigs.join("/")}%${arm ? ` ${arm}` : ""}`);
+    } else if (Array.isArray(config.entry_penetration_thresholds) && config.entry_penetration_thresholds.length) {
+        bits.push(`Pen ${config.entry_penetration_thresholds.join("/")}%`);
+    }
+
+    // Portfolio Manager
+    if (config.portfolio_policy_enabled) {
+        const ver = opts.pmVersionLabel || shortPolicyVersion(config.portfolio_policy_version);
+        // Research override: disabled cohorts included → "All cohorts" so an all-cohorts
+        // run is never confused with a normal PM run. Only appended when the flag is set.
+        bits.push(config.portfolio_include_disabled_cohorts
+            ? `PM ${ver || "on"} · All cohorts`
+            : `PM ${ver || "on"}`);
+    } else {
+        bits.push("PM off");
+    }
+
+    // Global Market State gate
+    if (config.regime_gate_enabled) {
+        bits.push(config.regime_direction_policy === "direction_aware" ? "MS dir-aware" : "MS on");
+    } else {
+        bits.push("MS off");
+    }
+
+    // Session scope
+    const sess = config.session_strategy_scenario;
+    if (sess && typeof sess === "object" && sess.enabled) bits.push("Session scenario");
+    else if (config.session_filter_enabled) bits.push("Sessions filtered");
+    else bits.push("All sessions");
+
+    const detail = bits.join(" · ");
+    return { title, detail, full: detail ? `${title} — ${detail}` : title };
 }
 
 // ── scenario families ACTUALLY present + run-level layers ───────────────────

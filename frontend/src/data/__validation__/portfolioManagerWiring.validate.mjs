@@ -57,6 +57,33 @@ ok(payOn.portfolio_policy_enabled === true && payOn.portfolio_policy_mode === "e
 const payOff = ct.buildBacktesterConfig({ ...d, portfolioEnabled: false, entryMode: "single", selectedEntryModel: "triggered_edge" });
 ok(payOff.portfolio_policy_enabled === false, "full payload PM OFF → false");
 
+console.log("\n[2b] research override — include disabled cohorts");
+// OFF (flag absent/false) must NOT emit the field → byte-identical to a normal PM run
+const onNoOverride = ct.buildPortfolioConfig({ portfolioEnabled: true });
+ok(!("portfolio_include_disabled_cohorts" in onNoOverride),
+    "PM ON, override OFF → field absent (byte-identical)");
+const onOverrideFalse = ct.buildPortfolioConfig({ portfolioEnabled: true, portfolioIncludeDisabledCohorts: false });
+ok(!("portfolio_include_disabled_cohorts" in onOverrideFalse),
+    "PM ON, override=false → field still absent");
+// ON emits exactly the boolean true, PM stays enabled/enforce (nothing else changes)
+const onOverride = ct.buildPortfolioConfig({ portfolioEnabled: true, portfolioIncludeDisabledCohorts: true });
+ok(onOverride.portfolio_include_disabled_cohorts === true,
+    "PM ON, override ON → portfolio_include_disabled_cohorts:true");
+ok(onOverride.portfolio_policy_enabled === true && onOverride.portfolio_policy_mode === "enforce",
+    "override does not disable PM or change mode (still enforce)");
+// PM OFF must never emit the override even if the flag is set (no PM = nothing to include)
+const offWithFlag = ct.buildPortfolioConfig({ portfolioEnabled: false, portfolioIncludeDisabledCohorts: true });
+ok(!("portfolio_include_disabled_cohorts" in offWithFlag),
+    "PM OFF → override field never emitted");
+// UI: toggle only shown when PM is ON; label + run-detail token present
+const PMC2 = fs.readFileSync(new URL("../../components/lab/portfolio/PortfolioManagerControls.jsx", import.meta.url), "utf8");
+ok(/data-testid="pm-include-disabled-toggle"/.test(PMC2), "include-disabled toggle present");
+ok(/on &&[\s\S]*pm-include-disabled/.test(PMC2), "include-disabled card gated on PM ON");
+ok(/portfolioIncludeDisabledCohorts/.test(PMC2), "toggle writes portfolioIncludeDisabledCohorts via onField");
+const SP = fs.readFileSync(new URL("../runs/scenarioPresentation.js", import.meta.url), "utf8");
+ok(/All cohorts/.test(SP) && /portfolio_include_disabled_cohorts/.test(SP),
+    "run-detail label appends 'All cohorts' when override set");
+
 console.log("\n[3] friendly labels map to the 4 canonical enums (no renames)");
 ok(labels.POLICY_LABELS.LABEL === "ALWAYS ALLOW" && labels.POLICY_LABELS.STATE_ONLY === "BLOCK CHOP"
     && labels.POLICY_LABELS.DIRECTION_AWARE === "FOLLOW TREND" && labels.POLICY_LABELS.DISABLE === "NEVER TRADE",

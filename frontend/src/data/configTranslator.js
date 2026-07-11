@@ -48,6 +48,9 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { CONFIG_REGISTRY } from "@/data/configRegistry";
+import { buildSessionStrategyScenario, overridesFromScenario, globalRunRR } from "@/data/cohortTargetOverrides";
+import { mergeStateOverridesIntoScenario, stateOverridesFromScenario } from "@/data/stateTargetOverrides";
+import { mergeEligibilityIntoScenario, eligibilityFromScenario } from "@/data/eligibilityPolicy";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // §1  Core type utilities
@@ -570,6 +573,56 @@ export function buildRegimeConfig(cfg) {
     };
 }
 
+// ── Portfolio Manager v1 — deployed cohort policy emission ────────────────────
+// Mirrors buildRegimeConfig's discipline. When portfolioEnabled is falsy the ONLY
+// emitted key is portfolio_policy_enabled:false (the backend default; it does not
+// participate in run identity unless enabled). When enabled, enforce mode + the
+// deployed policy file are emitted. "enforce" is the only supported mode today.
+export function buildPortfolioConfig(cfg) {
+    if (!cfg || !cfg.portfolioEnabled) return { portfolio_policy_enabled: false };
+    const out = {
+        portfolio_policy_enabled: true,
+        // SB-V2 consolidation: PM mode is user-selectable — Off (enabled:false above),
+        // Label (stamp decisions, never block: complete research populations), or
+        // Enforce (the deployed gate). Default remains "enforce" for compatibility.
+        portfolio_policy_mode: cfg.portfolioMode === "label" ? "label" : "enforce",
+        portfolio_policy_file: cfg.portfolioPolicyFile || "configs/policy/deployed_policy.v1.json",
+    };
+    // Research override: include disabled cohorts (DISABLE → runtime LABEL for this run
+    // only). Emitted ONLY when both PM is ON and the toggle is set, so an OFF run stays
+    // byte-identical (matches the backend config_hash discipline). Never edits the policy.
+    if (cfg.portfolioIncludeDisabledCohorts) {
+        out.portfolio_include_disabled_cohorts = true;
+    }
+    return out;
+}
+
+// ── Cohort Target Overrides (Phase 1) ──────────────────────────────────────────
+// Serialize the "Cohort Target Overrides" research panel into the EXISTING backend
+// `session_strategy_scenario` structure (24 explicit cohorts; enabled→target:{rr},
+// disabled→enabled:false). Emitted ONLY when the panel gate is ON, so a normal run
+// stays byte-identical (same discipline as buildPortfolioConfig). The scenario NEVER
+// bypasses PM: the engine runs PM enforcement first, then applies these targets/
+// disables to the candidates PM allowed through.
+export function buildCohortScenarioConfig(cfg) {
+    // Defensive: if the serializer isn't resolvable (e.g. a stubbed test harness), emit
+    // no scenario — the safe default that keeps a run byte-identical to a normal run.
+    if (typeof buildSessionStrategyScenario !== "function") return {};
+    let scenario = buildSessionStrategyScenario(cfg);
+    // Market State Target Overrides (STATE-TARGET-POLICY-UI-PLAN-1): additive merge of
+    // per-state cells into the SAME scenario cohorts. OFF (default) or nothing to emit
+    // ⇒ the base scenario is returned UNCHANGED (byte-identical runs).
+    if (scenario && typeof mergeStateOverridesIntoScenario === "function") {
+        scenario = mergeStateOverridesIntoScenario(scenario, cfg);
+    }
+    // Eligibility Policy (SB-V2 consolidation): base allow/disable + per-state
+    // allow(rescue)/block, schema v2, legacy `enabled` mirrored. OFF ⇒ unchanged.
+    if (scenario && typeof mergeEligibilityIntoScenario === "function") {
+        scenario = mergeEligibilityIntoScenario(scenario, cfg);
+    }
+    return scenario ? { session_strategy_scenario: scenario } : {};
+}
+
 export function buildBacktesterConfig(cfg) {
     const allowedSessions = Boolean(cfg.sessionFilter) ? selectedAllowedSessions(cfg) : [];
 
@@ -754,6 +807,14 @@ export function buildBacktesterConfig(cfg) {
         // ── Market State / Regime Gate ─────────────────────────────────────────
         // Emits regime_* only when regimeEnabled (off by default → byte-identical).
         ...buildRegimeConfig(cfg),
+
+        // Portfolio Manager (deployed cohort policy). enforce when portfolioEnabled;
+        // else portfolio_policy_enabled:false. Recommended filter layer (PM ON, global
+        // Market State gate OFF).
+        ...buildPortfolioConfig(cfg),
+        // Cohort Target Overrides (Phase 1): emits session_strategy_scenario ONLY when
+        // the panel gate is ON. PM enforcement still runs first in the engine.
+        ...buildCohortScenarioConfig(cfg),
         session_filter_enabled:     Boolean(cfg.sessionFilter),
         allowed_sessions:           allowedSessions,
         news_blackout_enabled:      Boolean(cfg.newsBlackout),
@@ -846,6 +907,46 @@ export function buildRunConfigLoadReport(current, run) {
     }
 
     applyFirstPresent(patch, source, "rr",               ["rr_multiple", "rr", "risk_reward"],          toNumber);
+
+    // ── Cohort Target Overrides round-trip (Phase 1) ──────────────────────────
+    // Reconstruct the panel state from a persisted/imported session_strategy_scenario
+    // so a saved run reloads with the exact 24-cohort enable/disable + targets. A
+    // cohort rr equal to the run's global RR restores as "run default". When the
+    // scenario is absent/disabled the panel stays OFF (byte-identical normal run).
+    {
+        const scenario = source.session_strategy_scenario;
+        if (scenario && scenario.enabled === true) {
+            const gRR = globalRunRR({ rr: patch.rr != null ? patch.rr : source.rr_multiple });
+            const restored = overridesFromScenario(scenario, { globalRR: gRR });
+            patch.cohortOverridesEnabled = restored.enabled;
+            patch.cohortTargetOverrides = restored.overrides;
+            patch.cohortOverridesPreset = restored.preset;
+            // Market State Target Overrides (additive; absent ⇒ panel stays OFF).
+            const restoredStates = stateOverridesFromScenario(scenario);
+            patch.stateOverridesEnabled = restoredStates.enabled;
+            patch.stateTargetOverrides = restoredStates.overrides;
+            // Eligibility Policy (schema v2; legacy enabled-only configs stay under the
+            // cohort panel's model — eligibility restores ONLY when the key exists).
+            const restoredElig = eligibilityFromScenario(scenario);
+            patch.eligibilityEnabled = restoredElig.enabled;
+            patch.eligibilityPreset = restoredElig.preset;
+            patch.cohortEligibility = restoredElig.eligibility;
+        }
+        // Portfolio Manager reload mapping (SB-V2): old runs restore their exact PM
+        // semantics — enabled, mode (enforce/label) and the legacy include-disabled
+        // research override (kept internal; surfaced only as a research-override note).
+        if (source.portfolio_policy_enabled !== undefined) {
+            patch.portfolioEnabled = source.portfolio_policy_enabled === true || String(source.portfolio_policy_enabled) === "true";
+        }
+        if (source.portfolio_policy_mode !== undefined) {
+            patch.portfolioMode = String(source.portfolio_policy_mode) === "label" ? "label" : "enforce";
+        }
+        if (source.portfolio_include_disabled_cohorts !== undefined) {
+            patch.portfolioIncludeDisabledCohorts = source.portfolio_include_disabled_cohorts === true
+                || String(source.portfolio_include_disabled_cohorts) === "true";
+        }
+    }
+
     applyFirstPresent(patch, source, "obEntryDepthPct",  ["ob_entry_depth_pct", "obEntryDepthPct"],      toNumber);
     applyFirstPresent(patch, source, "entryBuffer",      ["entry_buffer_pips", "entry_buffer", "entryBuffer"], toNumber);
     applyFirstPresent(patch, source, "stopBuffer",       ["stop_buffer_pips",  "stop_buffer",  "stopBuffer"],  toNumber);

@@ -348,8 +348,8 @@ console.log("\n[8h] cohort target suitability");
     ok(L(3).reachedPct === 0 && L(5).reachedPct === 0, "3R/5R = 0%");
 
     // expanded target ladder (UI polish): all new levels present, existing calcs unchanged
-    const EXPECT_LEVELS = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0, 3.25, 3.5, 5.0];
-    ok(JSON.stringify(TARGET_SUITABILITY_LEVELS) === JSON.stringify(EXPECT_LEVELS), "TARGET_SUITABILITY_LEVELS = 17-level fine ladder");
+    const EXPECT_LEVELS = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0, 3.25, 3.5, 3.75, 4.0, 4.25, 4.5, 4.75, 5.0];
+    ok(JSON.stringify(TARGET_SUITABILITY_LEVELS) === JSON.stringify(EXPECT_LEVELS), "TARGET_SUITABILITY_LEVELS = 22-level fine ladder (adds 3.75–4.75R)");
     ok(ts.levels.length === EXPECT_LEVELS.length, `table emits all ${EXPECT_LEVELS.length} levels (was 6)`);
     ok(EXPECT_LEVELS.every((lv) => L(lv) != null), "every new level (0.6/0.7/1.25/2.25/3.25 …) is computed");
     // new intermediate levels compute correctly on the same data (0.9R: 2.5,1.2,1.5 reach = 3/5 = 60%)

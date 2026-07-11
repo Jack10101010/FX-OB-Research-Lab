@@ -15,7 +15,15 @@ import { SESSIONS, CELLS } from "@/data/cohortKeys";
 import { attachSessionStrategy } from "@/data/sessionScenarioConfig";
 import { buildBacktesterConfig, BE_ARM_LEVEL_CHOICES } from "@/data/configTranslator";
 import { defaultsForGroup } from "@/data/configRegistry";
+import { deriveRunName, shortPolicyVersion } from "@/data/runs/scenarioPresentation";
+import { DATA_RANGES, DATA_RANGE_ORDER, resolveDataRangeKey, dataRangePatch, dataRangeBounds, dataRangeContext, unionBounds, candleFileForStart, resolveFullHistory, preLaunchDateSummary, fileBounds } from "@/data/dataRanges";
+import deployedPolicyDoc from "@/data/deployedPolicy.v1.json";
 import { MarketStateControls, regimeFilterInvalid } from "@/components/lab/marketState/MarketStateControls";
+import PortfolioManagerControls from "@/components/lab/portfolio/PortfolioManagerControls";
+import MarketStateTargetOverrides from "@/components/lab/portfolio/MarketStateTargetOverrides";
+import TradeEligibility from "@/components/lab/portfolio/TradeEligibility";
+import ResolvedRunSummary from "@/components/lab/portfolio/ResolvedRunSummary";
+import RecommendedStackStrip from "@/components/lab/portfolio/RecommendedStackStrip";
 import { startSidecarRun, getSidecarRun, getSidecarRunBundle, getResultBundleByRunId, revealSidecarRun, cancelSidecarRun, getRunFileByRunId, getMarketDataStatus } from "@/data/sidecarClient";
 import { ingestRunBundle } from "@/data/importer";
 import { addRunBundle } from "@/data/store";
@@ -68,6 +76,10 @@ const DEFAULT_CFG = {
     // Market State / Regime Gate defaults — sourced from CONFIG_REGISTRY (single
     // source of truth), all off by default so existing runs are byte-identical.
     ...defaultsForGroup("regime"),
+    // Portfolio Manager defaults — sourced from CONFIG_REGISTRY. Registry default is
+    // OFF (safe/legacy); a BRAND-NEW config is nudged ON below (recommended layer),
+    // while any persisted config keeps its saved value (never silently changed).
+    ...defaultsForGroup("portfolio"),
 };
 
 // Short entry-model token for run names: TE / PEN / BASE.
@@ -478,7 +490,9 @@ function VariantGroupView({ cfg }) {
 }
 
 // ── small presentational helpers ─────────────────────────────────────────────────
-function SectionShell({ n, title, question, scope, active, onActivate, children }) {
+function SectionShell({ n, title, question, scope, active, onActivate, children, collapsible = false }) {
+    // Advanced/legacy sections are COLLAPSED by default; header click expands.
+    const [open, setOpen] = React.useState(!collapsible);
     return (
         <section
             onFocusCapture={onActivate} onMouseDownCapture={onActivate}
@@ -499,10 +513,19 @@ function SectionShell({ n, title, question, scope, active, onActivate, children 
                         {question && <div className="text-[12.5px] text-white mt-0.5">{question}</div>}
                     </div>
                 </div>
-                {scope && <div className="text-[11.5px] text-muted-lab text-right max-w-[260px]">{scope}</div>}
+                <div className="flex items-center gap-3">
+                    {scope && <div className="text-[11.5px] text-muted-lab text-right max-w-[260px]">{scope}</div>}
+                    {collapsible && (
+                        <button type="button" onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+                            className="rounded border border-[hsl(var(--border-mid))] px-2 py-1 text-[11px] font-ui text-[hsl(var(--text-2))]"
+                            data-testid={`section-toggle-${n}`}>
+                            {open ? "Collapse" : "Expand"}
+                        </button>
+                    )}
+                </div>
             </div>
             {/* Body slightly transparent — blueprint grid reads through behind the opaque inner cards */}
-            <div className="p-6 flex flex-col gap-5 bg-[hsl(var(--panel)/0.35)]">{children}</div>
+            {(!collapsible || open) && <div className="p-6 flex flex-col gap-5 bg-[hsl(var(--panel)/0.35)]">{children}</div>}
         </section>
     );
 }
@@ -555,13 +578,36 @@ function GlobalReveal({ label, on, onToggle, children }) {
 
 export default function StrategyBuilderV2() {
     const persisted = useMemo(loadPersistedV2, []);
-    const [cfg, setCfg] = useState(() => ({ ...DEFAULT_CFG, ...(persisted?.cfg || {}) }));
+    const [cfg, setCfg] = useState(() => {
+        const base = { ...DEFAULT_CFG, ...(persisted?.cfg || {}) };
+        // Portfolio Manager is the recommended filter layer: default ON for a BRAND-NEW
+        // config only. A persisted config that predates PM (no portfolioEnabled key) keeps
+        // its legacy behaviour (PM OFF) — never silently changed on reload.
+        if (!persisted?.cfg) base.portfolioEnabled = true;
+        // Global Market State gate is legacy/advanced and OFF in the recommended stack.
+        // Always start the builder draft with EVERY aspect of it OFF (master gate + EMA /
+        // BBW / ADX enables + label mode), even if a previous draft had it on. Numeric
+        // parameters are kept so re-enabling it for research restores sensible values.
+        base.regimeEnabled = false;
+        base.regimeMode = "label";
+        base.emaEnabled = false;
+        base.bbwEnabled = false;
+        base.adxEnabled = false;
+        return base;
+    });
     const [sessionStrategy, setSessionStrategy] = useState(() => persisted?.sessionStrategy || { ...DEFAULT_SESSION_STRATEGY });
-    const [runName, setRunName] = useState(() => (persisted?.runName != null ? persisted.runName : buildSuggestedRunName(DEFAULT_CFG)));
-    const [runNameDirty, setRunNameDirty] = useState(() => !!persisted?.runNameDirty); // user edited → stop auto-syncing
+    // runName is now an OPTIONAL manual nickname/override (empty ⇒ use the auto name).
+    // The canonical auto name is always derived live from the config, so the nickname
+    // never replaces or destroys the canonical metadata.
+    const [runName, setRunName] = useState(() => (persisted?.runName != null ? persisted.runName : ""));
+    const [runNameDirty, setRunNameDirty] = useState(() => !!persisted?.runNameDirty); // legacy persistence key (unused for auto-sync)
     const [gridUi, setGridUi] = useState(() => ({ ...DEFAULT_GRID_UI, ...(persisted?.gridUi || {}) }));
     const [showLegacy, setShowLegacy] = useState(false);
     const [showConfig, setShowConfig] = useState(false);
+    // Global Market State gate is advanced/legacy: collapsed by default (all aspects off).
+    // The collapsed header still surfaces "(currently ON)" if a saved config has the gate
+    // enabled, so an active legacy gate is never silently hidden.
+    const [msGateOpen, setMsGateOpen] = useState(false);
     const [runMsg, setRunMsg] = useState("");
     const [beOn, setBeOn] = useState(false);
     const [rrOn, setRrOn] = useState(false);
@@ -589,18 +635,20 @@ export default function StrategyBuilderV2() {
     const set = (k) => (v) => setCfg((c) => ({ ...c, [k]: v }));
     const setNum = (k) => (e) => setCfg((c) => ({ ...c, [k]: Number(e.target.value) }));
 
-    // ── Suggested run name ────────────────────────────────────────────────────────
-    // Auto-generated from symbol / TF / entry model / RR / date range. Re-suggested
-    // whenever any of those change — but ONLY until the user manually edits the field;
-    // after a manual edit (runNameDirty) we never clobber it again.
-    const suggestedRunName = useMemo(
-        () => buildSuggestedRunName(cfg),
-        [cfg.symbol, cfg.detectionTf, cfg.selectedEntryModel, cfg.rr, cfg.dateFrom, cfg.dateTo],
-    );
-    useEffect(() => {
-        if (!runNameDirty) setRunName(suggestedRunName);
-    }, [suggestedRunName, runNameDirty]);
-    const onRunNameEdit = (e) => { setRunNameDirty(true); setRunName(e.target.value); };
+    // ── Canonical auto name (single source: scenarioPresentation.deriveRunName) ────
+    // Derived LIVE from the exact submitted config (same payload path as onRun) so the
+    // preview, Runs cards, and Run Workspace header all agree. PM version comes from the
+    // deployed policy mirror. The optional nickname (runName) never touches this.
+    const PM_VERSION_LABEL = useMemo(() => shortPolicyVersion(deployedPolicyDoc.policy_version), []);
+    const autoNameConfig = useMemo(() => {
+        const base = buildBacktesterConfig(cfg);
+        const stripped = Object.fromEntries(Object.entries(base).filter(([k]) => !String(k).startsWith("_")));
+        return attachSessionStrategy(stripped, sessionStrategy);
+    }, [cfg, sessionStrategy]);
+    const autoName = useMemo(() => deriveRunName(autoNameConfig, {}, { pmVersionLabel: PM_VERSION_LABEL }), [autoNameConfig, PM_VERSION_LABEL]);
+    const effectiveRunName = (runName || "").trim() || autoName.full;
+    const onRunNameEdit = (e) => setRunName(e.target.value);
+    const resetToAutoName = () => setRunName("");
 
     // Persist the whole V2 page to its own versioned key. Best-effort; never throws.
     // lastRun lets the Current Run panel survive navigation/reload (slim job + snapshot
@@ -633,11 +681,44 @@ export default function StrategyBuilderV2() {
                 const first = status.first_candle ? String(status.first_candle).slice(0, 10) : undefined;
                 setDataDateBounds({ min: first, max: last });
                 if (endDateEdited.current) return;            // respect a manual End-date choice
-                setCfg((prev) => (prev.dateTo === last ? prev : { ...prev, dateTo: last }));
+                // Only auto-fill the End date for an UNKNOWN candle file. For a known dataset
+                // (recent / full) the curated extent in dataRanges is authoritative and pinned,
+                // so the symbol-level status (which reports the DEFAULT file's last candle) can
+                // never override it — this is what caused two A/B runs on the extended file to
+                // end 2026-06-18 vs -19.
+                setCfg((prev) => {
+                    if (fileBounds(prev)) return prev;        // known dataset → keep pinned dates
+                    return prev.dateTo === last ? prev : { ...prev, dateTo: last };
+                });
             })
             .catch(() => { /* sidecar unavailable → keep current dates */ });
         return () => { cancelled = true; };
     }, [cfg.symbol]);
+
+    // ── Data Range presets (Recent / Full history / Custom) ───────────────────────────
+    // Only sets cfg when the USER picks a preset — never silently on load, so saved configs
+    // keep their dataFile/dates. The date pickers clamp to the active preset's own extent
+    // (so Full history unlocks 2015), else the fetched market-data bounds.
+    const activeDataRange = resolveDataRangeKey(cfg);
+    // The pickers span the UNION of all known datasets (2015 → 2026) so a pre-2020 date is ALWAYS
+    // selectable — no need to hunt for the "Full history" toggle first. Picking a pre-2020 start
+    // auto-upgrades the candle file (setDateFrom below). Falls back to fetched market bounds only
+    // if the union is somehow unavailable.
+    const effectiveDateBounds = unionBounds() || dataRangeBounds(cfg, dataDateBounds);
+    const dataCtx = dataRangeContext(cfg);
+    // Pre-launch resolved dates — exactly what will be submitted, so a truncated window
+    // (e.g. extended file but 2020 start) is visible BEFORE launch, not discovered later.
+    const dateSummary = preLaunchDateSummary(cfg);
+    const applyDataRange = (key) => {
+        const patch = dataRangePatch(key);
+        if (!patch) return;                         // "Custom" → no-op; user edits dates directly
+        endDateEdited.current = true;               // preset owns the end date; don't let a status refresh clobber it
+        setCfg((c) => ({ ...c, ...patch }));
+    };
+    // Setting the start date auto-selects the dataset that actually covers it: a pre-2020 start
+    // switches to the extended 2015→2026 file, so "select a 2015 date" just works without first
+    // toggling the dataset. Never downgrades a Full/extended selection.
+    const setDateFrom = (v) => setCfg((c) => ({ ...c, dateFrom: v, dataFile: candleFileForStart(v, c.dataFile) }));
 
     // ── single payload path (reuses translator + session compiler) ───────────────
     const buildPayload = () => {
@@ -666,10 +747,11 @@ export default function StrategyBuilderV2() {
         // the user edits the builder afterwards. cfg/sessionStrategy are frozen object
         // references (edits create new objects), so the snapshot never mutates.
         const payload = buildPayload();
-        setRunSnapshot({ cfg, sessionStrategy, runName: (runName || "").trim(), payload });
+        const submitName = effectiveRunName;   // nickname if set, else the canonical auto name
+        setRunSnapshot({ cfg, sessionStrategy, runName: submitName, payload });
         try {
-            const started = await startSidecarRun(payload, runName);
-            setRunJob({ ...(started || {}), name: (runName || "").trim(), startedAt: new Date().toISOString() });
+            const started = await startSidecarRun(payload, submitName);
+            setRunJob({ ...(started || {}), name: submitName, startedAt: new Date().toISOString() });
             setRunMsg(`Run started${started?.run_id ? `: ${started.run_id}` : ""}.`);
         } catch (e) {
             setRunJob(null);
@@ -868,7 +950,12 @@ export default function StrategyBuilderV2() {
         }).catch(() => { /* summary fetch best-effort */ });
         return () => { cancelled = true; };
     }, [runJob?.status, runJob?.job_id, completionStats, runSnapshot]);
-    const onMaxRange = () => setCfg((c) => ({ ...c, dateFrom: "2020-01-02" }));  // end stays latest
+    // "Max Range" = true Full History: the widest dataset with BOTH dates pinned to that
+    // file's actual earliest/latest candle extent (2015-01-01 → 2026-06-19). Previously this
+    // hardcoded dateFrom:"2020-01-02", which — combined with the extended file — produced
+    // 2020-start runs mislabelled "Full history". endDateEdited marks the dates as
+    // preset-owned so the async market-data status can't clobber them.
+    const onMaxRange = () => { endDateEdited.current = true; setCfg((c) => ({ ...c, ...resolveFullHistory() })); };
     const copyPayload = () => { try { navigator.clipboard?.writeText(JSON.stringify(buildPayload(), null, 2)); setRunMsg("Payload copied."); } catch { /* noop */ } };
 
     // Selecting an entry model wires the right backend mode + auto-sets variant mode.
@@ -910,8 +997,24 @@ export default function StrategyBuilderV2() {
 
                     {/* ───────────────── ① BACKTEST SETUP ───────────────── */}
                     <SectionShell n={1} title="Backtest Setup" question="What market and data am I testing?" scope="These settings apply to the entire backtest." active={activeSection === 1} onActivate={() => setActiveSection(1)}>
+                        {/* Auto run name (canonical, live) + optional nickname */}
+                        <div className="mb-4 rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel))] px-3 py-2 flex flex-wrap items-center gap-x-3 gap-y-1" data-testid="run-autoname">
+                            <span className="text-[10px] uppercase tracking-wide text-muted-lab font-ui">Auto name</span>
+                            <span className="text-[13px] text-[hsl(var(--text-1))] font-ui">{autoName.title}</span>
+                            <span className="text-[11px] text-[hsl(var(--text-2))] font-ui">{autoName.detail}</span>
+                            {(runName || "").trim() && (
+                                <span className="ml-auto text-[10px] font-ui text-[hsl(var(--accent-secondary))]">using nickname “{runName.trim()}” — auto name shown above</span>
+                            )}
+                        </div>
                         <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-                            <Field label="Run Name" hint="Auto-suggested — edit to override."><NeonInput value={runName} placeholder="EURUSD_M15_TE_2R_…" onChange={onRunNameEdit} className="w-full" /></Field>
+                            <Field label="Nickname / override" hint="Leave blank to use automatic name.">
+                                <div className="flex items-center gap-2">
+                                    <NeonInput value={runName} placeholder="Leave blank to use automatic name" onChange={onRunNameEdit} className="w-full" data-testid="run-nickname" />
+                                    {(runName || "").trim() && (
+                                        <button type="button" onClick={resetToAutoName} data-testid="run-reset-auto" className="text-[11px] text-muted-lab hover:text-white whitespace-nowrap">Reset to auto</button>
+                                    )}
+                                </div>
+                            </Field>
                             <Field label="Symbol"><NeonSelect value={cfg.symbol} onChange={set("symbol")} options={SYMBOLS} /></Field>
                             <Field label="Detection Timeframe"><NeonSelect value={cfg.detectionTf} onChange={set("detectionTf")} options={["M5", "M15", "M30", "H1", "H4"]} /></Field>
                             <Field label="Execution Timeframe" hint="Fixed at 1 minute."><NeonInput value="1m (fixed)" disabled readOnly className="w-full opacity-60" /></Field>
@@ -919,12 +1022,71 @@ export default function StrategyBuilderV2() {
 
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                             <Card icon={CalendarRange} title="Date Range" className="lg:col-span-2">
+                                {/* Data Range presets — pick the candle dataset without touching raw file names. */}
+                                <div className="mb-3" data-testid="v2-data-range">
+                                    <div className="text-[10px] font-ui uppercase tracking-[0.06em] text-[hsl(var(--accent-secondary))] mb-1.5">Data Range</div>
+                                    <div className="flex flex-wrap gap-1.5" role="group" aria-label="Data range">
+                                        {DATA_RANGE_ORDER.map((key) => {
+                                            const sel = activeDataRange === key;
+                                            const label = key === "custom" ? "Custom" : DATA_RANGES[key].label;
+                                            return (
+                                                <button key={key} type="button" onClick={() => applyDataRange(key)} disabled={key === "custom"}
+                                                    data-testid={`v2-data-range-${key}`}
+                                                    className={`clip-bevel-sm px-2.5 py-1 text-[11px] font-ui border transition-colors ${sel ? "border-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.12)] text-white" : "border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))] hover:border-[hsl(var(--accent-secondary))]"} ${key === "custom" ? "cursor-default" : ""}`}
+                                                    title={key === "custom" ? "Edit the dates below to define a custom window" : DATA_RANGES[key].help}>
+                                                    {label}{sel && key === "custom" ? " (edited)" : ""}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                    {activeDataRange !== "custom" && (
+                                        <div className="text-[10.5px] font-ui text-muted-lab mt-1.5" data-testid="v2-data-range-help">{DATA_RANGES[activeDataRange].help}</div>
+                                    )}
+                                    {dataCtx.note && (
+                                        <div className={`text-[10.5px] font-ui mt-1 ${dataCtx.mode === "cold" ? "text-[hsl(var(--warning))]" : "text-muted-lab"}`} data-testid="v2-data-range-context">{dataCtx.note}</div>
+                                    )}
+                                </div>
                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
-                                    <Field label="Start Date"><NeonDatePicker testId="v2-date-from" min={dataDateBounds?.min} max={dataDateBounds?.max} value={cfg.dateFrom} onChange={(v) => set("dateFrom")(v)} /></Field>
-                                    <Field label="End Date" hint="Defaults to the latest available candle."><NeonDatePicker testId="v2-date-to" min={dataDateBounds?.min} max={dataDateBounds?.max} value={cfg.dateTo} onChange={(v) => { endDateEdited.current = true; set("dateTo")(v); }} /></Field>
+                                    <Field label="Start Date"><NeonDatePicker testId="v2-date-from" min={effectiveDateBounds?.min} max={effectiveDateBounds?.max} value={cfg.dateFrom} onChange={(v) => setDateFrom(v)} /></Field>
+                                    <Field label="End Date" hint="Defaults to the latest available candle."><NeonDatePicker testId="v2-date-to" min={effectiveDateBounds?.min} max={effectiveDateBounds?.max} value={cfg.dateTo} onChange={(v) => { endDateEdited.current = true; set("dateTo")(v); }} /></Field>
                                     <NeonButton tone="ghost" onClick={onMaxRange}>★ Max Range</NeonButton>
                                 </div>
-                                <div className="text-[11px] text-muted-lab mt-2">From 02 Jan 2020 to latest.</div>
+                                {effectiveDateBounds?.min && (
+                                    <div className="text-[10.5px] text-muted-lab mt-2" data-testid="v2-selectable-range">
+                                        Selectable range: {(effectiveDateBounds.min || "").slice(0, 10)} → {(effectiveDateBounds.max || "").slice(0, 10)}
+                                    </div>
+                                )}
+                                <div className="text-[10.5px] text-muted-lab mt-1 flex flex-wrap items-center gap-x-2" data-testid="v2-dataset-line">
+                                    <span>{(cfg.dateFrom || "").slice(0, 10)} → {(cfg.dateTo || "").slice(0, 10)}</span>
+                                    <span className="text-[hsl(var(--text-3))]">· dataset:</span>
+                                    <span className="font-num text-[hsl(var(--text-3))]" title="Candle file sent to the backtester">{cfg.dataFile}</span>
+                                </div>
+
+                                {/* Pre-launch resolved-date summary — exactly what will be submitted. */}
+                                <div className="mt-2 rounded-md border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel))] p-2.5" data-testid="v2-prelaunch-date-summary">
+                                    <div className="text-[10px] text-muted-lab font-ui mb-1 flex items-center gap-2">
+                                        Resolved run window
+                                        {dateSummary.isFullHistory
+                                            ? <span className="text-[hsl(var(--success))]">Full history</span>
+                                            : dateSummary.startTruncated
+                                                ? <span className="text-[hsl(var(--warning))]">Truncated</span>
+                                                : <span className="text-[hsl(var(--text-3))]">Custom window</span>}
+                                    </div>
+                                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-x-3 gap-y-1 text-[10.5px] font-ui">
+                                        <div><div className="text-[hsl(var(--text-3))]">Candle file</div><div className="font-num text-[hsl(var(--text-2))] truncate" title={dateSummary.candleFile}>{dateSummary.candleFile || "—"}</div></div>
+                                        <div><div className="text-[hsl(var(--text-3))]">Earliest available</div><div className="font-num text-[hsl(var(--text-2))]">{dateSummary.earliest || "—"}</div></div>
+                                        <div><div className="text-[hsl(var(--text-3))]">Latest available</div><div className="font-num text-[hsl(var(--text-2))]">{dateSummary.latest || "—"}</div></div>
+                                        <div><div className="text-[hsl(var(--text-3))]">Submitted start</div><div className="font-num" style={{ color: dateSummary.startTruncated ? "hsl(var(--warning))" : "hsl(var(--text-1))" }}>{dateSummary.submittedStart || "—"}</div></div>
+                                        <div><div className="text-[hsl(var(--text-3))]">Submitted end</div><div className="font-num" style={{ color: dateSummary.endTruncated ? "hsl(var(--warning))" : "hsl(var(--text-1))" }}>{dateSummary.submittedEnd || "—"}</div></div>
+                                    </div>
+                                    {dateSummary.warnings.length > 0 && (
+                                        <div className="mt-1.5 space-y-1" data-testid="v2-prelaunch-date-warnings">
+                                            {dateSummary.warnings.map((w, i) => (
+                                                <div key={i} className="text-[10px] font-ui text-[hsl(var(--warning))] flex gap-1.5"><span aria-hidden>⚠</span><span>{w}</span></div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
                             </Card>
                             <Card icon={RefreshCw} title="Refresh Market Data">
                                 <div className="text-[11.5px] text-muted-lab mb-3">Update candles from your data source.</div>
@@ -1127,8 +1289,40 @@ export default function StrategyBuilderV2() {
                         </div>
                     </SectionShell>
 
-                    {/* ───────────────── ③ SESSION STRATEGY ───────────────── */}
-                    <SectionShell n={3} title="Session Strategy" question="Override settings per session." scope={<span>Pair-specific strategy for this run: <span className="text-[hsl(var(--accent-secondary))] italic">{cfg.symbol}</span></span>} active={activeSection === 3} onActivate={() => setActiveSection(3)}>
+                    {/* ───────────────── ③ TRADE ELIGIBILITY ───────────────── */}
+                    <SectionShell n={3} title="Trade Eligibility" question="Which trades are allowed?" scope="Two separate layers in engine order: the Portfolio Manager decision (runs first, never bypassed) and the scenario eligibility override (cohort base allow/disable + per-state rescue/block)." active={activeSection === 3} onActivate={() => setActiveSection(3)}>
+                        <RecommendedStackStrip cfg={cfg} sessionStrategy={sessionStrategy} onApply={(patch) => setCfg((c) => ({ ...c, ...patch }))} />
+                        <div className="h-3" />
+                        <PortfolioManagerControls cfg={cfg} instrument={cfg.symbol || "EURUSD"} onField={(k, v) => setCfg((c) => ({ ...c, [k]: v }))} />
+                        <div className="h-3" />
+                        {sessionStrategy?.enabled && (
+                            <div className="clip-bevel-sm border border-[hsl(var(--warning)/0.5)] bg-[hsl(var(--warning)/0.08)] px-3 py-2 text-[11.5px] font-ui text-[hsl(var(--warning))]" data-testid="legacy-owns-scenario">
+                                Legacy Session Strategy owns the emitted scenario for this run — scenario eligibility below is inactive until it is disabled (Advanced / Legacy section).
+                            </div>
+                        )}
+                        <div className={sessionStrategy?.enabled ? "opacity-40 pointer-events-none select-none" : ""}>
+                        <TradeEligibility cfg={cfg} instrument={cfg.symbol || "EURUSD"} onField={(k, v) => setCfg((c) => ({ ...c, [k]: v }))} />
+                        </div>
+                    </SectionShell>
+
+                    {/* ───────────────── ④ TARGET POLICY (merged: base + per-state) ───────────────── */}
+                    <SectionShell n={4} title="Target Policy" question="What target does each allowed trade use?" scope="The editable per-cohort Base target plus per-state Inherit/Custom exceptions. Eligibility stays in Trade Eligibility; research drafts apply here explicitly." active={activeSection === 4} onActivate={() => setActiveSection(4)}>
+                        {sessionStrategy?.enabled && (
+                            <div className="clip-bevel-sm border border-[hsl(var(--warning)/0.5)] bg-[hsl(var(--warning)/0.08)] px-3 py-2 text-[11.5px] font-ui text-[hsl(var(--warning))]">
+                                Legacy Session Strategy owns the emitted scenario for this run — Target Policy below is inactive until it is disabled.
+                            </div>
+                        )}
+                        <div className={sessionStrategy?.enabled ? "opacity-40 pointer-events-none select-none" : ""}>
+                        <MarketStateTargetOverrides cfg={cfg} instrument={cfg.symbol || "EURUSD"} onField={(k, v) => setCfg((c) => ({ ...c, [k]: v }))} />
+                        </div>
+                    </SectionShell>
+
+                    {/* ───────────────── ⑤ RESOLVED RUN SUMMARY ───────────────── */}
+                    <SectionShell n={5} title="Resolved Run Summary" question="What exactly will this run do?" scope="Entry · Eligibility · Targets · Management · Data — resolved from every layer above, with conflict warnings." active={activeSection === 5} onActivate={() => setActiveSection(5)}>
+                        <ResolvedRunSummary cfg={cfg} instrument={cfg.symbol || "EURUSD"} />
+                    </SectionShell>
+
+                    <SectionShell collapsible n={6} title="Advanced / Legacy — Session Strategy" question="Legacy per-session scenario tools (BE, move-stop, risk amount, fair baseline). When ENABLED this grid SUPERSEDES the Trade Eligibility + Target Policy scenario above." scope={<span>Pair-specific strategy for this run: <span className="text-[hsl(var(--accent-secondary))] italic">{cfg.symbol}</span></span>} active={activeSection === 6} onActivate={() => setActiveSection(6)}>
                         {/* top summary strip */}
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <Card title="Strategy Summary">
@@ -1154,10 +1348,31 @@ export default function StrategyBuilderV2() {
                         <SessionStrategyGrid value={sessionStrategy} onChange={setSessionStrategy} symbol={cfg.symbol} ui={gridUi} onUiChange={setGridUi} />
                     </SectionShell>
 
-                    {/* ───────────────── ④ MARKET STATE ───────────────── */}
-                    <SectionShell n={4} title="Market State" question="What regime must the market be in?" scope="EMA / Bollinger width / ADX regime gate. Off by default — configuring it does not change existing runs." active={activeSection === 4} onActivate={() => setActiveSection(4)}>
-                        <MarketStateControls cfg={cfg} onField={(k, v) => setCfg((c) => ({ ...c, [k]: v }))} />
+                    <SectionShell collapsible n={7} title="Advanced Research — Global Market State Gate" question="Advanced / legacy research layer (normal execution uses cohort/state policy directly)." scope="EMA / Bollinger width / ADX global regime gate. Off by default — the Portfolio Manager already applies Market State selectively by cohort." active={activeSection === 7} onActivate={() => setActiveSection(7)}>
+                        {cfg.portfolioEnabled && cfg.regimeEnabled && (
+                            <div className="rounded-md border border-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.08)] p-3 mb-3 text-[11px] font-ui text-[hsl(var(--text-1))]" data-testid="pm-ms-warning">
+                                <span className="text-[hsl(var(--warning))] font-semibold">Warning:</span> Portfolio Manager already applies Market State selectively by cohort. Research found the global Market State gate was harmful/redundant when PM is enabled. Recommended stack: PM ON, Global Market State gate OFF.
+                            </div>
+                        )}
+                        {!msGateOpen ? (
+                            <button type="button" onClick={() => setMsGateOpen(true)} data-testid="ms-gate-expand"
+                                className="w-full text-left rounded-md border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel))] px-3 py-2 text-[11.5px] font-ui text-muted-lab hover:text-white">
+                                <span className="inline-flex items-center gap-2"><ChevronDown className="w-3.5 h-3.5" /> Show advanced Market State gate controls</span>
+                                <div className="text-[10px] mt-0.5">Use this only for legacy comparisons or explicit research. Do not enable it by default with PM.{cfg.regimeEnabled ? " (currently ON)" : ""}</div>
+                            </button>
+                        ) : (
+                            <>
+                                <div className="flex items-center justify-between mb-2">
+                                    <span className="text-[10.5px] font-ui text-muted-lab">Use this only for legacy comparisons or explicit research. Do not enable it by default with PM.</span>
+                                    <button type="button" onClick={() => setMsGateOpen(false)} data-testid="ms-gate-collapse" className="text-[10.5px] font-ui text-muted-lab hover:text-white inline-flex items-center gap-1"><ChevronUp className="w-3.5 h-3.5" /> Collapse</button>
+                                </div>
+                                <MarketStateControls cfg={cfg} onField={(k, v) => setCfg((c) => ({ ...c, [k]: v }))} />
+                            </>
+                        )}
                     </SectionShell>
+
+                    {/* ───────────────── ⑤ MARKET STATE (advanced / legacy) ───────────────── */}
+                    
 
                     {/* config preview */}
                     <div className="border border-[hsl(var(--border-soft)/0.6)] clip-bevel-sm">
@@ -1456,7 +1671,7 @@ export default function StrategyBuilderV2() {
 
                     {/* footer run */}
                     <div className="flex items-center justify-between px-2 py-4 border-t border-[hsl(var(--border-soft)/0.5)]">
-                        <NeonButton tone="ghost" icon={RefreshCw} onClick={() => { setCfg({ ...DEFAULT_CFG }); setSessionStrategy({ ...DEFAULT_SESSION_STRATEGY }); setRunNameDirty(false); setRunName(buildSuggestedRunName(DEFAULT_CFG)); setGridUi({ ...DEFAULT_GRID_UI }); setRunMsg("Builder reset — last run kept (use “Clear current run” to remove it)."); }}>Reset All</NeonButton>
+                        <NeonButton tone="ghost" icon={RefreshCw} onClick={() => { setCfg({ ...DEFAULT_CFG }); setSessionStrategy({ ...DEFAULT_SESSION_STRATEGY }); setRunNameDirty(false); setRunName(""); setGridUi({ ...DEFAULT_GRID_UI }); setRunMsg("Builder reset — last run kept (use “Clear current run” to remove it)."); }}>Reset All</NeonButton>
                         <span className="text-[12px] text-muted-lab">{runMsg || "All changes are kept for this session."}</span>
                         <NeonButton tone="primary" icon={Play} onClick={onRun} disabled={running || runInProgress}>{runInProgress ? "Run in progress…" : "Run Backtest"}</NeonButton>
                     </div>
