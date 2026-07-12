@@ -77,7 +77,10 @@ ok(!("portfolio_include_disabled_cohorts" in offWithFlag),
     "PM OFF → override field never emitted");
 // UI: toggle only shown when PM is ON; label + run-detail token present
 const PMC2 = fs.readFileSync(new URL("../../components/lab/portfolio/PortfolioManagerControls.jsx", import.meta.url), "utf8");
-ok(/data-testid="pm-include-disabled-toggle"/.test(PMC2), "include-disabled toggle present");
+// SB-V2 UX polish: the include-disabled control moved OUT of the normal workflow into
+// Advanced Research / Legacy (IncludeDisabledOverride.jsx) — same cfg field + testids.
+const IDO = fs.readFileSync(new URL("../../components/lab/portfolio/IncludeDisabledOverride.jsx", import.meta.url), "utf8");
+ok(/data-testid="pm-include-disabled-toggle"/.test(IDO), "include-disabled toggle present (Advanced Research / Legacy)");
 ok(/on &&[\s\S]*pm-include-disabled/.test(PMC2), "include-disabled card gated on PM ON");
 ok(/portfolioIncludeDisabledCohorts/.test(PMC2), "toggle writes portfolioIncludeDisabledCohorts via onField");
 const SP = fs.readFileSync(new URL("../runs/scenarioPresentation.js", import.meta.url), "utf8");
@@ -96,22 +99,34 @@ const eur = table.cohorts.filter((c) => c.instrument === "EURUSD");
 const by = { LABEL: 0, STATE_ONLY: 0, DIRECTION_AWARE: 0, DISABLE: 0 };
 for (const c of eur) by[c.policy]++;
 ok(eur.length === 24, `EURUSD cohorts = 24 (got ${eur.length})`);
-ok(by.LABEL === 8 && by.STATE_ONLY === 2 && by.DIRECTION_AWARE === 4 && by.DISABLE === 10,
-    `deployed (PM v1.1) counts LABEL8/STATE2/DIR4/DISABLE10 (got ${JSON.stringify(by)})`);
+// Re-derived from the deployed v1.2 mirror (2026-07-09.te-v1.2-surgical-disable):
+// v1.1 was LABEL8/STATE2/DIR4/DISABLE10; the two surgical disables below moved
+// newYork BOS Long (STATE_ONLY→DISABLE) and london BOS Short (LABEL→DISABLE),
+// giving LABEL7/STATE1/DIR4/DISABLE12.
+ok(by.LABEL === 7 && by.STATE_ONLY === 1 && by.DIRECTION_AWARE === 4 && by.DISABLE === 12,
+    `deployed (PM v1.2) counts LABEL7/STATE1/DIR4/DISABLE12 (got ${JSON.stringify(by)})`);
 ok(/counts\[c\.policy\]/.test(PMC) || /by\[c\.policy\]/.test(PMC), "preview derives counts from the mirror, not hard-coded");
-// PM v1.1 is now DEPLOYED → NY CHoCH Short is DIRECTION_AWARE ("FOLLOW TREND")
+// NY CHoCH Short remains DIRECTION_AWARE under v1.2 — the surgical disable targeted
+// newYork BOS Long + london BOS Short only, NOT CHoCH Short.
 const nyc = table.byKey.get("EURUSD|newYork|choch_short");
-ok(nyc && nyc.policy === "DIRECTION_AWARE", "deployed mirror is PM v1.1 (NY CHoCH Short = DIRECTION_AWARE)");
+ok(nyc && nyc.policy === "DIRECTION_AWARE", "deployed mirror v1.2: NY CHoCH Short = DIRECTION_AWARE");
 ok(labels.POLICY_LABELS.DIRECTION_AWARE === "FOLLOW TREND", "DIRECTION_AWARE still labelled FOLLOW TREND");
+// v1.2 surgical disable (derived_from.change) — the two deployed-substrate losing cohorts.
+ok(table.byKey.get("EURUSD|newYork|bos_long")?.policy === "DISABLE",
+    "v1.2 surgical: EURUSD newYork BOS Long STATE_ONLY→DISABLE");
+ok(table.byKey.get("EURUSD|london|bos_short")?.policy === "DISABLE",
+    "v1.2 surgical: EURUSD london BOS Short LABEL→DISABLE");
 // the component reports whichever state the mirror carries (v1.1-deployed vs not) — both branches present
 ok(/includes the PM v1.1 New York CHoCH Short change/.test(PMC) && /not yet deployed/.test(PMC),
     "PM section reports deployed-vs-candidate state from the mirror (v1.1 message when deployed)");
 
 console.log("\n[5] Market State gate = advanced/legacy, collapsed + all aspects OFF by default");
 ok(/Global Market State Gate/.test(SB), "MS section relabelled 'Global Market State Gate'");
-ok(/Advanced \/ legacy research layer/.test(SB), "MS section marked advanced/legacy");
-ok(/msGateOpen, setMsGateOpen\] = useState\(false\)/.test(SB), "MS gate collapsed by default (useState(false))");
-ok(/data-testid="ms-gate-expand"/.test(SB), "MS gate expand control present");
+// SB-V2 UX polish: the gate now lives inside the collapsible "Advanced Research / Legacy"
+// section (defaultOpen={false}) — the inner double-toggle was removed (one disclosure).
+ok(/Advanced Research — Global Market State Gate/.test(SB), "MS section marked advanced/legacy");
+ok(/collapsible defaultOpen=\{false\} n=\{6\} title="Advanced Research \/ Legacy"/.test(SB), "MS gate collapsed by default (inside the Advanced section)");
+ok(/data-testid="advanced-ms-gate"/.test(SB), "MS gate block present in the Advanced section");
 // all regime aspects off by default: master gate + the three indicator enables
 const rd = reg.defaultsForGroup("regime");
 ok(rd.regimeEnabled === false, "regime master gate OFF by default");
@@ -141,7 +156,8 @@ const patch = rec.recommendedLayerPatch();
 ok(patch.portfolioEnabled === true && patch.regimeEnabled === false, "apply patch = PM ON + MS OFF (layer only)");
 
 console.log("\n[8] guardrails: no deployed policy edit / no backend semantics change");
-ok(mirror.policy_version === "2026-07-07.te-v1.1", "deployed mirror is PM v1.1 (2026-07-07.te-v1.1)");
+ok(mirror.policy_version === "2026-07-09.te-v1.2-surgical-disable", "deployed mirror is PM v1.2 (2026-07-09.te-v1.2-surgical-disable)");
+ok(mirror.policy_sha256 === "86ff709c6346dc5e0e695de5c550577d15877ebda0b4025e70da327bfb5c00a9", "deployed mirror canonical checksum = 86ff709c… (v1.2)");
 ok(!/portfolio_policy_regime|decision_policy|regime_gate/.test(PMC), "PM controls do not touch execution/regime logic");
 
 console.log(`\n${fail === 0 ? "ALL PASSED" : fail + " FAILED"}`);
