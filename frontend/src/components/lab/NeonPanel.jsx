@@ -51,25 +51,29 @@ export function NeonPanel({
                     onClick={collapsible ? () => setCollapsed(c => !c) : undefined}
                 >
                     <div className="flex items-center gap-2 min-w-0">
-                        {collapsible && (
-                            collapsed
-                                ? <ChevronRight className="w-3.5 h-3.5 text-[hsl(var(--accent-primary))] shrink-0" />
-                                : <ChevronDown className="w-3.5 h-3.5 text-[hsl(var(--accent-primary))] shrink-0" />
-                        )}
                         {title && (
                             <h3 className="panel-title-label uppercase text-title-lab">
                                 {title}
                             </h3>
                         )}
                     </div>
-                    {action && (
-                        <div
-                            className={cn("transition-opacity shrink-0", collapsed && "opacity-40")}
-                            onClick={e => e.stopPropagation()}
-                        >
-                            {action}
-                        </div>
-                    )}
+                    <div className="flex items-center gap-2 shrink-0">
+                        {action && (
+                            <div
+                                className={cn("transition-opacity", collapsed && "opacity-40")}
+                                onClick={e => e.stopPropagation()}
+                            >
+                                {action}
+                            </div>
+                        )}
+                        {/* ONE disclosure control (right-aligned); the old small accent
+                            chevron next to the title produced double disclosure icons. */}
+                        {collapsible && (
+                            collapsed
+                                ? <ChevronRight className="w-3.5 h-3.5 text-muted-lab shrink-0" />
+                                : <ChevronDown className="w-3.5 h-3.5 text-muted-lab shrink-0" />
+                        )}
+                    </div>
                 </div>
             )}
             {!collapsed && (

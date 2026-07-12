@@ -38,7 +38,7 @@ export const POLICY_SHORT = {
 
 // Design-token tone per policy (theme-aware; used for chips/highlights).
 export const POLICY_TONE = {
-    LABEL: "text-2",
+    LABEL: "success",            // ALWAYS ALLOW reads as positive (SB-V2 UX polish)
     STATE_ONLY: "accent-secondary",
     DIRECTION_AWARE: "accent-primary",
     DISABLE: "danger",

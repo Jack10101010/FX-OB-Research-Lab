@@ -114,7 +114,9 @@ ok(D.saveDraft(null, "newYork|bos_short", "Bull/Expand", { target: 2 }) === null
 
 console.log("\n[6]/[7] research never affects execution + UI distinctness");
 const SR = fs.readFileSync("src/components/lab/sessionProfiles/SessionResults.jsx", "utf8");
-const PANEL = fs.readFileSync("src/components/lab/portfolio/MarketStateTargetOverrides.jsx", "utf8");
+// SB-V2 UX polish: apply moved to the Trade Policy → Drafts tab (DraftsPanel), still
+// signature-scoped — MarketStateTargetOverrides no longer applies drafts itself.
+const PANEL = fs.readFileSync("src/components/lab/portfolio/DraftsPanel.jsx", "utf8");
 const OVR = fs.readFileSync("src/data/stateTargetOverrides.js", "utf8");
 ok(!/applyDraftsToOverrides/.test(SR), "Session Results NEVER applies drafts (read-only research surface)");
 ok(/applyDraftsToOverrides\(signature, cfg\?\.stateTargetOverrides\)/.test(PANEL), "Strategy Builder apply is signature-scoped");

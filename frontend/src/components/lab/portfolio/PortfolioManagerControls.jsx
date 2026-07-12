@@ -1,13 +1,13 @@
-// PortfolioManagerControls.jsx — Strategy Builder V2 Portfolio Manager section.
+// PortfolioManagerControls.jsx — "Deployed Policy Reference" (SB-V2 UX polish).
 //
-// Read-only over the DEPLOYED policy mirror (src/data/deployedPolicy.v1.json). Lets the
-// user turn the Portfolio Manager ON/OFF, shows the deployed policy summary, explains the
-// four actions with friendly labels, and previews what the policy will block/allow.
+// PURE DOCUMENTATION, collapsed by default. Read-only over the DEPLOYED policy mirror
+// (src/data/deployedPolicy.v1.json): policy version + checksum, what the PM does, the
+// four actions with friendly labels, and the "What this policy will do" preview.
 //
-// It reads/writes ONLY the builder cfg fields via onField:
-//   portfolioEnabled  (→ portfolio_policy_enabled)   portfolioMode ("enforce")
-// It NEVER edits the policy, NEVER renames a canonical enum, and re-uses the single
-// source of truth for friendly labels: @/data/portfolioLabels.
+// It contains NO active controls. The ONE Portfolio Manager control (Enabled + Mode
+// Off/Label/Enforce) lives in the Trade Policy → Eligibility tab; the include-disabled
+// research override lives in Advanced Research / Legacy. This panel never edits the
+// policy and never renames a canonical enum (labels come from @/data/portfolioLabels).
 
 import React, { useMemo, useState } from "react";
 import policyDoc from "@/data/deployedPolicy.v1.json";
@@ -41,10 +41,11 @@ function RCell({ v, bold }) {
     return <span className={bold ? "font-semibold" : ""} style={{ color: `hsl(var(--${tone}))` }}>{v > 0 ? "+" : ""}{v.toFixed(2)}</span>;
 }
 
-export default function PortfolioManagerControls({ cfg, onField, instrument = "EURUSD" }) {
+export default function PortfolioManagerControls({ cfg, instrument = "EURUSD", defaultOpen = false }) {
     const table = useMemo(() => loadPolicy(policyDoc), []);
     const on = Boolean(cfg?.portfolioEnabled);
     const includeDisabled = Boolean(cfg?.portfolioIncludeDisabledCohorts);
+    const [open, setOpen] = useState(defaultOpen);
     const [showList, setShowList] = useState(false);
 
     // deployed-policy summary
@@ -78,84 +79,19 @@ export default function PortfolioManagerControls({ cfg, onField, instrument = "E
 
     return (
         <div className="space-y-3" data-testid="pm-controls">
-            {/* Toggle + mode + subtitle */}
-            <div className={`${card} p-3`}>
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                        <div className="text-[13px] font-ui text-[hsl(var(--text-1))]">Portfolio Manager</div>
-                        <div className="text-[11px] text-muted-lab font-ui max-w-xl">
-                            Use the validated cohort policy to allow/block eligible trades by Session × Structure × Direction.
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                        {on && <Chip tone="accent-primary" title="Enforce is the only supported mode: PM blocks disallowed fills.">Mode: Enforce</Chip>}
-                        <button
-                            type="button"
-                            role="switch"
-                            aria-checked={on}
-                            data-testid="pm-toggle"
-                            onClick={() => onField("portfolioEnabled", !on)}
-                            className="inline-flex items-center gap-2 rounded border border-[hsl(var(--border-soft))] px-2.5 py-1 text-[11px] font-ui"
-                            style={{ color: on ? "hsl(var(--success))" : "hsl(var(--text-2))" }}
-                        >
-                            <span className="inline-block w-8 h-4 rounded-full relative"
-                                style={{ background: on ? "hsl(var(--success)/0.35)" : "hsl(var(--border-mid))" }}>
-                                <span className="absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all"
-                                    style={{ left: on ? "18px" : "2px" }} />
-                            </span>
-                            Portfolio Manager {on ? "ON" : "OFF"}
-                        </button>
+            {/* Documentation header — single disclosure control, no active PM controls here. */}
+            <button type="button" onClick={() => setOpen((v) => !v)} data-testid="pm-docs-toggle"
+                className={`${card} w-full p-3 flex items-center justify-between text-left`}>
+                <div>
+                    <div className="text-[13px] font-ui text-[hsl(var(--text-1))]">Deployed Policy Reference</div>
+                    <div className="text-[11px] text-muted-lab font-ui">
+                        Documentation: what the deployed Portfolio Manager policy is and what it will do.
+                        The PM on/off + mode control is in the Eligibility tab.
                     </div>
                 </div>
-            </div>
-
-            {/* Research override: include disabled cohorts.
-                HIDDEN from the normal workflow (SB-V2 consolidation): eligibility presets in the
-                Trade Eligibility panel replace it ("All Cohorts (Research)" = same population, clearer
-                semantics). Rendered only when the legacy flag is ALREADY set on the loaded config, so
-                old research configs stay visible/editable and can be switched off — never silently active. */}
-            {on && includeDisabled && (
-                <div className={`${card} p-3`} data-testid="pm-include-disabled">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                            <div className="text-[12px] font-ui text-[hsl(var(--text-1))] flex items-center gap-2">
-                                Include disabled cohorts
-                                <Chip tone="warning" title="Research-only run override.">Research</Chip>
-                            </div>
-                            <div className="text-[11px] text-muted-lab font-ui max-w-xl mt-0.5">
-                                Portfolio Manager stays active and applies its normal per-cohort logic — but the{" "}
-                                <span className="text-[hsl(var(--text-2))]">{counts.DISABLE}</span>{" "}
-                                cohort{counts.DISABLE === 1 ? "" : "s"} currently set to <span className="text-[hsl(var(--danger))]">NEVER TRADE</span>{" "}
-                                are treated as <span className="text-[hsl(var(--text-2))]">Always Trade (Label)</span> for this run only.
-                                Existing Label / State-only / Direction-aware cohorts are unchanged. The deployed policy and its checksum are not modified.
-                            </div>
-                        </div>
-                        <button
-                            type="button"
-                            role="switch"
-                            aria-checked={includeDisabled}
-                            data-testid="pm-include-disabled-toggle"
-                            onClick={() => onField("portfolioIncludeDisabledCohorts", !includeDisabled)}
-                            className="inline-flex items-center gap-2 rounded border border-[hsl(var(--border-soft))] px-2.5 py-1 text-[11px] font-ui"
-                            style={{ color: includeDisabled ? "hsl(var(--warning))" : "hsl(var(--text-2))" }}
-                        >
-                            <span className="inline-block w-8 h-4 rounded-full relative"
-                                style={{ background: includeDisabled ? "hsl(var(--warning)/0.35)" : "hsl(var(--border-mid))" }}>
-                                <span className="absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all"
-                                    style={{ left: includeDisabled ? "18px" : "2px" }} />
-                            </span>
-                            {includeDisabled ? "All cohorts ON" : "Deployed (OFF)"}
-                        </button>
-                    </div>
-                    {includeDisabled && (
-                        <div className="mt-2 text-[10.5px] font-ui text-[hsl(var(--warning))]" data-testid="pm-include-disabled-note">
-                            This run is <span className="font-semibold">PM v1.2 · All cohorts</span> — every cohort participates; no cohort is fully excluded.
-                            It is tagged in the run metadata so it cannot be confused with a normal PM v1.2 run.
-                        </div>
-                    )}
-                </div>
-            )}
-
+                <span className="text-[11px] font-ui text-[hsl(var(--text-2))]">{open ? "▴ Hide" : "▾ Show"}</span>
+            </button>
+            {open && (<>
             {/* Deployed policy summary */}
             <div className={`${card} p-3`}>
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
@@ -213,7 +149,9 @@ export default function PortfolioManagerControls({ cfg, onField, instrument = "E
                         </span>
                     ))}
                     <span className="ml-auto text-[10px] text-muted-lab">
-                        {counts.DISABLE} cohort{counts.DISABLE === 1 ? "" : "s"} will be blocked entirely (NEVER TRADE).
+                        {includeDisabled && on
+                            ? <>{counts.DISABLE} NEVER TRADE cohort{counts.DISABLE === 1 ? "" : "s"} <span className="text-[hsl(var(--warning))]">run as Label this run (research override)</span>.</>
+                            : <>{counts.DISABLE} cohort{counts.DISABLE === 1 ? "" : "s"} will be blocked entirely (NEVER TRADE).</>}
                     </span>
                 </div>
 
@@ -266,11 +204,13 @@ export default function PortfolioManagerControls({ cfg, onField, instrument = "E
                 )}
             </div>
 
-            {!on && (
-                <div className="text-[10.5px] font-ui text-muted-lab">
-                    Portfolio Manager is OFF for this run — the deployed cohort policy will not filter trades.
+            {includeDisabled && on && (
+                <div className="text-[10.5px] font-ui text-[hsl(var(--warning))]" data-testid="pm-include-disabled-note">
+                    Research override active: NEVER TRADE cohorts run as Always Allow (Label) for this run only —
+                    managed in Advanced Research / Legacy.
                 </div>
             )}
+            </>)}
         </div>
     );
 }

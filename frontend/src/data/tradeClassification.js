@@ -83,6 +83,11 @@ export const EXCLUDED_CATEGORIES = new Set([
     "NEWS_CANCELLED",
     "OPEN",
     "UNKNOWN",
+    // Pre-fill rejections by the Portfolio Manager / regime gate (REGIME_BLOCKED) or the
+    // Session-Scenario disable (COHORT_DISABLED). Never filled → never counted in
+    // win/loss/netR; surfaced separately (e.g. "Blocked by PM").
+    "REGIME_BLOCKED",
+    "COHORT_DISABLED",
 ]);
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -209,6 +214,14 @@ export function classifyTrade(trade, options = {}) {
     if (normOutcome === "INVALID" || normOutcome === "INVALIDATED") return "INVALID_CANCELLED";
     if (normOutcome === "OPEN") return "OPEN";
     if (normOutcome === "REVERSE_TOUCH_CANCEL") return "INVALID_CANCELLED";
+    // Portfolio Manager / regime gate rejected the candidate BEFORE any fill. It has
+    // net_r=0 but is NOT a breakeven fill — it never entered. Must be hard-excluded so
+    // it never counts as an executed/performance trade (would otherwise fall through to
+    // the r-sign logic below and be mislabelled BREAKEVEN, inflating executed counts and
+    // hiding it from the "Blocked by PM" population). COHORT_DISABLED (Session-Scenario
+    // disable) is likewise a pre-fill exclusion.
+    if (normOutcome === "REGIME_BLOCKED") return "REGIME_BLOCKED";
+    if (normOutcome === "COHORT_DISABLED") return "COHORT_DISABLED";
 
     // 2. cancelled_before_entry flag without a real entry → invalid.
     //    We check this AFTER outcome-strings so explicit backend outcomes win,

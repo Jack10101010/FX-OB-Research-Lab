@@ -124,16 +124,21 @@ function RegistryField({ fieldKey, label, cfg, onField, disabled }) {
 function SubCard({ title, enableKey, fields, cfg, onField, gateOn }) {
     const enabled = !!cfg[enableKey];
     const dim = !gateOn || !enabled;
+    // When the master Market State gate is OFF, these indicators do nothing, so the
+    // toggle READS OFF and is non-interactive — an off/legacy gate looks entirely off
+    // rather than showing stale "on" sub-toggles. Enable the gate above to configure them.
     return (
         <div className="border border-[hsl(var(--border-soft)/0.6)] bg-[hsl(var(--panel-2))] clip-bevel-sm p-4">
             <div className="mb-3 flex items-center justify-between">
                 <span className="text-[13px] font-semibold text-[hsl(var(--accent-primary))] uppercase tracking-wide">{title}</span>
-                <NeonToggle
-                    testId={`regime-${enableKey}`}
-                    checked={enabled}
-                    onChange={(v) => onField(enableKey, v)}
-                    label="Enable"
-                />
+                <div className={gateOn ? "" : "opacity-50 pointer-events-none"} title={gateOn ? undefined : "Enable the Market State gate above to configure its indicators"}>
+                    <NeonToggle
+                        testId={`regime-${enableKey}`}
+                        checked={gateOn && enabled}
+                        onChange={(v) => onField(enableKey, v)}
+                        label="Enable"
+                    />
+                </div>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 {fields.map((f) => (

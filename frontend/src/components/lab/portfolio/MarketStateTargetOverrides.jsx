@@ -27,10 +27,11 @@ import {
     copyBaseToAllStates, summarizeStateOverrides, buildStateOverrideWarnings,
     pmBlockedStates, builderSignatureParts,
 } from "@/data/stateTargetOverrides";
-import { applyDraftsToOverrides, draftCounts, buildStrategySignature } from "@/data/statePolicyDrafts";
+import { buildStrategySignature } from "@/data/statePolicyDrafts";
+import { StateHeader, resolveCohortEligibility, ResolvedEligibilityCell } from "./stateDisplay";
+import { normalizeEligibility, eligibilityForPreset, ELIGIBILITY_PRESETS } from "@/data/eligibilityPolicy";
 
 const card = "rounded-md border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel))]";
-const SHORT_STATE = { "Bull/Expand": "B/Exp", "Bull/Compress": "B/Com", "Bull/Chop": "B/Chp", "Bear/Expand": "Be/Exp", "Bear/Compress": "Be/Com", "Bear/Chop": "Be/Chp" };
 
 function Chip({ tone = "text-2", title, children }) {
     return (
@@ -69,15 +70,27 @@ function StateCell({ cell, pmBlocksState, onChange, testid }) {
 export default function MarketStateTargetOverrides({ cfg, onField, instrument = "EURUSD" }) {
     const table = useMemo(() => loadPolicy(policyDoc), []);
     const active = Boolean(cfg?.stateOverridesEnabled);
+    // Eligibility cross-annotation (read-only view of the Eligibility tab's policy).
+    const eligMap = useMemo(() => {
+        if (!cfg?.eligibilityEnabled) return null;
+        return (cfg?.eligibilityPreset === ELIGIBILITY_PRESETS.CUSTOM || !cfg?.eligibilityPreset)
+            ? normalizeEligibility(cfg?.cohortEligibility)
+            : eligibilityForPreset(cfg?.eligibilityPreset, table, instrument);
+    }, [cfg?.eligibilityEnabled, cfg?.eligibilityPreset, cfg?.cohortEligibility, table, instrument]);
+    const stateAllowed = (cohortKey, st) => {
+        if (!eligMap) return true;
+        const e = eligMap[cohortKey];
+        if (!e) return true;
+        if (e.states[st] === "allow") return true;
+        if (e.states[st] === "block") return false;
+        return e.base === "allow";
+    };
     const gRR = globalRunRR(cfg);
     const cohortOv = useMemo(() => normalizeOverrides(cfg?.cohortTargetOverrides), [cfg?.cohortTargetOverrides]);
     const stateOv = useMemo(() => normalizeStateOverrides(cfg?.stateTargetOverrides), [cfg?.stateTargetOverrides]);
     const summary = useMemo(() => summarizeStateOverrides(cfg), [cfg]);
     const warnings = useMemo(() => buildStateOverrideWarnings(cfg, table, instrument), [cfg, table, instrument]);
-    // Research-universe scope: drafts are read/applied ONLY for THIS builder
-    // configuration's strategy signature — never another strategy's research.
-    const signature = useMemo(() => buildStrategySignature(builderSignatureParts(cfg)), [cfg]);
-    const drafts = draftCounts(signature);
+    // Drafts are managed in the Trade Policy → Drafts tab (signature-scoped there).
 
     const baseLabel = (key) => {
         const o = cohortOv[key];
@@ -85,12 +98,6 @@ export default function MarketStateTargetOverrides({ cfg, onField, instrument = 
         return o.target === RUN_DEFAULT ? `${gRR}R` : `${o.target}R`;
     };
 
-    const applyConfirmedDrafts = () => {
-        const { overrides, appliedCount } = applyDraftsToOverrides(signature, cfg?.stateTargetOverrides);
-        if (!appliedCount) return;
-        onField("stateTargetOverrides", overrides);
-        if (!active) onField("stateOverridesEnabled", true);
-    };
 
     return (
         <div className="space-y-3" data-testid="market-state-target-overrides">
@@ -109,18 +116,10 @@ export default function MarketStateTargetOverrides({ cfg, onField, instrument = 
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
-                        {(drafts.Confirmed || 0) > 0 && (
-                            <button type="button" onClick={applyConfirmedDrafts}
-                                className="rounded border border-[hsl(var(--success)/0.5)] px-2 py-1 text-[11px] font-ui text-[hsl(var(--success))]"
-                                data-testid="apply-confirmed-drafts"
-                                title="Fold every CONFIRMED research draft into these overrides (drafts become Applied). The ONLY bridge from research to execution.">
-                                Apply {drafts.Confirmed} confirmed draft{drafts.Confirmed === 1 ? "" : "s"}
-                            </button>
-                        )}
                         <button type="button" onClick={() => onField("stateOverridesEnabled", !active)}
                             className={`rounded border px-2 py-1 text-[11px] font-ui ${active ? "border-[hsl(var(--success))] text-[hsl(var(--success))]" : "border-[hsl(var(--border-mid))] text-[hsl(var(--text-2))]"}`}
                             data-testid="state-overrides-toggle">
-                            {active ? "ON — emitted with the scenario" : "OFF — byte-identical run"}
+                            {active ? "Policy active — emitted with the scenario" : "Policy off — run unchanged (byte-identical)"}
                         </button>
                     </div>
                 </div>
@@ -149,7 +148,7 @@ export default function MarketStateTargetOverrides({ cfg, onField, instrument = 
                             <thead>
                                 <tr className="text-left text-muted-lab">
                                     <th className="pr-2 py-1">Cohort</th><th className="pr-2">PM</th><th className="pr-2">Base</th>
-                                    {STATE_AXIS.map((st) => <th key={st} className="pr-2" title={st}>{SHORT_STATE[st]}</th>)}
+                                    {STATE_AXIS.map((st) => <th key={st} className="pr-2"><StateHeader state={st} /></th>)}
                                     <th>Row</th>
                                 </tr>
                             </thead>
@@ -157,12 +156,23 @@ export default function MarketStateTargetOverrides({ cfg, onField, instrument = 
                                 {grp.cohorts.map((c) => {
                                     const action = cohortPmAction(table, c, instrument);
                                     const pmBlocked = new Set(cfg?.portfolioEnabled ? pmBlockedStates(action, c.direction) : []);
-                                    const enabled = cohortOv[c.key].enabled;
+                                    const e = eligMap ? eligMap[c.key] : null;
+                                    const rowActive = e
+                                        ? (e.base === "allow" || Object.values(e.states).includes("allow"))
+                                        : cohortOv[c.key].enabled;
+                                    const pmMode = cfg?.portfolioEnabled ? (cfg?.portfolioMode === "label" ? "label" : "enforce") : "off";
+                                    const resolved = resolveCohortEligibility({
+                                        pmAction: action, pmMode,
+                                        includeDisabled: Boolean(cfg?.portfolioIncludeDisabledCohorts),
+                                        scenarioBase: e ? e.base : (cohortOv[c.key].enabled ? "allow" : "disable"),
+                                        rescuedCount: e ? Object.values(e.states).filter((v) => v === "allow" && e.base === "disable").length : 0,
+                                        blockedCount: e ? Object.values(e.states).filter((v) => v === "block" && e.base === "allow").length : 0,
+                                    });
                                     return (
-                                        <tr key={c.key} className={`border-t border-[hsl(var(--border-soft))] align-top ${enabled ? "" : "opacity-45"}`} data-testid={`ms-row-${c.key}`}>
+                                        <tr key={c.key} className={`border-t border-[hsl(var(--border-soft))] align-top ${rowActive ? "" : "opacity-45"}`} data-testid={`ms-row-${c.key}`}>
                                             <td className="pr-2 py-1.5 text-[hsl(var(--text-1))] whitespace-nowrap">{c.cellLabel}</td>
-                                            <td className="pr-2 py-1.5">
-                                                {action ? <Chip tone={POLICY_TONE[action]} title={POLICY_TOOLTIPS[action]}>{POLICY_LABELS[action]}</Chip> : <span className="text-muted-lab">—</span>}
+                                            <td className="pr-2 py-1.5" data-testid={`ms-resolved-${c.key}`}>
+                                                <ResolvedEligibilityCell resolved={resolved} />
                                             </td>
                                             <td className="pr-2 py-1" data-testid={`ms-base-${c.key}`}>
                                                 <select className={`${selectCls} text-[hsl(var(--text-1))]`}
@@ -173,16 +183,27 @@ export default function MarketStateTargetOverrides({ cfg, onField, instrument = 
                                                     {TARGET_OPTIONS.map((t) => <option key={t} value={t}>{t}R</option>)}
                                                 </select>
                                             </td>
-                                            {STATE_AXIS.map((st) => (
-                                                <td key={st} className="pr-2 py-1">
-                                                    <StateCell
-                                                        cell={stateOv[c.key][st]}
-                                                        pmBlocksState={pmBlocked.has(st)}
-                                                        onChange={(cell) => onField("stateTargetOverrides", setCell(cfg?.stateTargetOverrides, c.key, st, cell))}
-                                                        testid={`ms-cell-${c.key}-${st.replace(/\W+/g, "_")}`}
-                                                    />
-                                                </td>
-                                            ))}
+                                            {STATE_AXIS.map((st) => {
+                                                const allowedByElig = stateAllowed(c.key, st);
+                                                return (
+                                                    <td key={st} className="pr-2 py-1">
+                                                        {allowedByElig ? (
+                                                            <StateCell
+                                                                cell={stateOv[c.key][st]}
+                                                                pmBlocksState={pmBlocked.has(st)}
+                                                                onChange={(cell) => onField("stateTargetOverrides", setCell(cfg?.stateTargetOverrides, c.key, st, cell))}
+                                                                testid={`ms-cell-${c.key}-${st.replace(/\W+/g, "_")}`}
+                                                            />
+                                                        ) : (
+                                                            <span className="text-[10px] font-ui text-[hsl(var(--text-3))]"
+                                                                title="This state is blocked/disabled by the Eligibility tab — a target here can never execute. Change it in Eligibility."
+                                                                data-testid={`ms-cell-${c.key}-${st.replace(/\W+/g, "_")}`}>
+                                                                🔒 blocked
+                                                            </span>
+                                                        )}
+                                                    </td>
+                                                );
+                                            })}
                                             <td className="py-1.5 whitespace-nowrap">
                                                 <button type="button" title="Copy Base to all states (reset every state cell to Inherit Base)"
                                                     className="text-[10px] text-muted-lab underline decoration-dotted mr-2"
@@ -190,7 +211,7 @@ export default function MarketStateTargetOverrides({ cfg, onField, instrument = 
                                                     data-testid={`ms-copybase-${c.key}`}>
                                                     Copy base
                                                 </button>
-                                                <span className="text-[9px] text-muted-lab" title="Eligibility (Allow/Disable/Rescue/Block) is configured in the Trade Eligibility panel.">elig → Trade Eligibility</span>
+                                                <span className="text-[9px] text-muted-lab" title="Eligibility (Allow/Disable/Rescue/Block) is configured in the Eligibility tab; 🔒 cells here are blocked there.">elig → Eligibility tab</span>
                                             </td>
                                         </tr>
                                     );

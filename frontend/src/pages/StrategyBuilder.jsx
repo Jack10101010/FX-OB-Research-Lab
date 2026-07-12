@@ -19,10 +19,13 @@ import {
     getUniqueRunDisplayName,
     setActiveProjectId,
     useDataset,
-    getSessionProfiles,
-    getLoadedPortfolio,
 } from "@/data/store";
-import { compileScenarioToRunConfig } from "@/data/scenarioCompile";
+// P4B: payload now compiled by the new session-first compiler (single source of truth).
+// The old getSessionProfiles/getLoadedPortfolio/compileScenarioToRunConfig payload path
+// is removed here; those modules remain for the (still-present) old Session UI.
+import { attachSessionStrategy } from "@/data/sessionScenarioConfig";
+import { DEFAULT_SESSION_STRATEGY } from "@/data/sessionStrategyEdits";
+import SessionStrategyGrid from "@/components/lab/sessionStrategy/SessionStrategyGrid";
 import SessionScenarioBuilder from "@/components/lab/sessionProfiles/SessionScenarioBuilder";
 import {
     buildBacktesterConfig,
@@ -329,6 +332,14 @@ export default function StrategyBuilder() {
     const [presetName, setPresetName] = useState("");
     const [flash, setFlash] = useState("");
     const [showConfig, setShowConfig] = useState(false);
+    // P4B/P4C — run-scoped Session Strategy state (single source compiled into the
+    // payload by buildSessionScenarioConfig). Default OFF → no scenario attached
+    // (byte-identical to a plain run). Authored by the SessionStrategyGrid (P4C) via the
+    // pure reducers in sessionStrategyEdits.js — run-scoped only, no localStorage/store.
+    const [sessionStrategy, setSessionStrategy] = useState(() => ({ ...DEFAULT_SESSION_STRATEGY }));
+    // Legacy Session Profiles UI is superseded by Session Strategy v1 and no longer feeds
+    // the payload — collapsed by default, kept available behind this toggle (files intact).
+    const [showLegacy, setShowLegacy] = useState(false);
     const [runJob, setRunJob] = useState(null);
     const [runError, setRunError] = useState("");
     const [runBusy, setRunBusy] = useState(false);
@@ -585,23 +596,15 @@ export default function StrategyBuilder() {
     //      the working copy and attach the session_strategy_scenario block (with
     //      meta). When inactive, no key is added (byte-identical to a plain run).
     const buildSidecarPayload = () => {
-        const payload = Object.fromEntries(
+        // P4B — single payload construction path. Base = cfg-derived sidecarConfig
+        // (pair/dates/TFs/entry sweep/stop buffer — entry stays GLOBAL here), then the
+        // new session-first compiler attaches session_strategy_scenario + baseline_comparison
+        // (each only when enabled). Replaces the old getSessionProfiles +
+        // compileScenarioToRunConfig path. Pure → preview == submitted payload.
+        const base = Object.fromEntries(
             Object.entries(sidecarConfig).filter(([k]) => !k.startsWith("_"))
         );
-        const profiles = getSessionProfiles();
-        if (profiles && profiles.enabled === true) {
-            const scn = compileScenarioToRunConfig(profiles, {}).session_strategy_scenario;
-            if (scn && scn.enabled === true) {
-                const loaded = getLoadedPortfolio();
-                scn.meta = {
-                    portfolio_id: loaded?.id || null,
-                    portfolio_name: loaded?.name || null,
-                    scenario_name: (runName || "").trim() || loaded?.name || null,
-                };
-                payload.session_strategy_scenario = scn;
-            }
-        }
-        return payload;
+        return attachSessionStrategy(base, sessionStrategy);
     };
     const copyRunPayload = () => {
         try { navigator.clipboard?.writeText(JSON.stringify(buildSidecarPayload(), null, 2)); } catch { /* clipboard unavailable */ }
@@ -796,22 +799,22 @@ export default function StrategyBuilder() {
                 actions={
                     <div className="flex flex-col items-end gap-2">
                         <ConfigScopeRibbon cfg={cfg} />
-                        {getSessionProfiles()?.enabled === true && (
+                        {sessionStrategy.enabled === true && (
                             buildSidecarPayload().session_strategy_scenario ? (
                                 <span
                                     className="clip-bevel-sm px-2 py-0.5 text-[10px] font-ui uppercase tracking-wider border border-[hsl(var(--accent-primary)/0.5)] bg-[hsl(var(--accent-primary)/0.12)] text-[hsl(var(--accent-primary))]"
-                                    title="The active Session Scenario will be compiled and sent with this run."
+                                    title="The active Session Strategy will be compiled and sent with this run."
                                     data-testid="scenario-attached-indicator"
                                 >
-                                    Scenario will be sent{getLoadedPortfolio()?.name ? `: ${getLoadedPortfolio().name}` : ""}
+                                    Session Strategy will be sent
                                 </span>
                             ) : (
                                 <span
                                     className="clip-bevel-sm px-2 py-0.5 text-[10px] font-ui uppercase tracking-wider border border-[hsl(var(--danger)/0.6)] bg-[hsl(var(--danger)/0.12)] text-[hsl(var(--danger))]"
-                                    title="Session Scenario is ON but did not produce a payload block — check that at least one cohort overrides the Run Default."
+                                    title="Session Strategy is ON but did not produce a payload block — check that at least one cohort overrides the Run Default."
                                     data-testid="scenario-not-attached-warning"
                                 >
-                                    Scenario is ON but not attached to payload
+                                    Session Strategy is ON but not attached to payload
                                 </span>
                             )
                         )}
@@ -1072,6 +1075,14 @@ export default function StrategyBuilder() {
             </div>
 
             <div className="px-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
+                {/* ── ① BACKTEST SETUP ───────────────────────────────────────── */}
+                <div className="lg:col-span-3 flex items-center gap-3 mt-3 mb-0.5">
+                    <span className="flex items-center justify-center w-7 h-7 clip-bevel-sm border border-[hsl(var(--accent-primary)/0.6)] bg-[hsl(var(--accent-primary)/0.1)] text-[hsl(var(--accent-primary))] text-[14px] font-semibold">1</span>
+                    <div>
+                        <div className="text-[16px] font-semibold text-[hsl(var(--text))] leading-tight">Backtest Setup</div>
+                        <div className="text-[11px] text-muted-lab">What market and data am I testing? · applies to the entire backtest</div>
+                    </div>
+                </div>
                 <BuilderFocusCard id="basic" activeId={activeBuilderCard} onActivate={setActiveBuilderCard}>
                 <NeonPanel title="Basic Settings" className="flex-1">
                     <div className="grid grid-cols-1 sm:grid-cols-6 gap-3">
@@ -1140,7 +1151,7 @@ export default function StrategyBuilder() {
                 </BuilderFocusCard>
 
                 <BuilderFocusCard id="structure" activeId={activeBuilderCard} onActivate={setActiveBuilderCard}>
-                <NeonPanel title="Setup Universe Filter" className="flex-1">
+                <NeonPanel title="Detection Settings" className="flex-1">
                     <p className="text-[11.5px] font-ui text-muted-lab leading-relaxed border-l-2 border-[hsl(var(--accent-secondary)/0.5)] pl-2.5 mb-3">
                         Choose which setup types are included in the backtest before Session Scenario rules are applied. Session Scenario can customise or disable cohorts within this universe, but it cannot recover setup types filtered out here.
                     </p>
@@ -1201,8 +1212,45 @@ export default function StrategyBuilder() {
                 </NeonPanel>
                 </BuilderFocusCard>
 
+                <BuilderFocusCard id="advanced" activeId={activeBuilderCard} onActivate={setActiveBuilderCard} className="flex-1">
+                <NeonPanel title="Advanced Execution Assumptions" className="flex-1">
+                    <div className="grid grid-cols-2 gap-3">
+                        <Field label="Spread (pips)"><NeonInput type="number" step="0.05" value={cfg.spread} onChange={(e) => set("spread")(Number(e.target.value))} /></Field>
+                        <Field label="Slippage (pips)"><NeonInput type="number" step="0.05" value={cfg.slippage} onChange={(e) => set("slippage")(Number(e.target.value))} /></Field>
+                        <Field label="Commission (R/trade)" className="col-span-2"><NeonInput type="number" step="0.01" value={cfg.commission} onChange={(e) => set("commission")(Number(e.target.value))} /></Field>
+                        <div className="col-span-2 flex items-center justify-between border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
+                            <div>
+                                <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Parallel scenarios (faster)</div>
+                                <div className="text-[10.5px] text-muted-lab">Run scenario passes across CPU cores. Outputs identical to serial; auto-picks a conservative worker count.</div>
+                            </div>
+                            <NeonToggle checked={Boolean(cfg.parallelScenarios)} onChange={set("parallelScenarios")} testId="bld-parallel-toggle" />
+                        </div>
+                        {cfg.parallelScenarios && (
+                            <Field label="Max workers (0 = auto)" className="col-span-2">
+                                <NeonInput type="number" step="1" min="0" max="8" value={cfg.maxWorkers ?? 0} onChange={(e) => set("maxWorkers")(Number(e.target.value))} />
+                            </Field>
+                        )}
+                        <div className="col-span-2 flex items-center justify-between border border-[hsl(var(--border-soft))] clip-bevel-sm p-3 opacity-50 pointer-events-none" aria-disabled="true">
+                            <div>
+                                <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Monte Carlo</div>
+                                <div className="text-[10.5px] text-muted-lab">Not yet wired to sidecar — no effect on generated config.</div>
+                            </div>
+                            <NeonToggle checked={cfg.monteCarlo} onChange={set("monteCarlo")} />
+                        </div>
+                    </div>
+                </NeonPanel>
+                </BuilderFocusCard>
+
+                {/* ── ② GLOBAL STRATEGY ──────────────────────────────────────── */}
+                <div className="lg:col-span-3 flex items-center gap-3 mt-5 mb-0.5">
+                    <span className="flex items-center justify-center w-7 h-7 clip-bevel-sm border border-[hsl(var(--accent-primary)/0.6)] bg-[hsl(var(--accent-primary)/0.1)] text-[hsl(var(--accent-primary))] text-[14px] font-semibold">2</span>
+                    <div>
+                        <div className="text-[16px] font-semibold text-[hsl(var(--text))] leading-tight">Global Strategy</div>
+                        <div className="text-[11px] text-muted-lab">How does the normal strategy trade? · applies to every trade unless overridden in Session Strategy</div>
+                    </div>
+                </div>
                 <BuilderFocusCard id="execution" activeId={activeBuilderCard} onActivate={setActiveBuilderCard}>
-                <NeonPanel title="Execution Settings" className="flex-1">
+                <NeonPanel title="Protection & Risk" className="flex-1">
                     <div className="grid grid-cols-2 gap-3">
                         <Field label="RR Multiple">
                             <NeonInput data-testid="bld-rr" type="number" step="0.1" value={cfg.rr} onChange={(e) => set("rr")(Number(e.target.value))} />
@@ -1469,8 +1517,8 @@ export default function StrategyBuilder() {
                     </>
                 </NeonPanel>
                 </BuilderFocusCard>
-                {/* SESSION-STRATEGY-CARDS Phase 2A — frontend-only per-session cards */}
-                <SessionStrategyCards />
+                {/* SESSION-STRATEGY-CARDS — LEGACY: moved entirely under the deprecated
+                    "Legacy Session Profiles" section below; no longer rendered here. */}
                 </div>{/* end left Filters col */}
                 <div className="flex flex-col gap-4">
                 {/* ── Entry Configuration panel ─────────────────────────────── */}
@@ -1482,23 +1530,9 @@ export default function StrategyBuilder() {
                         <Segment options={["Long", "Short", "Both"]} value={cfg.direction} onChange={set("direction")} />
                     </div>
 
-                    {/* Section B: Entry Assignment */}
-                    <div className="mb-4">
-                        <div className="control-label text-[10.5px] font-ui uppercase tracking-wider text-muted-lab mb-2">Entry Assignment</div>
-                        <Segment
-                            options={[
-                                { value: "symmetric", label: "Symmetric" },
-                                { value: "asymmetric", label: "Asymmetric" },
-                            ]}
-                            value={cfg.directionalEntryMode}
-                            onChange={set("directionalEntryMode")}
-                        />
-                        <div className="mt-2 text-[10.5px] text-muted-lab">
-                            {cfg.directionalEntryMode === "symmetric"
-                                ? "Longs and shorts use the same entry model."
-                                : "Assign separate entry models for long and short trades."}
-                        </div>
-                    </div>
+                    {/* Section B (Entry Assignment / directional long-short) REMOVED — v1 uses
+                        one entry model per run. cfg.directionalEntryMode stays "symmetric"
+                        (default) so the payload/translator is unchanged. */}
 
                     {/* Section C: Entry Model (symmetric only) */}
                     {cfg.directionalEntryMode === "symmetric" && (
@@ -1988,34 +2022,7 @@ export default function StrategyBuilder() {
                 </NeonPanel>
                 </BuilderFocusCard>
 
-                <BuilderFocusCard id="advanced" activeId={activeBuilderCard} onActivate={setActiveBuilderCard} className="flex-1">
-                <NeonPanel title="Advanced" className="flex-1">
-                    <div className="grid grid-cols-2 gap-3">
-                        <Field label="Spread (pips)"><NeonInput type="number" step="0.05" value={cfg.spread} onChange={(e) => set("spread")(Number(e.target.value))} /></Field>
-                        <Field label="Slippage (pips)"><NeonInput type="number" step="0.05" value={cfg.slippage} onChange={(e) => set("slippage")(Number(e.target.value))} /></Field>
-                        <Field label="Commission (R/trade)" className="col-span-2"><NeonInput type="number" step="0.01" value={cfg.commission} onChange={(e) => set("commission")(Number(e.target.value))} /></Field>
-                        <div className="col-span-2 flex items-center justify-between border border-[hsl(var(--border-soft))] clip-bevel-sm p-3">
-                            <div>
-                                <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Parallel scenarios (faster)</div>
-                                <div className="text-[10.5px] text-muted-lab">Run scenario passes across CPU cores. Outputs identical to serial; auto-picks a conservative worker count.</div>
-                            </div>
-                            <NeonToggle checked={Boolean(cfg.parallelScenarios)} onChange={set("parallelScenarios")} testId="bld-parallel-toggle" />
-                        </div>
-                        {cfg.parallelScenarios && (
-                            <Field label="Max workers (0 = auto)" className="col-span-2">
-                                <NeonInput type="number" step="1" min="0" max="8" value={cfg.maxWorkers ?? 0} onChange={(e) => set("maxWorkers")(Number(e.target.value))} />
-                            </Field>
-                        )}
-                        <div className="col-span-2 flex items-center justify-between border border-[hsl(var(--border-soft))] clip-bevel-sm p-3 opacity-50 pointer-events-none" aria-disabled="true">
-                            <div>
-                                <div className="control-label text-[11px] font-ui uppercase tracking-wider text-muted-lab">Monte Carlo</div>
-                                <div className="text-[10.5px] text-muted-lab">Not yet wired to sidecar — no effect on generated config.</div>
-                            </div>
-                            <NeonToggle checked={cfg.monteCarlo} onChange={set("monteCarlo")} />
-                        </div>
-                    </div>
-                </NeonPanel>
-                </BuilderFocusCard>
+                {/* Advanced Execution Assumptions card relocated to ① Backtest Setup. */}
                 </div>{/* end right Entry Mode + Advanced col */}
                 </div>{/* end middle row wrapper */}
 
@@ -2116,8 +2123,90 @@ export default function StrategyBuilder() {
                 </NeonPanel>
                 </BuilderFocusCard>
 
-                <BuilderFocusCard id="session-scenario" activeId={activeBuilderCard} onActivate={setActiveBuilderCard} className="lg:col-span-3">
-                    <SessionScenarioBuilder />
+                {/* ── ③ SESSION STRATEGY ─────────────────────────────────────── */}
+                <div className="lg:col-span-3 flex items-center gap-3 mt-5 mb-0.5">
+                    <span className="flex items-center justify-center w-7 h-7 clip-bevel-sm border border-[hsl(var(--accent-secondary)/0.6)] bg-[hsl(var(--accent-secondary)/0.1)] text-[hsl(var(--accent-secondary))] text-[14px] font-semibold">3</span>
+                    <div>
+                        <div className="text-[16px] font-semibold text-[hsl(var(--text))] leading-tight">Session Strategy</div>
+                        <div className="text-[11px] text-muted-lab">Override the Global Strategy per fill-session cohort · Fair Baseline runs automatically</div>
+                    </div>
+                </div>
+                {/* P4C — new Session-First v1 authoring grid (run-scoped state → payload). */}
+                <BuilderFocusCard id="session-strategy-v1" activeId={activeBuilderCard} onActivate={setActiveBuilderCard} className="lg:col-span-3">
+                    <NeonPanel title="Session Strategy (v1)">
+                        {/* Run Strategy Summary — shows the ACTUAL run-wide cfg values so the
+                            user can see exactly what is global vs per-session. */}
+                        <div className="mb-4 border border-[hsl(var(--border-soft)/0.7)] bg-[hsl(var(--panel-2)/0.25)] clip-bevel-sm p-3.5">
+                            <div className="flex items-center justify-between gap-2">
+                                <span className="text-[12.5px] font-semibold text-[hsl(var(--text))]">Run Strategy Summary</span>
+                                <span className="text-[11px] font-ui uppercase tracking-wider text-[hsl(var(--accent-secondary))]">Pair-specific strategy for this run{cfg.symbol ? `: ${cfg.symbol}` : ""}</span>
+                            </div>
+                            <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                <div>
+                                    <div className="text-[10px] font-ui uppercase tracking-widest text-[hsl(var(--accent-secondary))]">Run-wide settings</div>
+                                    <ul className="mt-1.5 text-[11.5px] leading-relaxed text-[hsl(var(--text-2))] tabular-nums">
+                                        <li><span className="text-muted-lab">Pair:</span> {cfg.symbol}</li>
+                                        <li><span className="text-muted-lab">Dates:</span> {cfg.dateFrom} → {cfg.dateTo}</li>
+                                        <li><span className="text-muted-lab">Timeframes:</span> {cfg.detectionTf} / {cfg.executionTf}</li>
+                                        <li><span className="text-muted-lab">Entry sweep:</span> {cfg.selectedEntryModel}{cfg.entryMode ? ` (${cfg.entryMode})` : ""}</li>
+                                        <li><span className="text-muted-lab">Stop buffer:</span> {cfg.stopBuffer} pips</li>
+                                        <li><span className="text-muted-lab">News blackout:</span> {cfg.newsBlackout ? `on (${cfg.newsBlackoutBefore}/${cfg.newsBlackoutAfter}m)` : "off"}</li>
+                                        <li><span className="text-muted-lab">Detection:</span> swing {cfg.swing} · OB {cfg.obFilter}</li>
+                                    </ul>
+                                </div>
+                                <div>
+                                    <div className="text-[10px] font-ui uppercase tracking-widest text-[hsl(var(--accent-primary))]">Session Strategy overrides</div>
+                                    <ul className="mt-1.5 text-[11.5px] leading-relaxed text-[hsl(var(--text-2))]">
+                                        <li>Enabled sessions / cohorts</li>
+                                        <li>Target RR</li>
+                                        <li>Break-even</li>
+                                        <li>Reduce Risk</li>
+                                        <li>Risk amount</li>
+                                    </ul>
+                                </div>
+                                <div>
+                                    <div className="text-[10px] font-ui uppercase tracking-widest text-[hsl(var(--accent-secondary))]">Fair Baseline</div>
+                                    <ul className="mt-1.5 text-[11.5px] leading-relaxed text-[hsl(var(--text-2))]">
+                                        <li>Always runs with Session Strategy</li>
+                                        <li>Same enabled sessions / cohorts</li>
+                                        <li>Baseline entry + chosen TP / BE</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                        <SessionStrategyGrid value={sessionStrategy} onChange={setSessionStrategy} symbol={sidecarConfig?.symbol || cfg?.symbol || ""} />
+                    </NeonPanel>
+                </BuilderFocusCard>
+
+                {/* Legacy Session Profiles — superseded by Session Strategy (v1); inert + collapsed. */}
+                <BuilderFocusCard id="legacy-session" activeId={activeBuilderCard} onActivate={setActiveBuilderCard} className="lg:col-span-3">
+                    <NeonPanel
+                        title="Legacy Session Profiles (Deprecated)"
+                        action={
+                            <button
+                                type="button"
+                                onClick={() => setShowLegacy((v) => !v)}
+                                className="flex items-center gap-1 text-[10px] font-ui uppercase tracking-wider text-muted-lab hover:text-white"
+                                data-testid="toggle-legacy-session"
+                            >
+                                <span>{showLegacy ? "Hide" : "Show"}</span>
+                                {showLegacy ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                            </button>
+                        }
+                    >
+                        <div className="flex items-start gap-2 border border-[hsl(var(--danger)/0.4)] bg-[hsl(var(--danger)/0.06)] clip-bevel-sm px-3 py-2">
+                            <ShieldAlert className="w-3.5 h-3.5 shrink-0 mt-0.5 text-[hsl(var(--danger))]" />
+                            <span className="text-[11px] leading-relaxed text-[hsl(var(--danger))]">
+                                <strong>Deprecated. Does not affect new backtest runs.</strong> Replaced by Session Strategy (v1) above. Kept for reference only.
+                            </span>
+                        </div>
+                        {showLegacy && (
+                            <div className="mt-3 flex flex-col gap-3 border-t border-[hsl(var(--border-soft)/0.5)] pt-3 opacity-70">
+                                <SessionScenarioBuilder />
+                                <SessionStrategyCards />
+                            </div>
+                        )}
+                    </NeonPanel>
                 </BuilderFocusCard>
 
                 <BuilderFocusCard id="sidecar-run" activeId={activeBuilderCard} onActivate={setActiveBuilderCard} className="lg:col-span-3">
@@ -2194,8 +2283,10 @@ export default function StrategyBuilder() {
                                 </button>
                             </div>
                             {showConfig && (
+                                /* P4B — preview shows the EXACT submitted payload (buildSidecarPayload),
+                                   not just sidecarConfig, so preview === submitted payload. */
                                 <pre className="max-h-80 overflow-auto scrollbar-thin whitespace-pre-wrap border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel-2)/0.35)] clip-bevel-sm p-3 text-[10.5px] leading-relaxed font-code text-[hsl(var(--accent-secondary))]">
-                                    {JSON.stringify(sidecarConfig, null, 2)}
+                                    {JSON.stringify(buildSidecarPayload(), null, 2)}
                                 </pre>
                             )}
                         </div>

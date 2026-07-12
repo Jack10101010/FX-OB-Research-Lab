@@ -679,10 +679,18 @@
 /* 1. SELECT ARROW — replace hardcoded violet (#d946ef) with terminal teal.
       #45bac4 ≈ hsl(185 52% 52%) matches current --accent-primary value.
       !important overrides the inline style prop in NeonSelect. */
+/* EXACTLY ONE chevron per select: this rule paints the custom teal arrow on EVERY
+   select, so it must also remove the native arrow (appearance:none) — otherwise raw
+   selects (policy tables etc.) render BOTH the browser arrow and the custom one.
+   NeonSelect already sets appearance-none + pr-8; this makes the invariant global. */
 [data-theme="terminal"] select {
     background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2345bac4' stroke-width='2'><polyline points='6 9 12 15 18 9'/></svg>") !important;
     background-repeat: no-repeat;
-    background-position: right 8px center;
+    background-position: right 6px center;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    padding-right: 22px;
     color: hsl(var(--text));
 }
 

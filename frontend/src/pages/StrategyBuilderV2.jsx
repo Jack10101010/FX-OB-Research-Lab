@@ -20,6 +20,9 @@ import { DATA_RANGES, DATA_RANGE_ORDER, resolveDataRangeKey, dataRangePatch, dat
 import deployedPolicyDoc from "@/data/deployedPolicy.v1.json";
 import { MarketStateControls, regimeFilterInvalid } from "@/components/lab/marketState/MarketStateControls";
 import PortfolioManagerControls from "@/components/lab/portfolio/PortfolioManagerControls";
+import DraftsPanel from "@/components/lab/portfolio/DraftsPanel";
+import IncludeDisabledOverride from "@/components/lab/portfolio/IncludeDisabledOverride";
+import BestValidatedConfig from "@/components/lab/portfolio/BestValidatedConfig";
 import MarketStateTargetOverrides from "@/components/lab/portfolio/MarketStateTargetOverrides";
 import TradeEligibility from "@/components/lab/portfolio/TradeEligibility";
 import ResolvedRunSummary from "@/components/lab/portfolio/ResolvedRunSummary";
@@ -490,9 +493,9 @@ function VariantGroupView({ cfg }) {
 }
 
 // ── small presentational helpers ─────────────────────────────────────────────────
-function SectionShell({ n, title, question, scope, active, onActivate, children, collapsible = false }) {
-    // Advanced/legacy sections are COLLAPSED by default; header click expands.
-    const [open, setOpen] = React.useState(!collapsible);
+function SectionShell({ n, title, question, scope, active, onActivate, children, collapsible = false, defaultOpen, chips }) {
+    // Collapsible sections show concise summary CHIPS when collapsed (UX polish Part 1).
+    const [open, setOpen] = React.useState(collapsible ? Boolean(defaultOpen) : true);
     return (
         <section
             onFocusCapture={onActivate} onMouseDownCapture={onActivate}
@@ -514,12 +517,21 @@ function SectionShell({ n, title, question, scope, active, onActivate, children,
                     </div>
                 </div>
                 <div className="flex items-center gap-3">
-                    {scope && <div className="text-[11.5px] text-muted-lab text-right max-w-[260px]">{scope}</div>}
+                    {/* collapsed ⇒ concise summary chips instead of the full body */}
+                    {collapsible && !open && Array.isArray(chips) && chips.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1.5 justify-end max-w-[560px]" data-testid={`section-chips-${n}`}>
+                            {chips.filter(Boolean).map((c, i) => (
+                                <span key={i} className="rounded border border-[hsl(var(--border-mid))] px-2 py-0.5 text-[11px] font-ui text-[hsl(var(--text-2))] whitespace-nowrap">{c}</span>
+                            ))}
+                        </div>
+                    )}
+                    {(!collapsible || open) && scope && <div className="text-[11.5px] text-muted-lab text-right max-w-[260px]">{scope}</div>}
                     {collapsible && (
                         <button type="button" onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+                            aria-expanded={open}
                             className="rounded border border-[hsl(var(--border-mid))] px-2 py-1 text-[11px] font-ui text-[hsl(var(--text-2))]"
                             data-testid={`section-toggle-${n}`}>
-                            {open ? "Collapse" : "Expand"}
+                            {open ? "▴" : "▾"}
                         </button>
                     )}
                 </div>
@@ -604,10 +616,9 @@ export default function StrategyBuilderV2() {
     const [gridUi, setGridUi] = useState(() => ({ ...DEFAULT_GRID_UI, ...(persisted?.gridUi || {}) }));
     const [showLegacy, setShowLegacy] = useState(false);
     const [showConfig, setShowConfig] = useState(false);
-    // Global Market State gate is advanced/legacy: collapsed by default (all aspects off).
-    // The collapsed header still surfaces "(currently ON)" if a saved config has the gate
-    // enabled, so an active legacy gate is never silently hidden.
-    const [msGateOpen, setMsGateOpen] = useState(false);
+    // Trade Policy working-area tab (Eligibility / Targets / Drafts / Summary).
+    const [policyTab, setPolicyTab] = useState("eligibility");
+
     const [runMsg, setRunMsg] = useState("");
     const [beOn, setBeOn] = useState(false);
     const [rrOn, setRrOn] = useState(false);
@@ -719,6 +730,28 @@ export default function StrategyBuilderV2() {
     // switches to the extended 2015→2026 file, so "select a 2015 date" just works without first
     // toggling the dataset. Never downgrades a Full/extended selection.
     const setDateFrom = (v) => setCfg((c) => ({ ...c, dateFrom: v, dataFile: candleFileForStart(v, c.dataFile) }));
+
+    // Collapsed-section summary chips (UX polish Part 1) — derived live from cfg.
+    const yearOf = (d) => (typeof d === "string" && d.length >= 4 ? d.slice(0, 4) : "");
+    const setupChips = [
+        cfg.symbol,
+        [yearOf(cfg.dateFrom), yearOf(cfg.dateTo)].filter(Boolean).join("–"),
+        `${cfg.detectionTf || "?"} → ${cfg.executionTf || "?"}`,
+    ];
+    const globalChips = (() => {
+        const out = [];
+        if (cfg.selectedEntryModel === "triggered_edge") {
+            const thr = (cfg.singleTriggeredEdgeThresholds || []).join("/");
+            out.push(`Triggered Edge ${thr || "?"}%`);
+            const arms = (Array.isArray(cfg.triggeredEdgeDelays) && cfg.triggeredEdgeDelays.length ? cfg.triggeredEdgeDelays : []).map((a) => `C${a}`).join(" ");
+            if (arms) out.push(arms);
+        } else if (cfg.selectedEntryModel === "baseline") out.push("Baseline");
+        else out.push(String(cfg.selectedEntryModel || ""));
+        if (cfg.direction && cfg.direction !== "Both") out.push(cfg.direction);
+        out.push(`RR ${cfg.rr}`);
+        out.push(cfg.executionMode === "multi_position" ? "Allow Multi Position" : String(cfg.executionMode || ""));
+        return out;
+    })();
 
     // ── single payload path (reuses translator + session compiler) ───────────────
     const buildPayload = () => {
@@ -996,7 +1029,7 @@ export default function StrategyBuilderV2() {
                 <div className="flex flex-col gap-7">
 
                     {/* ───────────────── ① BACKTEST SETUP ───────────────── */}
-                    <SectionShell n={1} title="Backtest Setup" question="What market and data am I testing?" scope="These settings apply to the entire backtest." active={activeSection === 1} onActivate={() => setActiveSection(1)}>
+                    <SectionShell collapsible defaultOpen={false} chips={setupChips} n={1} title="Backtest Setup" question="What market and data am I testing?" scope="These settings apply to the entire backtest." active={activeSection === 1} onActivate={() => setActiveSection(1)}>
                         {/* Auto run name (canonical, live) + optional nickname */}
                         <div className="mb-4 rounded border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel))] px-3 py-2 flex flex-wrap items-center gap-x-3 gap-y-1" data-testid="run-autoname">
                             <span className="text-[10px] uppercase tracking-wide text-muted-lab font-ui">Auto name</span>
@@ -1137,7 +1170,7 @@ export default function StrategyBuilderV2() {
                     </SectionShell>
 
                     {/* ───────────────── ② GLOBAL STRATEGY ───────────────── */}
-                    <SectionShell n={2} title="Global Strategy" question="How does the normal strategy trade?" scope="These settings apply globally to all sessions." active={activeSection === 2} onActivate={() => setActiveSection(2)}>
+                    <SectionShell collapsible defaultOpen={false} chips={globalChips} n={2} title="Global Strategy" question="How does the normal strategy trade?" scope="These settings apply globally to all sessions." active={activeSection === 2} onActivate={() => setActiveSection(2)}>
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                             {/* Entry */}
                             <Card icon={MousePointerClick} title="Entry">
@@ -1193,6 +1226,77 @@ export default function StrategyBuilderV2() {
                                 </div>
                             </Card>
 
+
+                        </div>
+
+                        {/* Risk */}
+                        <Card icon={Target} title="Risk">
+                            <Field label="Target RR">
+                                <div className="flex flex-wrap items-center gap-2">
+                                    {TP_PRESETS.map((p) => (
+                                        <button key={p} type="button" onClick={() => set("rr")(p)}
+                                            className={["w-14 text-center text-[12.5px] py-1.5 clip-bevel-sm border transition-colors",
+                                                Number(cfg.rr) === p ? "border-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.18)] text-[hsl(var(--accent-primary))]" : "border-[hsl(var(--border-soft))] text-muted-lab hover:text-white"].join(" ")}>{p}</button>
+                                    ))}
+                                    <NeonInput type="number" step="0.1" value={cfg.rr} onChange={setNum("rr")} className="w-20" />
+                                </div>
+                            </Field>
+                            <div className="mt-4 max-w-sm">
+                                <div className="text-[11px] font-ui uppercase tracking-wide text-[hsl(var(--text-2))] mb-1.5">Risk Amount</div>
+                                <div className="flex items-center gap-2">
+                                    <span className="text-[12.5px] px-2.5 py-1 clip-bevel-sm border border-[hsl(var(--border-mid))] text-[hsl(var(--text))]">Risk Amount: 1.0x / 1%</span>
+                                    <span className="text-[11px] text-muted-lab">basis: current equity</span>
+                                </div>
+                                <div className="text-[11px] text-muted-lab mt-1.5">Weights results (does not change raw R). Per-cohort risk amount is set in Session Strategy.</div>
+                            </div>
+                        </Card>
+
+                        {/* Global vs Session */}
+                        <div className="border border-[hsl(var(--accent-primary)/0.4)] bg-[hsl(var(--accent-primary)/0.06)] clip-bevel-sm px-4 py-3">
+                            <div className="text-[12px] font-semibold uppercase tracking-wide text-[hsl(var(--accent-primary))]">Global vs Session overrides</div>
+                            <div className="text-[12px] text-[hsl(var(--text-2))] mt-1 leading-relaxed">
+                                The settings above apply to the entire backtest. Session Strategy (below) only overrides:
+                                <span className="text-[hsl(var(--text))]"> Enabled · Target RR · Break-even · Reduce Risk · Risk Amount</span>. Nothing else.
+                            </div>
+                        </div>
+                    </SectionShell>
+
+                    {/* ───────────────── ③ TRADE POLICY ───────────────── */}
+                    <SectionShell n={3} title="Trade Policy" question="Which trades are allowed, and what target does each use?" scope="One working area — Eligibility (who trades) · Targets (how far) · Drafts (research) · Summary (deployed policy reference)." active={activeSection === 3} onActivate={() => setActiveSection(3)}>
+                        {/* Validated Configurations — always visible at the top of Trade Policy */}
+                        <BestValidatedConfig instrument={cfg.symbol || "EURUSD"} onApply={(patch) => setCfg((c) => ({ ...c, ...patch }))} />
+                        {sessionStrategy?.enabled && (
+                            <div className="clip-bevel-sm border border-[hsl(var(--warning)/0.5)] bg-[hsl(var(--warning)/0.08)] px-3 py-2 text-[11.5px] font-ui text-[hsl(var(--warning))]" data-testid="legacy-owns-scenario">
+                                Legacy Session Strategy owns the emitted scenario for this run — Eligibility and Targets below are inactive until it is disabled (Advanced Research / Legacy). The Portfolio Manager still applies.
+                            </div>
+                        )}
+                        <div className="flex items-center gap-1.5" data-testid="policy-tabs">
+                            {[["eligibility", "Eligibility"], ["targets", "Targets"], ["drafts", "Drafts"], ["summary", "Summary"]].map(([k, label]) => (
+                                <button key={k} type="button" onClick={() => setPolicyTab(k)} data-testid={`policy-tab-${k}`}
+                                    className={`px-3 py-1.5 text-[12px] font-ui clip-bevel-sm border ${policyTab === k ? "border-[hsl(var(--accent-primary))] text-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.10)]" : "border-[hsl(var(--border-soft))] text-muted-lab hover:text-white"}`}>
+                                    {label}
+                                </button>
+                            ))}
+                        </div>
+                        {policyTab === "eligibility" && (
+                            <TradeEligibility cfg={cfg} instrument={cfg.symbol || "EURUSD"} superseded={Boolean(sessionStrategy?.enabled)} onField={(k, v) => setCfg((c) => ({ ...c, [k]: v }))} />
+                        )}
+                        {policyTab === "targets" && (
+                            <div className={sessionStrategy?.enabled ? "opacity-40 pointer-events-none select-none" : ""}>
+                                <MarketStateTargetOverrides cfg={cfg} instrument={cfg.symbol || "EURUSD"} onField={(k, v) => setCfg((c) => ({ ...c, [k]: v }))} />
+                            </div>
+                        )}
+                        {policyTab === "drafts" && (
+                            <DraftsPanel cfg={cfg} onField={(k, v) => setCfg((c) => ({ ...c, [k]: v }))} />
+                        )}
+                        {policyTab === "summary" && (
+                            <PortfolioManagerControls cfg={cfg} instrument={cfg.symbol || "EURUSD"} defaultOpen />
+                        )}
+                    </SectionShell>
+
+                    {/* ───────────────── ④ TRADE MANAGEMENT ───────────────── */}
+                    <SectionShell n={4} title="Trade Management" question="How are open trades protected and managed?" scope="Stop buffer · break-even · entry-model protection. Global settings; per-cohort management lives in Advanced Research / Legacy." active={activeSection === 4} onActivate={() => setActiveSection(4)}>
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                             {/* Protection */}
                             <Card icon={Shield} title="Protection">
                                 <div className="flex flex-col gap-4">
@@ -1256,65 +1360,6 @@ export default function StrategyBuilderV2() {
                                 </div>
                             </Card>
                         </div>
-
-                        {/* Risk */}
-                        <Card icon={Target} title="Risk">
-                            <Field label="Target RR">
-                                <div className="flex flex-wrap items-center gap-2">
-                                    {TP_PRESETS.map((p) => (
-                                        <button key={p} type="button" onClick={() => set("rr")(p)}
-                                            className={["w-14 text-center text-[12.5px] py-1.5 clip-bevel-sm border transition-colors",
-                                                Number(cfg.rr) === p ? "border-[hsl(var(--accent-primary))] bg-[hsl(var(--accent-primary)/0.18)] text-[hsl(var(--accent-primary))]" : "border-[hsl(var(--border-soft))] text-muted-lab hover:text-white"].join(" ")}>{p}</button>
-                                    ))}
-                                    <NeonInput type="number" step="0.1" value={cfg.rr} onChange={setNum("rr")} className="w-20" />
-                                </div>
-                            </Field>
-                            <div className="mt-4 max-w-sm">
-                                <div className="text-[11px] font-ui uppercase tracking-wide text-[hsl(var(--text-2))] mb-1.5">Risk Amount</div>
-                                <div className="flex items-center gap-2">
-                                    <span className="text-[12.5px] px-2.5 py-1 clip-bevel-sm border border-[hsl(var(--border-mid))] text-[hsl(var(--text))]">Risk Amount: 1.0x / 1%</span>
-                                    <span className="text-[11px] text-muted-lab">basis: current equity</span>
-                                </div>
-                                <div className="text-[11px] text-muted-lab mt-1.5">Weights results (does not change raw R). Per-cohort risk amount is set in Session Strategy.</div>
-                            </div>
-                        </Card>
-
-                        {/* Global vs Session */}
-                        <div className="border border-[hsl(var(--accent-primary)/0.4)] bg-[hsl(var(--accent-primary)/0.06)] clip-bevel-sm px-4 py-3">
-                            <div className="text-[12px] font-semibold uppercase tracking-wide text-[hsl(var(--accent-primary))]">Global vs Session overrides</div>
-                            <div className="text-[12px] text-[hsl(var(--text-2))] mt-1 leading-relaxed">
-                                The settings above apply to the entire backtest. Session Strategy (below) only overrides:
-                                <span className="text-[hsl(var(--text))]"> Enabled · Target RR · Break-even · Reduce Risk · Risk Amount</span>. Nothing else.
-                            </div>
-                        </div>
-                    </SectionShell>
-
-                    {/* ───────────────── ③ TRADE ELIGIBILITY ───────────────── */}
-                    <SectionShell n={3} title="Trade Eligibility" question="Which trades are allowed?" scope="Two separate layers in engine order: the Portfolio Manager decision (runs first, never bypassed) and the scenario eligibility override (cohort base allow/disable + per-state rescue/block)." active={activeSection === 3} onActivate={() => setActiveSection(3)}>
-                        <RecommendedStackStrip cfg={cfg} sessionStrategy={sessionStrategy} onApply={(patch) => setCfg((c) => ({ ...c, ...patch }))} />
-                        <div className="h-3" />
-                        <PortfolioManagerControls cfg={cfg} instrument={cfg.symbol || "EURUSD"} onField={(k, v) => setCfg((c) => ({ ...c, [k]: v }))} />
-                        <div className="h-3" />
-                        {sessionStrategy?.enabled && (
-                            <div className="clip-bevel-sm border border-[hsl(var(--warning)/0.5)] bg-[hsl(var(--warning)/0.08)] px-3 py-2 text-[11.5px] font-ui text-[hsl(var(--warning))]" data-testid="legacy-owns-scenario">
-                                Legacy Session Strategy owns the emitted scenario for this run — scenario eligibility below is inactive until it is disabled (Advanced / Legacy section).
-                            </div>
-                        )}
-                        <div className={sessionStrategy?.enabled ? "opacity-40 pointer-events-none select-none" : ""}>
-                        <TradeEligibility cfg={cfg} instrument={cfg.symbol || "EURUSD"} onField={(k, v) => setCfg((c) => ({ ...c, [k]: v }))} />
-                        </div>
-                    </SectionShell>
-
-                    {/* ───────────────── ④ TARGET POLICY (merged: base + per-state) ───────────────── */}
-                    <SectionShell n={4} title="Target Policy" question="What target does each allowed trade use?" scope="The editable per-cohort Base target plus per-state Inherit/Custom exceptions. Eligibility stays in Trade Eligibility; research drafts apply here explicitly." active={activeSection === 4} onActivate={() => setActiveSection(4)}>
-                        {sessionStrategy?.enabled && (
-                            <div className="clip-bevel-sm border border-[hsl(var(--warning)/0.5)] bg-[hsl(var(--warning)/0.08)] px-3 py-2 text-[11.5px] font-ui text-[hsl(var(--warning))]">
-                                Legacy Session Strategy owns the emitted scenario for this run — Target Policy below is inactive until it is disabled.
-                            </div>
-                        )}
-                        <div className={sessionStrategy?.enabled ? "opacity-40 pointer-events-none select-none" : ""}>
-                        <MarketStateTargetOverrides cfg={cfg} instrument={cfg.symbol || "EURUSD"} onField={(k, v) => setCfg((c) => ({ ...c, [k]: v }))} />
-                        </div>
                     </SectionShell>
 
                     {/* ───────────────── ⑤ RESOLVED RUN SUMMARY ───────────────── */}
@@ -1322,7 +1367,22 @@ export default function StrategyBuilderV2() {
                         <ResolvedRunSummary cfg={cfg} instrument={cfg.symbol || "EURUSD"} />
                     </SectionShell>
 
-                    <SectionShell collapsible n={6} title="Advanced / Legacy — Session Strategy" question="Legacy per-session scenario tools (BE, move-stop, risk amount, fair baseline). When ENABLED this grid SUPERSEDES the Trade Eligibility + Target Policy scenario above." scope={<span>Pair-specific strategy for this run: <span className="text-[hsl(var(--accent-secondary))] italic">{cfg.symbol}</span></span>} active={activeSection === 6} onActivate={() => setActiveSection(6)}>
+                    <SectionShell collapsible defaultOpen={false} n={6} title="Advanced Research / Legacy"
+                        question="Research overrides and legacy layers — nothing here is part of the normal workflow."
+                        chips={[sessionStrategy?.enabled ? "Session Strategy ON" : null, cfg.regimeEnabled ? "MS gate ON" : null, cfg.portfolioIncludeDisabledCohorts ? "Include-disabled ON" : null].filter(Boolean).length ? [sessionStrategy?.enabled ? "Session Strategy ON" : null, cfg.regimeEnabled ? "MS gate ON" : null, cfg.portfolioIncludeDisabledCohorts ? "Include-disabled ON" : null].filter(Boolean) : ["All off"]}
+                        scope="Recommended research stack · include-disabled override · legacy Session Strategy grid · global Market State gate."
+                        active={activeSection === 6} onActivate={() => setActiveSection(6)}>
+                        <RecommendedStackStrip cfg={cfg} sessionStrategy={sessionStrategy} onApply={(patch) => setCfg((c) => ({ ...c, ...patch }))} />
+                        <IncludeDisabledOverride cfg={cfg} onField={(k, v) => setCfg((c) => ({ ...c, [k]: v }))} />
+
+                        {/* Advanced / Legacy — Session Strategy */}
+                        <div className="border-t border-[hsl(var(--border-soft)/0.5)] pt-4" data-testid="advanced-session-strategy">
+                            <div className="text-[13px] font-semibold text-[hsl(var(--accent-primary))] uppercase tracking-wide">Advanced / Legacy — Session Strategy</div>
+                            <div className="text-[11.5px] text-muted-lab mt-0.5 mb-3">
+                                Legacy per-session scenario tools (BE, move-stop, risk amount, fair baseline) for{" "}
+                                <span className="text-[hsl(var(--accent-secondary))] italic">{cfg.symbol}</span>.
+                                When ENABLED this grid SUPERSEDES the Trade Policy scenario above.
+                            </div>
                         {/* top summary strip */}
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <Card title="Strategy Summary">
@@ -1346,29 +1406,22 @@ export default function StrategyBuilderV2() {
 
                         {/* the reused v1 grid: session defaults, enabled summary, sessions, fair baseline, copy-to */}
                         <SessionStrategyGrid value={sessionStrategy} onChange={setSessionStrategy} symbol={cfg.symbol} ui={gridUi} onUiChange={setGridUi} />
-                    </SectionShell>
+                        </div>
 
-                    <SectionShell collapsible n={7} title="Advanced Research — Global Market State Gate" question="Advanced / legacy research layer (normal execution uses cohort/state policy directly)." scope="EMA / Bollinger width / ADX global regime gate. Off by default — the Portfolio Manager already applies Market State selectively by cohort." active={activeSection === 7} onActivate={() => setActiveSection(7)}>
-                        {cfg.portfolioEnabled && cfg.regimeEnabled && (
+                        {/* Advanced Research — Global Market State Gate */}
+                        <div className="border-t border-[hsl(var(--border-soft)/0.5)] pt-4" data-testid="advanced-ms-gate">
+                            <div className="text-[13px] font-semibold text-[hsl(var(--accent-primary))] uppercase tracking-wide">Advanced Research — Global Market State Gate</div>
+                            <div className="text-[11.5px] text-muted-lab mt-0.5 mb-3">
+                                EMA / Bollinger width / ADX global regime gate. Use only for legacy comparisons or explicit
+                                research — the Portfolio Manager already applies Market State selectively by cohort.{cfg.regimeEnabled ? " (currently ON)" : ""}
+                            </div>
+                            {cfg.portfolioEnabled && cfg.regimeEnabled && (
                             <div className="rounded-md border border-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.08)] p-3 mb-3 text-[11px] font-ui text-[hsl(var(--text-1))]" data-testid="pm-ms-warning">
                                 <span className="text-[hsl(var(--warning))] font-semibold">Warning:</span> Portfolio Manager already applies Market State selectively by cohort. Research found the global Market State gate was harmful/redundant when PM is enabled. Recommended stack: PM ON, Global Market State gate OFF.
                             </div>
                         )}
-                        {!msGateOpen ? (
-                            <button type="button" onClick={() => setMsGateOpen(true)} data-testid="ms-gate-expand"
-                                className="w-full text-left rounded-md border border-[hsl(var(--border-soft))] bg-[hsl(var(--panel))] px-3 py-2 text-[11.5px] font-ui text-muted-lab hover:text-white">
-                                <span className="inline-flex items-center gap-2"><ChevronDown className="w-3.5 h-3.5" /> Show advanced Market State gate controls</span>
-                                <div className="text-[10px] mt-0.5">Use this only for legacy comparisons or explicit research. Do not enable it by default with PM.{cfg.regimeEnabled ? " (currently ON)" : ""}</div>
-                            </button>
-                        ) : (
-                            <>
-                                <div className="flex items-center justify-between mb-2">
-                                    <span className="text-[10.5px] font-ui text-muted-lab">Use this only for legacy comparisons or explicit research. Do not enable it by default with PM.</span>
-                                    <button type="button" onClick={() => setMsGateOpen(false)} data-testid="ms-gate-collapse" className="text-[10.5px] font-ui text-muted-lab hover:text-white inline-flex items-center gap-1"><ChevronUp className="w-3.5 h-3.5" /> Collapse</button>
-                                </div>
-                                <MarketStateControls cfg={cfg} onField={(k, v) => setCfg((c) => ({ ...c, [k]: v }))} />
-                            </>
-                        )}
+                            <MarketStateControls cfg={cfg} onField={(k, v) => setCfg((c) => ({ ...c, [k]: v }))} />
+                        </div>
                     </SectionShell>
 
                     {/* ───────────────── ⑤ MARKET STATE (advanced / legacy) ───────────────── */}

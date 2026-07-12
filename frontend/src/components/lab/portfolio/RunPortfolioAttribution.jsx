@@ -16,6 +16,7 @@ import { buildRunPortfolioAttribution } from "@/data/runPortfolioAttribution";
 import { loadPolicy, policyCounts } from "@/data/portfolioPolicy";
 import { POLICY_LABELS, POLICY_TOOLTIPS } from "@/data/portfolioLabels";
 import deployedPolicyDoc from "@/data/deployedPolicy.v1.json";
+import PolicyGroupsSummary from "./PolicyGroupsSummary";
 
 const successTone = "text-[hsl(var(--success))]";
 const dangerTone = "text-[hsl(var(--danger))]";
@@ -158,6 +159,22 @@ export default function RunPortfolioAttribution({ trades: tradesProp, bundle: bu
         <NeonPanel title="PM · This Run">
             <div className="space-y-4">
                 <ScopeBanner pmOn={true} />
+
+                {/* Which policy produced this result — never rely on memory (Part 11). */}
+                {(() => {
+                    let table = null;
+                    try { table = loadPolicy(deployedPolicyDoc); } catch (_e) { table = null; }
+                    if (!table) return null;
+                    const runVersion = attribution.version || null;
+                    const matches = !runVersion || runVersion === table.policyVersion;
+                    return (
+                        <PolicyGroupsSummary table={table} instrument={cfg.symbol || cfg.instrument || "EURUSD"}
+                            policyVersion={runVersion || table.policyVersion}
+                            note={matches
+                                ? "The cohort policy this run was executed under."
+                                : `⚠ This run was executed under ${runVersion}; the current deployed mirror is ${table.policyVersion}. Groups below show the CURRENT mirror — per-cohort actions in the table below come from the run's own stamped rows.`} />
+                    );
+                })()}
 
                 {/* Summary cards */}
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
