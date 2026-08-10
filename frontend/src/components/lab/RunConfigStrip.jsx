@@ -118,6 +118,10 @@ function buildChips(config, diffFields = new Set()) {
     push("newsBlackoutBefore", config.newsBlackoutBefore);
     push("newsBlackoutAfter",  config.newsBlackoutAfter);
     push("flattenOnNews",      config.flattenOnNews);
+    // M-RESEARCH-LAB-DST-RUNNER-1 — which session clock produced this run. Always
+    // pushed (even when unknown) so the answer is never silently absent: a run that
+    // predates the metadata reads "not recorded", never a guessed default.
+    push("sessionClock",       config.sessionClock ?? "__unrecorded__");
 
     return { chips, coreEnd, entryEnd, filterEnd };
 }
@@ -144,7 +148,11 @@ const CHIP_META = {
     newsEnabled:             { label: "news"    },
     newsBlackoutBefore:      { label: null       },   // formatRunConfigValue includes context
     newsBlackoutAfter:       { label: null       },
-    flattenOnNews:           { label: "flatten" },
+    // "flatten" was ambiguous next to the ±3m blackout chips and read as part of the
+    // same rule. It is a SEPARATE behaviour — the blackout blocks NEW FILLS, this
+    // closes trades that are ALREADY OPEN before the event (the T-8 surprise).
+    flattenOnNews:           { label: "flatten open trades" },
+    sessionClock:            { label: "clock"   },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

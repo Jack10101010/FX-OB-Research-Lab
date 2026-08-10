@@ -118,7 +118,18 @@ export function extractRunConfig(run) {
     const newsEnabled       = bool("news_filter_enabled", "newsEnabled",       "news_on",         "use_news_filter");
     const newsBlackoutBefore = num("news_blackout_before", "blackoutBefore",   "news_before_mins", "blackout_before_mins");
     const newsBlackoutAfter  = num("news_blackout_after",  "blackoutAfter",    "news_after_mins",  "blackout_after_mins");
-    const flattenOnNews      = bool("flatten_on_news",     "flattenOnNews",    "flatten_active_trades", "news_flatten");
+    // M-RESEARCH-LAB-DST-RUNNER-1 — the canonical backend key is
+    // `news_flatten_active_trades`; it was absent from this list, so the chip never
+    // bound to real run configs and the T-8 pre-news flatten stayed invisible.
+    // This is a SEPARATE behaviour from the ±minute blackout above: those fields
+    // gate NEW FILLS only, while this one closes trades that are already open.
+    const flattenOnNews      = bool("news_flatten_active_trades", "newsFlattenActiveTrades",
+                                    "flatten_on_news",     "flattenOnNews",    "flatten_active_trades", "news_flatten");
+    // Session clock provenance, read from run metadata (never assumed). Runs written
+    // before this field existed return null → the UI must say "not recorded" rather
+    // than claiming either clock.
+    const sessionClock       = get("session_clock", "sessionClock");
+    const sessionDstAware    = bool("session_dst_aware", "sessionDstAware");
 
     return {
         // Core
@@ -147,6 +158,9 @@ export function extractRunConfig(run) {
         newsBlackoutBefore,
         newsBlackoutAfter,
         flattenOnNews,
+        // Session clock provenance
+        sessionClock,
+        sessionDstAware,
     };
 }
 
@@ -186,10 +200,17 @@ export function formatRunConfigValue(field, value) {
         case "batchEntry":
         case "flattenOnNews":
             return value ? "ON" : "OFF";
+        // These two describe the NEW-FILL blackout only — never the flatten rule.
         case "newsBlackoutBefore":
-            return `${value}m before`;
+            return `${value}m before (new fills)`;
         case "newsBlackoutAfter":
-            return `${value}m after`;
+            return `${value}m after (new fills)`;
+        // Session clock provenance. A run written before this metadata existed is
+        // labelled honestly rather than assumed to be either clock.
+        case "sessionClock":
+            return value === "__unrecorded__"
+                ? "legacy · not recorded"
+                : (String(value) === "Europe/London" ? "Europe/London (DST-aware)" : String(value));
         case "detectionTf": {
             const TF_MAP = { "1min": "M1", "5min": "M5", "15min": "M15", "30min": "M30", "1h": "H1", "4h": "H4" };
             return TF_MAP[value] || String(value);
